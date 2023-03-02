@@ -128,7 +128,7 @@ FunctionExtractor::FunctionContext::FunctionContext(
   GRAPH_UPDATE(
       "Process function context for scope ",
       scope_key_->name().toDisplayString());
-  TORCH_INTERNAL_ASSERT(scopes.size() > 0);
+  TORCH_INTERNAL_ASSERT(!scopes.empty());
   const auto& ref_ctx = scope_ctxs[scope_key_];
   // NOTE: Function scopes must have same number and order of nodes.
   GRAPH_DEBUG(
@@ -332,7 +332,7 @@ c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
 
 c10::optional<ScopePtr> FunctionExtractor::FindCommonAncestor(
     const scope_list& scopes) {
-  if (scopes.size() == 0) {
+  if (scopes.empty()) {
     return c10::nullopt;
   }
 
@@ -372,7 +372,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
       output_scopes.emplace_back(use.user->scope());
     }
   }
-  if (output_scopes.size() > 0 &&
+  if (!output_scopes.empty() &&
       std::all_of(
           output_scopes.begin(),
           output_scopes.end(),
@@ -381,7 +381,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
           })) {
     return output_scopes.at(0);
   } else if (
-      input_scopes.size() > 0 &&
+      !input_scopes.empty() &&
       std::all_of(
           input_scopes.begin(),
           input_scopes.end(),
@@ -401,7 +401,7 @@ c10::optional<ScopePtr> FunctionExtractor::InferScope(Node* n) {
         output_scopes.end(),
         std::back_inserter(scopes),
         IsValidScope);
-    if (scopes.size() > 0) {
+    if (!scopes.empty()) {
       auto common_ancestor = FindCommonAncestor(scopes);
       if (common_ancestor.has_value() &&
           IsValidScope(common_ancestor.value())) {
@@ -829,7 +829,7 @@ void FunctionExtractor::HandleNoScopeNodes(
         "ONNX function extraction cannot determine the scope for node: ", *n);
   }
   TORCH_INTERNAL_ASSERT(
-      no_scope_nlist.size() == 0,
+      no_scope_nlist.empty(),
       "ONNX function extraction cannot determine the scope for the above nodes.");
 }
 

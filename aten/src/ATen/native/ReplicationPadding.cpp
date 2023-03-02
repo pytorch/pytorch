@@ -70,19 +70,13 @@ TORCH_META_FUNC(replication_pad1d_backward) (
   IntArrayRef paddingSize
 ) {
   int64_t dimw = 1;
-  int64_t dimslices = 0;
-  int64_t nbatch = 1;
   TORCH_CHECK(paddingSize.size() == 2, "padding size is expected to be 2");
   int64_t pad_l = paddingSize[0];
   int64_t pad_r = paddingSize[1];
 
   if (input.ndimension() == 3)
   {
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    nbatch = input.size(0);
-    (void)nbatch;
     dimw++;
-    dimslices++;
   }
 
   /* sizes */
@@ -154,7 +148,7 @@ static inline void shapeCheck3d(
   int dimw = 3;
   int dimh = 2;
   int dimd = 1;
-  int dimslices = 0;
+  /* int dimslices = 0; */
 
   // allow batch size of 0-dim.
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0 && input.size(3) != 0;
@@ -169,7 +163,7 @@ static inline void shapeCheck3d(
     dimw++;
     dimh++;
     dimd++;
-    dimslices++;
+    /* dimslices++; */
   }
 
   /* sizes */

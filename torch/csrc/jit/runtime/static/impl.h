@@ -865,7 +865,7 @@ class TORCH_API ProcessedNodeMetadata {
   ProcessedNodeMetadata(
       std::vector<BlockRunner> runners,
       torch::jit::TaskLauncher* launcher)
-      : block_runners_(std::move(runners)), launcher_(std::move(launcher)) {}
+      : block_runners_(std::move(runners)), launcher_(launcher) {}
 
   ProcessedNodeMetadata() : launcher_(nullptr) {}
 

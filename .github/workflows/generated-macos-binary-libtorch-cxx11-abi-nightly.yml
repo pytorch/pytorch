@@ -49,7 +49,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.7"
+      DESIRED_PYTHON: "3.8"
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -166,7 +166,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.7"
+      DESIRED_PYTHON: "3.8"
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -283,7 +283,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.7"
+      DESIRED_PYTHON: "3.8"
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
@@ -400,7 +400,7 @@ jobs:
       DESIRED_DEVTOOLSET: cxx11-abi
       # This is a dummy value for libtorch to work correctly with our batch scripts
       # without this value pip does not get installed for some reason
-      DESIRED_PYTHON: "3.7"
+      DESIRED_PYTHON: "3.8"
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}

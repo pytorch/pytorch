@@ -84,7 +84,7 @@ class SemiRandomFeatures(ArcCosineFeatureMap):
             self.input_record_full = input_record
             self.input_record_random = input_record
 
-        super(SemiRandomFeatures, self).__init__(
+        super().__init__(
             model,
             self.input_record_full,
             output_dims,

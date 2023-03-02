@@ -1,13 +1,15 @@
+import functools
+import operator
 from typing import Dict, List, Optional
 
 import torch
 import torch.fx
 
 from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..source import GetItemSource
-from ..utils import namedtuple_fields, proxy_args_kwargs
+from ..utils import check_constant_args, namedtuple_fields, proxy_args_kwargs
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
 
@@ -30,9 +32,7 @@ class BaseListVariable(VariableTracker):
         regen_guards=True,
         **kwargs,
     ):
-        super(BaseListVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         assert all(isinstance(x, VariableTracker) for x in items)
 
@@ -84,21 +84,75 @@ class BaseListVariable(VariableTracker):
         if name == "__getitem__":
             assert not kwargs and len(args) == 1
             return self.getitem_const(args[0])
-        elif name == "__add__":
-            assert not kwargs and len(args) == 1
-            return type(self)(self.items + args[0].items, **options)
-        elif (
-            name == "__contains__"
-            and len(args) == 1
-            and args[0].is_python_constant()
-            and all(x.is_python_constant() for x in self.items)
-        ):
+        elif name == "__contains__":
+            assert len(args) == 1
             assert not kwargs
-            search = args[0].as_python_constant()
-            result = any(x.as_python_constant() == search for x in self.items)
-            return variables.ConstantVariable(result, **options)
 
-        return super(BaseListVariable, self).call_method(tx, name, args, kwargs)
+            search = args[0]
+            if check_constant_args(args, {}) and search.is_python_constant():
+                result = any(
+                    x.as_python_constant() == search.as_python_constant()
+                    for x in self.items
+                )
+                return variables.ConstantVariable(result, **options)
+
+            from .builtin import BuiltinVariable
+
+            result = None
+            for x in self.items:
+                check = BuiltinVariable(operator.eq).call_function(tx, [x, search], {})
+                if result is None:
+                    result = check
+                else:
+                    result = BuiltinVariable(operator.or_).call_function(
+                        tx, [check, result], {}
+                    )
+            return result
+
+        return super().call_method(tx, name, args, kwargs)
+
+    @staticmethod
+    def list_compare(tx, op, left, right):
+        from .builtin import BuiltinVariable
+
+        eq_result = BaseListVariable.list_eq(tx, left, right)
+        if op is operator.eq:
+            return eq_result
+        elif op is operator.ne:
+            return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
+        else:
+            unimplemented(f"list_compare {left} {op} {right}")
+
+    @staticmethod
+    def list_eq(tx, left, right):
+        from .builtin import BuiltinVariable
+
+        options = VariableTracker.propagate(left, right)
+
+        # Most list-like variables implement comparison ops the same way,
+        # so they can re-use this helper.
+        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
+        # but `tuple([2]) != list([2])`
+        if len(left.items) != len(right.items):
+            return ConstantVariable(False, **options)
+        if len(left.items) == 0:
+            return ConstantVariable(True, **options)
+
+        # Generic list comparison works by iterating over left aka self and right the compared-to list.
+        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
+        # So, we iterate over the zipped list items.
+        comps = []
+        for l, r in zip(left.items, right.items):
+            comp = BuiltinVariable(operator.eq).call_function(tx, [l, r], {})
+            if comp.is_python_constant() and not comp.as_python_constant():
+                # early exit in false case
+                return comp.add_options(options)
+            comps.append(comp)
+
+        return functools.reduce(
+            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
+            comps,
+        ).add_options(options)
 
 
 class RangeVariable(BaseListVariable):
@@ -137,9 +191,9 @@ class RangeVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         assert "range" not in codegen.tx.f_globals
-        codegen.append_output(codegen.create_load_python_module(range))
+        codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return [create_instruction("CALL_FUNCTION", 3)]
+        return create_call_function(3, False)
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -181,7 +235,7 @@ class ListVariable(BaseListVariable):
             )
             return ConstantVariable(None)
         elif (
-            name in ("extend", "__iadd__")
+            name == "extend"
             and self.mutable_local
             and args
             and args[0].has_unpack_var_sequence(tx)
@@ -254,23 +308,6 @@ class TupleVariable(BaseListVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        if (
-            name in ("__add__", "__iadd__")
-            and len(args) == 1
-            and isinstance(args[0], TupleVariable)
-        ):
-            assert not kwargs
-            return TupleVariable(self.items + args[0].items, **options)
-        elif (
-            name in ("__add__", "__iadd__")
-            and len(args) == 1
-            and isinstance(args[0], variables.ConstantVariable)
-        ):
-            assert not kwargs
-            return TupleVariable(
-                self.items + list(args[0].unpack_var_sequence(self)), **options
-            )
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -335,8 +372,7 @@ class SizeVariable(TupleVariable):
         codegen.foreach(self.items)
         build_torch_size = [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1, True)
         return build_torch_size
 
     def unpack_var_sequence(self, tx):
@@ -357,10 +393,10 @@ class SizeVariable(TupleVariable):
             else:
                 out = self.getitem_const(args[0])
             return out
-        return super(SizeVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def get_item_dyn(self, tx, arg: VariableTracker):
-        from .tensor import DynamicShapeVariable
+        from .tensor import SymNodeVariable
 
         index = arg.as_python_constant()
         if isinstance(index, slice):
@@ -377,8 +413,8 @@ class SizeVariable(TupleVariable):
             items = self.items[index]
 
             def _unpack_into_example(item):
-                if isinstance(item, DynamicShapeVariable):
-                    return item.dyn_shape
+                if isinstance(item, SymNodeVariable):
+                    return item.sym_num
                 return item.as_python_constant()
 
             # Mirror the indexing into example_value for downstream correctness
@@ -417,8 +453,7 @@ class NamedTupleVariable(TupleVariable):
         codegen.foreach(self.items)
         return [
             create_instruction("BUILD_TUPLE", len(self.items)),
-            create_instruction("CALL_FUNCTION", 1),
-        ]
+        ] + create_call_function(1, True)
 
     def var_getattr(self, tx, name):
         fields = namedtuple_fields(self.tuple_cls)
@@ -475,9 +510,7 @@ class SliceVariable(BaseListVariable):
 
 class ListIteratorVariable(VariableTracker):
     def __init__(self, items, index: int = 0, recursively_contains=None, **kwargs):
-        super(ListIteratorVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
         assert isinstance(items, list)
         # Removing this check as it slows things down too much
         # https://github.com/pytorch/pytorch/pull/87533#issuecomment-1287574492

@@ -15,6 +15,7 @@ from torchgen.api.autograd import (
 )
 from torchgen.api.types import (
     ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -93,6 +94,23 @@ DERIVATIVE_SINGLE = CodeTemplate(
     """\
 if (task_should_compute_output({ ${name}_ix })) {
   auto grad_result = ${derivative};
+  copy_range(grad_inputs, ${name}_ix, grad_result);
+}
+"""
+)
+
+# note(crcrpar): `self` argument and other optional positional argument
+# of foreach functions are basically a list of n `Tensor`s thus iterating over
+# `grads` in order to utilize and apply the existing derivative definitions
+# to each `Tensor`(s) of `self`, and the others.
+DERIVATIVE_SINGLE_FOREACH = CodeTemplate(
+    """\
+if (task_should_compute_output({ ${name}_ix })) {
+  std::vector<Tensor> grad_result;
+  grad_result.reserve(grads.size());
+  for (const auto & i : c10::irange(grads.size())) {
+    grad_result.emplace_back(${derivative});
+  }
   copy_range(grad_inputs, ${name}_ix, grad_result);
 }
 """
@@ -351,6 +369,34 @@ if (prop.isComplex()) {
   return nullptr;
 }
 """
+
+
+GETTER_BODY_VEC_SCALAR = """\
+PyObject* tup = PyTuple_New((Py_ssize_t) prop.size());
+for (auto i: c10::irange(prop.size())) {
+  if (prop[i].isComplex()) {
+    auto cprop = prop[i].to<c10::complex<double>>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyComplex_FromDoubles(cprop.real(), cprop.imag()));
+  } else if (prop[i].isFloatingPoint()) {
+    auto double_prop = prop[i].to<double>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyFloat_FromDouble(double_prop));
+  } else if (prop[i].isIntegral(/*includeBool=*/false)) {
+    auto long_prop = prop[i].to<int64_t>();
+    PyTuple_SetItem(tup, (Py_ssize_t) i, PyLong_FromLong(long_prop));
+  } else if (prop[i].isBoolean()) {
+    if (prop[i].to<bool>()) {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_True);
+    } else {
+      PyTuple_SetItem(tup, (Py_ssize_t) i, Py_False);
+    }
+  } else {
+    PyErr_SetString(PyExc_RuntimeError, "Unknown scalar type");
+    return nullptr;
+  }
+}
+return tup;
+"""
+
 
 MISC_GETTER_DEFS = {
     OptionalCType(BaseCType(longT)): (GETTER_DEFINITION_OPT, GETTER_BODY_INT64_T),
@@ -628,6 +674,38 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     op=info.op, name=name, body=GETTER_BODY_STRING
                 )
             )
+        elif type == ArrayRefCType(
+            elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+        ):
+            saved_variables.append(f"std::vector<at::Scalar> {name};")
+            saved_variables.append(f"bool {name}_released_ = false;")
+            # Just clear() is sufficient, we don't need to loop and clear each variable.
+            # Because the SavedVariable owns a tensor and a grad_fn, removing the SavedVariable makes them go away as well.
+            release_variables.append(f"{name}.clear();")
+            # release_variables.append(f"{name}_released_ = true;")
+            # unpack.append(f"auto {name} = unpack_list({name}_);")
+            # asserts.append(f"TORCH_CHECK(!{name}_released_, ERR_BACKWARD_TWICE);")
+            getter_definitions.append(
+                CodeTemplate(
+                    """\
+PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+  HANDLE_TH_ERRORS
+  const auto *node = static_cast<${op}*>(self->cdata.get());
+  const auto& prop = node->${name};
+  if (node->${name}_released_) {
+    PyErr_SetString(PyExc_RuntimeError, ERR_BACKWARD_TWICE);
+    return nullptr;
+  }
+  ${body}
+  END_HANDLE_TH_ERRORS
+}
+                            """
+                ).substitute(
+                    op=info.op,
+                    name=name,
+                    body=GETTER_BODY_VEC_SCALAR,
+                )
+            )
         else:
             # Check for indicators that you're putting a non-owning reference
             # into the saved variable field.  If this is spuriously firing,
@@ -709,9 +787,13 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
                     ) in ("Tensor", "Tensor?"):
                         formula = "any_grad_defined ? (" + formula + ") : Tensor()"
                         checks_any_grad_defined = True
+            if info.name.startswith("_foreach_"):
+                derivative_template = DERIVATIVE_SINGLE_FOREACH
+            else:
+                derivative_template = DERIVATIVE_SINGLE
             return (
                 checks_any_grad_defined,
-                DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula),
+                derivative_template.substitute(name=var_names[0], derivative=formula),
             )
         else:
             if "grad_input_mask" in formula:

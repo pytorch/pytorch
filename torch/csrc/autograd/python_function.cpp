@@ -219,8 +219,9 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
       }
     }
     // See NOTE [retains_grad_hook PyObject traversal]
-    for (const auto& hook : cdata->retains_grad_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+    for (const auto& pair : cdata->retains_grad_hooks()) {
+      if (auto pyhook =
+              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
         Py_VISIT(pyhook->dict);
       }
     }
@@ -461,7 +462,7 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      jvp_user_function);
+      std::move(jvp_user_function));
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -709,7 +710,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(tuple_values));
     // Original type is tuple of tensors "without" element type and shape.
     // The missed parts will be added below.
-    node->output()->setType(tuple_type);
+    node->output()->setType(std::move(tuple_type));
     auto unpacked = graph->createTupleUnpack(node->output())->insertAfter(node);
     node = unpacked;
   }
@@ -730,7 +731,7 @@ static void _trace_post_record(
   py::bool_ is_in_onnx_export =
       py::module::import("torch.onnx.__init__").attr("is_in_onnx_export");
   if (py::cast<bool>(is_in_onnx_export)) {
-    _append_subgraph(old_node, graph, trace_outputs, unpack_output);
+    _append_subgraph(old_node, graph, std::move(trace_outputs), unpack_output);
   }
 
   // If TupleUnpack operator is created, we copy its output type back
@@ -744,7 +745,7 @@ static void _trace_post_record(
     auto tuple_type = at::TupleType::create(std::move(new_tuple_values));
     // The i-th tuple element receives a new tensor type with element type and
     // shape.
-    old_node->output()->setType(tuple_type);
+    old_node->output()->setType(std::move(tuple_type));
   }
 }
 

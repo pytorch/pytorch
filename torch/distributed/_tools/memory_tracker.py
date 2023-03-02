@@ -1,5 +1,7 @@
 from collections import defaultdict
 
+from itertools import chain
+
 import pickle
 
 from typing import (
@@ -15,6 +17,7 @@ import torch
 import torch.nn as nn
 from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
+
 
 BYTES_PER_MB = 1024 * 1024.0
 
@@ -83,6 +86,7 @@ class MemoryTracker:
         self._markers: Dict[str, int] = defaultdict(int)
         self._cur_module_name: str = ""
         self._op_index: int = 0
+        self._num_cuda_retries: int = 0
 
     @no_type_check
     def start_monitor(self, root_module: nn.Module) -> None:
@@ -116,7 +120,11 @@ class MemoryTracker:
         """
         Remove module hooks and exit ``MemoryProfileDispatchMode`` to stop
         tracking memory stats at operator level.
+        Get some aggregated stats when the memory_tracker() is enabled, like
+        cuda ``num_alloc_retries``.
         """
+        self._num_cuda_retries = torch.cuda.memory_stats().get("num_alloc_retries", 0)
+
         for h in self._hooks:
             h.remove()
         self._hooks.clear()
@@ -138,6 +146,7 @@ class MemoryTracker:
             previous_allocated_memory = current_allocated_memory
 
         print("------------------------------------------------")
+        print(f"The number of cuda retries are: {self._num_cuda_retries}")
         print(f"Top {top} ops that generates memory are:")
         for k, v in sorted(op_diff.items(), key=lambda item: item[1], reverse=True)[
             :top
@@ -147,8 +156,6 @@ class MemoryTracker:
 
     @no_type_check
     def show_traces(self, path: str = "") -> None:
-        from itertools import chain
-
         import matplotlib.pyplot as plt
 
         def _plot_figure(x, y_values, labels):
@@ -206,6 +213,7 @@ class MemoryTracker:
             "memories_active": self.memories_active,
             "memories_reserved": self.memories_reserved,
             "markers": self._markers,
+            "num_alloc_retries": self._num_cuda_retries,
         }
 
         with open(path, "wb") as f:
@@ -223,6 +231,7 @@ class MemoryTracker:
         self.memories_active = stats["memories_active"]
         self.memories_reserved = stats["memories_reserved"]
         self._markers = stats["markers"]
+        self._num_cuda_retries = stats["num_alloc_retries"]
 
     def _create_pre_forward_hook(self, name: str) -> Callable:
         """
@@ -305,3 +314,4 @@ class MemoryTracker:
         self._markers.clear()
         self._cur_module_name = ""
         self._op_index = 0
+        self._num_cuda_retries = 0

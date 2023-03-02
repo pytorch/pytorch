@@ -41,7 +41,6 @@ ROOT_NODE_GETTER_DICT_KEY = "root_node_getter"
 EXTRA_INPUTS_GETTER_DICT_KEY = "extra_inputs_getter"
 NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY = "num_tensor_args_to_observation_type"
 INPUT_TYPE_TO_INDEX_DICT_KEY = "input_type_to_index"
-INPUT_OUTPUT_OBSERVED_DICT_KEY = "input_output_observed"
 
 
 # TODO: maybe rename this to something that's not related to observer
@@ -61,6 +60,11 @@ class ObservationType(Enum):
     """this means the output will use the same observer instance as input, based
     on qconfig.activation
     example: torch.cat, maxpool
+    """
+
+    INPUT_OUTPUT_NOT_OBSERVED = 2
+    """this means the input and output are never observed
+    example: x.shape, x.size
     """
 
 
@@ -417,7 +421,6 @@ class BackendPatternConfig:
         self._extra_inputs_getter: Optional[Callable] = None
         self._num_tensor_args_to_observation_type: Dict[int, ObservationType] = {}
         self._input_type_to_index: Dict[str, int] = {}
-        self._input_output_observed: Optional[bool] = None
         self._pattern_complex_format: Optional[Pattern] = None
 
     def __repr__(self):
@@ -558,10 +561,6 @@ class BackendPatternConfig:
         self._input_type_to_index = input_type_to_index
         return self
 
-    def _set_input_output_observed(self, input_output_observed: bool) -> BackendPatternConfig:
-        self._input_output_observed = input_output_observed
-        return self
-
     def _set_pattern_complex_format(self, pattern: Pattern) -> BackendPatternConfig:
         """
         Set the pattern to configure, using the reversed nested tuple format.
@@ -620,7 +619,6 @@ class BackendPatternConfig:
         conf._set_num_tensor_args_to_observation_type(
             backend_pattern_config_dict.get(NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY, {}))
         conf._set_input_type_to_index(backend_pattern_config_dict.get(INPUT_TYPE_TO_INDEX_DICT_KEY, {}))
-        conf._set_input_output_observed(backend_pattern_config_dict.get(INPUT_OUTPUT_OBSERVED_DICT_KEY, None))
         if PATTERN_COMPLEX_FORMAT_DICT_KEY in backend_pattern_config_dict:
             conf._set_pattern_complex_format(backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY])
         return conf
@@ -654,8 +652,6 @@ class BackendPatternConfig:
             backend_pattern_config_dict[NUM_TENSOR_ARGS_TO_OBSERVATION_TYPE_DICT_KEY] = self._num_tensor_args_to_observation_type
         if len(self._input_type_to_index) > 0:
             backend_pattern_config_dict[INPUT_TYPE_TO_INDEX_DICT_KEY] = self._input_type_to_index
-        if self._input_output_observed is not None:
-            backend_pattern_config_dict[INPUT_OUTPUT_OBSERVED_DICT_KEY] = self._input_output_observed
         if self._pattern_complex_format is not None:
             backend_pattern_config_dict[PATTERN_COMPLEX_FORMAT_DICT_KEY] = self._pattern_complex_format
         return backend_pattern_config_dict

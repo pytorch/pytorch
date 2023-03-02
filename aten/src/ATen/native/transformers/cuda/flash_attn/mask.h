@@ -28,6 +28,7 @@
 #pragma once
 
 #include <ATen/cuda/CUDAContext.h>
+
 namespace fmha {
 
 
@@ -52,21 +53,20 @@ struct Mask {
         const int quad = lane / 4;
         const int tid = (lane % 4) * 2;
         row = warp_m * 16 + quad;
-        // col = warp_n * 16 + tid;
-        col = warp_n * Mma_tile::N_PER_MMA * Mma_tile::MMAS_N + tid;
+        col = warp_n * 16 + tid;
     }
 
     inline __device__ bool is_valid(const int mi, const int ni, const int ii, const int jj) const {
 
         // ii and jj iterate over the 2x4 fragment
         // const int current_col = (Is_causal ? loop_step_idx * Cta_tile::N : 0) + ni * Mma_tile::N_PER_MMA_PER_CTA + col + (jj & 2) * 4 + (jj & 1);
-        // const int current_col = ni * Mma_tile::N_PER_MMA_PER_CTA + col + (jj & 2) * 4 + (jj & 1);
-        const int current_col = ni * Mma_tile::N_PER_MMA + col + (jj & 2) * 4 + (jj & 1);
+        const int current_col = ni * Mma_tile::N_PER_MMA_PER_CTA + col + (jj & 2) * 4 + (jj & 1);
         const int current_row = row_offset + ii * 8;
         const bool col_valid = current_col < actual_seqlen_k;
         // const bool col_valid = (ni * Mma_tile::N_PER_MMA_PER_CTA + col + (jj & 2) * 4 + (jj & 1)) < actual_seqlen_k;
         //&& (row + mi * Mma_tile::M_PER_MMA_PER_CTA + ii * 8) < actual_seqlen_k;
-        // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0)) {
+        // bool all_valid = Is_causal ? col_valid && (current_col + loop_step_idx * Cta_tile::N <= current_row) : col_valid;
+        // if ((threadIdx.x == 0) && (blockIdx.x == 0) && (blockIdx.y == 0) && (blockIdx.z == 1)) {
         //     printf("current_col=%d, current_row=%d, actual_seqlen_k=%d, col_valid=%d, all_valid=%d\n", current_col, current_row, actual_seqlen_k, col_valid, all_valid);
         // }
         return Is_causal ? col_valid && (current_col + loop_step_idx * Cta_tile::N <= current_row) : col_valid;

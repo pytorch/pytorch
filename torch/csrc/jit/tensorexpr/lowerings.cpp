@@ -1732,7 +1732,7 @@ int nnc_lowerings_lazy_registration() {
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = c10::get<int64_t>(inputs[1]);
               if (dim < 0) {
-                if (axes.size() == 0) {
+                if (axes.empty()) {
                   throw malformed_input("axes are zero handling unsqueeze");
                 }
                 dim += axes.size();

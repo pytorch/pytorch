@@ -5,11 +5,11 @@ import cProfile
 import dataclasses
 import datetime
 import dis
+import enum
 import functools
 import gc
 import inspect
 import itertools
-import logging
 import logging.config
 import math
 import operator
@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import numpy as np
@@ -33,7 +33,10 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
     HAS_NUMPY = False
 
+import importlib
+
 import torch
+import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
@@ -49,7 +52,6 @@ log = logging.getLogger(__name__)
 
 # profiling compilation time
 compilation_metrics = collections.OrderedDict()
-
 
 timer_counter = itertools.count()
 
@@ -86,20 +88,98 @@ def dynamo_profiled(func):
     return profile_wrapper
 
 
-def dynamo_timed(func):
-    @wraps(func)
-    def time_wrapper(*args, **kwargs):
-        key = func.__qualname__
-        if key not in compilation_metrics:
-            compilation_metrics[key] = []
-        t0 = time.time()
-        r = func(*args, **kwargs)
-        latency = time.time() - t0
-        # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
-        compilation_metrics[key].append(latency)
-        return r
+frame_phase_timing = collections.OrderedDict()
 
-    return time_wrapper
+curr_frame = 0
+
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def increment_frame():
+    global curr_frame
+    curr_frame = curr_frame + 1
+
+
+# Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
+def reset_frame_count():
+    global curr_frame
+    frame_phase_timing.clear()
+    curr_frame = 0
+
+
+op_count = 0
+
+
+def increment_op_count(cnt):
+    global op_count
+    op_count += cnt
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total = 0
+    total_by_key = {}
+    for frame, timings in frame_phase_timing.items():
+        for key, timing in timings.items():
+            total += timing
+            if key not in total_by_key:
+                total_by_key[key] = timing
+            else:
+                total_by_key[key] += timing
+
+    out = "TIMING:"
+    for key, value in total_by_key.items():
+        out = f"{out} {key}:{round(value, 5)}"
+
+    print(out)
+
+
+# dynamo_timed API works as a function decorator
+# By wrapping a function in dynamo_timed, we can store a record in compilation_metrics
+# where the key is the functions name.
+# For example:
+#
+#  @dynamo_timed
+#  def _foo(...):
+#
+# Would show up as an entry in our timing dict:
+# OrderedDict([('bar.<locals>._foo', [0.083690, 0.23949, 3.1425e-05])])
+# This is extremely useful for granular debugging.
+#
+# For a higher-level mode, pass a phase_name into dynamo_timed
+# phase_names record an extra record into a separate compilation timing structure,
+# one keyed on frame+name rather than function.
+# The frame is incremented outside of this function, in def increment_frame() above.
+def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed_inner(func):
+        @wraps(func)
+        def time_wrapper(*args, **kwargs):
+            key = func.__qualname__
+            if key not in compilation_metrics:
+                compilation_metrics[key] = []
+            t0 = time.time()
+            r = func(*args, **kwargs)
+            time_spent = time.time() - t0
+            # print(f"Dynamo timer: key={key}, latency={latency:.2f} sec")
+            compilation_metrics[key].append(time_spent)
+            if phase_name:
+                frame_key = str(curr_frame)
+                if frame_key not in frame_phase_timing:
+                    frame_phase_timing[frame_key] = {}
+                assert (
+                    phase_name not in frame_phase_timing[frame_key]
+                ), f"Duplicate phase name {phase_name} for frame {frame_key}"
+                frame_phase_timing[frame_key][phase_name] = time_spent
+            return r
+
+        return time_wrapper
+
+    if original_function:
+        return dynamo_timed_inner(original_function)
+    return dynamo_timed_inner
 
 
 def compile_times(repr="str", aggregate=False):
@@ -117,7 +197,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -153,7 +232,7 @@ tensortype_to_dtype = {
 }
 
 
-class DuplicateWarningChecker(object):
+class DuplicateWarningChecker:
     def __init__(self, maxsize=4096):
         self.maxsize = maxsize
         self.reset()
@@ -621,8 +700,9 @@ def is_safe_constant(v):
             slice,
             type(type),
             torch.device,
+            torch.dtype,
         ),
-    )
+    ) or isinstance(v, enum.Enum)
 
 
 def check_constant_args(args, kwargs):
@@ -671,12 +751,33 @@ def tuple_iterator_getitem(it, index):
     return obj[start + index]
 
 
+def enum_repr(value):
+    # Workaround repr(Enum) returning invalid global reference before python 3.11
+    # https://peps.python.org/pep-0663/
+    if sys.version_info < (3, 11):
+        return str(value)
+    else:
+        return repr(value)
+
+
 def dict_param_key_ids(value):
-    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys(value):
-    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
+
+
+def dict_const_keys_repr(const_keys):
+    if any(isinstance(k, enum.Enum) for k in const_keys):
+        # To workaround repr(Enum) returning invalid global reference before python 3.11
+        # by calling enum_repr and removing quotes to render enum in guard code.
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
+            "'", ""
+        )
+    else:
+        const_keys_str = f"{const_keys!r}"
+    return const_keys_str
 
 
 def global_key_name(key):
@@ -789,13 +890,16 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 # triton stores bool as int8, so add this for more accurate checking
-                return torch.allclose(
+                r = torch.allclose(
                     ref.to(dtype=torch.uint8),
                     res.to(dtype=torch.uint8),
                     atol=tol,
                     rtol=tol,
                     equal_nan=equal_nan,
                 )
+                if not r:
+                    log.error("Accuracy failed: uint8 tensor did not match")
+                return r
         if cos_similarity:
             ref = ref.flatten().to(torch.float32)
             res = res.flatten().to(torch.float32)
@@ -829,7 +933,7 @@ def same(
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
-                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
@@ -840,15 +944,25 @@ def same(
                     # import pdb; pdb.set_trace()
                 return passes_test
 
+            log.error(f"Accuracy failed: allclose not within tol={tol}")
             return False
     elif isinstance(ref, (str, int, type(None), bool, torch.device)):
-        return ref == res
+        r = ref == res
+        if not r:
+            log.error(f"Accuracy failed ({type(ref)}): {ref} != {res}")
+        return r
     elif isinstance(ref, float):
-        return math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
+        if not r:
+            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
+        return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
             ref = ref.item()
-        return (type(ref) is type(res)) and (ref == res)
+        r = (type(ref) is type(res)) and (ref == res)
+        if not r:
+            log.error(f"Accuracy failed (numpy): {ref} != {res}")
+        return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
     elif type(ref).__name__ in (
@@ -949,7 +1063,7 @@ class CompileProfiler:
             rpt += "\n"
             rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
             rpt += (
-                f"You may gain additional insight by passing `nopython=True` to {config.dynamo_import}.optimize, "
+                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
                 "to break on the first condition.\n"
             )
             graph_breaks = counters["graph_break"]
@@ -974,7 +1088,7 @@ class CompileProfiler:
             )
             rpt += "\n"
             rpt += (
-                f"Set {config.dynamo_import}.config.cache_size_limit to "
+                f"Set torch._dynamo.config.cache_size_limit to "
                 f"{max_recompiles} to avoid being cache limited.\n"
             )
         else:
@@ -986,7 +1100,13 @@ class CompileProfiler:
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
-    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    dir_name = (
+        "run_"
+        + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+        # use pid to avoid conflicts among ranks
+        + "-pid_"
+        + str(os.getpid())
+    )
     return os.path.join(root_dir, dir_name)
 
 
@@ -1041,14 +1161,15 @@ def get_fake_value(node, tx):
         if isinstance(
             cause, torch._subclasses.fake_tensor.DataDependentOutputException
         ):
-            if config.capture_scalar_outputs and node.target == "item":
-                return torch.zeros(size=(), dtype=args[0].dtype).item()
-            else:
-                unimplemented(f"data dependent operator: {cause.func}")
+            unimplemented(f"data dependent operator: {cause.func}")
         elif isinstance(
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             unimplemented(f"dynamic shape operator: {cause.func}")
+        elif isinstance(
+            cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+        ):
+            unimplemented("guard on data-dependent symbolic int/float")
         raise TorchRuntimeError() from e
 
 
@@ -1158,3 +1279,95 @@ def fake_mode_from_tensors(inputs: List[Any]):
             else:
                 assert fake_mode is flat_input.fake_mode
     return fake_mode
+
+
+def fqn(obj: Any):
+    """
+    Returns the fully qualified name of the object.
+    """
+    return f"{obj.__module__}.{obj.__qualname__}"
+
+
+def ifdyn(count1, count2):
+    if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def import_submodule(mod: types.ModuleType):
+    """
+    Ensure all the files in a given submodule are imported
+    """
+    for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
+        if filename.endswith(".py") and filename[0] != "_":
+            importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def object_has_getattribute(value: Any):
+    try:
+        if isinstance(
+            inspect.getattr_static(type(value), "__getattribute__"),
+            types.FunctionType,
+        ):
+            return True
+    except AttributeError:
+        pass
+    return False
+
+
+def get_custom_getattr(value: Any):
+    try:
+        getattr_fn = inspect.getattr_static(type(value), "__getattr__")
+    except AttributeError:
+        getattr_fn = None
+    if getattr_fn is torch.nn.Module.__getattr__:
+        # ignore this case of getattr
+        getattr_fn = None
+    return getattr_fn
+
+
+class TensorStaticReason(enum.Enum):
+    NO_SOURCE = 1
+    PARAMETER = 2
+    CONFIG_NOT_DYN = 3
+    NOT_TENSOR = 4
+
+
+def tensor_static_reason_to_message(reason: TensorStaticReason):
+    if reason == TensorStaticReason.NO_SOURCE:
+        return "mark_dynamic usage without a source is illegal."
+    if reason == TensorStaticReason.PARAMETER:
+        return "mark_dynamic on parameter, parameters are always static today."
+    if reason == TensorStaticReason.CONFIG_NOT_DYN:
+        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if reason == TensorStaticReason.NOT_TENSOR:
+        return "mark_dynamic on a non tensor, how did this happen?"
+    raise AssertionError(f"Illegal reason {reason}")
+
+
+def tensor_shape_should_be_static(
+    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+) -> Tuple[bool, TensorStaticReason]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the real tensor to evaluate, parameters force a static shape.
+    source - an optional source, None forces a static shape
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
+    The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
+    """
+    if source is None:
+        # TODO(voz): Look into why we need this case?
+        return True, TensorStaticReason.NO_SOURCE
+    if type(tensor) is torch.nn.Parameter:
+        return True, TensorStaticReason.PARAMETER
+    if config.dynamic_shapes is False:
+        return True, TensorStaticReason.CONFIG_NOT_DYN
+    if not is_tensor:
+        return True, TensorStaticReason.NOT_TENSOR
+    return False, None

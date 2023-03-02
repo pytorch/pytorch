@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <utility>
+
 namespace {
 using torch::autograd::Variable;
 void check_single_result(
@@ -13,7 +15,7 @@ void check_single_result(
     throw std::runtime_error(
         "can't replace a empty gradient with a non-empty value");
   }
-  torch::autograd::check_variable_result(value, result, hook_name);
+  torch::autograd::check_variable_result(value, result, std::move(hook_name));
 }
 } // namespace
 
@@ -45,6 +47,22 @@ variable_list CppFunctionTensorPreHook::operator()(
   }
   variable_list results(values);
   results[value_idx_] = value;
+  return results;
+}
+
+CppFunctionSingleTensorPreHook::CppFunctionSingleTensorPreHook(
+    std::function<at::TensorBase(const at::TensorBase&)> hook,
+    int value_idx)
+    : hook_(std::move(hook)), value_idx_(value_idx) {}
+
+variable_list CppFunctionSingleTensorPreHook::operator()(
+    const variable_list& values) {
+  const auto& value = values[value_idx_];
+  auto res = hook_(value);
+  TORCH_INTERNAL_ASSERT(
+      !res.defined(),
+      "CppFunctionSingleTensorPreHook currently only supports hooks that don't return");
+  variable_list results(values);
   return results;
 }
 

@@ -356,6 +356,17 @@ def fold(input: Tensor, output_size: _size_any_t, kernel_size: _size_any_t, dila
          stride: _size_any_t = ...) -> Tensor: ...
 
 
+def _canonical_mask(
+        mask: Optional[Tensor],
+        mask_name: str,
+        other_type: Optional[_dtype],
+        other_name: str,
+        target_type: _dtype,
+        check_other: bool = True,
+) -> Optional[Tensor]: ...
+
+def _none_or_dtype(input: Optional[Tensor]) -> Optional[_dtype]: ...
+
 def multi_head_attention_forward(query: Tensor,
                                  key: Tensor,
                                  value: Tensor,

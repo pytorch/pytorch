@@ -268,7 +268,7 @@ class TestRemoveMutation(JitTestCase):
         for op in ["cat", "stack", "vstack", "hstack", "dstack"]:
             class OpMod(torch.nn.Module):
                 def __init__(self, op):
-                    super(OpMod, self).__init__()
+                    super().__init__()
                     self.op = torch_op
 
                 def forward(self):

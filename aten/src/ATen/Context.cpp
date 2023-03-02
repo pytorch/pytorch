@@ -2,18 +2,12 @@
 
 #include <ATen/Context.h>
 
-#include <c10/core/TensorOptions.h>
 #include <c10/core/CPUAllocator.h>
 
 #include <algorithm>
 #include <cctype>
-#include <mutex>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <thread>
 
-#include <ATen/Tensor.h>
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM

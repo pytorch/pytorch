@@ -96,7 +96,7 @@ void cuda_device_assertions_from_2_processes() {
 
 TEST(CUDATest, cuda_device_assertions_from_2_processes) {
 #ifdef TORCH_USE_CUDA_DSA
-  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = true;
+  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = true;
   cuda_device_assertions_from_2_processes();
 #else
   GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled at compile time.";

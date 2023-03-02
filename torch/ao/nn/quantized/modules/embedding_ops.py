@@ -12,7 +12,7 @@ class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
 
     def __init__(self, num_embeddings, embedding_dim, dtype=torch.quint8):
-        super(EmbeddingPackedParams, self).__init__()
+        super().__init__()
         self.dtype = dtype
         if self.dtype in [torch.quint8, torch.quint4x2]:
             scales = torch.ones(num_embeddings, dtype=torch.float)
@@ -48,7 +48,7 @@ class EmbeddingPackedParams(torch.nn.Module):
     #   |--- dtype : torch.dtype
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(EmbeddingPackedParams, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'dtype'] = self.dtype
         destination[prefix + '_packed_weight'] = self._weight()
 
@@ -61,8 +61,8 @@ class EmbeddingPackedParams(torch.nn.Module):
         state_dict.pop(prefix + '_packed_weight')
         self.set_weight(weight)
 
-        super(EmbeddingPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                                 missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def __repr__(self):
         return self._weight().__repr__()
@@ -93,7 +93,7 @@ class Embedding(torch.nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  sparse: bool = False, _weight: Optional[Tensor] = None, dtype=torch.quint8) -> None:
-        super(Embedding, self).__init__()
+        super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.dtype = dtype
@@ -220,7 +220,7 @@ class EmbeddingBag(Embedding):
                  max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
                  mode: str = 'sum', sparse: bool = False, _weight: Optional[Tensor] = None,
                  include_last_offset: bool = False, dtype=torch.quint8) -> None:
-        super(EmbeddingBag, self).__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
+        super().__init__(num_embeddings, embedding_dim, _weight=_weight, dtype=dtype)
 
         self.mode = mode
         self.pruned_weights = False

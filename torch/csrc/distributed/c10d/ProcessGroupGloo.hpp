@@ -227,7 +227,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
       int size,
       c10::intrusive_ptr<Options> options = Options::create());
 
-  virtual ~ProcessGroupGloo();
+  ~ProcessGroupGloo() override;
 
   c10::intrusive_ptr<Options> getOptions() {
     return options_;

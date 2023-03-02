@@ -73,7 +73,7 @@ void PopScope() {
 }
 
 void ResetScopeContext() {
-  if (g_scope_context.scopes.size() != 0) {
+  if (!g_scope_context.scopes.empty()) {
     TORCH_CHECK(
         false, "Expecting scope to be empty but it is " + GetCurrentScope());
   }

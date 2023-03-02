@@ -315,7 +315,10 @@ void DistEngine::computeDependencies(
       // to be captured.
       if (auto accumulateGradFn = dynamic_cast<AccumulateGrad*>(fn)) {
         for (auto& capture : *execInfo.captures_) {
-          capture.hooks_.push_back(
+          // Capture hooks are technically deprecated, but as an exception below
+          // is the single and only instance of capture hooks usage that we
+          // support. See NOTE [Deprecated capture hooks] for more context.
+          capture.DO_NOT_USE_DEPRECATED_register_capture_hook(
               std::make_unique<DistAccumulateGradCaptureHook>(
                   std::dynamic_pointer_cast<AccumulateGrad>(
                       accumulateGradFn->shared_from_this()),

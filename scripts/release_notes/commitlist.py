@@ -17,14 +17,14 @@ Example Usages
 Create a new commitlist for consumption by categorize.py.
 Said commitlist contains commits between v1.5.0 and f5bc91f851.
 
-    python commitlist.py --create_new tags/v1.5.0 f5bc91f851
+    python commitlist.py --create-new tags/v1.5.0 f5bc91f851
 
 Update the existing commitlist to commit bfcb687b9c.
 
-    python commitlist.py --update_to bfcb687b9c
+    python commitlist.py --update-to bfcb687b9c
 
 """
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=False)
 class Commit:
     commit_hash: str
     category: str
@@ -143,7 +143,7 @@ class CommitList:
         files_changed = features['files_changed']
         for file in files_changed:
             file_lowercase = file.lower()
-            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.azure_pipelines']):
+            if CommitList.keywordInFile(file, ['docker/', '.circleci', '.github', '.jenkins', '.ci', '.azure_pipelines']):
                 category = 'releng'
                 break
             # datapipe(s), torch/utils/data, test_{dataloader, datapipe}
@@ -342,16 +342,16 @@ def main():
     parser = argparse.ArgumentParser(description='Tool to create a commit list')
 
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--create_new', nargs=2)
-    group.add_argument('--update_to')
+    group.add_argument('--create-new', '--create_new', nargs=2)
+    group.add_argument('--update-to', '--update_to')
     # I found this flag useful when experimenting with adding new auto-categorizing filters.
     # After running commitlist.py the first time, if you add any new filters in this file,
     # re-running with "rerun_with_new_filters" will update the existing commitlist.csv file,
     # but only affect the rows that were previously marked as "Uncategorized"
-    group.add_argument('--rerun_with_new_filters', action='store_true')
+    group.add_argument('--rerun-with-new-filters', '--rerun_with_new_filters', action='store_true')
     group.add_argument('--stat', action='store_true')
-    group.add_argument('--export_markdown', action='store_true')
-    group.add_argument('--export_csv_categories', action='store_true')
+    group.add_argument('--export-markdown', '--export_markdown', action='store_true')
+    group.add_argument('--export-csv-categories', '--export_csv_categories', action='store_true')
     parser.add_argument('--path', default='results/commitlist.csv')
     args = parser.parse_args()
 

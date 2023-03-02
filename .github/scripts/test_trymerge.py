@@ -11,77 +11,40 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import (find_matching_merge_rule,
-                      get_land_checkrun_conclusions,
-                      validate_land_time_checks,
-                      gh_graphql,
-                      gh_get_team_members,
-                      read_merge_rules,
-                      validate_revert,
-                      has_required_labels,
-                      add_label_err_comment,
-                      delete_all_label_err_comments,
-                      GitHubComment,
-                      GitHubPR,
-                      MergeRule,
-                      MandatoryChecksMissingError,
-                      PostCommentError,
-                      BOT_AUTHORS,
-                      LABEL_ERR_MSG_TITLE,
-                      main as trymerge_main)
+from trymerge import (
+    find_matching_merge_rule,
+    get_land_checkrun_conclusions,
+    validate_land_time_checks,
+    gh_graphql,
+    gh_get_team_members,
+    read_merge_rules,
+    validate_revert,
+    GitHubPR,
+    MergeRule,
+    MandatoryChecksMissingError,
+    PostCommentError,
+    FlakyRule,
+    categorize_checks,
+    get_combined_checks_from_pr_and_land_validation,
+    get_rockset_results,
+    main as trymerge_main,
+    get_classifications,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest import TestCase, main, mock
 from urllib.error import HTTPError
 
 if 'GIT_REMOTE_URL' not in os.environ:
     os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
 
-release_notes_labels = [
-    "release notes: AO frontend",
-    "release notes: autograd",
-    "release notes: benchmark",
-    "release notes: build",
-    "release notes: complex",
-    "release notes: composability",
-    "release notes: cpp",
-    "release notes: cuda",
-    "release notes: cudnn",
-    "release notes: dataloader",
-    "release notes: distributed (c10d)",
-    "release notes: distributed (ddp)",
-    "release notes: distributed (fsdp)",
-    "release notes: distributed (pipeline)",
-    "release notes: distributed (rpc)",
-    "release notes: distributed (sharded)",
-    "release notes: foreach_frontend",
-    "release notes: functorch",
-    "release notes: fx",
-    "release notes: hub",
-    "release notes: jit",
-    "release notes: lazy",
-    "release notes: linalg_frontend",
-    "release notes: memory format",
-    "release notes: Meta API",
-    "release notes: mobile",
-    "release notes: mps",
-    "release notes: nested tensor",
-    "release notes: nn",
-    "release notes: onnx",
-    "release notes: package/deploy",
-    "release notes: performance_as_product",
-    "release notes: profiler",
-    "release notes: python_frontend",
-    "release notes: quantization",
-    "release notes: releng",
-    "release notes: rocm",
-    "release notes: sparse",
-    "release notes: visualization",
-    "release notes: vulkan",
-]
-
-def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
-    gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
+def mock_query(
+    fallback_function: Any,
+    file_name: str,
+    key_function: Any,
+    *args: Any,
+) -> Any:
+    gql_db_fname = os.path.join(os.path.dirname(__file__), file_name)
 
     def get_mocked_queries() -> Any:
         if not os.path.exists(gql_db_fname):
@@ -94,21 +57,25 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
             json.dump(obj, f, indent=2)
             f.write("\n")
 
-    key = f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join([f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())])
+    key = key_function(*args)
     mocked_queries = get_mocked_queries()
 
     if key in mocked_queries:
         return mocked_queries[key]
 
     try:
-        rc = gh_graphql(query, **kwargs)
+        rc = fallback_function(*args)
     except HTTPError as err:
         if err.code == 401:
-            err_msg = "If you are seeing this message during workflow run, please make sure to update gql_mocks.json"
+            err_msg = f"If you are seeing this message during workflow run, please make sure to update {file_name}"
             err_msg += f" locally, by deleting it and running {os.path.basename(__file__)} with "
             err_msg += " GitHub Personal Access Token passed via GITHUB_TOKEN environment variable"
-            if os.getenv("GITHUB_TOKEN") is None:
-                err_msg = "Failed to update cached GraphQL queries as GITHUB_TOKEN is not defined." + err_msg
+            err_msg += " the rockset api key passed via ROCKSET_API_KEY environment variable"
+            if os.getenv("GITHUB_TOKEN") is None or os.getenv("ROCKSET_API_KEY") is None:
+                err_msg = (
+                    "Failed to update cached GraphQL queries as GITHUB_TOKEN or ROCKSET_API_KEY is not defined."
+                    + err_msg
+                )
             raise RuntimeError(err_msg) from err
     mocked_queries[key] = rc
 
@@ -116,8 +83,27 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 
     return rc
 
-def mock_parse_args(revert: bool = False,
-                    force: bool = False) -> Any:
+
+def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
+    def key_function(query: str, kwargs: Any) -> str:
+        return f"query_sha={sha256(query.encode('utf-8')).hexdigest()} " + " ".join(
+            [f"{k}={kwargs[k]}" for k in sorted(kwargs.keys())]
+        )
+
+    def gh_graphql_wrapper(query: str, kwargs: Any) -> Any:
+        return gh_graphql(query, **kwargs)
+    return mock_query(gh_graphql_wrapper, "gql_mocks.json", key_function, query, kwargs)
+
+def mocked_rockset_results(head_sha: str, merge_base: str) -> Any:
+    return mock_query(
+        get_rockset_results,
+        "rockset_mocks.json",
+        lambda x, y: f"{x} {y}",
+        head_sha,
+        merge_base,
+    )
+
+def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
     class Object(object):
         def __init__(self) -> None:
             self.revert = revert
@@ -149,36 +135,9 @@ def mock_merge(pr_num: int, repo: GitRepo,
                stale_pr_days: int = 3) -> None:
     pass
 
-def mock_add_label_err_comment(pr: GitHubPR) -> None:
-    pass
-
-def mock_delete_all_label_err_comments(pr: GitHubPR) -> None:
-    pass
-
 def mock_gh_get_info() -> Any:
     return {"closed": False, "isCrossRepository": False}
 
-def mock_get_comments() -> List[GitHubComment]:
-    return [
-        # Case 1 - a non label err comment
-        GitHubComment(
-            body_text="mock_body_text",
-            created_at="",
-            author_login="",
-            author_association="",
-            editor_login=None,
-            database_id=1,
-        ),
-        # Case 2 - a label err comment
-        GitHubComment(
-            body_text=" #" + LABEL_ERR_MSG_TITLE,
-            created_at="",
-            author_login=BOT_AUTHORS[1],
-            author_association="",
-            editor_login=None,
-            database_id=2,
-        ),
-    ]
 
 def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
     return [
@@ -208,6 +167,15 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
 def mocked_read_merge_rules_raise(repo: Any, org: str, project: str) -> List[MergeRule]:
     raise RuntimeError("testing")
 
+def empty_flaky_rules() -> List[FlakyRule]:
+    return []
+
+def empty_rockset_results(head_sha: str, merge_base: str) -> List[Dict[str, Any]]:
+    return []
+
+def dummy_merge_base() -> str:
+    return "dummy"
+
 class DummyGitRepo(GitRepo):
     def __init__(self) -> None:
         super().__init__(get_git_repo_dir(), get_git_remote_name())
@@ -218,15 +186,20 @@ class DummyGitRepo(GitRepo):
     def commit_message(self, ref: str) -> str:
         return "super awsome commit message"
 
-class TestTryMerge(TestCase):
-    def test_merge_rules_valid(self) -> None:
+
+@mock.patch("trymerge.read_flaky_rules", side_effect=empty_flaky_rules)
+@mock.patch("trymerge.get_rockset_results", side_effect=empty_rockset_results)
+@mock.patch("trymerge.GitHubPR.get_merge_base", side_effect=dummy_merge_base)
+class TestGitHubPR(TestCase):
+    def test_merge_rules_valid(self, *args: Any) -> None:
         "Test that merge_rules.yaml can be parsed"
         repo = DummyGitRepo()
-        self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
+        merge_rules = read_merge_rules(repo, "pytorch", "pytorch")
+        self.assertGreater(len(merge_rules), 1)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
-    def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any) -> None:
+    def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR passes merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = DummyGitRepo()
@@ -234,7 +207,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_raise)
-    def test_read_merge_rules_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
+    def test_read_merge_rules_fails(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR fails to read the merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = DummyGitRepo()
@@ -242,14 +215,14 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
-    def test_lint_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
+    def test_lint_fails(self, mocked_gql: Any, mocked_rmr: Any, *args: Any) -> None:
         "Tests that PR fails mandatory lint check"
-        pr = GitHubPR("pytorch", "pytorch", 74649)
+        pr = GitHubPR("pytorch", "pytorch", 90791)
         repo = DummyGitRepo()
         self.assertRaises(RuntimeError, lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_last_comment(self, mocked_gql: Any) -> None:
+    def test_get_last_comment(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that last comment can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 71759)
         comment = pr.get_last_comment()
@@ -258,7 +231,7 @@ class TestTryMerge(TestCase):
         self.assertTrue("You've committed this PR" in comment.body_text)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_author_null(self, mocked_gql: Any) -> None:
+    def test_get_author_null(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that PR author can be computed
             If reply contains NULL
         """
@@ -275,7 +248,20 @@ class TestTryMerge(TestCase):
         self.assertTrue(author is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_large_diff(self, mocked_gql: Any) -> None:
+    def test_last_pushed_at(self, mocked_gql: Any, *args: Any) -> None:
+        """ Tests that last_pushed_at will return None on merge commits.
+        """
+        pr = GitHubPR("pytorch", "pytorch", 71759)
+        self.assertIsNotNone(pr.last_pushed_at())
+
+        # 307120d6d3f7fcc3f92cfd26be891d360ad6a92a is merge commit
+        # and as such does not have a pushedDate
+        # See https://github.com/pytorch/pytorch/pull/94146#issuecomment-1421647117
+        pr = GitHubPR("pytorch", "pytorch", 94146)
+        self.assertIsNone(pr.last_pushed_at())
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_large_diff(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that PR with 100+ files can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73099)
         self.assertTrue(pr.get_changed_files_count() > 100)
@@ -283,25 +269,25 @@ class TestTryMerge(TestCase):
         self.assertEqual(len(flist), pr.get_changed_files_count())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_internal_changes(self, mocked_gql: Any) -> None:
+    def test_internal_changes(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that PR with internal changes is detected"
         pr = GitHubPR("pytorch", "pytorch", 73969)
         self.assertTrue(pr.has_internal_changes())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_checksuites_pagination(self, mocked_gql: Any) -> None:
+    def test_checksuites_pagination(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that PR with lots of checksuits can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 73811)
         self.assertEqual(len(pr.get_checkrun_conclusions()), 76)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_comments_pagination(self, mocked_gql: Any) -> None:
+    def test_comments_pagination(self, mocked_gql: Any, *args: Any) -> None:
         "Tests that PR with 50+ comments can be fetched"
         pr = GitHubPR("pytorch", "pytorch", 31093)
         self.assertGreater(len(pr.get_comments()), 50)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_gql_complexity(self, mocked_gql: Any) -> None:
+    def test_gql_complexity(self, mocked_gql: Any, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         # Previous version of GrapQL query used to cause HTTP/502 error
         # see https://gist.github.com/malfet/9b93bc7eeddeaf1d84546efc4f0c577f
@@ -311,7 +297,13 @@ class TestTryMerge(TestCase):
         self.assertGreater(pr.get_commit_count(), 60)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_team_members(self, mocked_gql: Any) -> None:
+    def test_gql_retrieve_checksuites(self, mocked_gql: Any, *args: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        pr = GitHubPR("pytorch", "pytorch", 94787)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    def test_team_members(self, mocked_gql: Any, *args: Any) -> None:
         "Test fetching team members works"
         dev_infra_team = gh_get_team_members("pytorch", "pytorch-dev-infra")
         self.assertGreater(len(dev_infra_team), 2)
@@ -320,7 +312,7 @@ class TestTryMerge(TestCase):
             self.assertEqual(len(non_existing_team), 0)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_author_many_commits(self, mocked_gql: Any) -> None:
+    def test_get_author_many_commits(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that authors for all commits can be fetched
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
@@ -331,7 +323,7 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_NE)
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any) -> None:
+    def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any, *args: Any) -> None:
         """ Tests that PR with nonexistent/pending status checks fails with the right reason.
         """
         pr = GitHubPR("pytorch", "pytorch", 76118)
@@ -341,7 +333,7 @@ class TestTryMerge(TestCase):
                                lambda: find_matching_merge_rule(pr, repo))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_author_many_reviews(self, mocked_gql: Any) -> None:
+    def test_get_author_many_reviews(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that all reviews can be fetched
         """
         pr = GitHubPR("pytorch", "pytorch", 76123)
@@ -351,7 +343,7 @@ class TestTryMerge(TestCase):
         self.assertGreater(len(pr._reviews), 100)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_checkruns_many_runs(self, mocked_gql: Any) -> None:
+    def test_get_checkruns_many_runs(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that all checkruns can be fetched
         """
         pr = GitHubPR("pytorch", "pytorch", 77700)
@@ -360,7 +352,7 @@ class TestTryMerge(TestCase):
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_cancelled_gets_ignored(self, mocked_gql: Any) -> None:
+    def test_cancelled_gets_ignored(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that cancelled workflow does not override existing successfull status
         """
         pr = GitHubPR("pytorch", "pytorch", 82169)
@@ -370,7 +362,7 @@ class TestTryMerge(TestCase):
         self.assertTrue(all([conclusions[name].status == "SUCCESS" for name in lint_checks]))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_get_many_land_checks(self, mocked_gql: Any) -> None:
+    def test_get_many_land_checks(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that all checkruns can be fetched for a commit
         """
         conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
@@ -378,7 +370,7 @@ class TestTryMerge(TestCase):
         self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_failed_land_checks(self, mocked_gql: Any) -> None:
+    def test_failed_land_checks(self, mocked_gql: Any, *args: Any) -> None:
         """ Tests that PR with Land Checks fail with a RunTime error
         """
         self.assertRaisesRegex(RuntimeError,
@@ -388,19 +380,14 @@ class TestTryMerge(TestCase):
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
     @mock.patch('trymerge.try_revert', side_effect=mock_revert)
-    def test_main_revert(self, mock_revert: Any, mock_parse_args: Any, gh_get_pr_info: Any) -> None:
+    def test_main_revert(self, mock_revert: Any, mock_parse_args: Any, gh_get_pr_info: Any, *args: Any) -> None:
         trymerge_main()
         mock_revert.assert_called_once()
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
-    def test_main_force(
-        self,
-        mock_merge: Any,
-        mock_parse_args: Any,
-        mock_gh_get_info: Any,
-    ) -> None:
+    def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any, *args: Any) -> None:
         trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
@@ -414,12 +401,7 @@ class TestTryMerge(TestCase):
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
-    def test_main_merge(
-        self,
-        mock_merge: Any,
-        mock_parse_args: Any,
-        mock_gh_get_info: Any,
-    ) -> None:
+    def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any, *args: Any) -> None:
         trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
@@ -432,14 +414,14 @@ class TestTryMerge(TestCase):
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
-    def test_revert_rules(self, mock_gql: Any, mock_mr: Any) -> None:
+    def test_revert_rules(self, mock_gql: Any, mock_mr: Any, *args: Any) -> None:
         """ Tests that reverts from collaborators are allowed """
         pr = GitHubPR("pytorch", "pytorch", 79694)
         repo = DummyGitRepo()
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_revert_codev_fails(self, mock_gql: Any) -> None:
+    def test_revert_codev_fails(self, mock_gql: Any, *args: Any) -> None:
         pr = GitHubPR("pytorch", "pytorch", 91340)
 
         class GitRepoCoDev(GitRepo):
@@ -455,60 +437,32 @@ class TestTryMerge(TestCase):
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
 
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
-    def test_pr_with_missing_labels(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
-        "Test PR with no 'release notes:' label or 'topic: not user facing' label"
-        pr = GitHubPR("pytorch", "pytorch", 82169)
-        self.assertFalse(has_required_labels(pr))
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
-    def test_pr_with_release_notes_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
-        "Test PR with 'release notes: nn' label"
-        pr = GitHubPR("pytorch", "pytorch", 71759)
-        self.assertTrue(has_required_labels(pr))
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.get_release_notes_labels', return_value=release_notes_labels)
-    def test_pr_with_not_user_facing_label(self, mocked_rn_labels: Any, mocked_gql: Any) -> None:
-        "Test PR with 'topic: not user facing' label"
-        pr = GitHubPR("pytorch", "pytorch", 75095)
-        self.assertTrue(has_required_labels(pr))
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.GitHubPR.get_comments', return_value=[mock_get_comments()[0]])
-    @mock.patch('trymerge.gh_post_pr_comment')
-    def test_correctly_add_label_err_comment(
-        self, mock_gh_post_pr_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
-    ) -> None:
-        "Test add label err comment when similar comments don't exist."
-        pr = GitHubPR("pytorch", "pytorch", 75095)
-        add_label_err_comment(pr)
-        mock_gh_post_pr_comment.assert_called_once()
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.GitHubPR.get_comments', return_value=[mock_get_comments()[1]])
-    @mock.patch('trymerge.gh_post_pr_comment')
-    def test_not_add_label_err_comment(
-        self, mock_gh_post_pr_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
-    ) -> None:
-        "Test not add label err comment when similar comments exist."
-        pr = GitHubPR("pytorch", "pytorch", 75095)
-        add_label_err_comment(pr)
-        mock_gh_post_pr_comment.assert_not_called()
-
-    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    @mock.patch('trymerge.GitHubPR.get_comments', return_value=mock_get_comments())
-    @mock.patch('trymerge.delete_comment')
-    def test_correctly_delete_all_label_err_comments(
-        self, mock_delete_comment: Any, mock_get_comments: Any, mock_gh_grphql: Any
-    ) -> None:
-        "Test only delete label err comment."
-        pr = GitHubPR("pytorch", "pytorch", 75095)
-        delete_all_label_err_comments(pr)
-        mock_delete_comment.assert_called_once_with(2)
-
+@mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
+@mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+class TestBypassFailures(TestCase):
+    def test_get_classifications(self, *args: Any) -> None:
+        flaky_rules = [FlakyRule("distributed", ["##[error]The operation was canceled."])]
+        pr = GitHubPR("pytorch", "pytorch", 92863)
+        checks = get_combined_checks_from_pr_and_land_validation(pr, None)
+        checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+        self.assertTrue(
+            checks[
+                "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.4xlarge)"
+            ].classification
+            == "BROKEN_TRUNK"
+        )
+        self.assertTrue(
+            checks[
+                "pull / linux-focal-py3.7-gcc7 / test (distributed, 1, 2, linux.2xlarge)"
+            ].classification
+            == "FLAKY"
+        )
+        pending, failed = categorize_checks(checks, list(checks.keys()), ok_failed_checks_threshold=2)
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        pending, failed = categorize_checks(checks, list(checks.keys()), ok_failed_checks_threshold=1)
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 2)
 
 if __name__ == "__main__":
     main()

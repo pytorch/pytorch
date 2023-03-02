@@ -192,7 +192,316 @@ void LayerNormKernelImpl(
   });
 }
 
-template <typename T>
+template <typename T, typename T2, typename T_ACC>
+void layer_norm_backward_frame(
+    const T* dY_data,
+    const T* X_data,
+    const T2* mean_data,
+    const T2* rstd_data,
+    const T2* gamma_data,
+    T* dX_data,
+    T* dgamma_buffer_ptr,
+    T* dbeta_buffer_ptr,
+    const T_ACC scale,
+    const bool gamma_null,
+    const bool dX_null,
+    const bool dgamma_null,
+    const bool dbeta_null,
+    int64_t N,
+    int64_t i) {
+  using Vec = vec::Vectorized<T_ACC>;
+  const T* dY_ptr = dY_data + i * N;
+  const T* X_ptr = X_data + i * N;
+  if (!dgamma_null) {
+    const T_ACC a = rstd_data[i];
+    const T_ACC b = -a * mean_data[i];
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
+    // }
+    vec::map3<T>(
+        [a, b](Vec dgamma, Vec dy, Vec x) {
+          return dgamma + dy * (Vec(a) * x + Vec(b));
+        },
+        dgamma_buffer_ptr,
+        dgamma_buffer_ptr,
+        dY_ptr,
+        X_ptr,
+        N);
+  }
+  if (!dbeta_null) {
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   dbeta_data[j] += dY_ptr[j];
+    // }
+    vec::map2<T>(
+        [](Vec dbeta, Vec dy) { return dbeta + dy; },
+        dbeta_buffer_ptr,
+        dbeta_buffer_ptr,
+        dY_ptr,
+        N);
+  }
+  if (!dX_null) {
+    T* dX_ptr = dX_data + i * N;
+    T_ACC ds = T_ACC(0);
+    T_ACC db = T_ACC(0);
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+    //   ds += dY_ptr[j] * X_ptr[j] * gamma_v;
+    //   db += dY_ptr[j] * gamma_v;
+    // }
+    if (gamma_null) {
+      ds = vec::map2_reduce_all<T>(
+          [](Vec x, Vec y) { return x * y; },
+          [](Vec x, Vec y) { return x + y; },
+          dY_ptr,
+          X_ptr,
+          N);
+      db = vec::reduce_all<T>(
+          [](Vec& x, Vec& y) { return x + y; }, dY_ptr, N);
+    } else {
+      ds = vec::map3_reduce_all<T>(
+          [](Vec x, Vec y, Vec z) { return x * y * z; },
+          [](Vec x, Vec y) { return x + y; },
+          dY_ptr,
+          X_ptr,
+          gamma_data,
+          N);
+      db = vec::map2_reduce_all<T>(
+          [](Vec x, Vec y) { return x * y; },
+          [](Vec x, Vec y) { return x + y; },
+          dY_ptr,
+          gamma_data,
+          N);
+    }
+    const T_ACC a = rstd_data[i];
+    const T_ACC b = (db * mean_data[i] - ds) * a * a * a * scale;
+    const T_ACC c = -b * mean_data[i] - db * a * scale;
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+    //   dX_ptr[j] = a * dY_ptr[j] * gamma_v + b * X_ptr[j] + c;
+    // }
+    if (gamma_null) {
+      vec::map2<T>(
+          [a, b, c](Vec dy, Vec x) {
+            return Vec(a) * dy + Vec(b) * x + Vec(c);
+          },
+          dX_ptr,
+          dY_ptr,
+          X_ptr,
+          N);
+    } else {
+      vec::map3<T>(
+          [a, b, c](Vec dy, Vec gamma, Vec x) {
+            return Vec(a) * dy * gamma + Vec(b) * x + Vec(c);
+          },
+          dX_ptr,
+          dY_ptr,
+          gamma_data,
+          X_ptr,
+          N);
+    }
+  }
+}
+
+template <>
+void layer_norm_backward_frame<BFloat16, float, float>(
+    const BFloat16* dY_data,
+    const BFloat16* X_data,
+    const float* mean_data,
+    const float* rstd_data,
+    const float* gamma_data,
+    BFloat16* dX_data,
+    BFloat16* dgamma_buffer_ptr,
+    BFloat16* dbeta_buffer_ptr,
+    const float scale,
+    const bool gamma_null,
+    const bool dX_null,
+    const bool dgamma_null,
+    const bool dbeta_null,
+    int64_t N,
+    int64_t i) {
+  using bVec = Vectorized<BFloat16>;
+  using fVec = Vectorized<float>;
+  const BFloat16* dY_ptr = dY_data + i * N;
+  const BFloat16* X_ptr = X_data + i * N;
+  if (!dgamma_null) {
+    const float a = rstd_data[i];
+    const float b = -a * mean_data[i];
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
+    // }
+    vec::map3<BFloat16>(
+        [a, b](fVec dgamma, fVec dy, fVec x) {
+          return dgamma + dy * (fVec(a) * x + fVec(b));
+        },
+        dgamma_buffer_ptr,
+        dgamma_buffer_ptr,
+        dY_ptr,
+        X_ptr,
+        N);
+  }
+  if (!dbeta_null) {
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   dbeta_data[j] += dY_ptr[j];
+    // }
+    vec::map2<BFloat16>(
+        [](fVec dbeta, fVec dy) { return dbeta + dy; },
+        dbeta_buffer_ptr,
+        dbeta_buffer_ptr,
+        dY_ptr,
+        N);
+  }
+  if (!dX_null) {
+    BFloat16* dX_ptr = dX_data + i * N;
+    float ds = float(0);
+    float db = float(0);
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+    //   ds += dY_ptr[j] * X_ptr[j] * gamma_v;
+    //   db += dY_ptr[j] * gamma_v;
+    // }
+    if (gamma_null) {
+      ds = vec::map2_reduce_all<BFloat16>(
+          [](fVec x, fVec y) { return x * y; },
+          [](fVec x, fVec y) { return x + y; },
+          dY_ptr,
+          X_ptr,
+          N);
+      db = vec::reduce_all<BFloat16>(
+          [](fVec& x, fVec& y) { return x + y; }, dY_ptr, N);
+    } else {
+      if (N < bVec::size()) {
+        bVec x_bvec = bVec::loadu(X_ptr, N);
+        bVec dy_bvec = bVec::loadu(dY_ptr, N);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data, N);
+        if (N > fVec::size()) {
+          fVec db_fvec0 = dy_fvec0 * gamma_fvec0;
+          fVec db_fvec1 = dy_fvec1 * gamma_fvec1;
+          fVec ds_fvec0 = x_fvec0 * db_fvec0;
+          fVec ds_fvec1 = x_fvec1 * db_fvec1;
+          ds_fvec0 = fVec::set(ds_fvec0, ds_fvec0 + ds_fvec1, N - fVec::size());
+          ds = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, ds_fvec0);
+          db_fvec0 = fVec::set(db_fvec0, db_fvec0 + db_fvec1, N - fVec::size());
+          db = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, db_fvec0);
+        } else {
+          fVec db_fvec0 = dy_fvec0 * gamma_fvec0;
+          fVec ds_fvec0 = x_fvec0 * db_fvec0;
+          ds = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, ds_fvec0, N);
+          db = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, db_fvec0, N);
+        }
+      } else {
+        int64_t d = bVec::size();
+        bVec x_bvec = bVec::loadu(X_ptr);
+        bVec dy_bvec = bVec::loadu(dY_ptr);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
+        fVec ds_fvec0, ds_fvec1, db_fvec0, db_fvec1, acc_ds_fvec0, acc_ds_fvec1, acc_db_fvec0, acc_db_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data);
+        acc_db_fvec0 = dy_fvec0 * gamma_fvec0;
+        acc_db_fvec1 = dy_fvec1 * gamma_fvec1;
+        acc_ds_fvec0 = x_fvec0 * acc_db_fvec0;
+        acc_ds_fvec1 = x_fvec1 * acc_db_fvec1;
+        for (; d < N - (N % bVec::size()); d += bVec::size()) {
+          x_bvec = bVec::loadu(X_ptr + d);
+          dy_bvec = bVec::loadu(dY_ptr + d);
+          std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+          std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+          std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d);
+          db_fvec0 = dy_fvec0 * gamma_fvec0;
+          db_fvec1 = dy_fvec1 * gamma_fvec1;
+          ds_fvec0 = x_fvec0 * db_fvec0;
+          ds_fvec1 = x_fvec1 * db_fvec1;
+          acc_ds_fvec0 = acc_ds_fvec0 + ds_fvec0;
+          acc_ds_fvec1 = acc_ds_fvec1 + ds_fvec1;
+          acc_db_fvec0 = acc_db_fvec0 + db_fvec0;
+          acc_db_fvec1 = acc_db_fvec1 + db_fvec1;
+        }
+        if (N - d > 0) {
+          x_bvec = bVec::loadu(X_ptr + d, N - d);
+          dy_bvec = bVec::loadu(dY_ptr + d, N - d);
+          std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+          std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+          std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d, N - d);
+          if (N - d > fVec::size()) {
+            db_fvec0 = dy_fvec0 * gamma_fvec0;
+            db_fvec1 = dy_fvec1 * gamma_fvec1;
+            ds_fvec0 = x_fvec0 * db_fvec0;
+            ds_fvec1 = x_fvec1 * db_fvec1;
+            acc_ds_fvec0 = acc_ds_fvec0 + ds_fvec0;
+            acc_ds_fvec1 = fVec::set(acc_ds_fvec1, acc_ds_fvec1 + ds_fvec1, N - d - fVec::size());
+            acc_db_fvec0 = acc_db_fvec0 + db_fvec0;
+            acc_db_fvec1 = fVec::set(acc_db_fvec1, acc_db_fvec1 + db_fvec1, N - d - fVec::size());
+          } else {
+            db_fvec0 = dy_fvec0 * gamma_fvec0;
+            ds_fvec0 = x_fvec0 * db_fvec0;
+            acc_ds_fvec0 = fVec::set(acc_ds_fvec0, acc_ds_fvec0 + ds_fvec0, N - d);
+            acc_db_fvec0 = fVec::set(acc_db_fvec0, acc_db_fvec0 + db_fvec0, N - d);
+          }
+        }
+        acc_ds_fvec0 = acc_ds_fvec0 + acc_ds_fvec1;
+        acc_db_fvec0 = acc_db_fvec0 + acc_db_fvec1;
+        ds = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, acc_ds_fvec0);
+        db = vec_reduce_all<float>([](fVec x, fVec y) { return x + y; }, acc_db_fvec0);
+      }
+    }
+    const float a = rstd_data[i];
+    const float b = (db * mean_data[i] - ds) * a * a * a * scale;
+    const float c = -b * mean_data[i] - db * a * scale;
+    // Scalar math:
+    // for (const auto j : c10::irange(N)) {
+    //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
+    //   dX_ptr[j] = a * dY_ptr[j] * gamma_v + b * X_ptr[j] + c;
+    // }
+    if (gamma_null) {
+      vec::map2<BFloat16>(
+          [a, b, c](fVec dy, fVec x) {
+            return fVec(a) * dy + fVec(b) * x + fVec(c);
+          },
+          dX_ptr,
+          dY_ptr,
+          X_ptr,
+          N);
+    } else {
+      int64_t d = 0;
+      for (; d < N - (N % bVec::size()); d += bVec::size()) {
+        bVec x_bvec = bVec::loadu(X_ptr + d);
+        bVec dy_bvec = bVec::loadu(dY_ptr + d);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d);
+        fVec r_fvec0 = fVec(a) * dy_fvec0 * gamma_fvec0 + fVec(b) * x_fvec0 + fVec(c);
+        fVec r_fvec1 = fVec(a) * dy_fvec1 * gamma_fvec1 + fVec(b) * x_fvec1 + fVec(c);
+        bVec r_bvec = convert_float_bfloat16(r_fvec0, r_fvec1);
+        r_bvec.store(dX_ptr + d);
+      }
+      if (N - d > 0) {
+        bVec x_bvec = bVec::loadu(X_ptr + d, N - d);
+        bVec dy_bvec = bVec::loadu(dY_ptr + d, N - d);
+        fVec x_fvec0, x_fvec1, dy_fvec0, dy_fvec1, gamma_fvec0, gamma_fvec1;
+        std::tie(x_fvec0, x_fvec1) = convert_bfloat16_float(x_bvec);
+        std::tie(dy_fvec0, dy_fvec1) = convert_bfloat16_float(dy_bvec);
+        std::tie(gamma_fvec0, gamma_fvec1) = load2f(gamma_data + d, N - d);
+        fVec r_fvec0 = fVec(a) * dy_fvec0 * gamma_fvec0 + fVec(b) * x_fvec0 + fVec(c);
+        fVec r_fvec1 = fVec(a) * dy_fvec1 * gamma_fvec1 + fVec(b) * x_fvec1 + fVec(c);
+        bVec r_bvec = convert_float_bfloat16(r_fvec0, r_fvec1);
+        r_bvec.store(dX_ptr + d, N - d);
+      }
+    }
+  }
+}
+
+template <typename T, typename T2>
 void LayerNormBackwardKernelImplInternal(
     const Tensor& dY,
     const Tensor& X,
@@ -205,7 +514,6 @@ void LayerNormBackwardKernelImplInternal(
     Tensor* dgamma,
     Tensor* dbeta) {
   using T_ACC = at::opmath_type<T>;
-  using Vec = vec::Vectorized<T_ACC>;
   TORCH_DCHECK_EQ(dY.numel(), M * N);
   TORCH_DCHECK_EQ(X.numel(), M * N);
   TORCH_DCHECK_EQ(mean.numel(), M);
@@ -213,13 +521,13 @@ void LayerNormBackwardKernelImplInternal(
   DCHECK(!gamma.defined() || gamma.numel() == N);
   const T* dY_data = dY.template data_ptr<T>();
   const T* X_data = X.template data_ptr<T>();
-  const T* mean_data = mean.template data_ptr<T>();
-  const T* rstd_data = rstd.template data_ptr<T>();
-  const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+  const T2* mean_data = mean.template data_ptr<T2>();
+  const T2* rstd_data = rstd.template data_ptr<T2>();
+  const T2* gamma_data =
+      gamma.defined() ? gamma.template data_ptr<T2>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
-  T* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T>() : nullptr;
-  T* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T>() : nullptr;
+  T2* dgamma_data = dgamma->defined() ? dgamma->template data_ptr<T2>() : nullptr;
+  T2* dbeta_data = dbeta->defined() ? dbeta->template data_ptr<T2>() : nullptr;
   const T_ACC scale = T_ACC(1) / static_cast<T_ACC>(N);
   const bool gamma_null = gamma_data == nullptr;
   const bool dX_null = dX_data == nullptr;
@@ -257,100 +565,7 @@ void LayerNormBackwardKernelImplInternal(
     T* dbeta_buffer_ptr =
         dbeta_null ? nullptr : buffer_data + num_threads * N + tid * N;
     for (const auto i : c10::irange(start, end)) {
-      const T* dY_ptr = dY_data + i * N;
-      const T* X_ptr = X_data + i * N;
-      if (!dgamma_null) {
-        const T_ACC a = rstd_data[i];
-        const T_ACC b = -a * mean_data[i];
-        // Scalar math:
-        // for (const auto j : c10::irange(N)) {
-        //   dgamma_data[j] += dY_ptr[j] * (a * X_ptr[j] + b);
-        // }
-        vec::map3<T>(
-            [a, b](Vec dgamma, Vec dy, Vec x) {
-              return dgamma + dy * (Vec(a) * x + Vec(b));
-            },
-            dgamma_buffer_ptr,
-            dgamma_buffer_ptr,
-            dY_ptr,
-            X_ptr,
-            N);
-      }
-      if (!dbeta_null) {
-        // Scalar math:
-        // for (const auto j : c10::irange(N)) {
-        //   dbeta_data[j] += dY_ptr[j];
-        // }
-        vec::map2<T>(
-            [](Vec dbeta, Vec dy) { return dbeta + dy; },
-            dbeta_buffer_ptr,
-            dbeta_buffer_ptr,
-            dY_ptr,
-            N);
-      }
-      if (!dX_null) {
-        T* dX_ptr = dX_data + i * N;
-        T_ACC ds = T_ACC(0);
-        T_ACC db = T_ACC(0);
-        // Scalar math:
-        // for (const auto j : c10::irange(N)) {
-        //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-        //   ds += dY_ptr[j] * X_ptr[j] * gamma_v;
-        //   db += dY_ptr[j] * gamma_v;
-        // }
-        if (gamma_null) {
-          ds = vec::map2_reduce_all<T>(
-              [](Vec x, Vec y) { return x * y; },
-              [](Vec x, Vec y) { return x + y; },
-              dY_ptr,
-              X_ptr,
-              N);
-          db = vec::reduce_all<T>(
-              [](Vec& x, Vec& y) { return x + y; }, dY_ptr, N);
-        } else {
-          ds = vec::map3_reduce_all<T>(
-              [](Vec x, Vec y, Vec z) { return x * y * z; },
-              [](Vec x, Vec y) { return x + y; },
-              dY_ptr,
-              X_ptr,
-              gamma_data,
-              N);
-          db = vec::map2_reduce_all<T>(
-              [](Vec x, Vec y) { return x * y; },
-              [](Vec x, Vec y) { return x + y; },
-              dY_ptr,
-              gamma_data,
-              N);
-        }
-        const T_ACC a = rstd_data[i];
-        const T_ACC b = (db * mean_data[i] - ds) * a * a * a * scale;
-        const T_ACC c = -b * mean_data[i] - db * a * scale;
-        // Scalar math:
-        // for (const auto j : c10::irange(N)) {
-        //   const T gamma_v = gamma_null ? T(1) : gamma_data[j];
-        //   dX_ptr[j] = a * dY_ptr[j] * gamma_v + b * X_ptr[j] + c;
-        // }
-        if (gamma_null) {
-          vec::map2<T>(
-              [a, b, c](Vec dy, Vec x) {
-                return Vec(a) * dy + Vec(b) * x + Vec(c);
-              },
-              dX_ptr,
-              dY_ptr,
-              X_ptr,
-              N);
-        } else {
-          vec::map3<T>(
-              [a, b, c](Vec dy, Vec gamma, Vec x) {
-                return Vec(a) * dy * gamma + Vec(b) * x + Vec(c);
-              },
-              dX_ptr,
-              dY_ptr,
-              gamma_data,
-              X_ptr,
-              N);
-        }
-      }
+      layer_norm_backward_frame<T, T2, T_ACC>(dY_data, X_data, mean_data, rstd_data, gamma_data, dX_data, dgamma_buffer_ptr, dbeta_buffer_ptr, scale, gamma_null, dX_null, dgamma_null, dbeta_null, N, i);
     }
   });
 
@@ -390,8 +605,13 @@ void LayerNormBackwardKernelImpl(
     Tensor* dbeta) {
   AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
       "LayerNormBackwardKernelImpl", [&]() {
-    LayerNormBackwardKernelImplInternal<scalar_t>(
-        dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+    if (X.scalar_type() == at::kBFloat16 && gamma.scalar_type() == at::kFloat) {
+      LayerNormBackwardKernelImplInternal<BFloat16, float>(
+          dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+    } else {
+      LayerNormBackwardKernelImplInternal<scalar_t, scalar_t>(
+          dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+    }
   });
 }
 

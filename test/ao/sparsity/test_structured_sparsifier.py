@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 # Owner(s): ["module: unknown"]
-
-
 import copy
 import logging
 import random
@@ -10,6 +8,7 @@ import torch
 from torch import nn
 from torch.ao.pruning._experimental.pruner import (
     SaliencyPruner,
+    LSTMSaliencyPruner,
     BaseStructuredSparsifier,
     FakeStructuredSparsity,
 )
@@ -28,7 +27,11 @@ from torch.testing._internal.common_pruning import (
     Conv2dPool,
     Conv2dPoolFlatten,
     Conv2dPoolFlattenFunctional,
+    LSTMLinearModel,
+    LSTMLayerNormLinearModel,
+    rows_are_subset,
 )
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
@@ -53,8 +56,25 @@ class ImplementedPruner(BaseStructuredSparsifier):
         module.parametrizations[tensor_name][0].mask[prune] = False
 
 
+class BottomHalfLSTMPruner(BaseStructuredSparsifier):
+    """
+    Pruner that will remove the bottom half of the rows.
+    This is primarily meant for testing purposes
+    """
+
+    def update_mask(self, module, tensor_name, **kwargs):
+        for p in getattr(module.parametrizations, tensor_name):
+            if isinstance(p, FakeStructuredSparsity):
+                mask = p.mask
+                masks = torch.split(mask, len(mask) // 4)
+                for small in masks:
+                    num = len(small)
+                    small[num // 2 :] = False
+                new_mask = torch.cat(masks)
+                mask.data = new_mask.data
+
 class TestSaliencyPruner(TestCase):
-    def test_update_mask(self):
+    def test_saliency_pruner_update_mask(self):
         """Test that we prune out the row with the lowest saliency (first row)"""
         model = SimpleLinear()
         with torch.no_grad():
@@ -74,6 +94,70 @@ class TestSaliencyPruner(TestCase):
 
         assert expected.shape == pruned.shape
         assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+
+    def test_lstm_saliency_pruner_update_mask(self):
+        model = LSTMLinearModel(
+            input_dim=2,
+            hidden_dim=2,
+            output_dim=2,
+            num_layers=1,
+        )
+
+        manual_weights = torch.Tensor([[1, 1],
+                                       [2, 2],
+                                       [2, 2],
+                                       [1, 1],
+                                       [-1, -1],
+                                       [-2, -2],
+                                       [-2, -2],
+                                       [-1, -1]])
+
+        with torch.no_grad():
+            model.lstm.weight_ih_l0 = nn.Parameter(manual_weights)
+            model.lstm.weight_hh_l0 = nn.Parameter(torch.Tensor(manual_weights))
+            model.lstm.bias_ih_l0 = nn.Parameter(manual_weights[:, 0])
+            model.lstm.bias_hh_l0 = nn.Parameter(manual_weights[:, 0])
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+        ]
+        lstm_input = torch.ones((1, 2))
+        fx_pruner = LSTMSaliencyPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+
+        model.eval()
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+
+        # make sure both models run
+        model(lstm_input)
+        pruned_model(lstm_input)
+
+        # make sure lowest saliency rows are pruned
+        expected = torch.Tensor([[2, 2],
+                                 [2, 2],
+                                 [-2, -2],
+                                 [-2, -2]])
+        pruned = model.lstm.weight_ih_l0
+        assert expected.shape == pruned.shape
+        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+
+        expected = torch.Tensor([[2],
+                                 [2],
+                                 [-2],
+                                 [-2]])
+        pruned = model.lstm.weight_hh_l0
+        assert expected.shape == pruned.shape
+        assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+
+        expected = torch.Tensor([2, 2, -2, -2])
+        for pruned in [model.lstm.bias_ih_l0, model.lstm.bias_hh_l0]:
+            assert expected.shape == pruned.shape
+            assert torch.isclose(expected, pruned, rtol=1e-05, atol=1e-07).all()
+
 
 
 class TestBaseStructuredSparsifier(TestCase):
@@ -667,3 +751,169 @@ class TestBaseStructuredSparsifier(TestCase):
                     torch.device(device),
                     also_prune_bias,
                 )
+
+    def test_prune_lstm_linear_multiple_layer(self):
+        """
+        Test fusion support for LSTM(multi-layer) -> Linear
+        """
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=2,
+        )
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+            {"tensor_fqn": "lstm.weight_ih_l1"},
+            {"tensor_fqn": "lstm.weight_hh_l1"},
+        ]
+
+        lstm_input = torch.ones((1, 8))
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+
+        model.eval()
+        _, _ = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        _, _ = pruned_model(lstm_input)
+
+        expected_params = dict(model.named_parameters())
+        for name, param in model.named_parameters():
+            assert name in expected_params
+            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
+            # Instead we check that the weights of the new LSTM are a subset of the weights of
+            # the old LSTM
+            assert rows_are_subset(param, expected_params[name])
+            del expected_params[name]
+
+        # assert we haven't deleted any keys
+        assert len(expected_params) == 0
+
+    def test_prune_lstm_linear_single_layer(self):
+        """
+        Test fusion support for LSTM (single-layer) -> Linear
+        """
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=1,
+        )
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+        ]
+
+        lstm_input = torch.ones((1, 8))
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+        model.eval()
+
+        out_expected, lstm_out_expected = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
+        r, c = lstm_out_expected.size()
+
+        # We cannot check that y_expected == y_pruned as usual because
+        # zeros vs. missing elements yield different numerical results.
+        # Instead that we check that the pruned elements are the first half of the results
+        # since we are using a BottomHalfLSTMPruner
+        assert torch.isclose(
+            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
+        ).all()
+        # also check that output of linear is the same shape, this means we've resized
+        # linear columns correctly.
+        assert out_expected.shape == out_pruned.shape
+
+    def test_prune_lstm_layernorm_linear_multiple_layer(self):
+        """
+        Test fusion support for LSTM(multi-layer) -> Linear
+        """
+        model = LSTMLayerNormLinearModel(
+            input_dim=8,
+            output_dim=8,
+            hidden_dim=8,
+            num_layers=2,
+        )
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+            {"tensor_fqn": "lstm.weight_ih_l1"},
+            {"tensor_fqn": "lstm.weight_hh_l1"},
+        ]
+
+        lstm_input = torch.ones((1, 8))
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+
+        model.eval()
+        _, _ = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        _, _ = pruned_model(lstm_input)
+
+        expected_params = dict(model.named_parameters())
+        for name, param in model.named_parameters():
+            assert name in expected_params
+            # We cannot compare y_expected == y_pruned, as the 0 elements mess up the numerics
+            # Instead we check that the weights of the new LSTM are a subset of the weights of
+            # the old LSTM
+            assert rows_are_subset(param, expected_params[name])
+            del expected_params[name]
+
+        # assert we haven't deleted any keys
+        assert len(expected_params) == 0
+
+    def test_prune_lstm_layernorm_linear_single_layer(self):
+        """
+        Test fusion support for LSTM (single-layer) -> Linear
+        """
+        model = LSTMLinearModel(
+            input_dim=8,
+            hidden_dim=8,
+            output_dim=8,
+            num_layers=1,
+        )
+
+        config = [
+            {"tensor_fqn": "lstm.weight_ih_l0"},
+            {"tensor_fqn": "lstm.weight_hh_l0"},
+        ]
+
+        lstm_input = torch.ones((1, 8))
+        fx_pruner = BottomHalfLSTMPruner({"sparsity_level": 0.5})
+        fx_pruner.prepare(model, config)
+        fx_pruner.enable_mask_update = True
+        fx_pruner.step()
+        model.eval()
+
+        out_expected, lstm_out_expected = model(lstm_input)
+        pruned_model = fx_pruner.prune()
+        pruned_model.eval()
+        out_pruned, lstm_out_pruned = pruned_model(lstm_input)
+        r, c = lstm_out_expected.size()
+
+        # We cannot check that y_expected == y_pruned as usual because
+        # zeros vs. missing elements yield different numerical results.
+        # Instead that we check that the pruned elements are the first half of the results
+        # since we are using a BottomHalfLSTMPruner
+        assert torch.isclose(
+            lstm_out_expected[:, : c // 2], lstm_out_pruned, rtol=1e-05, atol=1e-07
+        ).all()
+        # also check that output of linear is the same shape, this means we've resized
+        # linear columns correctly.
+        assert out_expected.shape == out_pruned.shape

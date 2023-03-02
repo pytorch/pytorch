@@ -225,6 +225,9 @@ public:
   Vectorized<float> exp() const {
     return Vectorized<float>(Sleef_expf16_u10(values));
   }
+  Vectorized<float> exp2() const {
+    return Vectorized<float>(Sleef_exp2f16_u10(values));
+  }
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f16_u10(values));
   }
@@ -245,13 +248,13 @@ public:
   }
   Vectorized<float> frac() const;
   Vectorized<float> sin() const {
-    return Vectorized<float>(Sleef_sinf16_u10(values));
+    return Vectorized<float>(Sleef_sinf16_u35(values));
   }
   Vectorized<float> sinh() const {
     return Vectorized<float>(Sleef_sinhf16_u10(values));
   }
   Vectorized<float> cos() const {
-    return Vectorized<float>(Sleef_cosf16_u10(values));
+    return Vectorized<float>(Sleef_cosf16_u35(values));
   }
   Vectorized<float> cosh() const {
     return Vectorized<float>(Sleef_coshf16_u10(values));

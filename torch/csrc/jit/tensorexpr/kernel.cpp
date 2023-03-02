@@ -432,7 +432,7 @@ ArgValue TensorExprKernel::toArg(const torch::jit::Value* v) const {
     for (auto el : v->node()->inputs()) {
       vec.push_back(toArg(el));
     }
-    if (vec.size() == 0) {
+    if (vec.empty()) {
       return BufList(); // Return arbitrarily typed vector
     } else if (c10::get_if<BufHandle>(&vec[0])) {
       return convertVecArgValue<BufHandle>(vec);
@@ -543,7 +543,7 @@ bool constZeroDimTensorAsScalarArg(
   }
 
   const auto t = toIValue(v)->toTensor();
-  if (t.sizes().size() != 0) {
+  if (!t.sizes().empty()) {
     return false;
   }
 
@@ -675,7 +675,7 @@ void fuseAllLoops(StmtPtr st) {
   std::vector<ForPtr> outer_loops;
   for (const auto& stmt : *block) {
     auto loop = to<For>(stmt);
-    auto hasReduction = NodeFinder<ReduceOp>::find(stmt).size() != 0;
+    auto hasReduction = !NodeFinder<ReduceOp>::find(stmt).empty();
     if (!loop || hasReduction) {
       all_outer_loops.push_back(outer_loops);
       outer_loops.clear();
@@ -797,7 +797,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
         "After random transform:\n", std::to_string(l.root_stmt()), "\n");
   }
 
-  bool hasReduction = NodeFinder<ReduceOp>::find(l.root_stmt()).size() != 0;
+  bool hasReduction = !NodeFinder<ReduceOp>::find(l.root_stmt()).empty();
 
   // For Block codegen we create a map of tensor dims before
   // inlining. Like GPU codegen we need to inline. But the order
@@ -1460,7 +1460,6 @@ void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
 std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
     const std::vector<BufPtr>& interm_bufs) {
   std::vector<BufPtr> remaining_interm_bufs;
-  std::vector<std::pair<BufPtr, void*>> allocated_bufs;
   for (const auto& buf : interm_bufs) {
     // Check if buf shape is static and compute its size if static.
     bool is_static = true;
@@ -1580,7 +1579,7 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
   auto _prefer_symbolic_mem =
       [](const torch::jit::Value* val,
          const std::vector<torch::jit::StrideInput>& stride_desc_vec) {
-        TORCH_INTERNAL_ASSERT(stride_desc_vec.size() > 0);
+        TORCH_INTERNAL_ASSERT(!stride_desc_vec.empty());
         // Has symbolic stride information
         auto cur_stride_desc = stride_desc_vec[0];
         return (cur_stride_desc ==
@@ -1621,7 +1620,7 @@ void TensorExprKernel::deduceMemoryLayoutPolicy() {
   // std::all_of returns true if the range is empty. But we prefer to keep
   // the original memory layout propagation policy for this case. So we
   // check whether the range is empty.
-  auto prefer_channels_last = (graph_io_tensors.size() > 0);
+  auto prefer_channels_last = (!graph_io_tensors.empty());
   for (auto el : graph_io_tensors) {
     auto is_complete = el->isCompleteTensor();
     auto is_symbolic = symbolic_strides_.count(el);

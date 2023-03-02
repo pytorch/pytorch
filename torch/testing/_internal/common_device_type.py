@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo
+    NATIVE_DEVICES, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -239,7 +239,7 @@ except ImportError:
 #         # Intention is to override
 #         def assertEqual(self, x, y):
 #             # This DOESN'T WORK!
-#             super(TestFooDeviceType, self).assertEqual(x, y)
+#             super().assertEqual(x, y)
 #
 # If you try to run this code, you'll get an error saying that TestFooDeviceType
 # is not in scope.  This is because after instantiating our classes, we delete
@@ -259,7 +259,7 @@ except ImportError:
 
 def _dtype_test_suffix(dtypes):
     """ Returns the test suffix for a dtype, sequence of dtypes, or None. """
-    if isinstance(dtypes, list) or isinstance(dtypes, tuple):
+    if isinstance(dtypes, (list, tuple)):
         if len(dtypes) == 0:
             return ''
         return '_' + '_'.join((dtype_name(d) for d in dtypes))
@@ -280,7 +280,7 @@ def _update_param_kwargs(param_kwargs, name, value):
     if plural_name in param_kwargs:
         del param_kwargs[plural_name]
 
-    if isinstance(value, list) or isinstance(value, tuple):
+    if isinstance(value, (list, tuple)):
         param_kwargs[plural_name] = value
     elif value is not None:
         param_kwargs[name] = value
@@ -870,7 +870,7 @@ class ops(_TestParametrizer):
 #       for the test to run. If you want to use a string argument you should
 #       probably define a new decorator instead (see below).
 #   (3) Prefer the existing decorators to defining the 'device_type' kwarg.
-class skipIf(object):
+class skipIf:
 
     def __init__(self, dep, reason, device_type=None):
         self.dep = dep
@@ -973,7 +973,7 @@ def largeTensorTest(size, device=None):
     return inner
 
 
-class expectedFailure(object):
+class expectedFailure:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -994,7 +994,7 @@ class expectedFailure(object):
         return efail_fn
 
 
-class onlyOn(object):
+class onlyOn:
 
     def __init__(self, device_type):
         self.device_type = device_type
@@ -1016,7 +1016,7 @@ class onlyOn(object):
 # as a list of strings instead of providing a single device string.
 # Skips the test if the number of available devices of the variant's device
 # type is less than the 'num_required_devices' arg.
-class deviceCountAtLeast(object):
+class deviceCountAtLeast:
 
     def __init__(self, num_required_devices):
         self.num_required_devices = num_required_devices
@@ -1064,7 +1064,7 @@ def onlyNativeDeviceTypes(fn):
 # precisions (or are working with multiple dtypes) they should be specified
 # explicitly and computed using self.precision (e.g.
 # self.precision *2, max(1, self.precision)).
-class precisionOverride(object):
+class precisionOverride:
 
     def __init__(self, d):
         assert isinstance(d, dict), "precisionOverride not given a dtype : precision dict!"
@@ -1096,7 +1096,7 @@ class precisionOverride(object):
 # atol = 1e-4 and rtol = 0 for torch.double.
 tol = namedtuple('tol', ['atol', 'rtol'])
 
-class toleranceOverride(object):
+class toleranceOverride:
     def __init__(self, d):
         assert isinstance(d, dict), "toleranceOverride not given a dtype : tol dict!"
         for dtype, prec in d.items():
@@ -1119,7 +1119,7 @@ class toleranceOverride(object):
 # Examples:
 # @dtypes(torch.float32, torch.float64)
 # @dtypes((torch.long, torch.float32), (torch.int, torch.float64))
-class dtypes(object):
+class dtypes:
 
     def __init__(self, *args, device_type="all"):
         if len(args) > 0 and isinstance(args[0], (list, tuple)):
@@ -1280,10 +1280,6 @@ def skipCUDAIfRocmVersionLessThan(version=None):
 
         return wrap_fn
     return dec_fn
-
-# Skips a test on CUDA when using ROCm.
-def skipCUDAIfNotMiopenSuggestNHWC(fn):
-    return skipCUDAIf(not TEST_WITH_MIOPEN_SUGGEST_NHWC, "test doesn't currently work without MIOpen NHWC activation")(fn)
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
 def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):

@@ -59,7 +59,9 @@ runs:
 
         if [[ "${EXIT_CODE}" == "0" ]]; then
           echo "Found Python3 at ${PYTHON3}, adding it into GITHUB_PATH"
-          echo "${PYTHON3}" >> "${GITHUB_PATH}"
+
+          PYTHON_PATH=$(dirname "${PYTHON3}")
+          echo "${PYTHON_PATH}" >> "${GITHUB_PATH}"
         else
           # According to https://docs.conda.io/en/latest/miniconda.html, we are using the Miniconda3
           # installation, which is Python 3 based. Its Python is default to Python 3. Further, there

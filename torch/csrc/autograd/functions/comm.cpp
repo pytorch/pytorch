@@ -16,7 +16,6 @@
 
 namespace torch {
 namespace autograd {
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 Scatter::Scatter(
     std::vector<at::Device> devices,
     c10::optional<std::vector<int64_t>> chunk_sizes,
@@ -95,10 +94,8 @@ variable_list Gather::apply(variable_list&& inputs) {
   std::shared_ptr<Node> grad_fn;
   // compute this before moving variables from `inputs`
   if (compute_requires_grad(inputs)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<at::Device> source_devices;
     source_devices.reserve(inputs.size());
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::vector<int64_t> input_sizes;
     input_sizes.reserve(inputs.size());
     for (auto& input : inputs) {
@@ -114,7 +111,6 @@ variable_list Gather::apply(variable_list&& inputs) {
     grad_fn->set_next_edges(collect_next_edges(inputs));
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::vector<at::Tensor> tensors;
   tensors.reserve(inputs.size());
   for (auto& variable : inputs) {

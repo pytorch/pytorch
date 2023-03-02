@@ -225,7 +225,7 @@ class CUDAHostAllocator {
     } else {
       std::lock_guard<std::mutex> g(cuda_events_mutex_);
       for (auto&& event : *events) {
-        cuda_events_.push_front({std::move(event), block});
+        cuda_events_.emplace_front(std::move(event), block);
       }
     }
   }

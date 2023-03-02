@@ -20,11 +20,7 @@ class Seq2SeqModelHelper(ModelHelper):
         if kwargs.get('ws_nbytes_limit', None):
             arg_scope['ws_nbytes_limit'] = kwargs.pop('ws_nbytes_limit')
 
-        super(Seq2SeqModelHelper, self).__init__(
-            init_params=init_params,
-            arg_scope=arg_scope,
-            **kwargs
-        )
+        super().__init__(init_params=init_params, arg_scope=arg_scope, **kwargs)
         self.non_trainable_params = []
 
     def AddParam(self, name, init=None, init_value=None, trainable=True):

@@ -66,7 +66,7 @@ For this you can use `./scripts/build_pytorch_android.sh` script.
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
 git submodule update --init --recursive
-sh ./scripts/build_pytorch_android.sh
+bash ./scripts/build_pytorch_android.sh
 ```
 
 The workflow contains several steps:
@@ -111,12 +111,12 @@ dependencies {
     implementation(name:'pytorch_android', ext:'aar')
     implementation(name:'pytorch_android_torchvision', ext:'aar')
     ...
-    implementation 'com.facebook.soloader:nativeloader:0.10.4'
+    implementation 'com.facebook.soloader:nativeloader:0.10.5'
     implementation 'com.facebook.fbjni:fbjni-java-only:0.2.2'
 }
 ```
 We also have to add all transitive dependencies of our aars.
-As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.4'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
+As `pytorch_android` [depends](https://github.com/pytorch/pytorch/blob/master/android/pytorch_android/build.gradle#L76-L77) on `'com.facebook.soloader:nativeloader:0.10.5'` and `'com.facebook.fbjni:fbjni-java-only:0.2.2'`, we need to add them.
 (In case of using maven dependencies they are added automatically from `pom.xml`).
 
 You can check out [test app example](https://github.com/pytorch/pytorch/blob/master/android/test_app/app/build.gradle) that uses aars directly.

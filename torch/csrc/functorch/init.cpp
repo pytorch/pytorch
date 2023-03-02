@@ -476,7 +476,7 @@ void initFuncTorchBindings(PyObject* module) {
   });
   m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
-    if (stack.size() == 0) {
+    if (stack.empty()) {
       return c10::nullopt;
     }
     auto result = stack.back().interpreter();

@@ -123,7 +123,7 @@ class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                &cudnnCreateTensorDescriptor,
                                                &cudnnDestroyTensorDescriptor> {
  public:
-  TensorDescriptor() {}
+  TensorDescriptor() = default;
   explicit TensorDescriptor(const at::Tensor &t, size_t pad = 0) {
     set(t, pad);
   }

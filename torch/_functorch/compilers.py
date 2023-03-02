@@ -6,6 +6,7 @@ import random
 from contextlib import contextmanager
 from functools import partial
 from typing import Callable, Optional, Tuple, Union
+import sympy
 
 import torch
 from torch import SymInt
@@ -96,7 +97,6 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     return f
 
 
-@make_boxed_compiler
 def _draw_graph_compile(fx_g, _, name, clear_meta=True):
     print(fx_g.code)
     draw_graph(fx_g, name, clear_meta=clear_meta)
@@ -104,7 +104,9 @@ def _draw_graph_compile(fx_g, _, name, clear_meta=True):
 
 
 def draw_graph_compile(name):
-    return partial(_draw_graph_compile, name=name)
+    return make_boxed_compiler(
+        partial(_draw_graph_compile, name=name)
+    )
 
 
 @make_boxed_compiler
@@ -125,7 +127,6 @@ class DebugInterpreter(fx.Interpreter):
         super().run(*args)
 
     def run_node(self, n):
-        import sympy
 
         def subst_symint(ni):
             if not isinstance(ni, SymInt):

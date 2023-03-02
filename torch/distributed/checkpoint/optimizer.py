@@ -177,17 +177,17 @@ class _ReaderWithOffset(DefaultLoadPlanner):
             reqs = _create_sharded_read_items(
                 fqn, cast(TensorStorageMetadata, md), local_shards
             )
-            # TODO: The WriteItems will have a displaced MetadataIndex, fix it.
+            # TODO: The ReadItems will have a displaced MetadataIndex, fix it.
             # TODO: we should change _create_sharded_read_items to have more ergonomic API
-            for wi in reqs:
-                assert wi.dest_index.offset is not None
+            for ri in reqs:
+                assert ri.dest_index.offset is not None
                 original_offset = _element_wise_sub(
-                    wi.dest_index.offset, offset
+                    ri.dest_index.offset, offset
                 )
                 original_index = dataclasses.replace(
-                    wi.dest_index, offset=torch.Size(original_offset)
+                    ri.dest_index, offset=torch.Size(original_offset)
                 )
-                self.translation[wi.dest_index] = original_index
+                self.translation[ri.dest_index] = original_index
 
             requests += reqs
         return LoadPlan(requests)
@@ -202,25 +202,24 @@ def load_sharded_optimizer_state_dict(
     storage_reader: dist_cp.StorageReader,
 ) -> STATE_DICT_TYPE:
     """
-    Loads a state_dict to be used in conjuntion with FSDP sharded optimizer state.
-    This is the current recommended way to checkpoint is FSDP
+    Loads a state_dict in conjuntion with FSDP sharded optimizer state.
+    This is the current recommended way to checkpoint FSDP.
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
-    >>> import spmd.checkpoint as sp_cp
     >>> # Save
     >>> model: torch.nn.Model
     >>> optim_params = model.parameters()
     >>> optim = torch.optim.SGD(optim_params, lr=0.01)
-    >>>
+    >>> # Save
     >>> with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
     >>>     state_dict = {
-    >>>         "optimizer": FSDP.sharded_optim_state_dict(model, optim, optim_params),
+    >>>         "optimizer": FSDP.optim_state_dict(model, optim),
     >>>         "model": model.state_dict()
     >>>     }
     >>>     dist_cp.save_state_dict(
     >>>         state_dict=optim_state,
     >>>         storage_writer=dist_cp.FileSystemWriter("checkpoint"),
-    >>>         planner=sp_cp.AdvLoadPlanner()
+    >>>         planner=dist_cp.DefaultSavePlanner(),
     >>>     )
     >>>
     >>> # Load
@@ -232,17 +231,17 @@ def load_sharded_optimizer_state_dict(
     >>>     dist_cp.load_state_dict(
     >>>         state_dict=checkpoint,
     >>>         storage_reader=dist_cp.FileSystemReader(checkpoint_file),
-    >>>         planner=sp_cp.AdvLoadPlanner()
+    >>>         planner=dist_cp.DefaultLoadPlanner(),
     >>>     )
     >>>     model.load_state_dict(checkpoint["model_state"])
     >>>
-    >>>     optim_state = sp_cp.load_sharded_optimizer_state_dict(
+    >>>     optim_state = dist_cp.load_sharded_optimizer_state_dict(
     >>>         model_state_dict,
     >>>         optimizer_key="optimizer",
     >>>         storage_reader=dist_cp.FileSystemReader("checkpoint"),
     >>>     )
     >>>
-    >>>     flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+    >>>     flattened_osd = FSDP.optim_state_dict_to_load(
     >>>        optim_state["optimizer"], model, optim
     >>>     )
     >>>

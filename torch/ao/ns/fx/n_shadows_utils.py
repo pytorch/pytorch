@@ -17,10 +17,10 @@ from torch.ao.ns.fx.ns_types import (
 )
 from torch.ao.ns.fx.graph_passes import _maybe_get_fqn
 from torch.ao.quantization import QConfigMapping
-from torch.ao.quantization.fx.custom_config import PrepareCustomConfig
 from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.fx.match_utils import _MatchResult
+from torch.utils._pytree import tree_map
 
 import collections
 import copy
@@ -243,65 +243,6 @@ def _get_logger_for_subgraph(
     logger_mod_orig.enabled = False
     return logger_mod_orig
 
-def _add_logger_to_subgraph_wrapper(
-    model: GraphModule,
-    subgraph_idx: int,
-    subgraph_candidate_idx: int,
-    qconfig_str: str,
-    logger_cls: Callable,
-    ref_output_node: Node,
-    fqn: Optional[str],
-) -> None:
-    """
-    Given a model which consists of a subgraph and nothing else, adds a logger
-    to the end of this model. The logger takes `ref_output_node` as the reference
-    output, and does the comparison during calibration time.
-    """
-    first_node, last_node, first_non_ph_node = None, None, None
-    for idx, node in enumerate(model.graph.nodes):  # type: ignore[union-attr, arg-type]
-        if idx == 0:
-            first_node = node
-        elif idx == len(model.graph.nodes) - 1:  # type: ignore[union-attr, arg-type]
-            # last node is the output, so we want the first
-            # arg of the output
-            last_node = node.args[0]
-        if first_non_ph_node is None and node.op != 'placeholder':
-            first_non_ph_node = node
-    assert first_node is not None and last_node is not None and \
-        first_non_ph_node is not None
-    logger_mod = _get_logger_for_subgraph(
-        model, first_non_ph_node, last_node, subgraph_idx,  # type: ignore[arg-type]
-        subgraph_candidate_idx, qconfig_str, logger_cls, fqn)
-    attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
-    assert not hasattr(model, attr_name)
-    setattr(model, attr_name, logger_mod)
-
-    # add a new placeholder to the original subgraph module
-    # to represent the reference input
-    # before:
-    #
-    #   x0 -> mod -> x1
-    #
-    # after:
-    #
-    #   x0 -> mod -> x1
-    #         /
-    #   x0_ref
-
-    ph_name = 'SHADOW_PH_NAME'
-    # verify a node with this name does not exist
-    assert len([n for n in model.graph.nodes if n.name == ph_name]) == 0, \
-        'graph already contains node with name {ph_name}'
-
-    new_ph = None
-    with model.graph.inserting_before(first_node):
-        new_ph = model.graph.placeholder(ph_name)
-
-    with model.graph.inserting_after(last_node):
-        new_node = model.graph.call_module(
-            attr_name, args=(last_node, new_ph), kwargs={})
-    model.recompile()
-
 def create_submodule_from_subgraph(
     model: torch.nn.Module,
     first_node: Node,
@@ -491,7 +432,7 @@ def create_submodule_from_subgraph(
     gm.recompile()
     return gm
 
-def handle_subgraph_candidate(
+def create_one_transformed_and_logged_copy_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     subgraph_candidate_idx: int,
@@ -500,6 +441,7 @@ def handle_subgraph_candidate(
     fqn: Optional[str],
     list_of_node_name_to_qconfig: List[Dict[str, QConfigAny]],
     example_inputs: Any,
+    last_added_shadow_node_list: List[Optional[Node]],
     custom_prepare_fn: Optional[Callable] = None,
     custom_prepare_kwargs: Dict[str, Any] = None,
 ) -> None:
@@ -531,6 +473,7 @@ def handle_subgraph_candidate(
         setattr(mt, attr_name, logger_mod_orig)
         with mt.graph.inserting_after(last_node):
             new_node = mt.graph.call_module(attr_name, args=(last_node,), kwargs={})
+            last_added_shadow_node_list[0] = new_node
 
     else:
         # idx > 0 means we have a candidate qconfig to try, so we need
@@ -556,22 +499,10 @@ def handle_subgraph_candidate(
         orig_mod_copy_wrapped = create_submodule_from_subgraph(
             mt, first_node, last_node)
 
-        # add a logger to the end of this submodule
-        # get first and last nodes of the submodule
-        _add_logger_to_subgraph_wrapper(
-            orig_mod_copy_wrapped, subgraph_idx, subgraph_candidate_idx,
-            str(qconfig), OutputComparisonLogger, last_node, fqn)
-
-        # We need to set the loggers as non traceable to have them survive
-        # prepare_fx and convert_fx calls.
-        prepare_custom_config = PrepareCustomConfig()\
-            .set_non_traceable_module_classes([OutputLogger, OutputComparisonLogger])
-
         # add a call to prepare_fx on the wrapper module
         if custom_prepare_fn is None:
             orig_mod_copy_wrapped = torch.ao.quantization.quantize_fx.prepare_fx(
-                orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs,
-                prepare_custom_config=prepare_custom_config)
+                orig_mod_copy_wrapped, qconfig_mapping, example_inputs=example_inputs)
         else:
             if custom_prepare_kwargs is None:
                 custom_prepare_kwargs = {}
@@ -579,7 +510,6 @@ def handle_subgraph_candidate(
                 assert kwarg_name not in custom_prepare_kwargs, f"cannot specify {kwarg_name} in custom_prepare_kwargs"
             prepare_kwargs: Dict[str, Any] = {
                 "example_inputs": example_inputs,
-                "prepare_custom_config": prepare_custom_config,
                 "qconfig_mapping": qconfig_mapping
             }
             prepare_kwargs.update(custom_prepare_kwargs)
@@ -593,16 +523,14 @@ def handle_subgraph_candidate(
         setattr(mt, attr_name, orig_mod_copy_wrapped)
 
         # add a call to the wrapper module from the parent graph
-        with mt.graph.inserting_after(last_node):
+        insert_after_node = last_added_shadow_node_list[0]
+        with mt.graph.inserting_after(insert_after_node):
             # TODO(future PR): handle fusion patterns where non-first nodes
             # need inputs
 
             # pass in all node args and kwargs
 
-            # the first argument is always the reference output of the last
-            # node of this subgraph
-            new_args = [last_node]
-
+            new_args = []
             for arg in first_node.args:
                 if isinstance(arg, Node):
                     new_args.append(arg)
@@ -625,7 +553,21 @@ def handle_subgraph_candidate(
             new_node = mt.graph.call_module(
                 attr_name, args=new_args, kwargs=new_kwargs)
 
-def handle_subgraph(
+        # add a logger to parent graph to observe the shadow wrapper
+        logger_mod_orig = _get_logger_for_subgraph(
+            mt, first_node, last_node, subgraph_idx, subgraph_candidate_idx,
+            str(qconfig), OutputComparisonLogger, fqn)
+
+        attr_name = _get_attr_name(subgraph_idx, subgraph_candidate_idx)
+        assert not hasattr(mt, attr_name)
+        setattr(mt, attr_name, logger_mod_orig)
+        with mt.graph.inserting_after(new_node):
+            logger = mt.graph.call_module(attr_name, args=(new_node, last_node), kwargs={})
+            last_added_shadow_node_list[0] = logger
+
+    mt.recompile()
+
+def create_n_transformed_and_logged_copies_of_subgraph(
     mt: GraphModule,
     subgraph_idx: int,
     match_name: str,
@@ -705,11 +647,442 @@ def handle_subgraph(
 
     fqn = _maybe_get_fqn(first_node, mt)
 
+    # We want the results to contain the subgraphs in natural order,
+    # and the graph to also contain shadow wrappers and shadow loggers
+    # in natural order.
+    # If we just iterate in reverse, the graph will be in natural
+    # order but the eventual results will be in reverse order.
+    # So, we keep track of the last shadow logger we added and
+    # always insert after it.
+    last_added_shadow_node_list: List[Optional[Node]] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
-        handle_subgraph_candidate(
+
+        create_one_transformed_and_logged_copy_of_subgraph(
             mt, subgraph_idx, subgraph_candidate_idx, first_node,
             last_node, fqn, list_of_node_name_to_qconfig,
-            example_inputs, custom_prepare_fn, custom_prepare_kwargs)
+            example_inputs, last_added_shadow_node_list, custom_prepare_fn,
+            custom_prepare_kwargs)
+
+def create_add_loggers_graph(
+    model: GraphModule,
+    subgraphs_dedup: Dict[str, List[Node]],
+    qconfig_mapping: QConfigMapping,
+    node_name_to_qconfig: Dict[str, QConfigAny],
+) -> None:
+    """
+    Given a model, a model graph partition (currently a set of matched
+    subgraphs) and instructions how to transform each subgraph
+    (currently quantizing it according to qconfig_mapping), modifies
+    the model graph to create an alternate path through the original graph,
+    with each of the subgraphs quantized.  This is useful to compare
+    propagation error of a transformation such as quantization.
+
+    For example, given layer op0 and op1, there are four cases when handling op1:
+    1. op0 and op1 quantized
+    2. op0 and op1 unquantized
+    3. op0 quantized, op1 unquantized
+    4. op0 unquantized, op1 quantized
+
+    Example input, case 1:
+
+    .. code::
+
+      x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
+       \                        \          \                 \       # noqa: W605
+         ---> op0_1 -> x1_1 ----> clog    op1_1 -> x2_1 ----> clog
+
+    Example output, case 1:
+
+    .. code::
+
+      x0_0 -> op0_0 -> x1_0 -> log -----> op1_0 -> x2_0 -> log
+       \                        \                           \        # noqa: W605
+         ---> op0_1 -> x1_1 ----> clog -> op1_1 -> x2_1 ----> clog
+
+    """
+    # TODO(future PR): move logger classes to utils to remove circular dependency
+    from torch.ao.ns._numeric_suite_fx import OutputLogger, OutputComparisonLogger
+
+    def _get_subgraph_containing_node(node, subgraphs_dedup):
+        for name, subgraph in subgraphs_dedup.items():
+            if node in subgraph:
+                return subgraph
+        return None
+
+    # First, we need to create shadow branches, going from
+    #
+    #   x0 -> op0 -> x1 -> ...
+    #
+    #
+    # to
+    #
+    #   x0 -> op0_0 -> x1_0 -> log -> ...
+    #    \                     \
+    #      -> op0_1 -> x1_1 -> clog
+    #
+    # Later, the outputs of each shadow will be rerouted to calculate
+    # propagation error.
+
+    # Note: we cannot iterate over matched subgraphs because some nodes
+    # may not be matched. So, we iterate over nodes in the graph, and
+    # associate them to matched subgraphs if possible.
+
+    nodes_to_skip = set()
+    # for each subgraph, save a mapping from first node of subgraph
+    # to first and last node of the shadow of this subgraph
+    orig_first_node_to_shadow_in_node = {}
+    orig_first_node_to_shadow_out_node = {}
+    # need to record original list because we will mutate the graph as we go
+    orig_nodes = list(model.graph.nodes)  # type: ignore[union-attr, arg-type]
+    cur_subgraph_idx = 0
+    for n in orig_nodes:
+        if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
+            continue
+
+        maybe_subgraph = _get_subgraph_containing_node(n, subgraphs_dedup)
+        insert_submodule_copy = False
+        if maybe_subgraph is not None:
+            first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
+            for node_to_skip in maybe_subgraph:
+                nodes_to_skip.add(node_to_skip)
+            qconfig = node_name_to_qconfig[first_node.name]
+            if qconfig is not None:
+                insert_submodule_copy = True
+        else:
+            first_node, last_node = n, n
+
+        if insert_submodule_copy:
+            match_name = first_node.name
+            create_n_transformed_and_logged_copies_of_subgraph(
+                model, cur_subgraph_idx, match_name, maybe_subgraph,
+                [qconfig_mapping], [node_name_to_qconfig],
+                None, None
+            )
+            # find the created shadow module and record it so we
+            # can find it easily in step 2
+            expected_shadow_target = f"shadow_wrapper_{cur_subgraph_idx}_1"
+            new_shadow_mod = None
+            for maybe_shadow_mod in model.graph.nodes:
+                if maybe_shadow_mod.op == 'call_module' and \
+                        maybe_shadow_mod.target == expected_shadow_target:
+                    new_shadow_mod = maybe_shadow_mod
+                    break
+            assert new_shadow_mod is not None
+            orig_first_node_to_shadow_in_node[first_node] = new_shadow_mod
+            orig_first_node_to_shadow_out_node[first_node] = new_shadow_mod
+
+        else:
+            # create a copy of the subgraph by only copying FX nodes
+            # but not copying any parameters, to minimize memory usage
+            subgraph_to_use = maybe_subgraph if maybe_subgraph is not None \
+                else [first_node]
+
+            # add a regular logger after last_node
+            qconfig_str = ''
+            subgraph_candidate_idx = 0
+            fqn = _maybe_get_fqn(first_node, model)
+            logger_mod_orig = _get_logger_for_subgraph(
+                model, first_node, last_node, cur_subgraph_idx, subgraph_candidate_idx,
+                qconfig_str, OutputLogger, fqn)
+            attr_name = _get_attr_name(cur_subgraph_idx, subgraph_candidate_idx)
+            assert not hasattr(model, attr_name)
+            setattr(model, attr_name, logger_mod_orig)
+            insertion_point = last_node
+            with model.graph.inserting_after(insertion_point):
+                logger = model.graph.call_module(
+                    attr_name, args=(last_node,), kwargs={})
+                insertion_point = logger
+
+            # create a copy of the subgraph
+            cur_node_orig = first_node
+            cur_node_copy = None
+            first_node_copy = None
+            while cur_node_orig in subgraph_to_use:
+                # TODO(future PR): make this support all possible args/kwargs
+                if cur_node_orig is first_node:
+                    new_args = cur_node_orig.args
+                    new_kwargs = cur_node_orig.kwargs
+                else:
+                    first_arg_for_copy = cur_node_copy
+                    new_args = tuple([first_arg_for_copy, *cur_node_orig.args[1:]])  # noqa: C409
+                    new_kwargs = cur_node_orig.kwargs
+                # make a copy of cur_node_orig
+                with model.graph.inserting_after(insertion_point):
+                    cur_node_copy = model.graph.create_node(
+                        cur_node_orig.op,
+                        cur_node_orig.target,
+                        new_args,
+                        new_kwargs,
+                        # cur_node_orig.name,  # TODO(future PR): set name explicitly
+                    )
+                    if first_node_copy is None:
+                        first_node_copy = cur_node_copy
+                # since now only linear subgraphs are supported, all nodes
+                # except the last one must have only one user
+                if cur_node_orig != last_node:
+                    assert len(cur_node_orig.users.keys()) == 1
+                cur_node_orig = list(cur_node_orig.users.keys())[0]
+                assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
+                insertion_point = cur_node_copy
+
+            # add a comparison logger after last_node's copy
+            subgraph_candidate_idx = 1
+            logger_mod_orig = _get_logger_for_subgraph(
+                model, first_node, last_node, cur_subgraph_idx, subgraph_candidate_idx,
+                qconfig_str, OutputComparisonLogger, fqn)
+            attr_name = _get_attr_name(cur_subgraph_idx, subgraph_candidate_idx)
+            assert not hasattr(model, attr_name)
+            setattr(model, attr_name, logger_mod_orig)
+            with model.graph.inserting_after(insertion_point):
+                logger = model.graph.call_module(
+                    attr_name, args=(cur_node_copy, last_node), kwargs={})
+
+            # save the final node so we can use it in step 2
+            orig_first_node_to_shadow_in_node[first_node] = first_node_copy
+            orig_first_node_to_shadow_out_node[first_node] = cur_node_copy
+
+        cur_subgraph_idx += 1
+
+    model.recompile()
+
+    # Now, we go from
+    #
+    #   x0 -> op0_0 -> x1_0 -> log -> x1 -> op1_0 -> ...
+    #    \                     \       \
+    #      -> op0_1 -> x1_1 -> clog      -> op1_1 -> ...
+    #
+    # to
+    #
+    #   x0 -> op0_0 -> x1_0 -> log --> x1_0 -> op1_0 -> ...
+    #    \                     \
+    #      -> op0_1 -> x1_1 -> clog -> x1_1 -> op1_1 -> ...
+    #
+    # sample values of key internal variables for the example above:
+    #
+    #   orig_first_node_to_shadow_in_node = {op0_0: op0_1, op1_0: op1_1}
+    #   orig_first_node_to_shadow_out_node = {op0_0: op0_1, op1_0: op1_1}
+    #
+    # note: for subgraphs with more than one node, in_node will be different
+    # compared to out_node
+
+
+    nodes_to_skip = set()
+    for n in orig_nodes:
+        if n.op in ('placeholder', 'get_attr', 'output') or n in nodes_to_skip:
+            continue
+
+        maybe_subgraph = _get_subgraph_containing_node(n, subgraphs_dedup)
+        if maybe_subgraph is not None:
+            first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
+            for node_to_skip in maybe_subgraph:
+                nodes_to_skip.add(node_to_skip)
+        else:
+            first_node, last_node = n, n
+
+        def maybe_remap_node_to_shadow(node):
+            """
+            If unshadowed `node` has a shadow version, return that. If not,
+            return `node`.
+            """
+            if not isinstance(node, Node):
+                # handle scalars
+                return node
+
+            if node.op in ('placeholder', 'get_attr'):
+                return node
+
+            # Find the shadowed version of this arg from the previous
+            # subgraph. For this, we need to:
+            # 1. navigate to the first node of the previous subgraph
+            # 2. get the output of the shadow wrapper which has (1) as an input
+
+            # For now, assume the arg is in matched subgraphs. In the
+            # future we may have to handle the case where this is not true.
+            prev_subgraph = _get_subgraph_containing_node(
+                node, subgraphs_dedup)
+            if prev_subgraph is None:
+                prev_subgraph = [node]
+            prev_first_node = prev_subgraph[0]
+            prev_shadow_output = \
+                orig_first_node_to_shadow_out_node[prev_first_node]
+            return prev_shadow_output
+
+        cur_shadow_input = \
+            orig_first_node_to_shadow_in_node[first_node]
+        assert cur_shadow_input is not None
+        cur_shadow_input.args = tree_map(
+            maybe_remap_node_to_shadow, cur_shadow_input.args)
+        cur_shadow_input.kwargs = tree_map(
+            maybe_remap_node_to_shadow, cur_shadow_input.kwargs)
+
+        model.recompile()
+
+def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
+    # input: shadow wrapper module
+    # output if shadow wrapper module has a weighted op:
+    #   (quantize_fn, (quantize_fn_args))
+    # output if shadow wrapper module doesn't have a weighted op:
+    #   None
+
+    # For now, assume that the weight is the second input
+    # to the shadow module. If that changes, we can fix it later.
+    placeholders_seen = 0
+    for shadow_n in shadow_wrapper.graph.nodes:  # type: ignore[union-attr]
+        if shadow_n.op != 'placeholder':
+            continue
+
+        placeholders_seen += 1
+        if placeholders_seen != 2:
+            continue
+
+        # the subgraph looks like
+        #
+        #   _input_scale_1 = self._input_scale_1
+        #   _input_zero_point_1 = self._input_zero_point_1
+        #   quantize_per_channel = torch.quantize_per_channel(
+        #       w2_0, _input_scale_1, _input_zero_point_1,
+        #       0, torch.qint8)
+        #
+        #  we have `w2_0`, and are navigating this subgraph
+        #  to get `_input_scale_1` and `_input_zero_point_1`
+
+        assert len(shadow_n.users) == 1
+        quant_node = list(shadow_n.users.keys())[0]
+        new_args: Any = None
+        if quant_node.target == torch.quantize_per_channel:
+            _weight, scale_node, zp_node, axis, dtype = quant_node.args
+            scale_val = getattr_from_fqn(
+                shadow_wrapper, scale_node.target)
+            zp_val = getattr_from_fqn(
+                shadow_wrapper, zp_node.target)
+            new_args = (scale_val, zp_val, axis, dtype)
+        else:
+            assert quant_node.target == torch.quantize_per_tensor
+            _weight, scale_node, zp_node, dtype = quant_node.args
+            scale_val = getattr_from_fqn(
+                shadow_wrapper, scale_node.target)
+            zp_val = getattr_from_fqn(
+                shadow_wrapper, zp_node.target)
+            new_args = (scale_val, zp_val, dtype)
+        return (quant_node.target, new_args)
+
+    return None
+
+
+def extract_weight_comparison(m: GraphModule) -> NSResultsType:
+
+    # example graph:
+    #
+    #   w1 = self.w1
+    #   b1 = self.b1
+    #   linear = torch._C._nn.linear(x, w1, b1)
+    #   shadow_0_0 = self.shadow_0_0(linear)
+    #   shadow_wrapper_0_1 = self.shadow_wrapper_0_1(x, w1, b1)
+    #   shadow_0_1 = self.shadow_0_1(shadow_wrapper_0_1, linear)
+    #
+    # algorithm:
+    # 1. for each call_function node matching our allowlist:
+    # 2.   if corresponding shadow wrapper exists, extract the weight pair
+    #
+    # Note: this is not super robust, but that's ok because this is
+    # just for legacy customers who depend on the previous two-model version
+    # of this API. TBD if we need to make this robust.
+    # Note: modules are not supported, since existing customers only
+    # use functions.
+
+    # TODO(future PR): move this to config
+    weighted_ops = {
+        torch.nn.functional.linear,
+    }
+
+    results: NSResultsType = {
+        'model': {NSSingleResultValuesType.WEIGHT.value: {}}
+    }
+
+    for n in m.graph.nodes:  # type: ignore[union-attr]
+        if not (n.op == 'call_function' and n.target in weighted_ops):
+            continue
+
+        # Check if we have a corresponding shadow wrapper
+        # TODO(future PR, if needed): support kwargs
+        # TODO(future PR, if needed): support multiple shadow users
+        first_arg = n.args[0]
+        shadow_wrapper_node = None
+        for user in first_arg.users:
+            # TODO(before land): fix string match
+            if user.op == 'call_module' and \
+                    user.target.startswith('shadow_wrapper'):
+                shadow_wrapper_node = user
+                break
+
+        if shadow_wrapper_node is None:
+            continue
+
+        shadow_wrapper = getattr_from_fqn(
+            m, shadow_wrapper_node.target)  # type: ignore[arg-type]
+        weight_info = _get_weight_info_from_shadow_wrapper(
+            shadow_wrapper)
+        if weight_info is None:
+            continue
+
+        # get weight
+        w_node = n.args[1]
+        w_obj = getattr_from_fqn(m, w_node.target).detach()
+
+        # get a quantized version of weight
+        quant_fn, quant_fn_args_except_first = weight_info
+        new_args = (w_obj, *quant_fn_args_except_first)
+        w_obj_q = quant_fn(*new_args)
+
+        # add a comparison
+        ref_node_name = n.name
+        prev_node_name = n.name
+        ref_node_type = get_target_type_str(n, m)
+        prev_node_type = ref_node_type
+        fqn = None
+        if hasattr(m, '_node_name_to_scope'):
+            fqn = m._node_name_to_scope[n.name][0]  # type: ignore[index]
+        comparison = torch.ao.ns.fx.utils.compute_sqnr(w_obj, w_obj_q)
+        result_fp32 = {
+            'res_type': NSSingleResultValuesType.WEIGHT.value,
+            'values': [w_obj],
+            'prev_node_name': prev_node_name,
+            'prev_node_target_type': prev_node_type,
+            'ref_node_name': ref_node_name,
+            'ref_node_target_type': ref_node_type,
+            'index_within_arg': 0,
+            'index_of_arg': 0,
+            'fqn': fqn,
+            'qconfig_str': '',
+            'comparisons': [comparison],
+            'comparison_fn_name': 'sqnr',
+        }
+        result_q = {
+            'res_type': NSSingleResultValuesType.WEIGHT.value,
+            'values': [w_obj_q],
+            'prev_node_name': prev_node_name,
+            'prev_node_target_type': prev_node_type,
+            'ref_node_name': ref_node_name,
+            'ref_node_target_type': ref_node_type,
+            'index_within_arg': 0,
+            'index_of_arg': 0,
+            'fqn': fqn,
+            'qconfig_str': '',
+            'comparisons': [comparison],
+            'comparison_fn_name': 'sqnr',
+        }
+
+        # go from subgraph_n_1 to subgraph_n_0
+        _1, _2, node_idx, _3 = shadow_wrapper_node.target.split('_')
+        name_fp32 = f"subgraph_{node_idx}_0"
+        name_q = f"subgraph_{node_idx}_1"
+
+        results['model'][NSSingleResultValuesType.WEIGHT.value][name_fp32] = \
+            [result_fp32]
+        results['model'][NSSingleResultValuesType.WEIGHT.value][name_q] = \
+            [result_q]
+
+    return results
 
 # TODO(future PR): redesign this to make it easier to consume outputs
 def group_results_by_subgraph(results: NSResultsType) -> Any:
@@ -771,8 +1144,11 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     """
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
+    # node_output or weight
+    key_to_use = list(results['model'].keys())[0]
+
     for subgraph_name_with_idx, subgraph_candidate_results in \
-            results['model']['node_output'].items():
+            results['model'][key_to_use].items():
 
         # convert from `subgraph_m_n` to `subgraph_m` and `n`
         subgraph_str, subgraph_idx, subgraph_candidate_idx = \

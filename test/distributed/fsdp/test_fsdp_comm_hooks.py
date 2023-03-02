@@ -69,7 +69,7 @@ class Net(nn.Module):
         return self.out(F.relu(self.net(x)))
 
 
-class DummyState(object):
+class DummyState:
 
     __slots__ = ["process_group", "noise"]
 
@@ -78,7 +78,7 @@ class DummyState(object):
         self.noise = noise
 
 
-class DummyHook(object):
+class DummyHook:
     def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
         """
         This communication hook is for illustration and testing purpose only.

@@ -676,7 +676,7 @@ public:
   }
   __m512 abs_2_() const {
     auto val_2 = _mm512_mul_ps(values, values);     // a*a     b*b
-    auto ret = hadd_ps(val_2, val_2);        // a*a+b*b a*a+b*b
+    auto ret = hadd_ps(val_2, val_2);               // a*a+b*b a*a+b*b
     return ret;
   }
   __m512 abs_() const {
@@ -798,6 +798,12 @@ public:
     auto cos_sin = _mm512_mask_blend_ps(0xAAAA, _mm512_permute_ps(sin_cos.y, 0xB1),
                                    sin_cos.x);                  //cos(b)           sin(b)
     return _mm512_mul_ps(exp, cos_sin);
+  }
+  Vectorized<c10::complex<float>> exp2() const {
+    // Use identity 2**x = exp(log(2) * x)
+    const __m512 ln_2 = _mm512_set1_ps(c10::ln_2<float>);
+    Vectorized<c10::complex<float>> scaled_values = _mm512_mul_ps(values, ln_2);
+    return scaled_values.exp();
   }
   Vectorized<c10::complex<float>> expm1() const {
     AT_ERROR("not supported for complex numbers");
@@ -933,18 +939,25 @@ template <> Vectorized<c10::complex<float>> inline operator*(const Vectorized<c1
 template <> Vectorized<c10::complex<float>> inline operator/(const Vectorized<c10::complex<float>> &a,
                                                             const Vectorized<c10::complex<float>> &b) {
   //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2()
-  //im = (bc - ad)/abs_2()
+  auto mask = _mm512_set1_ps(-0.f);
+  auto fabs_cd = _mm512_andnot_ps(mask, b);     // |c|    |d|
+  auto fabs_dc = _mm512_permute_ps(fabs_cd, 0xB1);   // |d|    |c|
+  auto scale = _mm512_rcp14_ps(_mm512_max_ps(fabs_cd, fabs_dc));  // 1/sc     1/sc
+  auto a2 = _mm512_mul_ps(a, scale);         // a/sc     b/sc
+  auto b2 = _mm512_mul_ps(b, scale);         // c/sc     d/sc
+  auto acbd2 = _mm512_mul_ps(a2, b2);
+
   const __m512 sign_mask = _mm512_setr_ps(-0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0,
                                           -0.0, 0.0, -0.0, 0.0, -0.0, 0.0, -0.0, 0.0);
-  auto ac_bd = _mm512_mul_ps(a, b);         //ac       bd
+  auto dc2 = _mm512_permute_ps(b2, 0xB1);    // d/sc         c/sc
+  dc2 = _mm512_xor_ps(sign_mask, dc2);       // -d/|c,d|        c/sc
+  auto adbc2 = _mm512_mul_ps(a2, dc2);       //-ad/sc^2      bc/sc^2
+  auto res2 = Vectorized<c10::complex<float>>::hadd_ps(acbd2, adbc2);  //(ac+bd)/sc^2  (bc-ad)/sc^2
 
-  auto d_c = _mm512_permute_ps(b, 0xB1);    //d        c
-  d_c = _mm512_xor_ps(sign_mask, d_c);      //-d       c
-  auto ad_bc = _mm512_mul_ps(a, d_c);       //-ad      bc
-
-  auto re_im = Vectorized<c10::complex<float>>::hadd_ps(ac_bd, ad_bc);//ac + bd  bc - ad
-  return _mm512_div_ps(re_im, b.abs_2_());
+  // get the denominator
+  auto denom2 = Vectorized<c10::complex<float>>(b2).abs_2_();  // (c^2+d^2)/sc^2   (c^2+d^2)/sc^2
+  res2 = _mm512_div_ps(res2, denom2);
+  return res2;
 }
 
 // reciprocal. Implement this here so we can use multiplication.

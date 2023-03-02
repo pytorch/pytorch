@@ -1,13 +1,11 @@
 #pragma once
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <c10/util/intrusive_ptr.h>
 
-#include <memory>
 #include <numeric>
-#include <utility>
 
 namespace c10 {
 
@@ -115,7 +113,11 @@ class C10_API SymInt {
 #endif
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   ~SymInt() {
     release_();
@@ -129,6 +131,11 @@ class C10_API SymInt {
     TORCH_CHECK(!is_symbolic());
     return data_;
   }
+
+  // Test if we have a hint for this int (e.g., guard_int would work).
+  // Most of the time this is true; it is only false when you have
+  // an unbacked SymInt.
+  bool has_hint() const;
 
   // Insert a guard for the int to be its concrete value, and then return
   // that value.  This operation always works, even if the int is symbolic,
@@ -157,15 +164,35 @@ class C10_API SymInt {
   SymInt operator*(const SymInt& sci) const;
   SymInt operator/(const SymInt& sci) const;
   SymInt operator%(const SymInt& sci) const;
-  bool operator==(const SymInt& sci) const;
-  bool operator!=(const SymInt& p2) const;
-  bool operator<(const SymInt& sci) const;
-  bool operator<=(const SymInt& sci) const;
-  bool operator>(const SymInt& sci) const;
-  bool operator>=(const SymInt& sci) const;
   void operator*=(const SymInt& sci);
   void operator+=(const SymInt& sci);
   void operator/=(const SymInt& sci);
+
+  SymBool sym_eq(const SymInt&) const;
+  SymBool sym_ne(const SymInt&) const;
+  SymBool sym_lt(const SymInt&) const;
+  SymBool sym_le(const SymInt&) const;
+  SymBool sym_gt(const SymInt&) const;
+  SymBool sym_ge(const SymInt&) const;
+
+  bool operator==(const SymInt& o) const {
+    return sym_eq(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator!=(const SymInt& o) const {
+    return sym_ne(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<(const SymInt& o) const {
+    return sym_lt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator<=(const SymInt& o) const {
+    return sym_le(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>(const SymInt& o) const {
+    return sym_gt(o).guard_bool(__FILE__, __LINE__);
+  }
+  bool operator>=(const SymInt& o) const {
+    return sym_ge(o).guard_bool(__FILE__, __LINE__);
+  }
 
   SymInt min(const SymInt& sci) const;
   SymInt max(const SymInt& sci) const;

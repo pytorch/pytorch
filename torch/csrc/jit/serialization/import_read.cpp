@@ -33,7 +33,7 @@ IValue readArchiveAndTensors(
   };
 
   std::string tensor_dir_path =
-      (tensor_prefix.compare("") != 0) ? tensor_prefix : archive_name + "/";
+      (!tensor_prefix.empty()) ? tensor_prefix : archive_name + "/";
 
   auto read_record = [&](const std::string& name) {
     std::string ss = tensor_dir_path + name;

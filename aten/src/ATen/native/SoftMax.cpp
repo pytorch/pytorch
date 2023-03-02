@@ -155,7 +155,7 @@ void host_softmax(
     const Tensor& input,
     const int64_t dim,
     bool* mask = nullptr,
-    const c10::optional<int64_t> mask_type_ = NULL) {
+    const c10::optional<int64_t> mask_type_ = {}) {
 
   if (MaskedSoftMax) {
     TORCH_CHECK(mask_type_.has_value(), "Mask Type should be defined");

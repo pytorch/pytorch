@@ -64,7 +64,7 @@ TORCH_META_FUNC(topk)
   // Build the output size, which is the dim being selected set to
   // size k
   DimVector topKSize(self.sizes().vec());
-  if (topKSize.size() > 0) {
+  if (!topKSize.empty()) {
     topKSize[dim] = k;
   }
   set_output_raw_strided(0, topKSize, {}, self.options());

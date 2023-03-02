@@ -12,8 +12,8 @@ namespace F = torch::nn::functional;
 namespace torch {
 namespace nn {
 
-LayerNormImpl::LayerNormImpl(const LayerNormOptions& options_)
-    : options(options_) { // NOLINT(modernize-pass-by-value)
+LayerNormImpl::LayerNormImpl(LayerNormOptions options_)
+    : options(std::move(options_)) {
   // NOLINTNEXTLINE(clang-analyzer-optin.cplusplus.VirtualCall)
   reset();
 }

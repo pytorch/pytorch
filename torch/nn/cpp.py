@@ -3,7 +3,7 @@
 from torch import nn
 
 
-class OrderedDictWrapper(object):
+class OrderedDictWrapper:
     """
     A wrapper around a C++ OrderedDict that dynamically evaluates the
     OrderedDict getter on a bound C++ module, such that new changes on the C++
@@ -56,7 +56,7 @@ class ModuleWrapper(nn.Module):
         # Assign before the super class constructor so ``self.training`` can be
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
-        super(ModuleWrapper, self).__init__()
+        super().__init__()
         self._parameters = OrderedDictWrapper(cpp_module, "_parameters")  # type: ignore[assignment]
         self._buffers: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_buffers")  # type: ignore[assignment]
         self._modules: OrderedDictWrapper = OrderedDictWrapper(cpp_module, "_modules")  # type: ignore[assignment]

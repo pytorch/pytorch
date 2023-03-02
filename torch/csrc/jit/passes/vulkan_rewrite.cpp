@@ -105,7 +105,8 @@ void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
   // Move inputs to Vulkan backend
   for (Value* input : graph->inputs()) {
     NamedValue named_input = NamedValue("", input);
-    if (named_input.type()->kind() == TypeKind::TensorType) {
+    if (named_input.type()->kind() == TypeKind::TensorType &&
+        !input->uses().empty()) {
       // find the insertion point
       WithInsertPoint ip(input->uses()[0].user->prev());
       Value* replaced_input = graph->insert(

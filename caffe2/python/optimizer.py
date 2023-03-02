@@ -5,6 +5,7 @@
 import copy
 import logging
 from collections import defaultdict, namedtuple
+from typing import Any, Dict
 
 import numpy as np
 from caffe2.proto import caffe2_pb2
@@ -31,7 +32,7 @@ def reset_optimizer_instance_count():
     _optimizer_instance_count.clear()
 
 
-class Optimizer(object):
+class Optimizer:
     def __init__(self):
         self._aux_params = AuxOptimizerParams(local=[], shared=[])
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]
@@ -301,7 +302,7 @@ class SgdOptimizer(Optimizer):
         lars=None,
         **kwargs
     ):
-        super(SgdOptimizer, self).__init__()
+        super().__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
@@ -417,7 +418,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(MultiPrecisionSgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -488,7 +489,7 @@ class FP16SgdOptimizer(SgdOptimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(FP16SgdOptimizer, self).__init__(
+        super().__init__(
             base_learning_rate=base_learning_rate,
             policy=policy,
             momentum=momentum,
@@ -634,7 +635,7 @@ class AdagradOptimizer(Optimizer):
         use_dedicated_lr_iteration_counter=False,
         **kwargs
     ):
-        super(AdagradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -655,6 +656,9 @@ class AdagradOptimizer(Optimizer):
         self._process_swa_options(swa_options)
         self._process_ema_options(ema_options)
 
+    def set_mapping_for_param2ema_teacher_param(self, param_mapping: Dict[str, Any]) -> None:
+        self.param2ema_teacher_param = param_mapping
+
     def _process_swa_options(self, swa_options):
         self.swa_enabled = True if swa_options else False
         if self.swa_enabled:
@@ -665,12 +669,19 @@ class AdagradOptimizer(Optimizer):
             self.swa_feedback_end_it = swa_options.get("swa_feedback_end_it", None)
 
     def _process_ema_options(self, ema_options):
-        self.ema_enabled = True if ema_options else False
-        if self.ema_enabled:
+        logger.info(f"ema_options: {str(ema_options)}")
+        self.ema_enabled = True if ema_options and "ema_alpha" in ema_options else False
+        self.ema_teacher_enabled = True if ema_options and "ema_teacher_alpha" in ema_options else False
+        self.param2ema_teacher_param = {}
+        if self.ema_enabled or self.ema_teacher_enabled:
             self.ema_start = ema_options.get("ema_start", None)
             self.ema_end = ema_options.get("ema_end", None)
             self.ema_step = ema_options.get("ema_step", None)
             self.ema_alpha = ema_options.get("ema_alpha", None)
+            self.ema_teacher_alpha = ema_options.get("ema_teacher_alpha", None)
+            self.ema_teacher_module_name = ema_options.get(
+                "ema_teacher_module_name", "ema_teacher_arch"
+            )
 
     def _process_pruning_options(self, pruning_options):
         self.use_mask = False
@@ -1143,6 +1154,23 @@ class AdagradOptimizer(Optimizer):
                 ema_alpha=self.ema_alpha,
             )
 
+
+        if self.ema_teacher_enabled:
+            if param in self.param2ema_teacher_param:
+                param_ema_teacher = self.param2ema_teacher_param[param]
+                if not param_init_net.BlobIsDefined(param_ema_teacher):
+                    param_init_net.ConstantFill([param], param_ema_teacher, value=0.0)
+                    self._aux_params.local.append(param_ema_teacher)
+
+                net.EMA(
+                    [param, param_ema_teacher, iteration],
+                    [param, param_ema_teacher],
+                    ema_start=self.ema_start,
+                    ema_end=self.ema_end,
+                    ema_step=self.ema_step,
+                    ema_alpha=self.ema_teacher_alpha,
+                )
+
         if self.weight_scale:
             net.WeightScale(
                 [param, iteration],
@@ -1179,7 +1207,7 @@ class WngradOptimizer(Optimizer):
         output_effective_lr_and_update=False,
         **kwargs
     ):
-        super(WngradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.policy = policy
@@ -1291,7 +1319,7 @@ class StormOptimizer(Optimizer):
               include 'mean' and 'sum'.
             lars: lars offset.
         """
-        super(StormOptimizer, self).__init__()
+        super().__init__()
         self.lr = lr
         self.momentum = momentum
         self.beta = beta
@@ -1392,7 +1420,7 @@ class AdadeltaOptimizer(Optimizer):
               include "mean" and "sum".
             engine: the engine used, options include "", "CUDNN", etc.
         """
-        super(AdadeltaOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.epsilon = epsilon
         self.decay = decay
@@ -1460,7 +1488,7 @@ class FtrlOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         engine="",
     ):
-        super(FtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -1518,7 +1546,7 @@ class GFtrlOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         engine="",
     ):
-        super(GFtrlOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta = beta
         self.lambda1 = lambda1
@@ -1570,7 +1598,7 @@ class AdamOptimizer(Optimizer):
         use_smart_decay=False,  # See https://fburl.com/2jdiwrhy for context.
         **kwargs
     ):
-        super(AdamOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -1733,7 +1761,7 @@ class DecayAdagradOptimizer(Optimizer):
         engine="",
         **kwargs
     ):
-        super(DecayAdagradOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
@@ -1745,13 +1773,22 @@ class DecayAdagradOptimizer(Optimizer):
         self.init_kwargs = kwargs
         self._process_ema_options(ema_options)
 
+    def set_mapping_for_param2ema_teacher_param(self, param_mapping: Dict[str, Any]) -> None:
+        self.param2ema_teacher_param = param_mapping
+
     def _process_ema_options(self, ema_options):
-        self.ema_enabled = True if ema_options else False
-        if self.ema_enabled:
+        self.ema_enabled = True if ema_options and "ema_alpha" in ema_options else False
+        self.ema_teacher_enabled = True if ema_options and "ema_teacher_alpha" in ema_options else False
+        self.param2ema_teacher_param = {}
+        if self.ema_enabled or self.ema_teacher_enabled:
             self.ema_start = ema_options.get("ema_start", None)
             self.ema_end = ema_options.get("ema_end", None)
             self.ema_step = ema_options.get("ema_step", None)
             self.ema_alpha = ema_options.get("ema_alpha", None)
+            self.ema_teacher_alpha = ema_options.get("ema_alpha", None)
+            self.ema_teacher_module_name = ema_options.get(
+                "ema_teacher_module_name", "ema_teacher_arch"
+            )
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -1810,6 +1847,22 @@ class DecayAdagradOptimizer(Optimizer):
                     ema_alpha=self.ema_alpha,
                 )
 
+            if self.ema_teacher_enabled:
+                if param in self.param2ema_teacher_param:
+                    param_ema_teacher = self.param2ema_teacher_param[param]
+                    if not param_init_net.BlobIsDefined(param_ema_teacher):
+                        param_init_net.ConstantFill([param], param_ema_teacher, value=0.0)
+                        self._aux_params.local.append(param_ema_teacher)
+
+                    net.EMA(
+                        [param, param_ema_teacher, iteration],
+                        [param, param_ema_teacher],
+                        ema_start=self.ema_start,
+                        ema_end=self.ema_end,
+                        ema_step=self.ema_step,
+                        ema_alpha=self.ema_teacher_alpha,
+                    )
+
     def scale_learning_rate(self, scale):
         self.alpha *= scale
         return
@@ -1832,7 +1885,7 @@ class YellowFinOptimizer(Optimizer):
         sparse_dedup_aggregator=None,
         **kwargs
     ):
-        super(YellowFinOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.mu = mu
         self.beta = beta
@@ -1920,7 +1973,7 @@ class RmsPropOptimizer(Optimizer):
         engine="",
         **kwargs
     ):
-        super(RmsPropOptimizer, self).__init__()
+        super().__init__()
         self.alpha = alpha
         self.decay = decay
         self.momentum = momentum

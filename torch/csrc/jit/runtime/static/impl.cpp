@@ -955,7 +955,7 @@ void BlockRunner::set_inputs(
 
   const auto& schema_args = schema->arguments();
   size_t consumed_kwargs = 0;
-  DCHECK(schema_args.size() > 0);
+  DCHECK(!schema_args.empty());
   TORCH_CHECK(
       args.size() < schema_args.size(),
       "Static runtime got too many arguments");
@@ -1375,8 +1375,7 @@ void BlockRunner::benchmark(
     const int main_runs,
     bool print_per_node_time,
     bool generate_ai_pep_output) {
-  TORCH_CHECK(
-      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
   std::cout << "Input size: " << args_list.size() << std::endl;
   float time_per_iter =
       benchmark_model(args_list, kwargs_list, warmup_runs, main_runs);
@@ -1397,7 +1396,7 @@ void BlockRunner::benchmark(
 
   std::vector<std::pair<std::string, double>> time_per_node_type_vec{
       results.time_per_node_type.begin(), results.time_per_node_type.end()};
-  if (args_list.size() == 0) {
+  if (args_list.empty()) {
     std::sort(
         time_per_node_type_vec.begin(),
         time_per_node_type_vec.end(),
@@ -1497,10 +1496,9 @@ float BlockRunner::benchmark_model(
     const int warmup_runs,
     const int main_runs) {
   TORCH_CHECK(warmup_runs >= 0 && main_runs >= 1);
-  TORCH_CHECK(
-      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
 
-  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const bool is_kwargs_empty = kwargs_list.empty();
   const KeywordArgs empty_kwargs;
   for (const auto i : c10::irange(warmup_runs)) {
     (void)i; // Suppress unused variable warning
@@ -1599,13 +1597,12 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
     const std::vector<KeywordArgs>& kwargs_list,
     const int warmup_runs,
     const int main_runs) {
-  TORCH_CHECK(
-      kwargs_list.size() == 0 || args_list.size() == kwargs_list.size());
+  TORCH_CHECK(kwargs_list.empty() || args_list.size() == kwargs_list.size());
   TORCH_CHECK(warmup_runs >= 1 && main_runs >= 1);
 
   IndividualMetrics results;
   results.time_per_node.resize(nodes_.size(), 0);
-  if (args_list.size() == 0) {
+  if (args_list.empty()) {
     // When the given input is empty, compute the op statistics from the given
     // graph without executing it.
     for (const auto i : c10::irange(nodes_.size())) {
@@ -1634,7 +1631,7 @@ BlockRunner::IndividualMetrics BlockRunner::benchmark_individual_ops(
     return results;
   }
 
-  const bool is_kwargs_empty = kwargs_list.size() == 0;
+  const bool is_kwargs_empty = kwargs_list.empty();
   const KeywordArgs empty_kwargs;
   bool manage_output_tensors = static_module_.opts().manage_output_tensors;
   // See comment on above use of InferenceMode for

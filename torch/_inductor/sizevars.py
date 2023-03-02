@@ -37,7 +37,7 @@ class PositiveGuard:
     expr: Expr
 
 
-class SizeVarAllocator(object):
+class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
@@ -46,6 +46,9 @@ class SizeVarAllocator(object):
         self.var_to_val = self.shape_env.var_to_val
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -116,7 +119,7 @@ class SizeVarAllocator(object):
         Simplify indexing expression with knowledge of the ranges of
         iteration variables.
         """
-        from .ir import IndexingDiv, ModularIndexing
+        from .ir import FloorDiv, ModularIndexing
 
         expr = join_dimensions(self.simplify(expr))
         original_expr = expr
@@ -137,7 +140,7 @@ class SizeVarAllocator(object):
             return base
 
         def visit_indexing_div(base, divisor):
-            return IndexingDiv(remove_zero_terms(base, divisor), divisor)
+            return FloorDiv(remove_zero_terms(base, divisor), divisor)
 
         def visit_modular_indexing(base, divisor, modulus):
             base = remove_zero_terms(base, divisor)
@@ -157,7 +160,7 @@ class SizeVarAllocator(object):
             else:
                 base_s = base
             if self.maybe_guard_lt(base_s, modulus * divisor):
-                return IndexingDiv(base, divisor)
+                return FloorDiv(base, divisor)
             return ModularIndexing(base, divisor, modulus)
 
         if expr.has(ModularIndexing):
@@ -170,9 +173,9 @@ class SizeVarAllocator(object):
                 visit_modular_indexing,
             )
 
-        if expr.has(IndexingDiv):
+        if expr.has(FloorDiv):
             expr = expr.replace(
-                IndexingDiv(
+                FloorDiv(
                     sympy.Wild("base"),
                     sympy.Wild("divisor"),
                 ),
@@ -247,36 +250,8 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        left = sympy.expand(left)
-        right = sympy.expand(right)
-        if left == right:
-            return left
-        expr = self.simplify(left - right)
-        assert self.size_hint(expr) == 0, (expr, self.size_hint(expr))
-        free = list(expr.free_symbols)
-        if len(free) == 0:
-            assert expr == 0
-            return left
-        elif len(free) in (1, 2, 3):
-            # remove the largest of the guarded variables
-            free.sort(key=self.size_hint)
-            try:
-                solutions = sympy.solve(expr, free[-1])
-                if (
-                    len(solutions) == 1
-                    and solutions[0]
-                    and "/" not in str(solutions[0])
-                ):
-                    self.replacements[free[-1]] = solutions[0]
-            except NotImplementedError:
-                pass
-
-        self.guards.append(ZeroGuard(expr))
-
-        if len(right.free_symbols) < len(left.free_symbols):
-            return right
-        else:
-            return left
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
         """if left==right, guard on that fact and return true"""
@@ -358,6 +333,9 @@ class SizeVarAllocator(object):
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
+
+    def guard_static_shapes(self, left: List[Expr]) -> List[int]:
+        return [self.guard_static_shape(x) for x in left]
 
     def __getitem__(self, val: int) -> Expr:
         return self.shape_env.duck_int(val)
@@ -453,6 +431,13 @@ class SizeVarAllocator(object):
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
+    def lookup_precomputed_size(self, expr: Expr):
+        if expr not in self.precomputed_replacements:
+            sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
+            self.precomputed_replacements[expr] = sym
+            self.inv_precomputed_replacements[sym] = expr
+        return self.precomputed_replacements[expr]
+
     def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
         if self.need_seed:
@@ -474,22 +459,32 @@ class SizeVarAllocator(object):
 
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
-        added = set()
 
-        for name, value in graph_inputs.items():
+        def is_expr(x):
+            return isinstance(x[1], sympy.Expr)
+
+        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
+        graph_inputs_tensors = list(
+            filter(lambda x: not is_expr(x), graph_inputs.items())
+        )
+
+        for name, shape in graph_inputs_expr:
+            shape = self.simplify(shape)
+            if shape in needed:
+                needed.remove(shape)
+                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
+
+        for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
                 if shape in needed:
                     needed.remove(shape)
-                    added.add(shape)
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
 
-        for name, value in graph_inputs.items():
+        for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -498,9 +493,12 @@ class SizeVarAllocator(object):
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
-                elif isinstance(shape, sympy.Symbol):
-                    assert shape in added, f"{shape} is needed but not added"
-        assert not needed
+
+    def codegen_precomputed_sizes(self, code: IndentedBuffer):
+        from .codegen.wrapper import pexpr
+
+        for sym, expr in self.inv_precomputed_replacements.items():
+            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr
@@ -533,13 +531,13 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     ModularIndexing(i0, 1, 32) + 32 * ModularIndexing(i0, 32, 4)
     becomes
     ModularIndexing(i0, 1, 128)
-    ModularIndexing(i0, 1, 32) + 32 * IndexingDiv(i0, 32)
+    ModularIndexing(i0, 1, 32) + 32 * FloorDiv(i0, 32)
     becomes i0
 
 
     This type of pattern can come from view operations
     """
-    from .ir import IndexingDiv, ModularIndexing
+    from .ir import FloorDiv, ModularIndexing
 
     assert isinstance(expr, sympy.Add)
 
@@ -571,14 +569,14 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
         if m1:
             for term2 in expr.args:
                 m2 = term2.match(
-                    m1[scale] * m1[mod1] * IndexingDiv(m1[base], m1[divisor] * m1[mod1])
+                    m1[scale] * m1[mod1] * FloorDiv(m1[base], m1[divisor] * m1[mod1])
                 )
                 if m2 is not None:  # in case of success we get an empty dict here
                     expr = join_dimensions(
                         expr
                         - term1
                         - term2
-                        + m1[scale] * IndexingDiv(m1[base], m1[divisor])
+                        + m1[scale] * FloorDiv(m1[base], m1[divisor])
                     )
                     return expr
     return expr
@@ -606,7 +604,7 @@ class CppSizeVarAllocator(SizeVarAllocator):
 class SimplifyIndexing(V.WrapperHandler):  # type: ignore[name-defined]
     """
     A wrapper around .virtualize.ops that uses var range information to
-    simplify ir.ModularIndexing/ir.IndexingDiv.
+    simplify ir.ModularIndexing/ir.FloorDiv.
     """
 
     def __init__(self, inner, var_ranges: VarRanges):

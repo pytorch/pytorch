@@ -6,7 +6,7 @@ _global_logic_variables = set()  # type: ignore[var-annotated]
 _glv = _global_logic_variables
 
 
-class Var(object):
+class Var:
     """ Logic Variable """
 
     _id = 1

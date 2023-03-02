@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bitset>
+#include <utility>
 
 #include <ATen/ArrayRef.h>
 #include <ATen/SmallVector.h>
@@ -120,7 +121,7 @@ inline BatchedTensorImpl* maybeGetBatchedImpl(Tensor tensor) {
   if (!isBatchedTensor(tensor)) {
     return nullptr;
   }
-  return unsafeGetBatchedImpl(tensor);
+  return unsafeGetBatchedImpl(std::move(tensor));
 }
 
 // Returns a bitset. If bit i is set, then that means dim i is a batchdim.

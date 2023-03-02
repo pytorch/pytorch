@@ -101,7 +101,7 @@ def _decompose_type(t, to_list=True):
             return None
         ts = [t]
     # Ignored: Generator has incompatible item type "object"; expected "Type[Any]"
-    ts = list(TYPE2ABC.get(_t, _t) for _t in ts)  # type: ignore[misc]
+    ts = [TYPE2ABC.get(_t, _t) for _t in ts]  # type: ignore[misc]
     return ts
 
 

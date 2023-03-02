@@ -27,9 +27,7 @@ TORCH_LIBRARY(xnnpack, m) {
           return createLinearClampPrePackOpContext(
               std::move(std::get<0>(state)),
               std::move(std::get<1>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg)
               std::move(std::get<2>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg)
               std::move(std::get<3>(state)));
         });
 
@@ -47,11 +45,8 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<2>(state)),
               std::move(std::get<3>(state)),
               std::move(std::get<4>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<5>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<6>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<7>(state)));
         });
 
@@ -70,11 +65,8 @@ TORCH_LIBRARY(xnnpack, m) {
               std::move(std::get<3>(state)),
               std::move(std::get<4>(state)),
               std::move(std::get<5>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<6>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<7>(state)),
-              // NOLINTNEXTLINE(performance-move-const-arg,cppcoreguidelines-avoid-magic-numbers)
               std::move(std::get<8>(state)));
         });
 

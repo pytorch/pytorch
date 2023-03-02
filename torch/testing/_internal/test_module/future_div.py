@@ -1,4 +1,3 @@
-from __future__ import division
 
 
 def div_int_future():

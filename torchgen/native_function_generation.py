@@ -319,13 +319,14 @@ def generate_function(
             )
         }
     }
+    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
 
     return (
         NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
             # These generated fn's aren't meant to be user friendly- don't generate methods.
-            variants=set([Variant.function]),
+            variants={Variant.function},
             structured=False,
             structured_delegate=None,
             structured_inherits=None,
@@ -347,7 +348,7 @@ def generate_function(
             has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
-            tags=set(["generated"]) | (f.tags & {"nondeterministic_seeded"}),
+            tags=tags,
             namespace=f.namespace,
         ),
         backend_metadata,

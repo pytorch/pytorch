@@ -14,6 +14,8 @@
 #include <torch/csrc/jit/passes/quantization/register_packed_params.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -110,7 +112,7 @@ void keepOnlyPackedParamsGeneration(Module& m, const std::string& method_name) {
   Node* none_node = g->createNone();
   g->registerOutput(none_node->output());
   none_node->insertBefore(g->return_node());
-  function.setSchema(new_schema);
+  function.setSchema(std::move(new_schema));
   EliminateDeadCode(g);
 }
 

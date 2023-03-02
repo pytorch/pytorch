@@ -10,9 +10,10 @@ import torch.nn.functional as F
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._tensor import DeviceMesh, DTensor as DT, Replicate
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._common_utils import FSDP_WRAPPED_MODULE
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.distributed.tensor.parallel import PairwiseParallel, parallelize_module
-from torch.distributed.tensor.parallel.fsdp import is_available
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 
 from torch.testing._internal.common_utils import run_tests
@@ -29,7 +30,7 @@ LR = 3e-5
 
 class SimpleModel(torch.nn.Module):
     def __init__(self):
-        super(SimpleModel, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 8)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(8, 4)
@@ -99,7 +100,7 @@ class Test2dParallelIntegration(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(4)
     def test_2d_fsdp_integration_functionality(self) -> None:
-        if not is_available():
+        if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
 
         model_tp = init_model()[0]
@@ -141,10 +142,15 @@ class Test2dParallelIntegration(DTensorTestBase):
                         p2 = p2.redistribute(p2.device_mesh, [Replicate()]).to_local()
                     self.assertTrue(torch.allclose(p1, p2), f"{p1} vs {p2}")
 
+    def _clean_up_fsdp_param_name(self, name):
+        return ".".join(
+            filter(lambda name: name != FSDP_WRAPPED_MODULE, name.split("."))
+        )
+
     def _test_2d_e2e_flow(
         self, use_orig_params=False, fsdp_nested=False, multi_param_group=False
     ) -> None:
-        if not is_available():
+        if not enable_2d_with_fsdp():
             self.skipTest("FSDP 2d parallel integration not available")
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
@@ -154,8 +160,14 @@ class Test2dParallelIntegration(DTensorTestBase):
             use_orig_params=use_orig_params, fsdp_nested=fsdp_nested
         )
         # Check named parameters are returning the same name at least.
-        param_names_2d = [name for name, _ in model_2d.named_parameters()]
+        param_names_2d = [
+            self._clean_up_fsdp_param_name(name)
+            for name, _ in model_2d.named_parameters()
+        ]
         for name, _ in model.named_parameters():
+            name = self._clean_up_fsdp_param_name(name)
+            if name not in param_names_2d:
+                print(name, param_names_2d)
             self.assertTrue(name in param_names_2d)
         self._compare_params(model, model_2d)
 

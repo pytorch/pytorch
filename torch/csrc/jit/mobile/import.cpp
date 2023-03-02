@@ -310,7 +310,7 @@ void BytecodeDeserializer::parseMethods(
     c10::ivalue::TupleElements&& vals,
     c10::optional<c10::ivalue::TupleElements>&& debug_handles,
     mobile::CompilationUnit& mcu) {
-  TORCH_CHECK(vals.size() > 0, "Bytecode has no elements. ");
+  TORCH_CHECK(!vals.empty(), "Bytecode has no elements. ");
   // Initialized with the version number when kProducedBytecodeVersion was
   // introduced. The old models (some of them already in production) without
   // version number are seen as version 3 (deprecated).

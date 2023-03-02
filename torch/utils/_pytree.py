@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 T = TypeVar('T')
 S = TypeVar('S')
+U = TypeVar('U')
 R = TypeVar('R')
 
 """
@@ -195,8 +196,10 @@ def tree_map(fn: Any, pytree: PyTree) -> PyTree:
     return tree_unflatten([fn(i) for i in flat_args], spec)
 
 Type2 = Tuple[Type[T], Type[S]]
+Type3 = Tuple[Type[T], Type[S], Type[U]]
 TypeAny = Union[Type[Any], Tuple[Type[Any], ...]]
 
+Fn3 = Callable[[Union[T, S, U]], R]
 Fn2 = Callable[[Union[T, S]], R]
 Fn = Callable[[T], R]
 FnAny = Callable[[Any], R]
@@ -255,6 +258,10 @@ def tree_map_only(ty: Type[T], fn: Fn[T, Any], pytree: PyTree) -> PyTree:
 def tree_map_only(ty: Type2[T, S], fn: Fn2[T, S, Any], pytree: PyTree) -> PyTree:
     ...
 
+@overload
+def tree_map_only(ty: Type3[T, S, U], fn: Fn3[T, S, U, Any], pytree: PyTree) -> PyTree:
+    ...
+
 def tree_map_only(ty: TypeAny, fn: FnAny[Any], pytree: PyTree) -> PyTree:
     return tree_map(map_only(ty)(fn), pytree)
 
@@ -272,6 +279,10 @@ def tree_all_only(ty: Type[T], pred: Fn[T, bool], pytree: PyTree) -> bool:
 
 @overload
 def tree_all_only(ty: Type2[T, S], pred: Fn2[T, S, bool], pytree: PyTree) -> bool:
+    ...
+
+@overload
+def tree_all_only(ty: Type3[T, S, U], pred: Fn3[T, S, U, bool], pytree: PyTree) -> bool:
     ...
 
 def tree_all_only(ty: TypeAny, pred: FnAny[bool], pytree: PyTree) -> bool:

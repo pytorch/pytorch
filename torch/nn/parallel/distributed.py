@@ -37,7 +37,6 @@ if torch.distributed.rpc.is_available():
 from torch._utils import _get_device_index
 
 from ..modules import Module
-from ._replicated_tensor_ddp_utils import _ddp_with_replicated_tensor_enabled
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
 
 __all__ = ["DistributedDataParallel"]
@@ -177,14 +176,13 @@ class _DDPSink(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        state_dict = ctx.state_dict
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
         if (
             ctx.state_dict["static_graph"]
             and ctx.state_dict["num_iterations"] == 1
         ):
-            Variable._execution_engine.queue_callback(
+            Variable._execution_engine.queue_callback(  # type: ignore[call-arg,misc]
                 ctx.reducer._delay_all_reduce
             )
 
@@ -559,7 +557,7 @@ class DistributedDataParallel(Module, Joinable):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         Joinable.__init__(self)
         self.logger = None
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
@@ -636,11 +634,6 @@ class DistributedDataParallel(Module, Joinable):
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
 
-        self._use_replicated_tensor_module = (
-            _ddp_with_replicated_tensor_enabled()
-        )
-        self._build_replicated_tensor_module()
-
         if check_reduction:
             # This argument is no longer used since the reducer
             # will ensure reduction completes even if some parameters
@@ -696,6 +689,9 @@ class DistributedDataParallel(Module, Joinable):
         if static_graph:
             self._set_static_graph()
 
+        self._setup_in_backward_optimizers()
+
+    def _setup_in_backward_optimizers(self):
         # Check if user has used apply_optim_in_backward to overlap optimizer
         # step + DDP backward. Current constraints:
         # 1. Only allreduce is supported at the moment, no custom communication.
@@ -706,7 +702,6 @@ class DistributedDataParallel(Module, Joinable):
         # If your use case requires some DDP managed parameters to run with
         # an in-backward optimizer and some with a traditional optimizer, please
         # ping https://github.com/pytorch/pytorch/issues/90052.
-
         # NOTE: we use self._module_parameters instead of .parameters() since
         # the former excludes ignored (non-DDP managed) parameters.
         if any(
@@ -749,17 +744,6 @@ class DistributedDataParallel(Module, Joinable):
                     "gradients to None/zero as desired."
                 )
                 self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
-
-    def _build_replicated_tensor_module(self):
-        if self._use_replicated_tensor_module:
-            # Create a module with ReplicatedTensor without copying tensors. Avoid
-            # registering '_replicated_tensor_module' as a submodule by directly
-            # adding to self.__dict__.
-            from ._replicated_tensor_ddp_interop import _replicate_module
-
-            self.__dict__["_replicated_tensor_module"] = _replicate_module(
-                self.module, self.process_group
-            )
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -870,15 +854,12 @@ class DistributedDataParallel(Module, Joinable):
         del attrs["process_group"]
         del attrs["reducer"]
         del attrs["logger"]
-        if self._use_replicated_tensor_module:
-            del attrs["_replicated_tensor_module"]
         return attrs
 
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
-        self._build_replicated_tensor_module()
+        super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -927,22 +908,20 @@ class DistributedDataParallel(Module, Joinable):
         ]
 
         # Build list of parameters.
-        parameters = list(parameter for _, parameter in modules_and_parameters)
+        parameters = [parameter for _, parameter in modules_and_parameters]
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding) or isinstance(
-                module, torch.nn.EmbeddingBag
-            ):
+            if isinstance(module, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
                 return module.sparse
             return False
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = list(
+        expect_sparse_gradient = [
             produces_sparse_gradient(module)
             for module, _ in modules_and_parameters
-        )
+        ]
 
         self._assign_modules_buffers()
 
@@ -1020,8 +999,7 @@ class DistributedDataParallel(Module, Joinable):
                 if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
             )
-            for p in ps:
-                yield p
+            yield from ps
 
         for m in m.modules() if recurse else [m]:
             for p in model_parameters(m):
@@ -1094,12 +1072,6 @@ class DistributedDataParallel(Module, Joinable):
             DistributedDataParallel._active_ddp_module = None
 
     def _run_ddp_forward(self, *inputs, **kwargs):
-        module_to_run = (
-            self._replicated_tensor_module
-            if self._use_replicated_tensor_module
-            else self.module
-        )
-
         if self.device_ids:
             inputs, kwargs = _to_kwargs(
                 inputs,
@@ -1108,10 +1080,10 @@ class DistributedDataParallel(Module, Joinable):
                 self.use_side_stream_for_tensor_copies,
             )
             with self._inside_ddp_forward():
-                return module_to_run(*inputs[0], **kwargs[0])  # type: ignore[index]
+                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
         else:
             with self._inside_ddp_forward():
-                return module_to_run(*inputs, **kwargs)
+                return self.module(*inputs, **kwargs)
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function(
@@ -1145,7 +1117,6 @@ class DistributedDataParallel(Module, Joinable):
 
             # sync params according to location (before/after forward) user
             # specified as part of hook, if hook was specified.
-            buffer_hook_registered = hasattr(self, "buffer_hook")
             if self._check_sync_bufs_pre_fwd():
                 self._sync_buffers()
 
@@ -1234,9 +1205,7 @@ class DistributedDataParallel(Module, Joinable):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
-        if self._use_replicated_tensor_module:
-            self._replicated_tensor_module.train(mode)  # type: ignore[union-attr]
+        super().train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks

@@ -3,7 +3,7 @@ from typing import Optional, Union
 import torch
 
 
-class _remote_device(object):
+class _remote_device:
     """
     Represents a device on a remote worker.
 

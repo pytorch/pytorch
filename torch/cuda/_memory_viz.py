@@ -85,11 +85,11 @@ def compare(before, after, format_flamegraph=format_flamegraph):
 
     f = io.StringIO()
 
-    before_segs = set(_seg_key(seg) for seg in before)
-    after_segs = set(_seg_key(seg) for seg in after)
+    before_segs = {_seg_key(seg) for seg in before}
+    after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {list(a for a,_ in (before_segs - after_segs))}')
-    print(f'only_after = {list(a for a,_ in (after_segs - before_segs))}')
+    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:

@@ -4,8 +4,6 @@ from typing import Optional, Tuple, List, Union
 import torch
 from torch._C import _add_docstr, _sparse  # type: ignore[attr-defined]
 from torch import Tensor
-from torch.cuda import _lazy_call
-from torch._inductor.cuda_properties import get_device_capability
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
@@ -63,41 +61,65 @@ mm = _add_docstr(_sparse._sparse_mm, r"""
 .. note::
     This function doesn't support computing derivaties with respect to CSR matrices.
 
-    Args:
-        mat1 (Tensor): the first sparse matrix to be multiplied
-        mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
+    This function also additionally accepts an optional :attr:`reduce` argument that allows
+    specification of an optional reduction operation, mathematically performs the following operation:
 
-    Shape:
-        The format of the output tensor of this function follows:
-        - sparse x sparse -> sparse
-        - sparse x dense -> dense
+.. math::
 
-    Example::
+    z_{ij} = \bigoplus_{k = 0}^{K - 1} x_{ik} y_{kj}
 
-        >>> a = torch.randn(2, 3).to_sparse().requires_grad_(True)
-        >>> a
-        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                               [0, 1, 2, 0, 1, 2]]),
-               values=tensor([ 1.5901,  0.0183, -0.6146,  1.8061, -0.0112,  0.6302]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo, requires_grad=True)
+where :math:`\bigoplus` defines the reduce operator. :attr:`reduce` is implemented only for
+CSR storage format on CPU device.
 
-        >>> b = torch.randn(3, 2, requires_grad=True)
-        >>> b
-        tensor([[-0.6479,  0.7874],
-                [-1.2056,  0.5641],
-                [-1.1716, -0.9923]], requires_grad=True)
+Args:
+    mat1 (Tensor): the first sparse matrix to be multiplied
+    mat2 (Tensor): the second matrix to be multiplied, which could be sparse or dense
+    reduce (str, optional): the reduction operation to apply for non-unique indices
+        (:obj:`"sum"`, :obj:`"mean"`, :obj:`"amax"`, :obj:`"amin"`). Default :obj:`"sum"`.
 
-        >>> y = torch.sparse.mm(a, b)
-        >>> y
-        tensor([[-0.3323,  1.8723],
-                [-1.8951,  0.7904]], grad_fn=<SparseAddmmBackward>)
-        >>> y.sum().backward()
-        >>> a.grad
-        tensor(indices=tensor([[0, 0, 0, 1, 1, 1],
-                               [0, 1, 2, 0, 1, 2]]),
-               values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
-               size=(2, 3), nnz=6, layout=torch.sparse_coo)
-    """)
+Shape:
+    The format of the output tensor of this function follows:
+    - sparse x sparse -> sparse
+    - sparse x dense -> dense
+
+Example::
+
+    >>> a = torch.tensor([[1., 0, 2], [0, 3, 0]]).to_sparse().requires_grad_()
+    >>> a
+    tensor(indices=tensor([[0, 0, 1],
+                           [0, 2, 1]]),
+           values=tensor([1., 2., 3.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo, requires_grad=True)
+    >>> b = torch.tensor([[0, 1.], [2, 0], [0, 0]], requires_grad=True)
+    >>> b
+    tensor([[0., 1.],
+            [2., 0.],
+            [0., 0.]], requires_grad=True)
+    >>> y = torch.sparse.mm(a, b)
+    >>> y
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseAddmmBackward0>)
+    >>> y.sum().backward()
+    >>> a.grad
+    tensor(indices=tensor([[0, 0, 1],
+                           [0, 2, 1]]),
+           values=tensor([1., 0., 2.]),
+           size=(2, 3), nnz=3, layout=torch.sparse_coo)
+    >>> c = a.detach().to_sparse_csr()
+    >>> c
+    tensor(crow_indices=tensor([0, 2, 3]),
+           col_indices=tensor([0, 2, 1]),
+           values=tensor([1., 2., 3.]), size=(2, 3), nnz=3,
+           layout=torch.sparse_csr)
+    >>> y1 = torch.sparse.mm(c, b, 'sum')
+    >>> y1
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseMmReduceImplBackward0>)
+    >>> y2 = torch.sparse.mm(c, b, 'max')
+    >>> y2
+    tensor([[0., 1.],
+            [6., 0.]], grad_fn=<SparseMmReduceImplBackward0>)
+""")
 
 
 sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
@@ -150,7 +172,6 @@ Examples::
         values=tensor([ 0.1423, -0.3903, -0.0950]), device='cuda:0',
         size=(3, 3), nnz=3, layout=torch.sparse_csr)
 """)
-
 
 def sum(input: Tensor, dim: DimOrDims = None,
         dtype: Optional[DType] = None) -> Tensor:
@@ -361,7 +382,7 @@ Specifying a positive offset::
 """)
 
 
-class check_sparse_tensor_invariants(object):
+class check_sparse_tensor_invariants:
     """A tool to control checking sparse tensor invariants.
 
 The following options exists to manage sparsr tensor invariants
@@ -448,13 +469,19 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state = self.is_enabled()
+        self.saved_state : Optional[bool] = None
 
     def __enter__(self):
+        if self.saved_state is not None:
+            raise RuntimeError('This context manager instance is already activated.'
+                               ' Use a different context manager instance for context nesting.')
+        self.saved_state = self.is_enabled()
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
     def __exit__(self, type, value, traceback):
+        assert self.saved_state is not None
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
+        self.saved_state = None
 
     # decorator support
     def __call__(self, mth):
@@ -464,30 +491,3 @@ See :func:`torch.sparse.check_sparse_tensor_invariants.enable` for more informat
                 return mth(*args, **kwargs)
 
         return test_mth
-
-# Triton registrations
-def _has_triton():
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
-
-
-def _register_impls(lib):
-    """This function is called from torch/__init__.py to do any dynamic registrations. """
-
-
-    def register_sparse_cuda_impls(lib=lib):
-        from ._triton_ops import bsr_dense_mm
-
-        if bsr_dense_mm is not None:
-            lib.impl("aten::_triton_bsr_dense_mm",
-                     lambda *args, **kwargs: bsr_dense_mm(*args, skip_checks=True, **kwargs), "SparseCsrCUDA")
-
-    # This code is evaluated on import torch and therefore cannot force initialization of the cuda rt
-    # We must schedule the registration to occur lazily.
-    _lazy_call(register_sparse_cuda_impls)

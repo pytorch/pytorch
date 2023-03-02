@@ -21,6 +21,8 @@ from .misc import (
     BlackHoleVariable,
     ClosureVariable,
     ContextWrappingVariable,
+    CUDAStreamContextVariable,
+    CUDAStreamVariable,
     GetAttrVariable,
     GradModeVariable,
     InspectSignatureVariable,
@@ -35,8 +37,8 @@ from .misc import (
 )
 from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
-    DynamicShapeVariable,
     FakeItemVariable,
+    SymNodeVariable,
     TensorVariable,
     UnspecializedPythonVariable,
 )

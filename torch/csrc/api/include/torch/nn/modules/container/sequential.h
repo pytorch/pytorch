@@ -89,7 +89,6 @@ namespace nn {
 ///   must accept a single argument. If your modules need to take multiple
 ///   arguments, you should define them to take and return tuples.
 /// \endrst
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class SequentialImpl : public Cloneable<SequentialImpl> {
  public:
   using Iterator = std::vector<AnyModule>::iterator;

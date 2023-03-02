@@ -11,6 +11,7 @@
 #include <string>
 
 using c10::AliasInfo;
+using c10::AwaitType;
 using c10::BoolType;
 using c10::CapsuleType;
 using c10::ComplexType;
@@ -25,7 +26,6 @@ using c10::ListType;
 using c10::MemoryFormatType;
 using c10::NoneType;
 using c10::NumberType;
-using c10::OptionalType;
 using c10::QSchemeType;
 using c10::QuantizerType;
 using c10::RRefType;
@@ -81,7 +81,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (text.size() > 0 && islower(text[0])) {
+    if (!text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
@@ -175,7 +175,14 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
       const std::string& num = L.expect(TK_NUMBER).text();
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       std::string::size_type num_len;
-      device_idx = c10::stoi(num, &num_len);
+      try {
+        device_idx = c10::stoi(num, &num_len);
+      } catch (const std::invalid_argument& e) {
+        throw ErrorReport(L.cur())
+            << "Device index cannot be converted to integer";
+      } catch (const std::out_of_range& e) {
+        throw ErrorReport(L.cur()) << "Device index is too long";
+      }
     }
     if (dev == "cuda") {
       return c10::Device(at::kCUDA, device_idx);
@@ -192,7 +199,15 @@ c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   const std::string& num = L.expect(TK_NUMBER).text();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   std::string::size_type num_len;
-  return (bool)c10::stoi(num, &num_len);
+
+  try {
+    return (bool)c10::stoi(num, &num_len);
+  } catch (const std::invalid_argument& e) {
+    throw ErrorReport(L.cur())
+        << "Field requires_grad cannot be converted to integer";
+  } catch (const std::out_of_range& e) {
+    throw ErrorReport(L.cur()) << "Field requires_grad is too long";
+  }
 }
 
 TypePtr SchemaTypeParser::parseRefinedTensor() {
@@ -245,8 +260,15 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
           const std::string& num = L.expect(TK_NUMBER).text();
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           std::string::size_type num_len;
-          auto stride = c10::stoll(num, &num_len);
-          strides.push_back(stride);
+          try {
+            auto stride = c10::stoll(num, &num_len);
+            strides.push_back(stride);
+          } catch (const std::invalid_argument& e) {
+            throw ErrorReport(L.cur())
+                << "The stride value cannot be converted to int";
+          } catch (const std::out_of_range& e) {
+            throw ErrorReport(L.cur()) << "The stride is too big";
+          }
         });
         return;
       }
@@ -277,7 +299,14 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
     const std::string& num = L.expect(TK_NUMBER).text();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     std::string::size_type num_len;
-    int64_t dim = c10::stoll(num, &num_len);
+    int64_t dim = 0;
+    try {
+      dim = c10::stoll(num, &num_len);
+    } catch (const std::invalid_argument& e) {
+      throw ErrorReport(L.cur()) << "The number can't be converted to int";
+    } catch (const std::out_of_range& e) {
+      throw ErrorReport(L.cur()) << "Number is too big";
+    }
     if (shape_symbol) {
       L.expect(')');
       dim = -dim;
@@ -339,6 +368,14 @@ SchemaTypeParser::parseFakeAndRealType() {
     auto subalias = std::move(p.second);
     L.expect(')');
     fake_value = real_value = c10::TypeFactory::create<FutureType>(subtype);
+  } else if (L.cur().kind == TK_IDENT && L.cur().text() == "Await") {
+    L.next(); // Await
+    L.expect('(');
+    auto p = parseType();
+    auto subtype = std::move(p.first);
+    auto subalias = std::move(p.second);
+    L.expect(')');
+    fake_value = real_value = c10::TypeFactory::create<AwaitType>(subtype);
   } else if (L.cur().kind == TK_IDENT && L.cur().text() == "RRef") {
     L.next(); // RRef
     L.expect('(');

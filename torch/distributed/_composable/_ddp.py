@@ -81,7 +81,7 @@ class _DDPSink(Function):
         # Enqueue delay allreduce for static graph training on the first
         # iteration.
         if state_dict["static_graph"] and state_dict["num_iterations"] == 1:
-            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)
+            Variable._execution_engine.queue_callback(ctx.reducer._delay_all_reduce)  # type: ignore[call-arg,misc]
 
         return (None, None, *grad_outputs)
 
@@ -104,7 +104,7 @@ class DistributedDataParallel(Module):
         static_graph=False,
     ):
 
-        super(DistributedDataParallel, self).__init__()
+        super().__init__()
         self.logger: Optional[dist.Logger] = None
         if not any((p.requires_grad for p in module.parameters())):
             self._log_and_throw(
@@ -337,7 +337,7 @@ class DistributedDataParallel(Module):
     def __setstate__(self, state):
         # If serializable, then the process group should be the default one
         self.process_group = _get_default_group()
-        super(DistributedDataParallel, self).__setstate__(state)
+        super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
@@ -383,21 +383,19 @@ class DistributedDataParallel(Module):
         ]
 
         # Build list of parameters.
-        parameters = list(parameter for _, parameter in modules_and_parameters)
+        parameters = [parameter for _, parameter in modules_and_parameters]
 
         # Checks if a module will produce a sparse gradient.
         def produces_sparse_gradient(module):
-            if isinstance(module, torch.nn.Embedding) or isinstance(
-                module, torch.nn.EmbeddingBag
-            ):
+            if isinstance(module, (torch.nn.Embedding, torch.nn.EmbeddingBag)):
                 return module.sparse
             return False
 
         # Build list of booleans indicating whether or not to expect sparse
         # gradients for the corresponding parameters.
-        expect_sparse_gradient = list(
+        expect_sparse_gradient = [
             produces_sparse_gradient(module) for module, _ in modules_and_parameters
-        )
+        ]
 
         self._assign_modules_buffers()
 
@@ -472,8 +470,7 @@ class DistributedDataParallel(Module):
                 if hasattr(m, "_former_parameters")
                 else m.parameters(recurse=False)
             )
-            for p in ps:
-                yield p
+            yield from ps
 
         for m in m.modules() if recurse else [m]:
             for p in model_parameters(m):
@@ -658,7 +655,7 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallel, self).train(mode)
+        super().train(mode)
         return self
 
     # When running in join mode, schedules an allreduce to notify joined ranks

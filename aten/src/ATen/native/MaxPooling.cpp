@@ -40,7 +40,7 @@ static void check_max_pool1d(
       "max_pool1d() kernel_size must be an int, list of ints or tuple of ints of size 1 but got size ",
       kernel_size.size());
   TORCH_CHECK(
-      stride.size() == 0 || stride.size() == 1,
+      stride.empty() || stride.size() == 1,
       "max_pool1d() stride must be None, an int, list of ints, or tuple of ints of size 1 but got size ",
       stride.size());
   TORCH_CHECK(

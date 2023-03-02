@@ -75,9 +75,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
         # Tensor x Tensor
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-
             def forward(self, a, b):
                 result_0 = a / b
                 result_1 = torch.div(a, b)
@@ -123,9 +120,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
             return self.divide_(other, rounding_mode='trunc')
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-
             def forward(self, a, b):
                 a /= b
                 return a
@@ -169,9 +163,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
             return torch.divide(self, other, out=out, rounding_mode='trunc')
 
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-
             def forward(self, a, b, out):
                 return a.div(b, out=out)
 
@@ -220,16 +211,10 @@ class TestSaveLoadForOpVersion(JitTestCase):
             return torch.divide(self, other, rounding_mode='trunc')
 
         class MyModuleFloat(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleFloat, self).__init__()
-
             def forward(self, a, b: float):
                 return a / b
 
         class MyModuleInt(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleInt, self).__init__()
-
             def forward(self, a, b: int):
                 return a / b
 
@@ -279,16 +264,10 @@ class TestSaveLoadForOpVersion(JitTestCase):
             return torch.divide(other, self, rounding_mode='trunc')
 
         class MyModuleFloat(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleFloat, self).__init__()
-
             def forward(self, a, b: float):
                 return b / a
 
         class MyModuleInt(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleInt, self).__init__()
-
             def forward(self, a, b: int):
                 return b / a
 
@@ -348,17 +327,11 @@ class TestSaveLoadForOpVersion(JitTestCase):
             return self.divide_(other, rounding_mode='trunc')
 
         class MyModuleFloat(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleFloat, self).__init__()
-
             def forward(self, a, b: float):
                 a /= b
                 return a
 
         class MyModuleInt(torch.nn.Module):
-            def __init__(self):
-                super(MyModuleInt, self).__init__()
-
             def forward(self, a, b: int):
                 a /= b
                 return a
@@ -396,9 +369,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
     #   so this test verifies the behavior is unchanged.
     def test_versioned_div_scalar_scalar(self):
         class MyModule(torch.nn.Module):
-            def __init__(self):
-                super(MyModule, self).__init__()
-
             def forward(self, a: float, b: int, c: float, d: int):
                 result_0 = a / b
                 result_1 = a / c
@@ -425,9 +395,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     def test_versioned_linspace(self):
         class Module(torch.nn.Module):
-            def __init__(self):
-                super(Module, self).__init__()
-
             def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
                 c = torch.linspace(a, b, steps=5)
                 d = torch.linspace(a, b, steps=100)
@@ -455,9 +422,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     def test_versioned_linspace_out(self):
         class Module(torch.nn.Module):
-            def __init__(self):
-                super(Module, self).__init__()
-
             def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
                 return torch.linspace(a, b, steps=100, out=out)
 
@@ -484,9 +448,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     def test_versioned_logspace(self):
         class Module(torch.nn.Module):
-            def __init__(self):
-                super(Module, self).__init__()
-
             def forward(self, a: Union[int, float, complex], b: Union[int, float, complex]):
                 c = torch.logspace(a, b, steps=5)
                 d = torch.logspace(a, b, steps=100)
@@ -514,9 +475,6 @@ class TestSaveLoadForOpVersion(JitTestCase):
 
     def test_versioned_logspace_out(self):
         class Module(torch.nn.Module):
-            def __init__(self):
-                super(Module, self).__init__()
-
             def forward(self, a: Union[int, float, complex], b: Union[int, float, complex], out: torch.Tensor):
                 return torch.logspace(a, b, steps=100, out=out)
 

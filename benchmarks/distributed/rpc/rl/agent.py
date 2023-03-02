@@ -22,7 +22,7 @@ class Policy(nn.Module):
             nlayers (int): Number of layers in the model
             out_features (int): Number of features the model outputs
         """
-        super(Policy, self).__init__()
+        super().__init__()
 
         self.model = nn.Sequential(
             nn.Flatten(1, -1),

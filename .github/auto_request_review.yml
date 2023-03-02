@@ -8,7 +8,6 @@ reviewers:
       - miladm
       - bdhirsh
       - voznesenskym
-      - SherlockNoMad
       - jbschlosser
 
   per_author:
@@ -16,6 +15,7 @@ reviewers:
       - symbolic-shapes
       - antoniojkim
       - wconstab
+      - SherlockNoMad
 
 files:
   # none yet, TODO: migrate CODEOWNERS here

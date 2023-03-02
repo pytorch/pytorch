@@ -709,7 +709,7 @@ class TORCH_API RecordFunctionGuard {
 class TORCH_API DisableRecordFunctionGuard : public RecordFunctionGuard {
  public:
   DisableRecordFunctionGuard() : RecordFunctionGuard(false) {}
-  virtual ~DisableRecordFunctionGuard() = default;
+  ~DisableRecordFunctionGuard() override = default;
 };
 
 struct TORCH_API RecordFunctionTLS {

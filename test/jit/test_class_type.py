@@ -29,7 +29,7 @@ class TestClassType(JitTestCase):
         Test that modifications made to a class instance in TorchScript
         are visible in eager.
         """
-        class Foo(object):
+        class Foo:
             def __init__(self, a: int):
                 self.a = a
 
@@ -59,7 +59,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(obj.attr, 2)
 
     def test_get_with_method(self):
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.foo = x
 
@@ -74,7 +74,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_get_attr(self):
-        class FooTest(object):  # noqa: B903
+        class FooTest:  # noqa: B903
             def __init__(self, x):
                 self.foo = x
 
@@ -87,7 +87,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input)
 
     def test_in(self):
-        class FooTest(object):  # noqa: B903
+        class FooTest:  # noqa: B903
             def __init__(self):
                 pass
 
@@ -102,7 +102,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(), (True, False))
 
     def test_set_attr_in_method(self):
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x: int) -> None:
                 self.foo = x
 
@@ -120,7 +120,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_type_mismatch(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "Wrong type for attribute assignment", "self.foo = 10"):
             @torch.jit.script
-            class FooTest(object):
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
                     self.foo = 10  # should error since int != Tensor
@@ -128,7 +128,7 @@ class TestClassType(JitTestCase):
     def test_get_attr_not_initialized(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "object has no attribute or method", "self.asdf"):
             @torch.jit.script
-            class FooTest(object):
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
@@ -138,7 +138,7 @@ class TestClassType(JitTestCase):
     def test_set_attr_non_initialized(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "Tried to set nonexistent attribute", "self.bar = y"):
             @torch.jit.script
-            class FooTest(object):
+            class FooTest:
                 def __init__(self, x):
                     self.foo = x
 
@@ -160,7 +160,7 @@ class TestClassType(JitTestCase):
     def test_type_annotations(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "Expected a value of type \'bool", ""):
             @torch.jit.script  # noqa: B903
-            class FooTest(object):  # noqa: B903
+            class FooTest:  # noqa: B903
                 def __init__(self, x: bool) -> None:
                     self.foo = x
 
@@ -173,13 +173,13 @@ class TestClassType(JitTestCase):
     def test_conditional_set_attr(self):
         with self.assertRaisesRegexWithHighlight(RuntimeError, "assignment cannot be in a control-flow block", ""):
             @torch.jit.script
-            class FooTest(object):
+            class FooTest:
                 def __init__(self, x):
                     if 1 == 1:
                         self.attr = x
 
     def test_class_type_as_param(self):
-        class FooTest(object):  # noqa: B903
+        class FooTest:  # noqa: B903
             def __init__(self, x):
                 self.attr = x
 
@@ -198,7 +198,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn2(input), input)
 
     def test_out_of_order_methods(self):
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.x = x
                 self.x = self.get_stuff(x)
@@ -215,7 +215,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(fn(input), input + input)
 
     def test_save_load_with_classes(self):
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.x = x
 
@@ -245,7 +245,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_returned(self):
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.x = x
 
@@ -277,16 +277,16 @@ class TestClassType(JitTestCase):
         self.assertEqual(input, output)
 
     def test_save_load_with_classes_nested(self):
-        class FooNestedTest(object):  # noqa: B903
+        class FooNestedTest:  # noqa: B903
             def __init__(self, y):
                 self.y = y
 
-        class FooNestedTest2(object):
+        class FooNestedTest2:
             def __init__(self, y):
                 self.y = y
                 self.nested = FooNestedTest(y)
 
-        class FooTest(object):
+        class FooTest:
             def __init__(self, x):
                 self.class_attr = FooNestedTest(x)
                 self.class_attr2 = FooNestedTest2(x)
@@ -315,7 +315,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(2 * input, output)
 
     def test_python_interop(self):
-        class Foo(object):  # noqa: B903
+        class Foo:  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -341,7 +341,7 @@ class TestClassType(JitTestCase):
         self.assertEqual(y, f2.y)
 
     def test_class_specialization(self):
-        class Foo(object):  # noqa: B903
+        class Foo:  # noqa: B903
             def __init__(self, x, y):
                 self.x = x
                 self.y = y
@@ -365,7 +365,7 @@ class TestClassType(JitTestCase):
         FileCheck().check_count("prim::GetAttr", 4).run(graphstr)
 
     def test_class_sorting(self):
-        class Foo(object):  # noqa: B903
+        class Foo:  # noqa: B903
             def __init__(self, x: int) -> None:
                 self.x = x
 
@@ -429,7 +429,7 @@ class TestClassType(JitTestCase):
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "must define a __lt__", ""):
             @torch.jit.script
-            class NoMethod(object):
+            class NoMethod:
                 def __init__(self):
                     pass
 
@@ -441,7 +441,7 @@ class TestClassType(JitTestCase):
             test()
 
         @torch.jit.script
-        class WrongLt(object):
+        class WrongLt:
             def __init__(self):
                 pass
 
@@ -459,7 +459,7 @@ class TestClassType(JitTestCase):
 
     def test_class_inheritance(self):
         @torch.jit.script
-        class Base(object):
+        class Base:
             def __init__(self):
                 self.b = 2
 
@@ -538,7 +538,7 @@ class TestClassType(JitTestCase):
 
     def test_interface(self):
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self):
                 pass
 
@@ -549,7 +549,7 @@ class TestClassType(JitTestCase):
                 return 2 * x
 
         @torch.jit.script
-        class Bar(object):
+        class Bar:
             def __init__(self):
                 pass
 
@@ -560,7 +560,7 @@ class TestClassType(JitTestCase):
                 return 2 / x
 
         @torch.jit.interface
-        class OneTwo(object):
+        class OneTwo:
             def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
@@ -568,7 +568,7 @@ class TestClassType(JitTestCase):
                 pass
 
         @torch.jit.interface
-        class OneTwoThree(object):
+        class OneTwoThree:
             def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
@@ -579,7 +579,7 @@ class TestClassType(JitTestCase):
                 pass
 
         @torch.jit.interface
-        class OneTwoWrong(object):
+        class OneTwoWrong:
             def one(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 pass
 
@@ -587,7 +587,7 @@ class TestClassType(JitTestCase):
                 pass
 
         @torch.jit.script
-        class NotMember(object):
+        class NotMember:
             def __init__(self):
                 pass
 
@@ -596,7 +596,7 @@ class TestClassType(JitTestCase):
             # missing two
 
         @torch.jit.script
-        class NotMember2(object):
+        class NotMember2:
             def __init__(self):
                 pass
 
@@ -650,7 +650,7 @@ class TestClassType(JitTestCase):
         # Test interface/class python assignment
         class TestPyAssign(nn.Module):
             def __init__(self):
-                super(TestPyAssign, self).__init__()
+                super().__init__()
                 self.proxy_mod = Foo()
 
             def forward(self, x):
@@ -665,7 +665,7 @@ class TestClassType(JitTestCase):
 
         class TestPyAssignError(nn.Module):
             def __init__(self, obj):
-                super(TestPyAssignError, self).__init__()
+                super().__init__()
                 self.proxy_mod = obj
 
             def forward(self, x):
@@ -678,7 +678,7 @@ class TestClassType(JitTestCase):
             torch.jit.script(TestPyAssignError(Foo()))
 
         # test pure python object assignment to interface fails
-        class PyClass(object):
+        class PyClass:
             def __init__(self):
                 pass
 
@@ -690,7 +690,7 @@ class TestClassType(JitTestCase):
 
     def test_overloaded_fn(self):
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self, x):
                 self.x = x
 
@@ -715,7 +715,7 @@ class TestClassType(JitTestCase):
 
         # TODO - support compiling classes from strings in jit.CompilationUnit
         @torch.jit.script
-        class MyClass(object):
+        class MyClass:
             def __init__(self, x: int) -> None:
                 self.x = x
 
@@ -827,7 +827,7 @@ class TestClassType(JitTestCase):
 
     def test_cast_overloads(self):
         @torch.jit.script
-        class Foo(object):
+        class Foo:
             def __init__(self, val: float) -> None:
                 self.val = val
 
@@ -858,7 +858,7 @@ class TestClassType(JitTestCase):
         self.assertTrue("0." in (str(Foo(0.0))))
 
         @torch.jit.script
-        class BadBool(object):
+        class BadBool:
             def __init__(self):
                 pass
 
@@ -874,7 +874,7 @@ class TestClassType(JitTestCase):
 
     def test_init_compiled_first(self):
         @torch.jit.script  # noqa: B903
-        class Foo(object):  # noqa: B903
+        class Foo:  # noqa: B903
             def __before_init__(self):
                 # accessing this field should not throw, since __init__ should be compiled
                 return self.x
@@ -885,7 +885,7 @@ class TestClassType(JitTestCase):
 
     def test_class_constructs_itself(self):
         @torch.jit.script  # noqa: B903
-        class LSTMStateStack(object):  # noqa: B903
+        class LSTMStateStack:  # noqa: B903
             def __init__(self, num_layers: int, hidden_size: int) -> None:
                 self.num_layers = num_layers
                 self.hidden_size = hidden_size
@@ -903,13 +903,13 @@ class TestClassType(JitTestCase):
 
     def test_optional_type_promotion(self):
         @torch.jit.script
-        class Leaf(object):
+        class Leaf:
             def __init__(self):
                 self.x = 1
 
         # should not throw
         @torch.jit.script  # noqa: B903
-        class Tree(object):  # noqa: B903
+        class Tree:  # noqa: B903
             def __init__(self):
                 self.child = torch.jit.annotate(Optional[Leaf], None)
 
@@ -922,7 +922,7 @@ class TestClassType(JitTestCase):
         """
         with self.assertRaises(RuntimeError):
             @torch.jit.script  # noqa: B903
-            class Tree(object):  # noqa: B903
+            class Tree:  # noqa: B903
                 def __init__(self):
                     self.parent = torch.jit.annotate(Optional[Tree], None)
 
@@ -931,7 +931,7 @@ class TestClassType(JitTestCase):
             __constants__ = ["w"]
 
             def __init__(self, w):
-                super(M, self).__init__()
+                super().__init__()
                 self.w = w
 
             def forward(self, x):
@@ -953,7 +953,7 @@ class TestClassType(JitTestCase):
             self.assertEqual(m.w, m_loaded.w)
 
     def test_py_class_to_ivalue_missing_attribute(self):
-        class Foo(object):
+        class Foo:
             i : int
             f : float
 
@@ -977,7 +977,7 @@ class TestClassType(JitTestCase):
         Test unused methods on scripted classes.
         """
         @torch.jit.script
-        class Unused(object):
+        class Unused:
             def __init__(self):
                 self.count: int = 0
                 self.items: List[int] = []
@@ -1029,7 +1029,7 @@ class TestClassType(JitTestCase):
         in its type annotations.
         """
         @torch.jit.script
-        class Meta(object):
+        class Meta:
             def __init__(self, a: int):
                 self.a = a
 
@@ -1240,7 +1240,7 @@ class TestClassType(JitTestCase):
             return x + 1
 
         @torch.jit.script
-        class Properties(object):
+        class Properties:
             __jit_unused_properties__ = ["unsupported"]
 
             def __init__(self, a: int):
@@ -1268,7 +1268,7 @@ class TestClassType(JitTestCase):
                 self.a = value + 3
 
         @torch.jit.script
-        class NoSetter(object):
+        class NoSetter:
             def __init__(self, a: int):
                 self.a = a
 
@@ -1277,7 +1277,7 @@ class TestClassType(JitTestCase):
                 return free_function(self.a)
 
         @torch.jit.script
-        class MethodThatUsesProperty(object):
+        class MethodThatUsesProperty:
             def __init__(self, a: int):
                 self.a = a
 
@@ -1315,7 +1315,7 @@ class TestClassType(JitTestCase):
         Test that del can be called on an instance of a class that
         overrides __delitem__.
         """
-        class Example(object):
+        class Example:
             def __init__(self):
                 self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
 
@@ -1333,7 +1333,7 @@ class TestClassType(JitTestCase):
         self.checkScript(fn, ())
 
         # Test the case in which the class does not have __delitem__ defined.
-        class NoDelItem(object):
+        class NoDelItem:
             def __init__(self):
                 self._data: Dict[str, torch.Tensor] = {"1": torch.tensor(1.0)}
 
@@ -1359,7 +1359,7 @@ class TestClassType(JitTestCase):
         device_t = torch.device
         device_ty = torch.device
 
-        class A(object):
+        class A:
             def __init__(self):
                 pass
 
@@ -1425,13 +1425,13 @@ class TestClassType(JitTestCase):
         to an IValue that has an attribute of the wrong type.
         """
         @torch.jit.script  # noqa: B903
-        class ValHolder(object):  # noqa: B903
+        class ValHolder:  # noqa: B903
             def __init__(self, val):
                 self.val = val
 
         class Mod(nn.Module):
             def __init__(self):
-                super(Mod, self).__init__()
+                super().__init__()
                 self.mod1 = ValHolder("1")
                 self.mod2 = ValHolder("2")
 
@@ -1450,7 +1450,7 @@ class TestClassType(JitTestCase):
         Test that class types are recursively scripted when an Python instance of one
         is encountered as a module attribute.
         """
-        class Class(object):
+        class Class:
             def __init__(self, a: int):
                 self.a = a
 
@@ -1473,7 +1473,7 @@ class TestClassType(JitTestCase):
         are added as failed attributes and do not cause compilation itself
         to fail unless they are used in scripted code.
         """
-        class UnscriptableClass(object):
+        class UnscriptableClass:
             def __init__(self, a: int):
                 self.a = a
 
@@ -1511,7 +1511,7 @@ class TestClassType(JitTestCase):
 
 
     def test_unresolved_class_attributes(self):
-        class UnresolvedAttrClass(object):
+        class UnresolvedAttrClass:
             def __init__(self):
                 pass
 
