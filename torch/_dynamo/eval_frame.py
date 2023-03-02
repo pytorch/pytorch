@@ -721,7 +721,7 @@ def export(
                 f"{fullargspec.varargs}_{i}"
                 for i in range(0, len(args) - len(input_strs))
             ]
-        else:
+        elif len(args) < len(fullargspec.args):
             # 3. If there are fewer arguments in `args` than `fullargspec.args`,
             # it implies these are arguments with default values. They can be safely
             # ignored. Because Dynamo.export does not export them as part of the
