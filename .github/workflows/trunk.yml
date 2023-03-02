@@ -229,7 +229,6 @@ jobs:
       build-environment: macos-12-py3-arm64
 
   macos-12-py3-arm64-test:
-    if: false
     name: macos-12-py3-arm64
     uses: ./.github/workflows/_mac-test.yml
     needs: macos-12-py3-arm64-build

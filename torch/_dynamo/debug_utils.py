@@ -504,7 +504,7 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
     Minifier for Fx Graph modules after Aot Autograd has finished. We wrap both
     forward and backward call separately with the backend compiler_fn - like
     inductor or nvfuser. Intercepting after Aot Autograd presents neat
-    abstration, where all the params are lifted as graph inputs, making it easy
+    abstraction, where all the params are lifted as graph inputs, making it easy
     to save the graph as a string.
     """
 
@@ -522,9 +522,9 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             """
             Aot Autograd fw_compiler and bw_compiler can have fake tensors. So,
             example_inputs can be fake tensors. We can call compiler_fn (which is
-            inductor or nvfuser) with fake tensors but the actualy compiled_fn
+            inductor or nvfuser) with fake tensors but the actually compiled_fn
             should be called with real tensors. Therefore, the actual invocation
-            is deffered.
+            is deferred.
             """
             # Avoid re-compiling when we call the compiled function twice. This happens
             # when we run the model inference or training in a for loop like here
@@ -1014,7 +1014,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
                 if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
-                        "Accuracy failed for the TorchDyanmo produced graph. Creating script to minify the error."
+                        "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                     )
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),

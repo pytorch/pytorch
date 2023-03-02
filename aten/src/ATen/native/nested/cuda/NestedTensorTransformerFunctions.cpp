@@ -319,78 +319,19 @@ bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
   return true;
 }
 
-} // namespace
-
-std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, Tensor> _scaled_dot_product_flash_attention_nestedtensor_cuda(
+/**
+ * This function will take nested query, key, and value
+ * and will preprocess it in order to run with either
+ * the flash-attention or efficient-attention kernels.
+ * @return A tuple containing all the necessary data for running the fused kernels
+ */
+inline auto sdpa_nested_preprocessing(
     const Tensor& query,
     const Tensor& key,
-    const Tensor& value,
-    double dropout_p,
-    bool is_causal,
-    bool return_debug_mask) {
-  TORCH_CHECK(false, "There are currently cuda memory errors being returned from this path.")
+    const Tensor& value) {
   // Query (Batch x Num_heads x {Q_seq_len}  x Dim_per_head)
   // Key   (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
   // Value (Batch x Num_heads x {KV_seq_len} x Dim_per_head)
-  const int64_t num_heads = query.size(1);
-  const int64_t head_dim = query.size(3);
-
-  // Query -> Query (Batch x {Q_seq_len}  x Num_heads x Dim_per_head)
-  // Key   -> Key   (Batch x {KV_seq_len} x Num_heads x Dim_per_head)
-  // Value -> Value (Batch x {KV_seq_len} x Num_heads x Dim_per_head)
-  Tensor q_t = query.transpose(1, 2).contiguous();
-  Tensor k_t = key.transpose(1, 2).contiguous();
-  Tensor v_t = value.transpose(1, 2).contiguous();
-
-  // K and V have to have the same Nnz, should probably torch_check
-  // assume in order to not iterate over v
-
-  auto cumulative_and_max_q = cumulative_and_max_seq_len(q_t);
-  auto cumulative_and_max_k = cumulative_and_max_seq_len(k_t);
-
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q);
-  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k);
-
-  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q);
-  const int64_t max_seqlen_batch_k = std::get<1>(cumulative_and_max_k);
-
-  const int64_t Nnz_q  = cumulative_sequence_length_q[-1].item<int64_t>();
-  const int64_t Nnz_kv = cumulative_sequence_length_k[-1].item<int64_t>();
-
-  auto query_buffer_reshaped =
-      get_buffer(q_t).view({Nnz_q, num_heads, head_dim});
-  auto key_buffer_reshaped =
-      get_buffer(k_t).view({Nnz_kv, num_heads, head_dim});
-  auto value_buffer_reshaped =
-      get_buffer(v_t).view({Nnz_kv, num_heads, head_dim});
-
-  Tensor attention, log_sumexp, debug_attn_mask;
-  int64_t philox_seed{0}, philox_offset{0};
-  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) = at::_flash_attention_forward(
-      query_buffer_reshaped,
-      key_buffer_reshaped,
-      value_buffer_reshaped,
-      cumulative_sequence_length_q,
-      cumulative_sequence_length_k,
-      max_seqlen_batch_q,
-      max_seqlen_batch_k,
-      dropout_p,
-      is_causal,
-      return_debug_mask);
-  // Reshape output to convert nnz to batch_size and seq_len
-  attention = wrap_buffer(attention.view(-1), get_nested_size_tensor(q_t).clone()).transpose(1,2);
-  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
-}
-
-std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_cuda(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool compute_log_sumexp,
-    bool is_causal) {
-   // Query (Batch x Num_heads x {Q_seq_len}  x qk_Dim_per_head)
-  // Key   (Batch x Num_heads x {KV_seq_len} x qk_Dim_per_head)
-  // Value (Batch x Num_heads x {KV_seq_len} x v_Dim_per_head)
   const int64_t num_heads = query.size(1);
   const int64_t head_dim_qk = query.size(3);
   const int64_t head_dim_v = value.size(3);
@@ -400,18 +341,23 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
   Tensor v_t = value.transpose(1, 2);
 
   auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
-  auto cumulative_and_max_k_and_nnz_k = cumulative_and_max_seq_len(k_t);
+  auto cumulative_and_max_kv_and_nnz_kv = cumulative_and_max_seq_len(k_t);
 
-  // K and V have to have the same Nnz, should probably torch_check
+  // [TODO] K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
-  Tensor cumulative_sequence_length_k = std::get<0>(cumulative_and_max_k_and_nnz_k);
+  Tensor cumulative_sequence_length_q =
+      std::get<0>(cumulative_and_max_q_and_nnz_q);
+  Tensor cumulative_sequence_length_kv =
+      std::get<0>(cumulative_and_max_kv_and_nnz_kv);
 
-  const int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
+  const int64_t max_seqlen_batch_q =
+      std::get<1>(cumulative_and_max_q_and_nnz_q);
+  const int64_t max_seqlen_batch_kv =
+      std::get<1>(cumulative_and_max_kv_and_nnz_kv);
 
   const int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
-  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_k_and_nnz_k);
+  const int64_t Nnz_kv = std::get<2>(cumulative_and_max_kv_and_nnz_kv);
 
   Tensor query_buffer_reshaped;
   Tensor key_buffer_reshaped;
@@ -474,84 +420,117 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_nestedtensor_
       {Nnz_kv, num_heads, head_dim_v},
       {nnz_v_stride, head_v_stride, head_dim_stride},
       value_impl->get_storage_offsets()[0]);
-  std::tuple<Tensor, Tensor> attention_and_logsumexp=
+
+  auto output_shape = get_nested_size_tensor(q_t).clone();
+  if (head_dim_v != head_dim_qk) {
+    output_shape.select(1, -1).fill_(head_dim_v);
+  }
+
+  return std::make_tuple(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      output_shape);
+}
+
+} // namespace
+
+std::tuple<
+    Tensor,
+    Tensor,
+    Tensor,
+    Tensor,
+    int64_t,
+    int64_t,
+    int64_t,
+    int64_t,
+    Tensor>
+_scaled_dot_product_flash_attention_nestedtensor_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask) {
+  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
+      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
+  int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
+  std::tie(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      output_shape) = sdpa_nested_preprocessing(query, key, value);
+
+  Tensor attention, log_sumexp, debug_attn_mask;
+  int64_t philox_seed{0}, philox_offset{0};
+  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
+      at::_flash_attention_forward(
+          query_buffer_reshaped,
+          key_buffer_reshaped,
+          value_buffer_reshaped,
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_kv,
+          max_seqlen_batch_q,
+          max_seqlen_batch_kv,
+          dropout_p,
+          is_causal,
+          return_debug_mask);
+  // Reshape output to convert nnz to batch_size and seq_len
+  attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
+  return std::make_tuple(
+      attention,
+      log_sumexp,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      max_seqlen_batch_kv,
+      philox_seed,
+      philox_offset,
+      debug_attn_mask);
+}
+
+std::tuple<Tensor, Tensor>
+_scaled_dot_product_efficient_attention_nestedtensor_cuda(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool compute_log_sumexp,
+    bool is_causal) {
+  Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
+      cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
+  int64_t max_seqlen_batch_q{0};
+  std::tie(
+      query_buffer_reshaped,
+      key_buffer_reshaped,
+      value_buffer_reshaped,
+      cumulative_sequence_length_q,
+      cumulative_sequence_length_kv,
+      max_seqlen_batch_q,
+      std::ignore,
+      output_shape) = sdpa_nested_preprocessing(query, key, value);
+
+  std::tuple<Tensor, Tensor> attention_and_logsumexp =
       at::_efficient_attention_forward(
           query_buffer_reshaped.unsqueeze(0),
           key_buffer_reshaped.unsqueeze(0),
           value_buffer_reshaped.unsqueeze(0),
           cumulative_sequence_length_q,
-          cumulative_sequence_length_k,
+          cumulative_sequence_length_kv,
           max_seqlen_batch_q,
           compute_log_sumexp,
           is_causal);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = std::get<0>(attention_and_logsumexp);
-  auto attention_size = get_nested_size_tensor(q_t).clone();
-  if (head_dim_v != head_dim_qk) {
-    attention_size.select(1, -1).fill_(head_dim_v);
-  }
-  attention =
-      wrap_buffer(attention.view(-1), attention_size)
-          .transpose(1, 2);
+  attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::tie(attention, std::get<1>(attention_and_logsumexp));
-}
-
-Tensor flash_attention_helper(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    double dropout_p,
-    bool is_causal) {
-  //  Query is of size (batch_size x ragged_seq_len x (3 or 1) x n_heads x
-  //  head_did
-  int64_t head_dim{query.size(-1)};
-  int64_t num_heads{query.size(-2)};
-
-  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(query);
-  Tensor cumulative_sequence_length_q = std::get<0>(cumulative_and_max_q_and_nnz_q);
-  int64_t max_seqlen_batch_q = std::get<1>(cumulative_and_max_q_and_nnz_q);
-
-  TORCH_CHECK(
-      key.is_same(key) && query.is_same(value),
-      "Key and Value must be the same tensor");
-
-  int64_t Nnz_q = std::get<2>(cumulative_and_max_q_and_nnz_q);
-
-  // For the packed case we need to set the output size for dim 2 to 1
-  auto atten_size = get_nested_size_tensor(query).clone();
-  atten_size.index({at::indexing::Slice(), 1}) = 1;
-
-  auto qkv_buffer_reshaped = get_buffer(query)
-                                 .view({Nnz_q, 3, num_heads, head_dim})
-                                 .transpose(0, 1)
-                                 .contiguous();
-
-  auto q = qkv_buffer_reshaped[0];
-  auto k = qkv_buffer_reshaped[1];
-  auto v = qkv_buffer_reshaped[2];
-
-  TORCH_CHECK(q.is_contiguous());
-  TORCH_CHECK(k.is_contiguous());
-  TORCH_CHECK(v.is_contiguous());
-
-  // If we are passing in query, key, value all the same tensors then we have
-  // packed them into one tensor and need to slice for flash attention
-  Tensor attention =
-      std::get<0>(at::_flash_attention_forward(
-          q,
-          k,
-          v,
-          cumulative_sequence_length_q,
-          cumulative_sequence_length_q,
-          max_seqlen_batch_q,
-          max_seqlen_batch_q,
-          dropout_p,
-          is_causal,
-          false));
-  // Output of flash_attention is a regular tensor lets wrap it back up to
-  // form a nested tensor
-
-  return wrap_buffer(attention.view(-1), atten_size);
 }
 
 } // namespace native
