@@ -723,18 +723,26 @@ def export(
             ]
         elif len(args) < len(fullargspec.args):
             # 3. If there are fewer arguments in `args` than `fullargspec.args`,
-            # it implies these are arguments with default values. They can be safely
-            # ignored. Because Dynamo.export does not export them as part of the
-            # function signature.
-            assert fullargspec.defaults is not None and len(fullargspec.defaults) >= (
-                len(fullargspec.args) - len(args)
-            ), "Fewer arguments than expected"
+            # it implies these are arguments either with default values, or provided in
+            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+            # export them as part of the function signature. The latter will be handled
+            # in the next step.
+            for unprovided_arg in fullargspec.args[
+                len(args) : -len(fullargspec.defaults or [])
+            ]:
+                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
 
         # 4. Keyword arguments provided in `kwargs`.
         input_strs += list(kwargs.keys())
 
-        # 5. Keyword arguments with default values if not provided are not exported
+        # 5. Keyword-only arguments with default values if not provided are not exported
         # as part of the function signature.
+        for kwonly_arg in fullargspec.kwonlyargs:
+            kwonlydefaults = fullargspec.kwonlydefaults or {}
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
+
         return input_strs
 
     new_graph.graph._codegen = _PyTreeCodeGen(
