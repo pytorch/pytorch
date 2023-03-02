@@ -384,9 +384,7 @@ class DataChunk(list, Generic[T]):
         return res
 
     def __iter__(self) -> Iterator[T]:
-        for i in super().__iter__():
-            yield i
+        yield from super().__iter__()
 
     def raw_iterator(self) -> T:  # type: ignore[misc]
-        for i in self.items:
-            yield i
+        yield from self.items

@@ -8,6 +8,7 @@ import pytorch_test_common
 import torch
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, symbolic_helper
+from torch.onnx._internal import jit_utils
 from torch.testing._internal import common_utils
 
 
@@ -20,6 +21,17 @@ def expect_tensor(scalar_type, shape=None):
             np.testing.assert_equal(actual_type.varyingSizes(), shape)
 
     return verify
+
+
+def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
+    return jit_utils.GraphContext(
+        graph=graph,
+        block=graph.block(),
+        opset=_constants.ONNX_MAX_OPSET,
+        original_node=None,  # type: ignore[arg-type]
+        params_dict={},
+        env={},
+    ).op(op_name, *args, **kwargs)
 
 
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
@@ -43,21 +55,23 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         return g
 
     def insert_tensor_constant(self, g, tensor):
-        return g.op("Constant", value_t=tensor)
+        return g_op(g, "Constant", value_t=tensor)
 
     def test_cast(self):
         # Test cast with input of unknown scalar type.
         g = self.create_empty_graph()
         input = g.addInput()
-        cast_out = g.op("Cast", input, to_i=1)
+        cast_out = g_op(g, "Cast", input, to_i=1)
         self.run_test(g, cast_out.node(), expect_tensor("Float"))
 
     def test_constant_of_shape(self):
         # Test ConstantOfShape with input of onnx::Shape node.
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(1, 2, 3, 4))
-        shape = g.op("Shape", constant)
-        constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
+        shape = g_op(g, "Shape", constant)
+        constant_of_shape = g_op(
+            g, "ConstantOfShape", shape, value_t=torch.tensor([2.0])
+        )
         self.run_test(
             g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4))
         )
@@ -69,9 +83,11 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         constants = [
             self.insert_tensor_constant(g, torch.tensor(i + 1)) for i in range(rank)
         ]
-        shape = g.op("prim::ListConstruct", *constants)
+        shape = g_op(g, "prim::ListConstruct", *constants)
         shape.setType(torch._C.ListType.ofInts())
-        constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
+        constant_of_shape = g_op(
+            g, "ConstantOfShape", shape, value_t=torch.tensor([2.0])
+        )
         self.run_test(
             g, constant_of_shape.node(), expect_tensor("Float", shape=(1, 2, 3, 4))
         )
@@ -81,9 +97,11 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         rank = 4
         g = self.create_empty_graph()
         inputs = [g.addInput() for i in range(rank)]
-        shape = g.op("prim::ListConstruct", *inputs)
+        shape = g_op(g, "prim::ListConstruct", *inputs)
         shape.setType(torch._C.ListType.ofInts())
-        constant_of_shape = g.op("ConstantOfShape", shape, value_t=torch.tensor([2.0]))
+        constant_of_shape = g_op(
+            g, "ConstantOfShape", shape, value_t=torch.tensor([2.0])
+        )
         self.run_test(
             g,
             constant_of_shape.node(),
@@ -98,7 +116,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         )
         indices = g.addInput()
         indices.setType(indices.type().with_dtype(torch.int64).with_sizes([None]))
-        output = g.op("Gather", input, indices, axis_i=1)
+        output = g_op(g, "Gather", input, indices, axis_i=1)
         self.run_test(
             g, output.node(), expect_tensor("Float", shape=([None, None, 16, 16]))
         )
@@ -110,26 +128,26 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
             input.type().with_dtype(torch.float).with_sizes([None, 3, 16, 16])
         )
         indices = self.insert_tensor_constant(g, torch.tensor(1))
-        output = g.op("Gather", input, indices, axis_i=1)
+        output = g_op(g, "Gather", input, indices, axis_i=1)
         self.run_test(g, output.node(), expect_tensor("Float", shape=([None, 16, 16])))
 
     def test_reshape(self):
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2, 16, 5, 5))
         constant_2 = self.insert_tensor_constant(g, torch.tensor([2, 0, -1]))
-        shape = g.op("Reshape", constant, constant_2)
+        shape = g_op(g, "Reshape", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(2, 16, 25)))
 
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2, 16, 5, 4))
         constant_2 = self.insert_tensor_constant(g, torch.tensor([-1, 0, 4]))
-        shape = g.op("Reshape", constant, constant_2)
+        shape = g_op(g, "Reshape", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(10, 16, 4)))
 
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2, 16, 5, 4))
         constant_2 = self.insert_tensor_constant(g, torch.tensor([-1, 0, 0]))
-        shape = g.op("Reshape", constant, constant_2)
+        shape = g_op(g, "Reshape", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(8, 16, 5)))
 
     def test_reshape_symbolic(self):
@@ -137,7 +155,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input = g.addInput()
         input.setType(input.type().with_sizes([None, None, 2, 8]))
         constant = self.insert_tensor_constant(g, torch.tensor([0, 0, -1]))
-        output = g.op("Reshape", input, constant)
+        output = g_op(g, "Reshape", input, constant)
         self.run_test(g, output.node(), expect_tensor(None, shape=(None, None, 16)))
 
     @skipIfUnsupportedMinOpsetVersion(14)
@@ -146,7 +164,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input = g.addInput()
         input.setType(input.type().with_sizes([3, 4, 0]))
         constant = self.insert_tensor_constant(g, torch.tensor([0, 4, 3]))
-        output = g.op("Reshape", input, constant, allowzero_i=1)
+        output = g_op(g, "Reshape", input, constant, allowzero_i=1)
         self.run_test(g, output.node(), expect_tensor(None, shape=(0, 4, 3)))
 
     def test_slice(self):
@@ -158,35 +176,35 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         end = self.insert_tensor_constant(g, torch.tensor([3]))
         axis = self.insert_tensor_constant(g, torch.tensor([0]))
         step = self.insert_tensor_constant(g, torch.tensor([1]))
-        slice = g.op("Slice", input, start_input, end, axis, step)
+        slice = g_op(g, "Slice", input, start_input, end, axis, step)
         self.run_test(g, slice.node(), expect_tensor(None, shape=(None, None)))
 
     def test_broadcast_matmul(self):
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))
         constant_2 = self.insert_tensor_constant(g, torch.ones(3, 1, 2, 1))
-        shape = g.op("MatMul", constant, constant_2)
+        shape = g_op(g, "MatMul", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(3, 5, 1, 1)))
 
         # test when first input is of rank 1
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2))
         constant_2 = self.insert_tensor_constant(g, torch.ones(3, 1, 2, 1))
-        shape = g.op("MatMul", constant, constant_2)
+        shape = g_op(g, "MatMul", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(3, 1, 1)))
 
         # test when second input is of rank 1
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(5, 1, 2))
         constant_2 = self.insert_tensor_constant(g, torch.ones(2))
-        shape = g.op("MatMul", constant, constant_2)
+        shape = g_op(g, "MatMul", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=(5, 1)))
 
         # test when both inputs are of rank 1
         g = self.create_empty_graph()
         constant = self.insert_tensor_constant(g, torch.ones(2))
         constant_2 = self.insert_tensor_constant(g, torch.ones(2))
-        shape = g.op("MatMul", constant, constant_2)
+        shape = g_op(g, "MatMul", constant, constant_2)
         self.run_test(g, shape.node(), expect_tensor("Float", shape=()))
 
     def test_expand(self):
@@ -194,8 +212,8 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input = g.addInput()
         constant = self.insert_tensor_constant(g, torch.ones(2, 4))
         input.setType(constant.type().with_sizes([None, None]))
-        shape = g.op("Shape", input)
-        expand = g.op("Expand", constant, shape)
+        shape = g_op(g, "Shape", input)
+        expand = g_op(g, "Expand", constant, shape)
         self.run_test(g, expand.node(), expect_tensor("Float", shape=(None, None)))
 
     def test_pad(self):
@@ -203,8 +221,8 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
         constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
-        none = g.op("prim::Constant").setType(torch.NoneType.get())
-        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        none = g_op(g, "prim::Constant").setType(torch.NoneType.get())
+        pad = g_op(g, "Pad", input, constant, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, 322, 102)))
 
     def test_pad_with_dynamic_input_shape(self):
@@ -212,8 +230,8 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.float).with_sizes([3, None, None]))
         constant = self.insert_tensor_constant(g, torch.ones(6, dtype=torch.long))
-        none = g.op("prim::Constant").setType(torch.NoneType.get())
-        pad = g.op("Pad", input, constant, none, mode_s="constant")
+        none = g_op(g, "prim::Constant").setType(torch.NoneType.get())
+        pad = g_op(g, "Pad", input, constant, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(5, None, None)))
 
     def test_pad_with_dynamic_pad_size(self):
@@ -222,19 +240,20 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input.setType(input.type().with_dtype(torch.float).with_sizes([3, 320, 100]))
         pad_size = g.addInput()
         pad_size.setType(pad_size.type().with_dtype(torch.long).with_sizes([6]))
-        none = g.op("prim::Constant").setType(torch.NoneType.get())
-        pad = g.op("Pad", input, pad_size, none, mode_s="constant")
+        none = g_op(g, "prim::Constant").setType(torch.NoneType.get())
+        pad = g_op(g, "Pad", input, pad_size, none, mode_s="constant")
         self.run_test(g, pad.node(), expect_tensor("Float", shape=(None, None, None)))
 
     def test_resize(self):
         g = self.create_empty_graph()
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
-        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        none = g_op(g, "prim::Constant").setType(torch.NoneType.get())
         scales = self.insert_tensor_constant(
             g, torch.tensor([1, 1, 2, 2], dtype=torch.float)
         )
-        resize = g.op(
+        resize = g_op(
+            g,
             "Resize",
             input,
             none,
@@ -250,7 +269,7 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         g = self.create_empty_graph()
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.float).with_sizes([4, 32, 64, 64]))
-        none = g.op("prim::Constant").setType(torch.NoneType.get())
+        none = g_op(g, "prim::Constant").setType(torch.NoneType.get())
         scale_1 = self.insert_tensor_constant(
             g, torch.tensor([1, 1], dtype=torch.float)
         )
@@ -258,8 +277,9 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
             g, torch.tensor([2, 2], dtype=torch.float)
         )
         # `scales` values should be statically known due to constant folding in shape inference.
-        scales = g.op("Concat", scale_1, scale_2, axis_i=0)
-        resize = g.op(
+        scales = g_op(g, "Concat", scale_1, scale_2, axis_i=0)
+        resize = g_op(
+            g,
             "Resize",
             input,
             none,
@@ -275,14 +295,14 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         g = self.create_empty_graph()
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
-        reduce_prod = g.op("ReduceProd", input, axes_i=[0])
+        reduce_prod = g_op(g, "ReduceProd", input, axes_i=[0])
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
 
     def test_reduce_prod_without_axes(self):
         g = self.create_empty_graph()
         input = g.addInput()
         input.setType(input.type().with_dtype(torch.long).with_sizes([2]))
-        reduce_prod = g.op("ReduceProd", input)
+        reduce_prod = g_op(g, "ReduceProd", input)
         self.run_test(g, reduce_prod.node(), expect_tensor("Long", shape=(1,)))
 
     def test_proceeding_nodes_use_prim_pack_padded_output_dtype_correctly(self):
@@ -291,14 +311,14 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
         input.setType(input.type().with_dtype(torch.float).with_sizes([4, 16]))
         length = g.addInput()
         length.setType(length.type().with_dtype(torch.long).with_sizes([4]))
-        padded, batch_size = g.op("prim::PackPadded", input, length, outputs=2)
+        padded, batch_size = g_op(g, "prim::PackPadded", input, length, outputs=2)
         # `prim::PackPadded` only occurs in tracing mode. Hence its outputs inherits
         # shape and data type from traced graph.
         padded.setType(padded.type().with_dtype(torch.float).with_sizes([None, None]))
         batch_size.setType(batch_size.type().with_dtype(torch.long).with_sizes([None]))
         # `Gather` should use the data type of `batch_size` as the data type of its output.
         gather_idx = self.insert_tensor_constant(g, torch.tensor([0], dtype=torch.long))
-        gather = g.op("Gather", batch_size, gather_idx, axis_i=0)
+        gather = g_op(g, "Gather", batch_size, gather_idx, axis_i=0)
         self.run_test(g, gather.node(), expect_tensor("Long", shape=(None,)))
 
 

@@ -10,12 +10,12 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 class TestAutocastCPU(TestCase):
     def setUp(self):
-        super(TestAutocastCPU, self).setUp()
+        super().setUp()
         self.autocast_lists = AutocastCPUTestLists(torch.device('cpu'))
 
     def tearDown(self):
         del self.autocast_lists
-        super(TestAutocastCPU, self).tearDown()
+        super().tearDown()
 
     def _run_autocast_outofplace(self, op, args, run_as_type, out_type=None, module=torch, add_kwargs=None):
         # helper to cast args

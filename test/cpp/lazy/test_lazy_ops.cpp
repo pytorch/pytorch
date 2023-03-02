@@ -956,7 +956,7 @@ TEST_F(LazyOpsTest, TestIntegerAdd) {
       torch::Tensor b =
           torch::randint(0, 63, {2, 2}, torch::TensorOptions(type));
       torch::Scalar one =
-          isIntegralType(type) ? torch::Scalar(1) : torch::Scalar(1.0);
+          isIntegralType(type, false) ? torch::Scalar(1) : torch::Scalar(1.0);
       torch::Tensor c = torch::add(b, one);
 
       torch::Tensor lazy_a = CopyToDevice(a, device);
@@ -1553,7 +1553,7 @@ TEST_F(LazyOpsTest, TestStdWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1573,7 +1573,7 @@ TEST_F(LazyOpsTest, TestStdMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1710,7 +1710,7 @@ TEST_F(LazyOpsTest, TestVarWithDim) {
 TEST_F(LazyOpsTest, TestVarWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (bool keepDim : {true, false}) {
       for (const auto& correction : corrections) {
@@ -1730,7 +1730,7 @@ TEST_F(LazyOpsTest, TestVarWithCorrection) {
 TEST_F(LazyOpsTest, TestVarMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<int64_t> corrections[] = {1, 2, c10::nullopt};
+  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (const auto& correction : corrections) {
       for (auto keepdim : {true, false}) {

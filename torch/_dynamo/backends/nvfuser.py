@@ -3,7 +3,7 @@ from functools import partial
 
 import torch
 from ..backends.common import aot_autograd, mem_efficient_fusion_kwargs
-from .registry import register_backend
+from .registry import register_backend, register_debug_backend
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ aot_nvprims_aten = create_nvprims_backend(executor="aten")
 # supported by nvFuser. This is the preferred backend for nvFuser+PrimTorch.
 register_backend(name="nvprims_nvfuser", compiler_fn=aot_nvprims_nvfuser)
 # This is useful for debugging. Can be removed later.
-register_backend(name="nvprims_aten", compiler_fn=aot_nvprims_aten)
+register_debug_backend(name="nvprims_aten", compiler_fn=aot_nvprims_aten)
 
 
 # Use min cut rematerialization and TorchScript+nvFuser with AOT Autograd

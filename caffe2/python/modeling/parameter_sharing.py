@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class ParameterSharingContext(object):
+class ParameterSharingContext:
     """
     This class manages scope driven way of parameter sharing across different
     NameScopes.

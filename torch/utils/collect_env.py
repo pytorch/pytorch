@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 # Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
@@ -181,7 +180,7 @@ def get_cudnn_version(run_lambda):
     if not files_set:
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files_set))
+    files = sorted(files_set)
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)

@@ -108,10 +108,10 @@ def download_gha_artifacts(
 
 def upload_to_rockset(collection: str, docs: List[Any]) -> None:
     print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    client = rockset.RocksetClient(
+        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
-    client.Collection.retrieve(collection).add_docs(docs)
+    client.Documents.add_documents(collection=collection, data=docs)
     print("Done!")
 
 

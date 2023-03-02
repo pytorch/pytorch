@@ -1,5 +1,6 @@
 #include <random>
 
+#include <c10/core/alignment.h>
 #include <gtest/gtest.h>
 #include "caffe2/core/context.h"
 #include "caffe2/proto/caffe2_pb.h"

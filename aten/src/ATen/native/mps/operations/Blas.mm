@@ -20,6 +20,9 @@ Tensor dot_mps(
   const Tensor &self,
   const Tensor &other)
 {
+
+  TORCH_CHECK(self.scalar_type() != ScalarType::Long, "MPS: dot op doesn't support int64 input")
+
   using namespace mps;
   auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 

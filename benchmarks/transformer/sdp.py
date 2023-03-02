@@ -339,7 +339,7 @@ def main(save_path: Optional[Path]):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--save_path", type=str, help="Path to save the results")
+    parser.add_argument("--save-path", "--save_path", type=str, help="Path to save the results")
 
     args = parser.parse_args()
     save_path = Path(args.save_path) if args.save_path else None

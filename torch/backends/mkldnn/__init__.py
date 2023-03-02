@@ -10,7 +10,7 @@ def is_available():
 VERBOSE_OFF = 0
 VERBOSE_ON = 1
 VERBOSE_ON_CREATION = 2
-class verbose(object):
+class verbose:
     """
     On-demand oneDNN (former MKL-DNN) verbosing functionality
     To make it easier to debug performance issues, oneDNN can dump verbose
@@ -70,7 +70,7 @@ def flags(enabled=False):
 
 class MkldnnModule(PropModule):
     def __init__(self, m, name):
-        super(MkldnnModule, self).__init__(m, name)
+        super().__init__(m, name)
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
 

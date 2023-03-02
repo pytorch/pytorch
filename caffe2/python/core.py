@@ -200,7 +200,7 @@ def InferOpDeviceAsBlobDevices(op):
 GradientSlice = namedtuple('GradientSlice', ['indices', 'values'])
 
 
-class BlobReference(object):
+class BlobReference:
     """A wrapper around a blob in a net.
 
     BlobReference gives us a way to refer to the network that the blob is
@@ -485,7 +485,7 @@ SparseGradGenMeta = namedtuple('SparseGradGenMeta', [
 ])
 
 
-class IR(object):
+class IR:
     """A simple IR class to keep track of all intermediate representations used
     in the gradient computation.
     """
@@ -1103,7 +1103,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         return all_gradient_ops, all_input_to_grad_out
 
 
-class GradientRegistry(object):
+class GradientRegistry:
     """GradientRegistry holds the mapping from operators to their gradients."""
     gradient_registry_ = {}
 
@@ -1444,7 +1444,7 @@ def _recover_record_by_prefix(names, prefix=''):
         col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
 
 
-class Net(object):
+class Net:
     _net_names_used = set()
     operator_registry_ = {}
 
@@ -2666,7 +2666,7 @@ def _add_net_to_dict(net_dict, net):
         return True
 
 
-class ExecutionStep(object):
+class ExecutionStep:
     _step_names_used = set()
 
     @staticmethod
@@ -2872,7 +2872,7 @@ def add_nets_in_order(step, net_list):
         net_list.append(proto.report_net)
 
 
-class Plan(object):
+class Plan:
 
     def __init__(self, name_or_step):
         self._plan = caffe2_pb2.PlanDef()

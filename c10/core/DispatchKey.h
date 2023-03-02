@@ -2,11 +2,8 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/ArrayRef.h>
-#include <c10/util/Exception.h>
 #include <ostream>
 #include <string>
-#include <vector>
 
 namespace c10 {
 
@@ -26,6 +23,10 @@ namespace c10 {
 // WARNING!  If you add a new backend component to the end of this list,
 // make sure you update PrivateUse3Bit.  (But you shouldn't: private use
 // keys should have higher precedence than all built-in keys)
+
+// If you add a new (non-privateuse) backend here,
+// make sure to add an Autograd<Backend> fallthrough kernel
+// in aten/src/ATen/core/VariableFallbackKernel.cpp
 
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \

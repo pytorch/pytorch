@@ -1,9 +1,13 @@
 import functools
+import warnings
 from typing import Callable, Dict, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.distributed.nn.functional import (
     reduce_scatter,
@@ -117,6 +121,7 @@ class _PartialTensor(torch.Tensor):
     __slots__ = ["_process_group", "_local_shard", "_reduce_op"]
 
     def __new__(cls, local_shard, process_group=None, reduce_op=distributed_c10d.ReduceOp.SUM):
+        warnings.warn(DEPRECATE_MSG)
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             local_shard.size(),
@@ -158,6 +163,7 @@ class _PartialTensor(torch.Tensor):
         """
         from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 
+        warnings.warn(DEPRECATE_MSG)
         if not isinstance(resharding_spec, shard_spec.ChunkShardingSpec):
             raise NotImplementedError("Only ChunkShardingSpec supported for reshard.")
         if self._local_shard.is_complex():
@@ -219,6 +225,7 @@ class _PartialTensor(torch.Tensor):
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
+        warnings.warn(DEPRECATE_MSG)
         # Find process_group
         process_group = None
 
@@ -252,7 +259,7 @@ class _PartialTensor(torch.Tensor):
         )
 
     def __repr__(self):
-        return f"PartialTensor({super(_PartialTensor, self).__repr__()})"
+        return f"PartialTensor({super().__repr__()})"
 
 def _transpose_impl(types, args=(), kwargs=None, process_group=None):
     partial_tensor = args[0]

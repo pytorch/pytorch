@@ -370,7 +370,7 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     dim2 = normalize_dim(dim2, ndim)
     assert dim1 < ndim
     assert dim2 < ndim
-    dimmap = list(InputDim(i) for i in range(ndim))
+    dimmap = [InputDim(i) for i in range(ndim)]
     swapdim = dimmap[dim1]
     dimmap[dim1] = dimmap[dim2]
     dimmap[dim2] = swapdim
@@ -480,7 +480,7 @@ def propagate_shape_and_sharding(
       if the leftmost split size is divisible by the mesh dimension
     """
     assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = set(s.dim for s in in_shard if isinstance(s, Shard))
+    sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, Shard)}
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     shardable_dims: torch.Tensor = torch.ones(
         (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool
@@ -614,12 +614,10 @@ def register_prop_rule_map(
             output_dtensor_spec = DTensorSpec(
                 mesh=input_dtensor_spec.mesh,
                 placements=shard_out,
-                shape=torch.Size(global_out_shape),
-                ndim=len(global_out_shape),
             )
-            local_out_shape = output_dtensor_spec.local_shape
+            local_out_shape = output_dtensor_spec._local_shape_from_global_shape(list(global_out_shape))
 
-            # We only need the local shape to lower he call into the local op
+            # We only need the local shape to lower the call into the local op
             args = op_schema.args_schema
             shape_argnum = spec.shape_argnum
             if shape_argnum is not None:
@@ -651,8 +649,7 @@ def register_prop_rule_map(
                             DTensorSpec(
                                 placements=suggested_placements,
                                 mesh=input_dtensor_spec.mesh,
-                                ndim=input_dtensor_spec.ndim,
-                                shape=input_dtensor_spec.shape,
+                                tensor_meta=input_dtensor_spec.tensor_meta,
                             ),
                         )
                         + op_schema.args_schema[1:],

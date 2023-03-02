@@ -16,13 +16,14 @@ static PyObject* THPStream_pynew(
   int64_t stream_id = 0;
   int64_t device_index = 0;
   int64_t device_type = 0;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,clang-diagnostic-writable-strings)
-  static char* kwlist[] = {"stream_id", "device_index", "device_type", nullptr};
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+  constexpr const char* kwlist[] = {
+      "stream_id", "device_index", "device_type", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
           "|LLL",
-          kwlist,
+          const_cast<char**>(kwlist),
           &stream_id,
           &device_index,
           &device_type)) {

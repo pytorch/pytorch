@@ -1,4 +1,3 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
 
 import hashlib
 import torch
@@ -57,8 +56,7 @@ if HAS_PYDOT:
         Visualize a torch.fx.Graph with graphviz
         Basic usage:
             g = FxGraphDrawer(symbolic_traced, "resnet18")
-            with open("a.svg", "w") as f:
-                f.write(g.get_dot_graph().create_svg())
+            g.get_dot_graph().write_svg("a.svg")
         """
 
         def __init__(

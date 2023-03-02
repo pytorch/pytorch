@@ -15,7 +15,7 @@ _enabled = False
 def _enable_layers(dims):
     global _enabled
     assert not _enabled
-    input = list(sorted((d._level, d.size) for d in dims if not isinstance(d, int)))
+    input = sorted((d._level, d.size) for d in dims if not isinstance(d, int))
     n = len(input)
     try:
         _vmap_add_layers(input)

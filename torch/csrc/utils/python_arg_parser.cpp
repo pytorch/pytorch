@@ -350,7 +350,6 @@ auto handle_torch_function_no_python_arg_parser(
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
     for (auto& arg : overloaded_args) {
-      // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
       if (!torch_function) {
@@ -784,6 +783,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
+      if (torch::is_symfloat(py::handle(obj))) {
+        // This will induce a guard
+        return true;
+      }
       return false;
     }
     case ParameterType::INT64: {
@@ -794,6 +797,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) &&
             !var.requires_grad() && var.dim() == 0;
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        // This will induce a guard
+        return true;
       }
       return false;
     }

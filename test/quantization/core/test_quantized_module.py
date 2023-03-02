@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.quantization
@@ -395,15 +395,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             qconv_module, [example_input_q],
             check_save_load=True)
 
-        class _FusedModule_two_input_args(torch.nn.intrinsic._FusedModule):
-            # Help Module for ConvAdd2d since torch.nn.intrinsic._FusedModule only support one input arg
+        class _FusedModule_two_input_args(torch.ao.nn.intrinsic._FusedModule):
+            # Help Module for ConvAdd2d since torch.ao.nn.intrinsic._FusedModule only support one input arg
             def forward(self, x1, x2):
                 input = self[0](x1, x2)
                 return input
 
         # Test from_float
         fused_conv_module = _FusedModule_two_input_args(conv_module) \
-            if post_op in ["add", "add_relu"] else torch.nn.intrinsic._FusedModule(conv_module)
+            if post_op in ["add", "add_relu"] else torch.ao.nn.intrinsic._FusedModule(conv_module)
 
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
@@ -940,7 +940,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         ref1 = mq1(data2)
 
         m2 = get_model()
-        m2.qconfig = torch.quantization.default_qconfig
+        m2.qconfig = torch.ao.quantization.default_qconfig
         mp2 = torch.ao.quantization.prepare(m2)
         mq2 = torch.ao.quantization.convert(mp2)
 
@@ -1009,7 +1009,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         ref1 = mq1(data2)
 
         m2 = get_model()
-        m2.qconfig = torch.quantization.default_qconfig
+        m2.qconfig = torch.ao.quantization.default_qconfig
         mp2 = torch.ao.quantization.prepare(m2)
         mq2 = torch.ao.quantization.convert(mp2)
 
@@ -1202,6 +1202,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
 
     def test_sigmoid(self):
         self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
+
+    def _test_hard_swish_serialization(self):
+        scale_original = 10.0 / 256
+        zero_point_original = 1.0
+
+        quant_mod_original = nnq.Hardswish(scale_original, zero_point_original)
+        state_dict = quant_mod_original.state_dict()
+
+        scale_new = 5.0 / 256
+        zero_point_new = 2.0
+        quant_mod_new = nnq.Hardswish(scale_new, zero_point_new)
+        quant_mod_new.load_state_dict(state_dict)
+
+        self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
+        self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
+
+    def test_hard_swish(self):
+        self._test_activation_module_impl("Hardswish", nn.Hardswish, nnq.Hardswish, {})
+        self._test_hard_swish_serialization()
 
     @given(
         num_embeddings=st.integers(10, 50),

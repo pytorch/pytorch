@@ -1,5 +1,5 @@
 import sys
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple, cast
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
@@ -39,12 +39,23 @@ def get_latest_commits() -> List[str]:
 
     return commits
 
-def query_commits(commits: List[str], qlambda: Any) -> Any:
-    params = rockset.ParamDict()
-    params['shas'] = ",".join(commits)
-    results = qlambda.execute(parameters=params)
+def query_commits(commits: List[str]) -> List[Dict[str, Any]]:
+    rs = rockset.RocksetClient(
+        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    )
+    params = [{
+        "name": "shas",
+        "type": "string",
+        "value": ",".join(commits)
+    }]
+    res = rs.QueryLambdas.execute_query_lambda(
+        query_lambda='commit_jobs_batch_query',
+        version='8003fdfd18b64696',
+        workspace='commons',
+        parameters=params
+    )
 
-    return results
+    return cast(List[Dict[str, Any]], res.results)
 
 def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     print(commit)
@@ -52,9 +63,9 @@ def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
         if check['sha'] == commit:
             print(f"\t{check['conclusion']:>10}: {check['name']}")
 
-def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, Any]]:
+def get_commit_results(commit: str, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     workflow_checks = []
-    for check in results['results']:
+    for check in results:
         if check['sha'] == commit:
             workflow_checks.append(WorkflowCheck(
                 workflowName=check['workflowName'],
@@ -64,7 +75,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
+def isGreen(commit: str, results: List[Dict[str, Any]]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
 
     regex = {
@@ -91,7 +102,7 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
 
     return (True, "")
 
-def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
+def get_latest_green_commit(commits: List[str], results: List[Dict[str, Any]]) -> Any:
     for commit in commits:
         eprint(f"Checking {commit}")
         is_green, msg = isGreen(commit, results)
@@ -103,16 +114,9 @@ def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     return None
 
 def main() -> None:
-    rs = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
-    )
-    qlambda = rs.QueryLambda.retrieve(
-        'commit_jobs_batch_query',
-        version='8003fdfd18b64696',
-        workspace='commons')
 
     commits = get_latest_commits()
-    results = query_commits(commits, qlambda)
+    results = query_commits(commits)
 
     latest_viable_commit = get_latest_green_commit(commits, results)
     print(latest_viable_commit)

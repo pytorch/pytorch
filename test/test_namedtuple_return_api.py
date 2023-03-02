@@ -167,7 +167,7 @@ class TestNamedTupleAPI(TestCase):
                     ret3 = meth(*op.input)
                     check_namedtuple(ret3, op.names)
 
-        all_covered_operators = set([x for y in operators for x in y.operators])
+        all_covered_operators = {x for y in operators for x in y.operators}
 
         self.assertEqual(all_operators_with_namedtuple_return, all_covered_operators, textwrap.dedent('''
         The set of covered operators does not match the `all_operators_with_namedtuple_return` of

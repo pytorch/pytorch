@@ -51,7 +51,7 @@ class Dirichlet(ExponentialFamily):
             raise ValueError("`concentration` parameter must be at least one-dimensional.")
         self.concentration = concentration
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
-        super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Dirichlet, _instance)

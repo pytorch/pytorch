@@ -90,7 +90,7 @@ def _map_mt_args_kwargs(args, kwargs, map_fn):
 
 def _wrap_result(result_data, result_mask):
     if isinstance(result_data, list):
-        return list(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
+        return [_wrap_result(r, m) for (r, m) in zip(result_data, result_mask)]
     if isinstance(result_data, tuple):
         return tuple(_wrap_result(r, m) for (r, m) in zip(result_data, result_mask))
     if torch.is_tensor(result_data):

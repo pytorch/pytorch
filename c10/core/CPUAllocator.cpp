@@ -5,6 +5,7 @@
 #include <c10/core/impl/alloc_cpu.h>
 #include <c10/mobile/CPUCachingAllocator.h>
 #include <c10/mobile/CPUProfilingAllocator.h>
+#include <c10/util/Logging.h>
 
 // TODO: rename flag to C10
 C10_DEFINE_bool(

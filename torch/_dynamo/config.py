@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 from os.path import abspath, dirname
 
 import torch
@@ -23,7 +24,7 @@ output_code = False
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # If true, traced graph outputs will be outputted as Python GraphModule code.
 # If false, traced graph outputs will be outputted in tabular form.
@@ -58,6 +59,12 @@ constant_functions = {
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
+
+# This is a temporarily flag, which changes the behavior of dynamic_shapes=True.
+# When assume_static_by_default is True, we only allocate symbols for shapes marked dynamic via mark_dynamic.
+# NOTE - this flag can be removed once we can run dynamic_shapes=False w/ the mark_dynamic API
+# see [Note - on the state of mark_dynamic]
+assume_static_by_default = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
 guard_nn_modules = False
@@ -131,7 +138,7 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # Compiler compilation debug info
 # 1: Dumps the original graph out to repro.py if compilation fails
 # 2: Dumps a minifier_launcher.py if compilation fails.
-# 3: Always dumps a minifier_laucher.py. Good for segfaults.
+# 3: Always dumps a minifier_launcher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
@@ -154,6 +161,13 @@ repro_tolerance = 1e-3
 # This requires dynamic_shapes to be True.
 capture_scalar_outputs = False
 
+# Not all backends support operators that have dynamic output shape (e.g.,
+# nonzero, unique).  When this flag is set to False, we introduce a graph
+# break instead of capturing.  This requires dynamic_shapes to be True.
+# If you set this to True, you probably also want capture_scalar_outputs
+# (these are separated for historical reasons).
+capture_dynamic_output_shape_ops = False
+
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
@@ -171,6 +185,9 @@ raise_on_ctx_manager_usage = True
 # If True, raise when aot autograd is unsafe to use
 raise_on_unsafe_aot_autograd = False
 
+# Throw an error if backend changes without reset
+raise_on_backend_change = False
+
 # If true, error with a better message if we symbolically trace over a
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
@@ -181,7 +198,16 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
-debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
+if is_fbcode():
+    debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
+else:
+    debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
+
 
 # this is to resolve a import problem in fbcode, we will be deleting
 # this very shortly

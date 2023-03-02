@@ -219,9 +219,6 @@ class TestLazyModules(TestCase):
         functions successfully.
         """
         class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def initialize_parameters(self, input):
                 return None
 
@@ -242,9 +239,6 @@ class TestLazyModules(TestCase):
         functions successfully.
         """
         class TestModule(torch.nn.modules.lazy.LazyModuleMixin, torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def initialize_parameters(self, input):
                 return None
 
@@ -551,7 +545,7 @@ class TestLazyModules(TestCase):
     def test_chained_initialization(self):
         class MyNetwork(torch.nn.Module):
             def __init__(self):
-                super(MyNetwork, self).__init__()
+                super().__init__()
                 self.linear_1 = torch.nn.LazyLinear(15)
                 self.linear_2 = torch.nn.LazyLinear(10)
 

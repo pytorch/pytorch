@@ -6,7 +6,6 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -127,7 +126,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+        _clear_grads_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -386,15 +385,23 @@ def _local_post_state_dict_hook(
     # to get flat_param to get the metadata.
     assert _module_handles(fsdp_state, module), "Should have returned early"
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
-    # Construct a ShardedTensor from the flat_param.
+    # Constructs a ShardedTensor from the flat_param "without" padding.
+    # Removing the padding allows users to change the number of ranks
+    # when loading the local_state_dict.
     full_numel = flat_param._unpadded_unsharded_size.numel()  # type: ignore[attr-defined]
     shard_offset = flat_param.numel() * fsdp_state.rank
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
-    if valid_data_size > 0 and flat_param._shard_numel_padded > 0:
-        flat_param = flat_param.narrow(0, 0, valid_data_size)
-    local_shards = [
-        Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
-    ]
+    if valid_data_size > 0:
+        # If FlatParameter is returned, FlatParameter._local_shard cause a
+        # pickling issue (can be torch.save but not torch.load). Since there
+        # is no benefit for state_dict to return the actual FlatParameter class,
+        # a view (which is a tensor) of the FlatParameter will be returned.
+        flat_param = flat_param[:valid_data_size].view(valid_data_size)
+        local_shards = [
+            Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
+        ]
+    else:
+        local_shards = []
     sharded_tensor = init_from_local_shards(
         local_shards, full_numel, process_group=fsdp_state.process_group
     )  # type: ignore[assignment]
@@ -436,20 +443,24 @@ def _local_pre_load_state_dict_hook(
     ), "Tensors in local_state_dict should be ShardedTensor."
 
     # Convert the ShardedTensor to a Tensor.
-    shards = load_tensor.local_shards()
-    assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
-    load_tensor = shards[0].tensor
-
-    # Get the metadata of the flat_param to decide whether to pad the loaded
-    # tensor.
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
     assert flat_param is not None
-    if flat_param._shard_numel_padded not in (0, flat_param.numel()):
-        assert load_tensor.numel() < flat_param.numel(), (
-            f"Local shard size = {flat_param.numel()} and the tensor in "
-            f"the state_dict is {load_tensor.numel()}."
-        )
-        load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
+    valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
+    shards = load_tensor.local_shards()
+    if valid_data_size > 0:
+        assert len(shards), "load_local_state_dict assume one shard per ShardedTensor."
+        load_tensor = shards[0].tensor
+
+        # Get the metadata of the flat_param to decide whether to pad the loaded
+        # tensor.
+        if flat_param._shard_numel_padded > 0:
+            assert load_tensor.numel() < flat_param.numel(), (
+                f"Local shard size = {flat_param.numel()} and the tensor in "
+                f"the state_dict is {load_tensor.numel()}."
+            )
+            load_tensor = F.pad(load_tensor, [0, flat_param._shard_numel_padded])
+    else:
+        load_tensor = flat_param
     state_dict[fqn] = load_tensor
 
 

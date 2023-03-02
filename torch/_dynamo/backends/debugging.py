@@ -6,7 +6,7 @@ from functorch.compile import min_cut_rematerialization_partition, nop
 import torch
 from torch._functorch.compilers import ts_compile
 from .common import aot_autograd
-from .registry import register_backend
+from .registry import register_debug_backend as register_backend
 
 """
 This file contains TorchDynamo backends intended for debugging uses.

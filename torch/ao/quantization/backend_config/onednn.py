@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.ao.nn.intrinsic as nni
 import torch.nn.functional as F
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.quantized.reference as nnqr
 from ._common_operator_config_utils import (
     _get_conv_configs,
     _get_linear_configs,

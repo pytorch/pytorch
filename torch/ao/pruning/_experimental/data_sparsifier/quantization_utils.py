@@ -85,16 +85,16 @@ def post_training_sparse_quantize(model,
         for _, emb_module in embedding_modules:
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
-        torch.quantization.prepare(model, inplace=True)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.prepare(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
 
     else:
         # quantize
         for _, emb_module in embedding_modules:
             emb_module.qconfig = torch.ao.quantization.float_qparams_weight_only_qconfig
 
-        torch.quantization.prepare(model, inplace=True)
-        torch.quantization.convert(model, inplace=True)
+        torch.ao.quantization.prepare(model, inplace=True)
+        torch.ao.quantization.convert(model, inplace=True)
 
         # retrieve scale & zero_points
         quantize_params: Dict[str, Dict] = {'scales': {}, 'zero_points': {},

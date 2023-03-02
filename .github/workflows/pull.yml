@@ -27,8 +27,6 @@ jobs:
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -146,7 +144,13 @@ jobs:
       docker-image-name: pytorch-linux-bionic-py3.11-clang9
       test-matrix: |
         { include: [
-          { config: "smoke", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-py3_11-clang9-test:
@@ -290,12 +294,29 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
+  linux-bionic-cpu-py3_10-gcc7-bazel-test:
+    name: linux-bionic-cpu-py3.10-gcc7-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    with:
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      cuda-version: cpu
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+        ]}
+
   linux-bionic-cuda11_7-py3_10-gcc7-bazel-test:
     name: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      cuda-version: "11.7"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
     name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single

@@ -132,11 +132,24 @@ torchgen/packaged/*
 .ipynb_checkpoints
 
 # Editor temporaries
+*.swa
+*.swb
+*.swc
+*.swd
+*.swe
+*.swf
+*.swg
+*.swh
+*.swi
+*.swj
+*.swk
+*.swl
+*.swm
 *.swn
 *.swo
 *.swp
-*.swm
 *~
+.~lock.*
 
 # macOS dir files
 .DS_Store
@@ -343,3 +356,4 @@ venv/
 
 # Log files
 *.log
+sweep/

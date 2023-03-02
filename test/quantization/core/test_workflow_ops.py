@@ -629,7 +629,7 @@ class TestFakeQuantizeOps(TestCase):
     def test_fake_quant_preserves_qparam_shapes_for_activations(self):
         class Model(nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
                 self.linear = nn.Linear(4, 4)
 
             def forward(self, x):

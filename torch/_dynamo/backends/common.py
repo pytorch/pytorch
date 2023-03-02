@@ -84,9 +84,15 @@ def fake_tensor_unsupported(fn):
     def defake(x):
         if not isinstance(x, FakeTensor):
             return x
+        if x._has_symbolic_sizes_strides:
+            size = [s.node.shape_env.size_hint(s.node.expr) for s in x.size()]
+            stride = [s.node.shape_env.size_hint(s.node.expr) for s in x.stride()]
+        else:
+            size = x.size()
+            stride = x.stride()
         y = torch.empty_strided(
-            x.size(),
-            x.stride(),
+            size,
+            stride,
             dtype=x.dtype,
             device=x.device,
             requires_grad=x.requires_grad,
@@ -107,3 +113,9 @@ def device_from_inputs(example_inputs) -> torch.device:
     for x in example_inputs:
         if hasattr(x, "device"):
             return x.device
+
+
+def dtype_from_inputs(example_inputs) -> torch.dtype:
+    for x in example_inputs:
+        if hasattr(x, "dtype"):
+            return x.dtype

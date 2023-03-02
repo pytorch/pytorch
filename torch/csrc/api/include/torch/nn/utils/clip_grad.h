@@ -19,7 +19,7 @@ namespace utils {
 // sense!) in order to return a CPU-side `double`. This C++ version therefore
 // cannot be run fully asynchronously w.r.t. the device of the gradients.
 inline double clip_grad_norm_(
-    std::vector<Tensor> parameters,
+    const std::vector<Tensor>& parameters,
     double max_norm,
     double norm_type = 2.0,
     bool error_if_nonfinite = false) {
@@ -118,7 +118,7 @@ inline double clip_grad_norm_(
 // See https://pytorch.org/docs/stable/nn.html#clip-grad-value
 // for more details about this module.
 inline void clip_grad_value_(
-    std::vector<Tensor> parameters,
+    const std::vector<Tensor>& parameters,
     double clip_value) {
   for (const auto& param : parameters) {
     if (param.grad().defined()) {

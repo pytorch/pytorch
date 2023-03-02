@@ -42,7 +42,7 @@ class HybridModel(torch.nn.Module):
    """
 
     def __init__(self, emb_rref_list, device):
-        super(HybridModel, self).__init__()
+        super().__init__()
         self.emb_rref_list = emb_rref_list
         fc1 = torch.nn.Linear(512, 256)
         fc2 = torch.nn.Linear(256, 128)

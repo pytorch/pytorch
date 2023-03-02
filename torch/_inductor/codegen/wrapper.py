@@ -6,16 +6,17 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+import sympy
+
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
-from ..codecache import cpp_compile_command, get_code_path
+from ..codecache import code_hash, cpp_compile_command, get_code_path
 from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel
-from .triton import texpr
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
-pexpr = texpr
+pexpr = PythonPrinter().doprint
 
 
 def buffer_reuse_key(node: ir.Buffer):
@@ -272,6 +273,7 @@ class WrapperCodeGen(CodeGen):
             f"""
                 from ctypes import c_void_p, c_long
                 import torch
+                import math
                 import random
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
@@ -289,19 +291,10 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
-
-            if config.triton.convolution != "aten":
-                self.header.splice(
-                    """
-                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
-                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torch._inductor.triton_ops.autotune import conv_heuristics
-                    """
-                )
 
         self.write_prefix()
 
@@ -504,6 +497,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -511,10 +507,6 @@ class WrapperCodeGen(CodeGen):
             ):
                 # these lines will be pointless
                 self.lines.pop()
-
-            for name, value in V.graph.graph_inputs.items():
-                if isinstance(value.data, ir.ReinterpretView):
-                    self.wrapper_call.writeline(value.data.codegen_reference_mutation())
 
             # codegen allocations in two passes
             planning_state = MemoryPlanningState()
@@ -540,6 +532,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
@@ -569,6 +565,9 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
         output.writelines(["", "", 'if __name__ == "__main__":'])
         with output.indent():
             output.splice(
@@ -585,20 +584,22 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                if isinstance(value.data, ir.ReinterpretView):
-                    value = value.data.data
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                else:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
-    def define_kernel(self, name: str, kernel: str):
-        self.header.splice(f"\n\n{name} = {kernel}")
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
+        self.header.splice(f"\n\n{kernel_path_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return
@@ -722,7 +723,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
         picked_vec_isa = pick_vec_isa()
         ext = "so"
-        extra = cpp_compile_command("i", "o", vec_isa=picked_vec_isa)
+        extra = code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa)))
         # \n is required to match with the CodeCache behavior
         #  For reductions, the code string gotten from code.getvalue() will use backslash '\'
         # at the end of lines for readability purpose:

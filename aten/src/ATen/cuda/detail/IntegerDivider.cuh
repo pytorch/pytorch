@@ -65,7 +65,7 @@ struct DivMod {
 // everything else, we use plain division.
 template <typename Value>
 struct IntDivider {
-  IntDivider() { }  // Dummy constructor for arrays.
+  IntDivider() = default;
   IntDivider(Value d) : divisor(d) { }
 
   C10_HOST_DEVICE inline Value div(Value n) const { return n / divisor; }
@@ -82,7 +82,7 @@ template <>
 struct IntDivider<unsigned int> {
   static_assert(sizeof(unsigned int) == 4, "Assumes 32-bit unsigned int.");
 
-  IntDivider() { }  // Dummy constructor for arrays.
+  IntDivider() = default;
 
   IntDivider(unsigned int d) : divisor(d) {
     assert(divisor >= 1 && divisor <= INT32_MAX);

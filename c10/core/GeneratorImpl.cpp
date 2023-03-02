@@ -1,5 +1,4 @@
 #include <c10/core/GeneratorImpl.h>
-#include <chrono>
 #include <random>
 
 #if defined(__SGX_ENABLED__)
@@ -9,6 +8,7 @@
 #ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
+#include <chrono>
 #endif
 
 namespace c10 {

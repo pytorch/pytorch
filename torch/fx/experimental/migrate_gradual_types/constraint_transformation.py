@@ -604,7 +604,7 @@ def calc_last_two_dims(constraint, d: List[DVar]):
 
     """
 
-    assert isinstance(constraint, CalcConv) or isinstance(constraint, CalcMaxPool)
+    assert isinstance(constraint, (CalcConv, CalcMaxPool))
 
     b3 = constraint.matching_constraint[2]
     b4 = constraint.matching_constraint[3]

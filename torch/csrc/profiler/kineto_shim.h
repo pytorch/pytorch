@@ -126,6 +126,12 @@ void popCorrelationId();
 void popUserCorrelationId();
 void recordThreadInfo();
 
+void logInvariantViolation(
+    const std::string& assertion,
+    const std::string& error,
+    const std::string& profile_id,
+    const std::string& group_profile_id);
+
 } // namespace kineto
 } // namespace impl
 } // namespace profiler

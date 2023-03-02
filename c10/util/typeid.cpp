@@ -4,15 +4,9 @@
 #include <algorithm>
 #include <atomic>
 
-#if !defined(_MSC_VER)
-#include <cxxabi.h>
-#endif
-
-using std::string;
-
 namespace caffe2 {
 namespace detail {
-C10_EXPORT void _ThrowRuntimeTypeLogicError(const string& msg) {
+C10_EXPORT void _ThrowRuntimeTypeLogicError(const std::string& msg) {
   // In earlier versions it used to be std::abort() but it's a bit hard-core
   // for a library
   TORCH_CHECK(false, msg);

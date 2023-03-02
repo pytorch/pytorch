@@ -1,5 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
+#pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
@@ -52,7 +54,10 @@ std::string getArrayRefString(const IntArrayRef s);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst);
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
+bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape);
 MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape *mpsShape, const MPSDataType mpsDataType);
+MPSGraphTensor* castToIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
+MPSGraphTensor* castFromIHFTypes(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor, const Tensor& input, bool includesInt64 = false);
 
 // The MPSShape could vary based on memory format
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
@@ -88,6 +93,7 @@ void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 MPSGraphTensor* convertNHWCtoNCHW(MPSGraph *mpsGraph, MPSGraphTensor* tensor);
 MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
+MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, MPSDataType toType);
 MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
 MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, MPSScalar& scalar);
 
@@ -175,7 +181,7 @@ struct MPSGraphCache
   MPSGraphCache(const MPSGraphCache&) = delete;
   void operator=(const MPSGraphCache&) = delete;
 
-  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
+  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
     __block MPSCachedGraph * result = nil;
 
@@ -193,17 +199,14 @@ struct MPSGraphCache
         result = createCacheBlock();
         CacheEntry entry(key, result);
         cache_.emplace(hash, entry);
-        if (view_ptr) {
-          views_list.insert(std::make_pair(view_ptr, hash));
-        }
       }
     });
     return result;
   }
 
   template<typename T>
-  inline T* CreateCachedGraphAs(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
-    return static_cast<T *>(CreateCachedGraph(key, createCacheBlock, view_ptr));
+  inline T* CreateCachedGraphAs(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
+    return static_cast<T *>(CreateCachedGraph(key, createCacheBlock));
   }
 
   MPSCachedGraph* LookUp(const std::string& key) const {
@@ -228,24 +231,6 @@ struct MPSGraphCache
     return static_cast<T *>(LookUp(key));
   }
 
-  void FindAndRemoveViewEntry(void* ptr) {
-    // this may find multiple view entries with the same buffer pointers
-    auto views_range = views_list.equal_range(ptr);
-    if (views_range.first == views_range.second)
-      return;
-    for (auto view_it = views_range.first; view_it != views_range.second; ++view_it) {
-      MPSCacheKey hash = view_it->second;
-      // find the cache entry associated with the hash
-      auto cache_it = cache_.find(hash);
-      if (cache_it != cache_.end()) {
-        cache_.erase(cache_it);
-        delete cache_it->second.cachedGraph_;
-      }
-    }
-    // this erase-by-key will remove all pairs in the list with the same key
-    views_list.erase(ptr);
-  }
-
  private:
   MPSGraphCache() {
     serialQueue_ = dispatch_queue_create("cache queue", DISPATCH_QUEUE_SERIAL);
@@ -253,13 +238,18 @@ struct MPSGraphCache
 
   static MPSGraphCache* _instance_cache;
   std::unordered_map<MPSCacheKey, CacheEntry> cache_;
-  // list of buffers associated with view entries in the cache
-  // note that multiple view cache entries could use the same buffer pointer
-  std::unordered_multimap<void*, MPSCacheKey> views_list;
   dispatch_queue_t serialQueue_ = nullptr;
 
 };
 
+// Common math operations
+MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
+
+#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                           \
+  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                       \
+     TORCH_WARN_ONCE("MPS: no support for int64 for ", op_name,                                                         \
+     ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3.");   \
+  }
 
 } // namespace mps
 } // namespace native
