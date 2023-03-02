@@ -75,15 +75,20 @@ MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor)
     return inputTensor;
   }
 
-  MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
-                                                   dataType:inputTensor.dataType];
-  MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
-                                                        secondaryTensor:zeroTensor
-                                                                    name:nil];
-  return [mpsGraph selectWithPredicateTensor:predicateTensor
-                         truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
-                        falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
-                                        name:nil];
+  if(!is_macos_13_or_newer()) {
+    MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
+                                                    dataType:inputTensor.dataType];
+    MPSGraphTensor* predicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
+                                                          secondaryTensor:zeroTensor
+                                                                      name:nil];
+    return [mpsGraph selectWithPredicateTensor:predicateTensor
+                          truePredicateTensor:[mpsGraph ceilWithTensor :inputTensor name:nil]
+                          falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
+                                          name:nil];
+  } else {
+    return [mpsGraph truncateWithTensor:inputTensor
+                                   name:nil];
+  }
 };
 
 } // namespace mps
