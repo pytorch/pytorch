@@ -7,7 +7,6 @@ import sys
 from copy import copy, deepcopy
 from pathlib import Path
 from typing import ClassVar, Dict, List, Union
-from unittest.mock import patch
 
 import numpy
 import sympy
@@ -1413,7 +1412,7 @@ class CppTile2DOverrides:
         ld_dst = f"{tile_sizes[0]}"
 
         load_line = (
-            f"([&]() {{ alignas(64) std::array<float,{math.prod(tile_sizes)}> {dst}; "
+            f"([&]() {{ __at_align__ std::array<float,{math.prod(tile_sizes)}> {dst}; "
             f"at::vec::transpose_mxn<float,{tile_sizes[1]},{tile_sizes[0]}>({src}, {ld_src}, &{dst}[0], {ld_dst}); "
             f"return {dst}; }})()"
         )
@@ -1570,7 +1569,10 @@ class CppTileOverrides:
 class TileCodeOrLine:
     # name of the buffers to store, tile buffer or in/out buffer
     name: str = None
+
+    # tile indices this code line works on, used to generate inner loops around it
     indices: list = None
+
     code_or_line: Union[IndentedBuffer, str] = None
 
 
@@ -1844,78 +1846,70 @@ class CppTileKernel(CppKernel):
                 None,
                 f"for (long {loopvar} = 0; {loopvar} < {self.tile_sizes[self.tile_loop_indices.index(loop_idx)]}; {loopvar}++) {{",
             )
-            self.indent += 1
+            self.code.add_indent()
 
         def loop_exit():
             global indent
-            self.indent -= 1
+            self.code.add_indent(-1)
             self.code.writeline(None, "}")
 
-        def prefix_override(code):
-            return " " * (self.indent * code.tabwidth)
+        # Remove unused tile buffers and the code lines that do tile slice store to them
+        self.loads.lines = [
+            line
+            for line in self.loads.lines
+            if line.name is None or line.name in self.tile_bufs_used
+        ]
+        self.compute.lines = [
+            line
+            for line in self.compute.lines
+            if line.name is None or line.name in self.tile_bufs_used
+        ]
 
-        with patch.object(self.code, "prefix", lambda: prefix_override(self.code)):
-            # Remove unused tile buffers and the code lines that do tile slice store to them
-            self.loads.lines = [
-                line
-                for line in self.loads.lines
-                if line.name is None or line.name in self.tile_bufs_used
+        # Declare used tile buffers
+        for tile_buf_name in sorted(self.tile_bufs_used):
+            tile_buf = self.tile_bufs_defined[tile_buf_name]
+            self.code.writeline(
+                None,
+                f"__at_align__ {DTYPE_TO_CPP[tile_buf.meta.dtype]} {tile_buf}[{math.prod(self.tile_sizes)}];",
+            )
+
+        # Sorting for maximum loop fusion
+        self.loads.lines.sort(reverse=True, key=lambda line: len(line.indices))
+        self.stores.lines.sort(reverse=False, key=lambda line: len(line.indices))
+
+        # Generate inner loops
+        loop_indices = []
+        for line in itertools.chain(
+            self.loads.lines, self.compute.lines, self.stores.lines
+        ):
+            new_loop_indices = [
+                self.tile_loop_indices[i]
+                for i in range(self.tile_rank())
+                if i not in line.indices
             ]
-            self.compute.lines = [
-                line
-                for line in self.compute.lines
-                if line.name is None or line.name in self.tile_bufs_used
+            common_indices = [
+                old for old, new in zip(loop_indices, new_loop_indices) if old == new
             ]
 
-            # Declare used tile buffers
-            for tile_buf_name in sorted(self.tile_bufs_used):
-                tile_buf = self.tile_bufs_defined[tile_buf_name]
-                self.code.writeline(
-                    None,
-                    f"alignas(64) {DTYPE_TO_CPP[tile_buf.meta.dtype]} {tile_buf}[{math.prod(self.tile_sizes)}];",
-                )
-
-            # Sorting for maximum loop fusion
-            self.loads.lines.sort(reverse=True, key=lambda line: len(line.indices))
-            self.stores.lines.sort(reverse=False, key=lambda line: len(line.indices))
-
-            # Generate inner loops
-            loop_indices = []
-            for line in itertools.chain(
-                self.loads.lines, self.compute.lines, self.stores.lines
-            ):
-                new_loop_indices = [
-                    self.tile_loop_indices[i]
-                    for i in range(self.tile_rank())
-                    if i not in line.indices
-                ]
-                common_indices = [
-                    old
-                    for old, new in zip(loop_indices, new_loop_indices)
-                    if old == new
-                ]
-
-                for _ in loop_indices[len(common_indices) :]:
-                    loop_exit()
-
-                for idx in new_loop_indices[len(common_indices) :]:
-                    loop_enter(idx)
-
-                loop_indices = new_loop_indices
-
-                if isinstance(line.code_or_line, str):
-                    name = (
-                        line.name
-                        if line.name is not None and "buf" in line.name
-                        else None
-                    )
-                    self.code.writeline(name, line.code_or_line)
-                else:
-                    assert line.name is None
-                    self.code.splice(line.code_or_line)
-
-            while self.indent > 0:
+            for _ in loop_indices[len(common_indices) :]:
                 loop_exit()
+
+            for idx in new_loop_indices[len(common_indices) :]:
+                loop_enter(idx)
+
+            loop_indices = new_loop_indices
+
+            if isinstance(line.code_or_line, str):
+                name = (
+                    line.name if line.name is not None and "buf" in line.name else None
+                )
+                self.code.writeline(name, line.code_or_line)
+            else:
+                assert line.name is None
+                self.code.splice(line.code_or_line)
+
+        while self.indent > 0:
+            loop_exit()
 
         super().__exit__(*args)
 
