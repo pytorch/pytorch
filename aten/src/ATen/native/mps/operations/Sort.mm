@@ -35,7 +35,9 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     indices.copy_(cpu_indices);
     return;
   }
-  TORCH_WARN_ONCE(self.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
+  if (self.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: no support for int64 min/max ops, casting it to int32");
+  }
 
   MPSStream* stream = getCurrentMPSStream();
   struct CachedGraph : public MPSCachedGraph {

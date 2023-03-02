@@ -27,15 +27,10 @@ from torch.distributed.fsdp._common_utils import (
     _set_fsdp_flattened,
     HandleTrainingState,
 )
+from torch.distributed.utils import _alloc_storage, _free_storage, _p_assert
 
 from ._fsdp_extensions import _ext_post_unflatten_transform, _ext_pre_flatten_transform
-from ._utils import (
-    _alloc_storage,
-    _free_storage,
-    _no_dispatch_record_stream,
-    _same_storage,
-    p_assert,
-)
+from ._utils import _no_dispatch_record_stream, _same_storage
 
 __all__ = [
     "FlatParameter",
@@ -558,7 +553,7 @@ class FlatParamHandle:
         if not self.uses_sharded_strategy:
             self._init_shard_metadata(0, 0, flat_param.numel() - 1)
         else:
-            p_assert(
+            _p_assert(
                 flat_param.storage_offset() == 0,
                 "The `FlatParameter` is not the sole occupant of its storage",
             )
@@ -600,8 +595,8 @@ class FlatParamHandle:
         """
         self.flat_param._sharded_size = self.flat_param.size()  # type: ignore[attr-defined]
         sharded_flat_param_numel = self.flat_param.numel()  # includes `numel_padded`
-        p_assert(start >= 0 and start <= end, f"start: {start} end: {end}")
-        p_assert(
+        _p_assert(start >= 0 and start <= end, f"start: {start} end: {end}")
+        _p_assert(
             numel_padded <= sharded_flat_param_numel,
             f"numel_padded: {numel_padded} "
             f"sharded_flat_param_numel: {sharded_flat_param_numel}",
@@ -792,7 +787,7 @@ class FlatParamHandle:
             self._orig_param_dtype = flat_param.dtype
         cpu_device = torch.device("cpu")
         if self._offload_params:
-            p_assert(
+            _p_assert(
                 flat_param.device == cpu_device,
                 f"Expects the `FlatParameter` to be on CPU when parameter CPU "
                 f"offloading is enabled, not {flat_param.device}",
@@ -957,7 +952,7 @@ class FlatParamHandle:
             # tensor as the all-gather destination to preserve the invariant
             # that  `_full_param_padded` is in the low precision
             unsharded_flat_param = flat_param._full_prec_full_param_padded  # type: ignore[attr-defined]
-            p_assert(
+            _p_assert(
                 unsharded_flat_param.dtype != self._fwd_bwd_param_dtype,
                 f"Expects full precision but got {self._fwd_bwd_param_dtype}",
             )
@@ -974,13 +969,13 @@ class FlatParamHandle:
         ``padded_unsharded_flat_param``, and switches to using the all-gathered
         tensor.
         """
-        p_assert(
+        _p_assert(
             hasattr(self, "process_group") and hasattr(self, "world_size"),
             "Expects a process group and world size to have been set via `shard()`",
         )
         sharded_flat_param = self.flat_param.data
         expected_numel = sharded_flat_param.numel() * self.world_size
-        p_assert(
+        _p_assert(
             padded_unsharded_flat_param.numel() == expected_numel,
             f"Expects {expected_numel} numel but got {padded_unsharded_flat_param.numel()}",
         )
@@ -1111,7 +1106,7 @@ class FlatParamHandle:
         clearing any existing sharded gradient in ``.grad`` to enable computing
         a new unsharded gradient.
         """
-        p_assert(
+        _p_assert(
             self._training_state
             in (HandleTrainingState.BACKWARD_PRE, HandleTrainingState.IDLE),
             "Expects to be in `BACKWARD_PRE` or `IDLE` (if prefetching)",
@@ -1123,7 +1118,7 @@ class FlatParamHandle:
         ):
             self._check_on_compute_device(self.flat_param)
             grad_offloaded = flat_param.grad.device != self.device
-            p_assert(
+            _p_assert(
                 not grad_offloaded or self._offload_params,
                 f"Expects the sharded gradient to be on {self.device} "
                 f"but got {flat_param.grad.device}",
@@ -1142,7 +1137,7 @@ class FlatParamHandle:
                     flat_param._saved_grad_shard = flat_param.grad.data  # type: ignore[attr-defined]
                     sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
                 else:
-                    p_assert(
+                    _p_assert(
                         hasattr(flat_param, "_cpu_grad"),
                         "`_cpu_grad` should be defined if the gradient is on CPU",
                     )
@@ -1162,7 +1157,7 @@ class FlatParamHandle:
                     sharded_grad.data = sharded_grad.to(local_shard_dtype)
             else:
                 padded_unsharded_size = flat_param._padded_unsharded_size  # type: ignore[attr-defined]
-                p_assert(
+                _p_assert(
                     flat_param.grad.size() == padded_unsharded_size,
                     "Expects `.grad` to be the unsharded gradient in "
                     f"`no_sync()` with size {padded_unsharded_size} "
@@ -1203,7 +1198,7 @@ class FlatParamHandle:
                 flat_param.grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
                 cast_grad_to_param_dtype_if_needed(flat_param)
         else:
-            p_assert(
+            _p_assert(
                 not self.uses_sharded_strategy
                 or not flat_param._post_backward_called,  # type: ignore[attr-defined]
                 "All sharded parameters that received a gradient in the "
@@ -1229,7 +1224,7 @@ class FlatParamHandle:
         Postcondition: Same as the precondition.
         """
         self._check_sharded_strategy()
-        p_assert(
+        _p_assert(
             self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
             f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
         )
@@ -1242,7 +1237,7 @@ class FlatParamHandle:
         padded_storage_ptr = (
             self._get_padded_unsharded_flat_param()._typed_storage()._data_ptr()
         )
-        p_assert(
+        _p_assert(
             unpadded_storage_ptr == padded_storage_ptr,
             "Expects the unpadded parameter to be a view into the padded parameter",
         )
@@ -1251,7 +1246,7 @@ class FlatParamHandle:
         try:
             yield
         finally:
-            p_assert(
+            _p_assert(
                 self.flat_param.size() == self.flat_param._unpadded_unsharded_size,
                 f"Expects size {self.flat_param._unpadded_unsharded_size} but got {self.flat_param.size()}",
             )
@@ -1314,7 +1309,7 @@ class FlatParamHandle:
         flat_param = self.flat_param
         if self._offload_params:
             device = flat_param._local_shard.device  # type: ignore[attr-defined]
-            p_assert(
+            _p_assert(
                 device == torch.device("cpu"),
                 f"Expects the local shard to be on CPU but got {device}",
             )
@@ -1357,7 +1352,7 @@ class FlatParamHandle:
         """
         if tensor is None:
             tensor = flat_param
-        p_assert(
+        _p_assert(
             tensor.numel() == flat_param._unpadded_unsharded_size.numel(),
             f"Expects {flat_param._unpadded_unsharded_size.numel()} numel but got "
             f"{tensor.numel()} numel",
@@ -1416,7 +1411,7 @@ class FlatParamHandle:
                         # hook fires (e.g. for reentrant AC)
                         assert self.flat_param._tensors is not None  # mypy
                         tensor = self.flat_param._tensors[i]
-                        p_assert(
+                        _p_assert(
                             tensor is not None,
                             "Expects `Tensor` to have been saved in forward",
                         )
@@ -1439,14 +1434,14 @@ class FlatParamHandle:
         ) in enumerate(self.flat_param._shared_param_infos):
             if hasattr(module, param_name):
                 delattr(module, param_name)
-            p_assert(
+            _p_assert(
                 hasattr(prim_module, prim_param_name),
                 f"Module {prim_module_name} is missing parameter {prim_param_name}",
             )
             prim_param: Union[Tensor, nn.Parameter] = getattr(
                 prim_module, prim_param_name
             )
-            p_assert(
+            _p_assert(
                 not as_params or isinstance(prim_param, nn.Parameter),
                 f"as_params={as_params} type(prim_param)={type(prim_param)}",
             )
@@ -1485,7 +1480,7 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            p_assert(
+            _p_assert(
                 hasattr(module, param_name),
                 f"{self.flat_param._fqns[i]} is missing",
             )
@@ -1511,7 +1506,7 @@ class FlatParamHandle:
             prim_module,
             _,
         ) in enumerate(self.flat_param._shared_param_infos):
-            p_assert(
+            _p_assert(
                 hasattr(module, param_name),
                 f"{module_name + '.' + param_name if module_name else param_name} is missing",
             )  # did not save FQN info in `_shared_param_infos`
@@ -1793,7 +1788,7 @@ class FlatParamHandle:
             RuntimeError: If the ``src_tensor`` does not have the expected
             shape.
         """
-        p_assert(
+        _p_assert(
             len(expected_shape) == 1,
             f"Expects a 1D expected shape but got {expected_shape}",
         )
@@ -1935,7 +1930,7 @@ class FlatParamHandle:
         else:
             # If in the forward, then there may be an accumulated gradient,
             # which will be in `.grad`
-            p_assert(
+            _p_assert(
                 flat_param.grad is None
                 or not self.uses_sharded_strategy
                 or self._training_state == HandleTrainingState.FORWARD,
@@ -1954,7 +1949,7 @@ class FlatParamHandle:
         """
         if not self._use_orig_params:
             return
-        p_assert(
+        _p_assert(
             self._training_state == HandleTrainingState.BACKWARD_POST,
             "Expects to only be called in the post-backward after gradient computation",
         )
@@ -1971,16 +1966,16 @@ class FlatParamHandle:
     # CHECKS & INVARIANTS #
     #######################
     def _check_sharded_strategy(self):
-        p_assert(self.uses_sharded_strategy, "Expects sharded strategy")
+        _p_assert(self.uses_sharded_strategy, "Expects sharded strategy")
 
     def _check_on_compute_device(self, tensor: Tensor):
-        p_assert(
+        _p_assert(
             tensor.device == self.device,
             f"Expects tensor to be on the compute device {self.device}",
         )
 
     def _check_on_cpu(self, tensor: Tensor):
-        p_assert(
+        _p_assert(
             tensor.device == torch.device("cpu"),
             f"Expects tensor to be on CPU but got {tensor.device}",
         )
@@ -1988,7 +1983,7 @@ class FlatParamHandle:
     @staticmethod
     def _check_storage_freed(tensor: Tensor):
         storage_size: int = tensor._typed_storage()._size()
-        p_assert(
+        _p_assert(
             storage_size == 0,
             f"Expects storage to be freed but got storage with size {storage_size}",
         )
@@ -1996,37 +1991,37 @@ class FlatParamHandle:
     @staticmethod
     def _check_storage_allocated(tensor: Tensor):
         storage_size: int = tensor._typed_storage()._size()
-        p_assert(storage_size > 0, "Expects storage to be allocated")
+        _p_assert(storage_size > 0, "Expects storage to be allocated")
 
     def _check_low_precision_shard(self):
-        p_assert(
+        _p_assert(
             self._uses_param_mixed_precision,
             "Not using low precision for parameters",
         )
-        p_assert(
+        _p_assert(
             getattr(self.flat_param, "_mp_shard", None) is not None,
             "Expects `_mp_shard` to exist",
         )
         device = self.flat_param._mp_shard.device  # type: ignore[attr-defined]
-        p_assert(
+        _p_assert(
             device == self.device,
             f"Expects the low precision shard to be on {self.device} but got {device}",
         )
 
     def _check_unsharded(self, tensor: Tensor):
         msg_prefix = "Expects tensor to be unsharded "
-        p_assert(tensor is not None, msg_prefix + "but got `None`")
+        _p_assert(tensor is not None, msg_prefix + "but got `None`")
         unsharded_size = self.flat_param._unpadded_unsharded_size
-        p_assert(
+        _p_assert(
             tensor.size() == unsharded_size,
             msg_prefix + f"with size {unsharded_size} but got {tensor.size()}",
         )
 
     def _check_sharded(self, tensor: Tensor):
         msg_prefix = "Expects tensor to be sharded "
-        p_assert(tensor is not None, msg_prefix + "but got `None`")
+        _p_assert(tensor is not None, msg_prefix + "but got `None`")
         sharded_size = self.flat_param._sharded_size  # type: ignore[attr-defined]
-        p_assert(
+        _p_assert(
             tensor.size() == sharded_size,
             msg_prefix + f"with size {sharded_size} but got {tensor.size()}",
         )
