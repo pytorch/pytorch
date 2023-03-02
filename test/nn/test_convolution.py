@@ -1270,24 +1270,24 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         # Symmetric padding
         z = F.conv1d(x, y, padding=3, dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv1d(x, y, padding='same', dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
 
         # Asymmetric padding
         z = F.conv1d(x, y, padding=2)[..., 1:]
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv1d(x, y, padding='same')
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
@@ -1299,12 +1299,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         # Symmetric padding
         z = F.conv2d(x, y, padding=(3, 4), dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv2d(x, y, padding='same', dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
@@ -1312,12 +1312,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # Asymmetric padding
         y = torch.rand(1, 1, 4, 4, device=device, dtype=dtype, requires_grad=True)
         z = F.conv2d(x, y, padding=2)[..., 1:, 1:]
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv2d(x, y, padding='same')
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
@@ -1331,12 +1331,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
         # Symmetric padding
         z = F.conv3d(x, y, padding=(0, 1, 4), dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv3d(x, y, padding='same', dilation=2)
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
         x.grad, y.grad = None, None
@@ -1351,12 +1351,12 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # Asymmetric padding
         y = torch.rand(1, 1, 1, 4, 4, dtype=dtype, device=device, requires_grad=True)
         z = F.conv3d(x, y, padding=2)[..., 1:, 1:]
-        z.sum().backward()
+        z.sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
         z = F.conv3d(x, y, padding='same')
-        z.sum().backward()
+        z.sum().abs().backward()
         self.assertEqual(gx_expect, x.grad)
         self.assertEqual(gy_expect, y.grad)
 
@@ -1372,11 +1372,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # Test F.conv1d gradients work with padding='valid'
         x = torch.rand(1, 1, 10, dtype=dtype, device=device, requires_grad=True)
         y = torch.rand(1, 1, 4, dtype=dtype, device=device, requires_grad=True)
-        F.conv1d(x, y, padding=0).sum().backward()
+        F.conv1d(x, y, padding=0).sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        F.conv1d(x, y, padding='valid').sum().backward()
+        F.conv1d(x, y, padding='valid').sum().abs().backward()
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
@@ -1510,11 +1510,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # Test F.conv2d gradients work with padding='valid'
         x = torch.rand(1, 1, 1, 10, device=device, dtype=dtype, requires_grad=True)
         y = torch.rand(1, 1, 1, 4, device=device, dtype=dtype, requires_grad=True)
-        F.conv2d(x, y, padding=0).sum().backward()
+        F.conv2d(x, y, padding=0).sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        F.conv2d(x, y, padding='valid').sum().backward()
+        F.conv2d(x, y, padding='valid').sum().abs().backward()
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
@@ -1526,11 +1526,11 @@ class TestConvolutionNNDeviceType(NNTestCase):
         # Test F.conv3d gradients work with padding='valid'
         x = torch.rand(1, 1, 1, 1, 10, dtype=dtype, device=device, requires_grad=True)
         y = torch.rand(1, 1, 1, 1, 4, dtype=dtype, device=device, requires_grad=True)
-        F.conv3d(x, y, padding=0).sum().backward()
+        F.conv3d(x, y, padding=0).sum().abs().backward()
         gx_expect, gy_expect = x.grad, y.grad
         x.grad, y.grad = None, None
 
-        F.conv3d(x, y, padding='valid').sum().backward()
+        F.conv3d(x, y, padding='valid').sum().abs().backward()
         gx_actual, gy_actual = x.grad, y.grad
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)

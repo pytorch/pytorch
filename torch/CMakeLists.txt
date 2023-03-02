@@ -109,13 +109,7 @@ elseif(APPLE)
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
-      -Wno-write-strings
       -Wno-strict-aliasing)
-endif()
-
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
-      -Wno-writable-strings)
 endif()
 
 if(USE_ITT)

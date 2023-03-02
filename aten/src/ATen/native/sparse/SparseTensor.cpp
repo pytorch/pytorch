@@ -814,6 +814,10 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       " but mask has size ",
       mask.sizes());
 
+  if (t.is_same(mask)) {
+    return t;
+  }
+
   if (!t.numel() || !mask.numel() || !mask._nnz()) {
     return mask.clone().to(t.device(), t.scalar_type());
   }

@@ -18,7 +18,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     _dispatch_dtypes, floating_types, floating_types_and, complex_types, floating_and_complex_types,
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
-    all_types, empty_types, complex_types_and, integral_types, floating_types_and_half
+    all_types, empty_types, complex_types_and, integral_types
 )
 from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
@@ -1990,18 +1990,6 @@ def sample_inputs_cdist(op_info, device, dtype, requires_grad, **kwargs):
             for t1_size, t2_size in test_cases:
                 # The args should never be non-contiguous as this is not supported in the backward
                 yield SampleInput(make_arg(t1_size), make_arg(t2_size), p, cm)
-
-
-def sample_inputs_fill_(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype,
-                       low=None, high=None, requires_grad=requires_grad)
-
-    cases = (((S, S, S), (1,)),
-             ((), (1,)),
-             ((S, S, S), (make_arg(()),)))
-
-    for shape, args in cases:
-        yield SampleInput(make_arg(shape), args=args)
 
 def _fill_np(a, value):
     a = a.copy()
@@ -5308,6 +5296,7 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_1d(), dim=0, unbiased=True, keepdim=True)
     yield SampleInput(tensor_1d(), dim=0, unbiased=False, keepdim=False)
 
+    yield SampleInput(tensor_nd(), dim=(1,), correction=1.3)
     yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
@@ -8505,6 +8494,11 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_scalar_self_arg=True,
         sample_inputs_func=foreach_inputs_sample_func(2, True, True),
         supports_autograd=True,
+        skips=(
+            # TODO: Memory leak https://github.com/pytorch/pytorch/issues/95237
+            DecorateInfo(unittest.skip("Memory leak https://github.com/pytorch/pytorch/issues/95237"),
+                         "TestForeach", "test_binary_op"),
+        ),
     ),
 ]
 
@@ -10933,7 +10927,7 @@ op_db: List[OpInfo] = [
                         ),
                     ], ),
     BinaryUfuncInfo('logaddexp',
-                    dtypes=floating_types_and(torch.bfloat16),
+                    dtypes=floating_and_complex_types_and(torch.bfloat16),
                     dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
                     dtypesIfROCM=floating_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
@@ -12331,7 +12325,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            dtypes=floating_types_and(torch.uint8, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
            skips=(
                # RuntimeError: false
@@ -12347,7 +12341,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
                # RuntimeError: false
@@ -12363,7 +12357,7 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            dtypes=floating_types_and(torch.uint8, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'bilinear'),
            skips=(
@@ -12380,7 +12374,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            skips=(
@@ -12397,7 +12391,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'trilinear'),
            skips=(
@@ -12429,7 +12423,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'bilinear'),
            skips=(
@@ -12446,7 +12440,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8),
-           dtypesIfCUDA=floating_types_and_half(),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample_aten, 'bilinear'),
            supports_out=False,
@@ -12473,7 +12467,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=floating_types_and(torch.uint8, torch.bfloat16),
-           dtypesIfCUDA=floating_types_and(torch.half, torch.uint8),
+           dtypesIfCUDA=floating_types_and(torch.half, torch.uint8, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'nearest'),
            skips=(
@@ -15073,7 +15067,6 @@ op_db: List[OpInfo] = [
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
-           assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_gather,
@@ -15103,7 +15096,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True),
            error_inputs_func=error_inputs_index_select,
-           assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
@@ -19013,6 +19005,13 @@ python_ref_db = [
         "_refs.logaddexp",
         torch_opinfo_name="logaddexp",
         supports_nvfuser=False,
+        skips=(
+            # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu',
+                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu',
+                         dtypes=(torch.complex64, torch.complex128)),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.floor_divide",
