@@ -55,7 +55,7 @@ class TORCH_API Context {
       return at::GetPrivateUse1HooksInterface()->getDefaultGenerator(
           device.index());
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled for defaultGenerator");
     }
   }
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
@@ -86,8 +86,10 @@ class TORCH_API Context {
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
     } else if (device_type == at::kPrivateUse1) {
       return at::GetPrivateUse1HooksInterface()->getDeviceFromPtr(data);
+    } else if (device_type == at::kORT) {
+      return {DeviceType::ORT, static_cast<DeviceIndex>(0)};
     } else {
-      AT_ERROR(c10::DeviceTypeName(device_type), " device type not enabled.");
+      AT_ERROR(DeviceTypeName(device_type), " device type not enabled for getDeviceFromPtr");
     }
   }
   static bool isPinnedPtr(const void* data) {

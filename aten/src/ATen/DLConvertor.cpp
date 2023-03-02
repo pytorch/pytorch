@@ -115,6 +115,9 @@ static DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
       ctx.device_id =
           at::detail::getXPUHooks().getGlobalIdxFromDevice(tensor.device());
       break;
+    case DeviceType::ORT:
+      ctx.device_type = DLDeviceType::kDLMAIA;
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
@@ -141,6 +144,8 @@ static Device getATenDevice(const DLDevice& ctx, void* data) {
 #endif
     case DLDeviceType::kDLOneAPI:
       return at::detail::getXPUHooks().getDeviceFromPtr(data);
+    case DLDeviceType::kDLMAIA:
+      return at::Device(DeviceType::ORT, ctx.device_id);
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
