@@ -75,6 +75,10 @@ unittest.expectedFailure(
 )
 
 unittest.expectedFailure(
+    DynamicShapesMiscTestsDefaultStatic.test_parsing_sdpa_dynamic_shapes_static_default
+)
+
+unittest.expectedFailure(
     DynamicShapesReproTestsDefaultStatic.test_convert_boxes_to_pooler_format_dynamic_shapes_static_default
 )
 
@@ -112,6 +116,11 @@ unittest.expectedFailure(
 
 unittest.expectedFailure(
     DynamicShapesMiscTests.test_autocast_sdpa_dynamic_shapes
+    # Cannot call sizes() on tensor with symbolic sizes/strides
+)
+
+unittest.expectedFailure(
+    DynamicShapesMiscTests.test_parsing_sdpa_dynamic_shapes
     # Cannot call sizes() on tensor with symbolic sizes/strides
 )
 
