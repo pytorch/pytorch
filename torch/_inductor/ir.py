@@ -332,9 +332,11 @@ class IRNode:
         self.origins = set(self._current_origins)
 
     def common_repr(self):
-        return (
-            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
-        )
+        origins = f"origins={getattr(self, 'origins', '')}"
+        if len(origins) > 64:
+            # this can get *very* long
+            origins = f"{origins[:61]}..."
+        return [origins]
 
     def str_helper(self, lines):
         lines = lines + self.common_repr()
@@ -2310,7 +2312,7 @@ class ComputedBuffer(Buffer):
 
 class TemplateBuffer(Buffer):
     """
-    Represents a Triton (in the futurue other type) of template operator
+    Represents a Triton (in the future other type) of template operator
     that we can fuse an epilogue onto.
     """
 
@@ -2579,7 +2581,7 @@ class ExternKernel(InputsKernel):
         """
         In order to pass this to an extern kernel we need a
         ReinterpretView not a View.  This allows us to avoid some
-        uneeded copies.
+        unneeded copies.
         """
         assert isinstance(x, BaseView)
         if isinstance(x, ReinterpretView):
@@ -4305,4 +4307,59 @@ class AllReduce(ExternKernel):
         wrapper.writeline(
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
+        )
+
+
+class AllGatherIntoTensor(ExternKernel):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    @classmethod
+    def create(cls, x: "TensorBox", tag: str, ranks: List[int], group_size: int):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[0] *= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
+        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
+        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
+        return AllGatherIntoTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+        )
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        (input_name,) = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        # At this point, output_name points to a fresh buffer
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_name}, async_op=True,"
+            f" group={output_name}_pg)"
         )

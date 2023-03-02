@@ -1475,7 +1475,6 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         # Ensure backend config will raise ValueError with the following arguments
         invalid_backend_config_strings = [
             "cpu:gloo,cuda:nccl,",  # trailing comma
-            "cpu:gloo,cuda:nccl ",  # trailing space
             "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
         ]
         for config_str in invalid_backend_config_strings:

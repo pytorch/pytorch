@@ -435,7 +435,7 @@ class Optimizer:
         self.__setstate__({'state': state, 'param_groups': param_groups})
 
     def zero_grad(self, set_to_none: bool = True):
-        r"""Sets the gradients of all optimized :class:`torch.Tensor` s to zero.
+        r"""Resets the gradients of all optimized :class:`torch.Tensor` s.
 
         Args:
             set_to_none (bool): instead of setting to zero, set the grads to None.

@@ -7,7 +7,6 @@ import logging
 import os
 import pickle
 import time
-import re
 import warnings
 from collections import namedtuple
 from datetime import timedelta
@@ -245,21 +244,21 @@ class BackendConfig:
         else:
             # make sure the backend string is in the correct format
             # "{device_type1}:{backend1},{device_type2}:{backend2}"
-            # device type and backend must be alphanumeric characters
             # e.g. "cpu:gloo,cuda:nccl"
-            pattern = r'^[a-zA-Z0-9]+:[a-zA-Z0-9]+(,[a-zA-Z0-9]+:[a-zA-Z0-9]+)*$'
-            # check if the test string matches the pattern
-            if not re.match(pattern, backend):
-                raise ValueError(f"""Invalid backend string argument: {backend}.
+            backend_str_error_message = f"""The custom backend string argument is invalid: {backend}.
                 Custom backend string is an experimental feature where the backend string must be in the format:
-                "<device_type1>:<backend1>,<device_type2>:<backend2>...". where device_type and backend are
-                alphanumeric characters. e.g. 'cpu:gloo,cuda:nccl'""")
+                "<device_type1>:<backend1>,<device_type2>:<backend2>...". e.g. 'cpu:gloo,cuda:nccl'"""
 
             # parse the backend string and populate the device_backend_map
-            for device_backend_pair in backend.lower().split(","):
-                device, backend = device_backend_pair.split(":")
+            for device_backend_pair_str in backend.lower().split(","):
+                device_backend_pair = device_backend_pair_str.split(":")
+                if len(device_backend_pair) != 2:
+                    raise ValueError(f"Invalid device:backend pairing: \
+                                     {device_backend_pair_str}. {backend_str_error_message}")
+                device, backend = device_backend_pair
                 if device in self.device_backend_map:
-                    raise ValueError(f"Duplicate device type {device} in backend string: {backend}")
+                    raise ValueError(f"Duplicate device type {device} \
+                                     in backend string: {backend}. {backend_str_error_message}")
                 self.device_backend_map[device] = Backend(backend)
 
     def __repr__(self):
