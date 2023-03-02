@@ -1030,10 +1030,13 @@ def forward(self, primals_1, primals_2):
             torch.ones(8, 8, device='cuda', requires_grad=True),
             torch.ones(1, 4, 1, device='cuda', requires_grad=True),
         ]
+        import gc
+        gc.collect()
         mem_before = torch.cuda.memory_allocated()
         f_compiled(*inps)
+        gc.collect()
         mem_after = torch.cuda.memory_allocated()
-        self.assertTrue(mem_after == mem_before)
+        self.assertEqual(mem_after, mem_before)
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_aliases_multiple_inputs_get_correct_one(self):

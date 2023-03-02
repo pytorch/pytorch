@@ -1984,46 +1984,69 @@ static int THPVariable_subclass_traverse(
 
   // Finally traverse THPVariable special stuff
   Py_VISIT(var->backward_hooks);
+  // Ordinarly, we would only traverse the "special stuff" if our pyobject owned
+  // the C++ tensor. In some cases though, we need to perform this traversal
+  // even if we don't own the C++ tensor.
   if (!var->cdata.unsafeIsBorrowed()) {
-    const auto& tensor = THPVariable_Unpack(var);
-    if (tensor.defined()) {
-      // WARNING: The grad_fn traversal logic is very subtle, if you change
-      // this, be very careful not to re-introduce this bug:
-      // https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
+    THPVariable_cpp_tensor_visit(*(var->cdata), visit, arg);
+  }
 
-      // We ensure that we follow NOTE [ PyObject Traversal ] he by checking
-      // that this python object is the sole owner of the underlying Tensor and
-      // that this Tensor is the sole owner of its grad_fn. In this case, the
-      // only way to get a new reference to the grad_fn is by using this python
-      // object, which requires the GIL to be accessed. Note that this is only
-      // valid as long as user don't share non-owning references across
-      // different threads (which is crazy and should never be done).
-      auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
-      if (tensor.use_count() == 1) {
-        if (autograd_meta) {
-          // Do NOT call grad_fn() here as that might trigger a recompute
-          const auto& grad_fn = autograd_meta->grad_fn_;
-          if (grad_fn && grad_fn.use_count() == 1) {
-            // All Node can have a pyobj (stored in "pyobj_")
-            Py_VISIT(grad_fn->pyobj());
-            // PyNode are special as they also have an "obj" field
-            if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
-              Py_VISIT(py_node_fn->obj);
-            }
-          }
-        }
-      }
-      if (autograd_meta) {
-        for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
-          if (auto pyhook =
-                  dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-            Py_VISIT(pyhook->dict);
-          }
-        }
+  return 0;
+}
+
+int THPVariable_cpp_tensor_visit(
+    const at::Tensor& tensor,
+    visitproc visit,
+    void* arg) {
+  // pre-conditions
+  TORCH_INTERNAL_ASSERT(tensor.defined());
+  TORCH_INTERNAL_ASSERT(tensor.use_count() == 1);
+  // WARNING: The grad_fn traversal logic is very subtle, if you change
+  // this, be very careful not to re-introduce this bug:
+  // https://gist.github.com/zou3519/7ac92b84dd7d206dcc6eae55fee8372c
+
+  // We ensure that we follow NOTE [ PyObject Traversal ] he by checking
+  // that this python object is the sole owner of the underlying Tensor and
+  // that this Tensor is the sole owner of its grad_fn. In this case, the
+  // only way to get a new reference to the grad_fn is by using this python
+  // object, which requires the GIL to be accessed. Note that this is only
+  // valid as long as user don't share non-owning references across
+  // different threads (which is crazy and should never be done).
+  auto autograd_meta = torch::autograd::impl::get_autograd_meta(tensor);
+  auto view_autograd_meta =
+      torch::autograd::impl::get_view_autograd_meta(tensor);
+  if (autograd_meta) {
+    // Do NOT call grad_fn() here as that might trigger a recompute
+    const auto& grad_fn = autograd_meta->grad_fn_;
+
+    if (grad_fn && grad_fn.use_count() == 1) {
+      // All Node can have a pyobj (stored in "pyobj_")
+      Py_VISIT(grad_fn->pyobj());
+      // PyNode are special as they also have an "obj" field
+      if (auto py_node_fn = dynamic_cast<PyNode*>(grad_fn.get())) {
+        Py_VISIT(py_node_fn->obj);
       }
     }
   }
-
+  if (view_autograd_meta && view_autograd_meta->has_bw_view()) {
+    const auto& bw_info = view_autograd_meta->get_backward_view();
+    if (bw_info.base_.use_count() == 1) {
+      THPVariable_cpp_tensor_visit(bw_info.base_, visit, arg);
+    }
+  }
+  if (autograd_meta) {
+    for (const auto& hook : torch::autograd::impl::hooks(tensor)) {
+      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+        Py_VISIT(pyhook->dict);
+      }
+    }
+  }
+  // Only if we own the python tensor, should we Py_VISIT it.
+  if (tensor.unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
+    Py_VISIT(tensor.unsafeGetTensorImpl()
+                 ->pyobj_slot()
+                 ->_unchecked_untagged_pyobj());
+  }
   return 0;
 }
 

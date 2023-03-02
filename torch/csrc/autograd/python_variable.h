@@ -76,3 +76,8 @@ void pushPyOutToStack(
     torch::jit::Stack* stack,
     py::object out,
     const char* msg);
+
+int THPVariable_cpp_tensor_visit(
+    const at::Tensor& self,
+    visitproc visit,
+    void* arg);

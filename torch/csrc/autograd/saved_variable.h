@@ -44,6 +44,13 @@ class TORCH_API SavedVariable {
   /// circular reference.
   Variable unpack(std::shared_ptr<Node> saved_for = nullptr) const;
 
+  const at::Tensor& _unsafe_data() const {
+    return data_;
+  }
+  bool _unsafe_saved_original() const {
+    return saved_original_;
+  }
+
   void register_hooks(std::unique_ptr<SavedVariableHooks>&& hooks);
 
   void reset_data();

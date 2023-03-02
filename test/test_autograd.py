@@ -347,6 +347,30 @@ class TestAutograd(TestCase):
         with self.assertRaisesRegex(Exception, "Simulate error on backward pass"):
             t3.sum().backward()
 
+    # See this github issue for the discussion: https://github.com/pytorch/pytorch/issues/94990
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    def test_custom_function_view_output_mem_leak(self):
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a):
+                b = a + 1
+                c = b.view(-1)
+                ctx.save_for_backward(c)
+                return b
+
+            @staticmethod
+            def backward(ctx, a):
+                self.fail("This node should not be executed!")
+
+        inp = torch.ones(2, requires_grad=True, device='cuda')
+        gc.collect()
+        mem_before = torch.cuda.memory_allocated()
+        MyFunc.apply(inp)
+        gc.collect()
+        mem_after = torch.cuda.memory_allocated()
+        self.assertEqual(mem_after, mem_before)
+
     def test_custom_function_non_tensor_inputs_outputs(self):
         class MyFunction(Function):
 

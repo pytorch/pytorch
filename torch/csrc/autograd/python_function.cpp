@@ -212,28 +212,45 @@ static int THPFunction_traverse(THPFunction* self, visitproc visit, void* arg) {
   //
   // TODO: I'm not really sure if we're actually obligated to traverse PyObject
   // that is stored in PyNode, since we don't really own that C++ object.
-  if (auto cdata = self->cdata.lock()) {
-    for (const auto& hook : cdata->tensor_pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
+  // Take care to keep the call to .lock() in a scope, so that we release our
+  // shared pointer before traversing any saved variables.
+  // This edge case can come up if any saved variables (indirectly) hold
+  // a strong reference to cdata (our PyNode).
+  {
+    if (auto cdata = self->cdata.lock()) {
+      for (const auto& hook : cdata->tensor_pre_hooks()) {
+        if (auto pyhook = dynamic_cast<PyFunctionTensorPreHook*>(hook.get())) {
+          Py_VISIT(pyhook->dict);
+        }
+      }
+      // See NOTE [retains_grad_hook PyObject traversal]
+      for (const auto& pair : cdata->retains_grad_hooks()) {
+        if (auto pyhook =
+                dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
+          Py_VISIT(pyhook->dict);
+        }
+      }
+      for (const auto& hook : cdata->pre_hooks()) {
+        if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
+          Py_VISIT(pyhook->dict);
+        }
+      }
+      for (const auto& hook : cdata->post_hooks()) {
+        if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
+          Py_VISIT(pyhook->dict);
+        }
       }
     }
-    // See NOTE [retains_grad_hook PyObject traversal]
-    for (const auto& pair : cdata->retains_grad_hooks()) {
-      if (auto pyhook =
-              dynamic_cast<PyFunctionTensorPreHook*>(pair.second.get())) {
-        Py_VISIT(pyhook->dict);
-      }
+  }
+  for (const auto& saved_variable : self->saved_variables) {
+    // Careful not to go through unpack(), which does a lot of extra things and
+    // might create a fresh tensor.
+    const auto& saved_tensor = saved_variable._unsafe_data();
+    if (!saved_tensor.defined()) {
+      continue;
     }
-    for (const auto& hook : cdata->pre_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
-    }
-    for (const auto& hook : cdata->post_hooks()) {
-      if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
-        Py_VISIT(pyhook->dict);
-      }
+    if (saved_tensor.use_count() == 1) {
+      THPVariable_cpp_tensor_visit(saved_tensor, visit, arg);
     }
   }
   Py_VISIT(self->to_save);
@@ -785,7 +802,7 @@ PyObject* process_outputs(
 
   // It is important that creating the SavedVariables happen after the output
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
-  // we save them.
+  // we save them
   if (is_executable) {
     _save_variables(cdata, grad_fn);
   } else {
