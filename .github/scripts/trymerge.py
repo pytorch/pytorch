@@ -1775,8 +1775,8 @@ def main() -> None:
         return
 
     if not pr.has_valid_submodule_updates() and not args.force:
-        message = f"PR updates submodules {', '.join(pr.get_changed_submodules())} but it's not mentioned in PR title nor description"
-        message += "\nIf updates are intentional, please add \"submodule\" label or keyword to PR description"
+        message = f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
+        message += "\nIf those updates are intentional, please add \"submodule\" keyword to PR title/description."
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
     try:

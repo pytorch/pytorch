@@ -430,7 +430,7 @@ class TestGitHubPR(TestCase):
 
     def test_pr_changed_submodule_detection(self, *args: Any) -> None:
         # Updates submodule during dev-cycle but reverts it later
-        pr  = GitHubPR("pytorch", "pytorch", 95045)
+        pr = GitHubPR("pytorch", "pytorch", 95045)
         self.assertEqual(pr.get_changed_submodules(), [])
         self.assertTrue(pr.has_valid_submodule_updates())
 
