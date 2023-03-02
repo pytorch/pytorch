@@ -149,14 +149,47 @@ def operator_dispatch(
     needs_redistribute = suggested_input_schema is not op_schema
 
     if mesh is not None and mesh.get_coordinate() is None:
-        # if we are on a non-participating device, we simply return
-        # an empty tensor for now.
-        # TODO: what if the op returns a non-tensor value, what if
-        # the op returns a list of tensors, we need to figure out
-        # a consistent way to handle that, and also need to figure
-        # out if we should communicate the result to non-participating
-        # ranks (i.e. a.sum() -> scalar, maybe we should set to 0)
-        local_results = torch.tensor([])
+        # if we are on a non-participating device, we should return
+        # a default value of some type consistent with other
+        # participating devices. This type can be obtained from
+        # the `OutputSharding` object by the following logic:
+        # 0. if output_spec and schema_suggestions are both None, unsuccessful
+        # sharding propagation. This has been handled by assertion on
+        # schema_suggestions
+        # 1. if output_spec is None and schema_suggestions is same as the
+        # input, the return value is a non-tensor (scalar) value.
+        # 2. else, a successful propagation. output_spec contains the return
+        # type (scalar, DTensor, List[DTensor])
+        def _default_ret_value(spec):
+            if spec is None:
+                return torch.tensor(0)
+            elif isinstance(spec, DTensorSpec):
+                if spec.tensor_meta is None:
+                    # TODO: shall we support the case where meta tensor
+                    # is None?
+                    raise NotImplementedError(
+                        "A meta tensor is required to assign a default value."
+                    )
+                elif not spec.tensor_meta.shape:
+                    return torch.tensor(0, dtype=spec.tensor_meta.dtype)
+                else:
+                    return torch.tensor([])
+            else:
+                raise RuntimeError(
+                    f"{spec} is expected to be a DTensorSpec"
+                    f" but got {type(spec)}"
+                )
+
+        output_spec = output_sharding.output_spec
+        if (
+            (output_spec is not None)
+            and (isinstance(output_spec, (tuple, list)))
+        ):
+            local_results = [_default_ret_value(spec) for spec in output_spec]
+        else:
+            local_results = _default_ret_value(output_spec)
+        # TODO: also need to figure out if we should communicate
+        # the result to non-participating ranks
     else:
         # compute locally with redistribute first if needed
         local_tensor_args = pack_args_kwargs_with_local_tensor(
