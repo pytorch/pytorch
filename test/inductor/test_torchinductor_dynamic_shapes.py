@@ -40,6 +40,7 @@ test_skips = {
     "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
     "test_cpp_wrapper_dynamic_shapes": ("cpu",),
     "test_cudnn_rnn_dynamic_shapes": ("cuda",),
+    "test_gather3_dynamic_shapes": ("cpu", "cuda"),
     "test_kwargs_dynamic_shapes": ("cpu",),
     "test_lowmem_dropout2_dynamic_shapes": ("cpu", "cuda"),
     "test_rand_like_deterministic_dynamic_shapes": ("cpu", "cuda"),

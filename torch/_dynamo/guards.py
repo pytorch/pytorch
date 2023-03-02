@@ -175,7 +175,7 @@ class GuardBuilder(GuardBuilderBase):
         #
         # WARNING: this guard is not safe to use generally.  It only works if the runtime
         # value is of a type that supports bool(), and some types e.g. Tensor do not.
-        # Only use this guard in cases you can gaurantee the runtime type will be friendly.
+        # Only use this guard in cases you can guarantee the runtime type will be friendly.
         # (e.g. Specialized NNModule with mutation protection via setattr)
         #
         # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
@@ -521,7 +521,7 @@ class GuardBuilder(GuardBuilderBase):
 
 
 # NB: Naively, you'd expect this to only be a function that produces
-# the callable that consistutes the guard.  However, there is some
+# the callable that constitutes the guard.  However, there is some
 # delicate handling for invalidating this check function when the
 # locals/globals get invalidated, so there's some extra state
 # we have to hold in this manager class.

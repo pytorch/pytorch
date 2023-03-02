@@ -103,22 +103,31 @@ class IterGraph(fx.Graph):
         return self._insert_context("inserting_before", node)
 
     @staticmethod
-    def _is_sese_graph(nodes: List[fx.Node], graph: fx.Graph) -> bool:
+    def _is_sese_graph(subgraph: List[fx.Node]) -> bool:
         """
-        Check if the given subgraph is a single-entry-single-exit (SESE)
-        graph of the original fx graph.
+        Check if the given subgraph forms a single-entry-single-exit (SESE) graph.
+        We borrow the SESE graph term from the graph theory because the graph
+        looks similar to SESE graph.
+
+        1. Only one node has inputs/args from the external nodes (not in subgraph).
+        2. Only one node has a user from the the external nodes and the user must
+           be output. The output condition is not strictly enforced due to the
+           testing purpose.
+
+        SESE graph is very restrict and is not applicable for all optimizations.
+        But this gives a good start point to explor cross-iteration optimizations.
         """
-        all_nodes: Set[fx.Node] = set(nodes)
-        for i, node in enumerate(nodes):
+        all_nodes: Set[fx.Node] = set(subgraph)
+        for i, node in enumerate(subgraph):
             pytree_args, _ = tree_flatten(node.args)
             pytree_kwargs, _ = tree_flatten(node.kwargs)
             for arg in itertools.chain(pytree_args, pytree_kwargs):
-                if node not in all_nodes and i > 0:
+                if arg not in all_nodes and i > 0:
                     return False
-            if i == len(nodes) - 1:
+            if i == len(subgraph) - 1:
                 # TODO: the only user must be the output. Otherwise, we don't
                 # know how to move this subgraph. We currently do not stricly
-                # force this attribute because some test code has orphan nodes.
+                # force this attribute because some test code create fake output.
                 if len(node.users) > 1:
                     return False
             else:
@@ -497,6 +506,10 @@ class IterGraphModule(nn.Module):
         that IterGraphModule knows which iteration is the last one and can do
         proper cleanup.
         """
+        # TODO: There are cases where max_iters is not known or not precise,
+        # e.g., data is depleted. One suggestion from the reviewer is to
+        # add one extra argument to forward(..., last_iter: bool = False) to
+        # allow users to tell us if the last iteration happens.
         if max_iters <= 0:
             raise ValueError(f"Incorrect max_iters is set, {max_iters}")
         self._iter = 0
