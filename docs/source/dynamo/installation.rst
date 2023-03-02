@@ -27,7 +27,7 @@ TorchDynamo dependencies (for CUDA 11.7):
 
 .. code-block:: shell
 
-   pip3 install numpy --pre torch[dynamo] --force-reinstall --extra-index-url https://download.pytorch.org/whl/nightly/cu117
+   pip3 install numpy --pre torch --force-reinstall --extra-index-url https://download.pytorch.org/whl/nightly/cu117
 
 CPU requirements
 ~~~~~~~~~~~~~~~~
@@ -40,16 +40,6 @@ To install, run the following command:
 
    pip3 install --pre torch --extra-index-url https://download.pytorch.org/whl/nightly/cpu
 
-
-Install from Local Source
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Alternatively, you can build PyTorch from `source
-<https://github.com/pytorch/pytorch#from-source>`__, which has TorchDynamo
-included.
-
-To install GPU TorchDynamo dependencies, run ``make triton`` in the
-PyTorch repo root directory.
 
 Verify Installation
 ~~~~~~~~~~~~~~~~~~~

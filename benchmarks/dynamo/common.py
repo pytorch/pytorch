@@ -1753,8 +1753,8 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1200,
-        help="timeout (ms) for benchmarking.",
+        default=1800,
+        help="timeout (second) for benchmarking.",
     )
 
     parser.add_argument(
@@ -1879,9 +1879,9 @@ def main(runner, original_dir=None):
     with maybe_init_distributed(
         (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
-        return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
-            runner, args, original_dir
-        )
+        return maybe_fresh_cache(
+            run, (args.cold_start_latency and args.only) or args.ci
+        )(runner, args, original_dir)
 
 
 def run(runner, args, original_dir=None):
