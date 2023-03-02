@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import PyOperator
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
