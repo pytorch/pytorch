@@ -421,7 +421,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
-        if isinstance(target, torch.Tensor):
+        if isinstance(source, ParamBufferSource):
+            # We DO NOT use the result of this, it is merely a registration mechanism.
+            def wrap_name(module_key):
+                return None
+
+        elif isinstance(target, torch.Tensor):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
