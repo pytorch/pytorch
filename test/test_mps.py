@@ -7399,7 +7399,7 @@ class TestViewOpsMPS(TestCaseMPS):
 
         # Use the same weights and bias as the ones from the cpu
         lin_mps.weight.data = lin_cpu.weight.data.detach().clone().to("mps").requires_grad_()
-        lin_mps.bias.data   = lin_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+        lin_mps.bias.data = lin_cpu.bias.data.detach().clone().to("mps").requires_grad_()
 
         x_mps = torch.rand([B, T, 10], device="mps", requires_grad=True)
         x_cpu = x_mps.detach().clone().cpu().requires_grad_()
