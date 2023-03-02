@@ -1,59 +1,88 @@
 import functools
 import logging
+from typing import List, Tuple
 
 import sympy
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs
 from torch._inductor.virtualized import V
-from ..utils import ceildiv as cdiv
-
+from ..utils import ceildiv as cdiv, next_power_of_2
 
 log = logging.getLogger(__name__)
 
 
-@functools.lru_cache(None)
-def mm_configs():
-    import triton
+def triton_config(num_stages, num_warps, **kwargs):
+    from triton import Config
 
-    return [
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=3, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=3, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=5, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=5, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 16}, num_stages=2, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 16}, num_stages=1, num_warps=2
-        ),
-    ]
+    return Config(kwargs, num_stages=num_stages, num_warps=num_warps)
+
+
+def filtered_configs(
+    m: int, n: int, k: int, configs: List[Tuple[int, int, int, int, int]]
+):
+    """Heuristic to shrink configs when they are bigger than the input size"""
+    m = max(next_power_of_2(V.graph.sizevars.size_hint(m)), 16)
+    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)
+    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), 16)
+    used = set()
+    for block_m, block_n, block_k, num_stages, num_warps in configs:
+        # shrink configs for small sizes
+        block_m = min(block_m, m)
+        block_n = min(block_n, n)
+        block_k = min(block_k, k)
+        # each warp computes 16x16 tile = 256
+        num_warps = min(num_warps, block_m * block_n // 256)
+        if (block_m, block_n, block_k, num_stages, num_warps) not in used:
+            used.add((block_m, block_n, block_k, num_stages, num_warps))
+            yield triton_config(
+                BLOCK_M=block_m,
+                BLOCK_N=block_n,
+                BLOCK_K=block_k,
+                num_stages=num_stages,
+                num_warps=num_warps,
+            )
+
+
+mm_configs = functools.partial(
+    filtered_configs,
+    configs=(
+        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+        (64, 64, 32, 2, 4),
+        (64, 128, 32, 3, 4),
+        (128, 64, 32, 3, 4),
+        (64, 128, 32, 4, 8),
+        (128, 64, 32, 4, 8),
+        (64, 32, 32, 5, 8),
+        (32, 64, 32, 5, 8),
+        (128, 128, 32, 2, 8),
+        (64, 64, 64, 3, 8),
+        (32, 32, 128, 2, 4),
+        (64, 64, 16, 2, 4),
+        (32, 32, 16, 1, 2),
+    ),
+)
+
+int8_mm_configs = functools.partial(
+    filtered_configs,
+    configs=(
+        # "BLOCK_M", "BLOCK_N", "BLOCK_K", "num_stages", "num_warps"
+        (64, 64, 32, 2, 4),
+        (64, 128, 32, 3, 4),
+        (128, 64, 32, 3, 4),
+        (64, 128, 32, 4, 8),
+        (128, 64, 32, 4, 8),
+        (64, 32, 32, 5, 8),
+        (32, 64, 32, 5, 8),
+        (128, 128, 32, 2, 8),
+        (64, 64, 64, 3, 8),
+        (32, 32, 128, 2, 4),
+        (64, 64, 16, 2, 4),
+        (32, 32, 16, 1, 2),
+        (128, 256, 128, 3, 8),
+        (256, 128, 128, 3, 8),
+    ),
+)
 
 
 def mm_grid(m, n, meta):
@@ -89,7 +118,7 @@ def mm_options(config, sym_k, layout):
     )
 
 
-def mm_args(mat1, mat2, *others, layout=None):
+def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     """
     Common arg processing for mm,bmm,addmm,etc
     """
@@ -101,11 +130,15 @@ def mm_args(mat1, mat2, *others, layout=None):
     if layout is None:
         from torch._inductor.ir import FixedLayout
 
+        if out_dtype is None:
+            out_dtype = mat1.get_dtype()
         layout = FixedLayout(
             mat1.get_device(),
-            mat1.get_dtype(),
+            out_dtype,
             [*b, m, n],
         )
+    else:
+        assert out_dtype is None, "out_dtype is ignored if layout is specified."
 
     from ..lowering import expand
 
