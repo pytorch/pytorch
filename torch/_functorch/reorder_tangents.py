@@ -13,9 +13,9 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor"):
     """
 
     def is_same_target(node):
-        if isinstance(node.target, str):
-            return False
-        return node.target.name() == target_name
+        if isinstance(node.target, torch._ops.PyOperatorABC):
+            return node.target.name() == target_name
+        return False
 
     input_nodes = list(node.users)
     if is_same_target(node):
