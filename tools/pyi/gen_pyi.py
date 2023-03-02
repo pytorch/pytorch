@@ -783,9 +783,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = [
-        "{} = {}".format(name, defn) for name, defn in namedtuples.items()
-    ]
+    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
