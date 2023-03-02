@@ -479,12 +479,7 @@ def fix_vars(instructions: List[Instruction], code_options):
         if instructions[i].opcode in HAS_LOCAL:
             instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
-            if not instructions[i].argval in names:
-                instructions[i].arg = len(code_options["co_names"])
-                code_options["co_names"] += (instructions[i].argval,)
-                names[instructions[i].argval] = instructions[i].arg
-            else:
-                instructions[i].arg = names[instructions[i].argval]
+            instructions[i].arg = names[instructions[i].argval]
 
         if instructions[i].arg is not None:
             instructions[i].arg = (instructions[i].arg << shift) + push_null
