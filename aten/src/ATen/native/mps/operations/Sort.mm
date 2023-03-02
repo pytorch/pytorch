@@ -18,6 +18,10 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
  const Tensor& values,
  const Tensor& indices) {
   using namespace mps;
+
+  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
+  MPS_CHECK_INT64_OP_SUPPORTED(self, macOS13_3_plus, "sort_stable_out");
+
   values.copy_(self);
   // check if self is scalar
   dim = maybe_wrap_dim(dim, self.dim(), true);
@@ -34,9 +38,6 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     values.copy_(cpu_values);
     indices.copy_(cpu_indices);
     return;
-  }
-  if (self.scalar_type() == ScalarType::Long) {
-    TORCH_WARN_ONCE("MPS: no support for int64 min/max ops, casting it to int32");
   }
 
   MPSStream* stream = getCurrentMPSStream();
@@ -60,17 +61,17 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
             newCachedGraph = new CachedGraph(mpsGraph);
             newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
 
-            MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self);
+            MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self, /*includesInt64=*/macOS13_3_plus);
             MPSGraphTensor * sortedTensor = [mpsGraph sortWithTensor:castInputTensor
                                                                 axis:(NSInteger)dim
                                                                 descending:(BOOL)descending
                                                                 name:@"sort_out"];
-            sortedTensor = castFromIHFTypes(mpsGraph, sortedTensor, values);
+            sortedTensor = castFromIHFTypes(mpsGraph, sortedTensor, values, /*includesInt64=*/macOS13_3_plus);
             MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim
                                                                      descending:(BOOL)descending
                                                                      name:@"argsort_out"];
-            argSortedTensor = castFromIHFTypes(mpsGraph, argSortedTensor, indices);
+            argSortedTensor = castFromIHFTypes(mpsGraph, argSortedTensor, indices, /*includesInt64=*/macOS13_3_plus);
             newCachedGraph->valuesTensor = sortedTensor;
             newCachedGraph->indicesTensor = argSortedTensor;
         }

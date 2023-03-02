@@ -7431,6 +7431,7 @@
   dispatch:
     CPU: masked_scatter__cpu
     CUDA: masked_scatter__cuda
+    MPS: masked_scatter__mps
   autogen: masked_scatter.out
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
