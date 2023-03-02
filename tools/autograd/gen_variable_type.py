@@ -550,6 +550,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
     "_nested_tensor_strides",
+    # Functional collectives keep an internal ref through the Work object
+    "all_reduce",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
