@@ -432,10 +432,17 @@ class TestGitHubPR(TestCase):
         # Updates submodule during dev-cycle but reverts it later
         pr  = GitHubPR("pytorch", "pytorch", 95045)
         self.assertEqual(pr.get_changed_submodules(), [])
+        self.assertTrue(pr.has_valid_submodule_updates())
 
         # PR updates ideep
         pr = GitHubPR("pytorch", "pytorch", 94939)
         self.assertEqual(pr.get_changed_submodules(), ["third_party/ideep"])
+        self.assertFalse(pr.has_valid_submodule_updates())
+
+        # Automated submodule update
+        pr = GitHubPR("pytorch", "pytorch", 91051)
+        self.assertEqual(pr.get_changed_submodules(), ["third_party/kineto"])
+        self.assertTrue(pr.has_valid_submodule_updates())
 
 
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)

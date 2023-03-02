@@ -755,6 +755,16 @@ class GitHubPR:
         submodules = self.get_submodules()
         return [f for f in self.get_changed_files() if f in submodules]
 
+    def has_valid_submodule_updates(self) -> bool:
+        """ Submodule updates in PR are valid either
+             - There are no submodule updates
+             - PR title, body or labels mentions submodules
+        """
+        return (len(self.get_changed_submodules()) == 0 or
+                "submodule" in self.get_title().lower() or
+                "submodule" in self.get_body().lower() or
+                any("submodule" in label for label in self.get_labels()))
+
     def _get_reviews(self) -> List[Tuple[str, str]]:
         if self._reviews is None:
             self._reviews = []
@@ -1764,6 +1774,11 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
+    if not pr.has_valid_submodule_updates() and not args.force:
+        message = f"PR updates submodules {', '.join(pr.get_changed_submodules())} but it's not mentioned in PR title nor description"
+        message += "\nIf updates are intentional, please add \"submodule\" label or keyword to PR description"
+        gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
+        return
     try:
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
