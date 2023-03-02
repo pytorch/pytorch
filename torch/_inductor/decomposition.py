@@ -225,8 +225,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
 
-        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
+        # Shape padding introduces addtional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+        # tradeoff between performance improvement from shape padding and overhead from addtional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         return ori_time > pad_time * 1.1
 
@@ -343,8 +343,8 @@ def all(input):
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
+def all_dim(input, dim, keeepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
 
 
 # NB: this decomposition is not stride accurate, do not put it in the main

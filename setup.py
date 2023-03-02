@@ -825,7 +825,12 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        extra_compile_args = ['/MD', '/FS', '/EHsc']
+        # /DNOMINMAX removes builtin min/max functions
+        # /wdXXXX disables warning no. XXXX
+        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
+                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
+                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
+                              '/wd4275']
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -1153,9 +1158,6 @@ def main():
         'include/torch/csrc/distributed/c10d/*.h',
         'include/torch/csrc/distributed/c10d/*.hpp',
         'include/torch/csrc/distributed/rpc/*.h',
-        'include/torch/csrc/distributed/autograd/context/*.h',
-        'include/torch/csrc/distributed/autograd/functions/*.h',
-        'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',

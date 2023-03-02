@@ -300,7 +300,8 @@ def split_module(
     else:
         # Go through the graph to construct the mapping dict
         for node in m.graph.nodes:
-            org_mod_env[node.name] = node
+            if node.op == "placeholder" or "get_attr":
+                org_mod_env[node.name] = node
 
     # Do some things iterating over the partitions in topological order again:
     # 1) Finish off submodule Graphs by setting corresponding outputs

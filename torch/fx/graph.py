@@ -451,20 +451,26 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
 
                         lines = node.stack_trace.strip().split('\n')
-                        # stacktrace should have innermost frame last, so we
-                        # iterate backwards to find the first line that starts
-                        # with 'File '
-                        summary_str = ""
-                        for idx in range(len(lines) - 2, -1, -1):
+                        idx = 0
+                        while idx < len(lines):
                             line = lines[idx].strip()
-                            matches = pattern.match(line)
+                            if line.startswith('File '):
+                                break
+                            idx += 1
+
+                        summary_lines = []
+                        if idx + 1 < len(lines):
+                            matches = pattern.match(lines[idx].strip())
                             if matches:
                                 file = matches.group(1)
                                 lineno = matches.group(2)
-                                # next line should be the code
-                                code = lines[idx + 1].strip()
-                                summary_str = f'File: {file}:{lineno}, code: {code}'
-                                break
+                                lineage = f'File: {file}:{lineno}'
+                                summary_lines.append(lineage)
+
+                            code = f"code: {lines[idx + 1].strip()}"
+                            summary_lines.append(code)
+
+                        summary_str = ', '.join(summary_lines)
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""

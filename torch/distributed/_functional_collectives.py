@@ -145,7 +145,7 @@ def _all_reduce(self, reduceOp, tag, ranks, group_size):
     group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
     assert group is not None
 
-    inplace_tensor = self.clone()
+    inplace_tensor = self.clone(memory_format=torch.contiguous_format)
     work = dist.all_reduce(inplace_tensor, op=op, group=group, async_op=True)
     _register_tensor_work(inplace_tensor, work)
 
@@ -160,20 +160,6 @@ c10_lib_cuda.impl("all_reduce", _all_reduce)
 c10_lib_cpu.impl("wait_tensor", _wait_tensor)
 c10_lib_cuda.impl("wait_tensor", _wait_tensor)
 
-def _all_gather_into_tensor(shard, tag, ranks, group_size):
-    # TODO add dim support?
-    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
-    assert group is not None
-    out_size = list(shard.size())
-    out_size[0] *= group_size
-    out_tensor = shard.new_empty(out_size)
-    work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
-    _register_tensor_work(out_tensor, work)
-
-    return out_tensor
-
-c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
-c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
 
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
