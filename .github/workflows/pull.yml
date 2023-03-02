@@ -332,16 +332,10 @@ jobs:
     with:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
-<<<<<<< HEAD
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
-=======
       cuda-version: "11.7"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
->>>>>>> master
         ]}
 
   linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
