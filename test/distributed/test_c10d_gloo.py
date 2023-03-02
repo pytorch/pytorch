@@ -37,7 +37,6 @@ from torch.distributed._shard.sharded_tensor import (
     ShardMetadata,
 )
 from torch.nn.parallel import DistributedDataParallel
-from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
 from torch.testing._internal.common_distributed import (
     create_device,
     MultiProcessTestCase,
@@ -1766,20 +1765,19 @@ class DistributedDataParallelTest(
         local_shards = [Shard(torch.randn(5, 10, device=device), local_shard_metadata)]
         st = init_from_local_shards(local_shards, [10, 10])
         m = MyModule(st)
-        with _ddp_replicated_tensor(False):
-            DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-                module=m,
-                params_and_buffers_to_ignore={'st'}
-            )
-            # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
-            DistributedDataParallel(
-                m,
-                device_ids=[device] if device.type == "gpu" else None,
-                process_group=pg,
-                gradient_as_bucket_view=True,
-                broadcast_buffers=False,
-                static_graph=True,
-            )
+        DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+            module=m,
+            params_and_buffers_to_ignore={'st'}
+        )
+        # test to make DDP constructor will not fail when module includes a ShardedTensor when ignored
+        DistributedDataParallel(
+            m,
+            device_ids=[device] if device.type == "gpu" else None,
+            process_group=pg,
+            gradient_as_bucket_view=True,
+            broadcast_buffers=False,
+            static_graph=True,
+        )
 
     def _run_and_verify_sparse_gradients(self, vanilla_model, ddp_model):
         mult = 2

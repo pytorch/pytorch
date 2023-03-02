@@ -246,13 +246,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
   if (log_target) {
     output = at::exp(target) * (target - input);
   } else {
-    if (input.is_mps() || target.is_mps()) {
-      // MPS fallback, as MPS does not currently implement xlogy.
-      // MPS will give the wrong results at `target[i] = 0`
-      output = target * (at::log(target) - input);
-    } else {
-      output = at::xlogy(target, target) - target * input;
-    }
+    output = at::xlogy(target, target) - target * input;
   }
   return apply_loss_reduction(output, reduction);
 }
