@@ -869,7 +869,6 @@ class NumpyVariable(VariableTracker):
         if self.value is np.meshgrid:
             if HAS_NUMPY_TORCH_INTEROP:
                 import torch_np
-
                 meshgrid = torch_np.meshgrid
             else:
                 # should we give a warning since torch.meshgrid is having a different semantics than np?
@@ -885,6 +884,8 @@ class NumpyVariable(VariableTracker):
                 example_value=None,
                 **options,
             )
+        else:
+            unimplemented("numpy")
 
     def call_method(
         self,

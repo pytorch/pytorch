@@ -627,12 +627,14 @@ class NumpyTensorVariable(TensorVariable):
     Represents a numpy.ndarray. Use this for Tensor.numpy() call.
     """
     def var_getattr(self, tx, name):
-        unimplemented(f"numpy_ndarray.{name}")
+        import pdb; pdb.set_trace()
+
 
     def call_isinstance(self, tensor_type):
         return False
 
     def call_method(
+        self,
         tx,
         name,
         args: "List[VariableTracker]",

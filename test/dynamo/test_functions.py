@@ -842,8 +842,8 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             return torch.tensor(False)
 
     @make_test
-    def test_torch_size(x):
-        if x.size(0) == 1:
+    def test_tensor_sum(x):
+        if x.sum() == 1:
             return torch.tensor(True)
         else:
             return torch.tensor(False)
