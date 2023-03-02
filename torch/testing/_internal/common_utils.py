@@ -748,11 +748,11 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
-        pytest_args = argv
+        pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
-            pytest_args = pytest_args + [f'--junit-xml-reruns={test_report_path}']
+            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
 
         import pytest
         os.environ["NO_COLOR"] = "1"
@@ -804,7 +804,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+        unittest_args = argv.copy()
+        unittest_args.remove("-rfEX")
+        unittest_args.remove("--reruns=2")
+        unittest.main(argv=unittest_args, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
             resultclass=XMLTestResultVerbose))
