@@ -2676,6 +2676,27 @@ def meta_upsample_bilinear2d_aa(
     )
 
 
+# From aten/src/ATen/native/cuda/AmpKernels.cu
+@register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
+def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
+    check(found_inf.numel() == 1, lambda: "found_inf must be a 1-element tensor.")
+    check(inv_scale.numel() == 1, lambda: "inv_scale must be a 1-element tensor.")
+    check(
+        found_inf.dtype.is_floating_point, lambda: "found_inf must be a float tensor."
+    )
+    check(
+        inv_scale.dtype.is_floating_point, lambda: "inv_scale must be a float tensor."
+    )
+
+
+# From aten/src/ATen/native/UnaryOps.cpp
+@register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
+@out_wrapper()
+def nan_to_num(self, nan=None, posinf=None, neginf=None):
+    result_size = list(self.size())
+    return self.new_empty(result_size)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
