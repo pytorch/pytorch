@@ -241,6 +241,7 @@ class IterGraph(fx.Graph):
         for graph in self._all_graphs:
             actual_nodes = [self._lookup_node(node, graph) for node in nodes]
             actual_target_node = self._lookup_node(target_node, graph)
+            assert actual_target_node is not None
             for actual_node in actual_nodes:
                 actual_target_node.prepend(actual_node)
 
@@ -249,6 +250,7 @@ class IterGraph(fx.Graph):
             actual_nodes = [self._lookup_node(node, graph) for node in nodes]
             actual_target_node = self._lookup_node(target_node, graph)
             for actual_node in actual_nodes:
+                assert actual_target_node is not None
                 actual_target_node.append(actual_node)
                 actual_target_node = actual_node
 
@@ -361,12 +363,12 @@ class IterGraph(fx.Graph):
             actual_target_node = self._lookup_node(target_node, graph)
             assert (
                 actual_target_node is not None
-            ), f"The actual target node is None, {target_ndoe}."
+            ), f"The actual target node is None, {target_node}."
             actual_target_node.append(actual_node)
 
     def node_update_arg(self, node: fx.Node, idx: int, arg: Argument) -> None:
         if self._freeze_cross_iter_movement:
-            target_node.update_arg(int, arg)
+            node.update_arg(int, arg)
             return
 
         setup_arg = tree_map(
@@ -402,6 +404,7 @@ class IterGraph(fx.Graph):
         for graph in self._all_graphs:
             actual_node = self._lookup_node(node, graph)
             actual_replace_with = self._lookup_node(replace_with, graph)
+            assert actual_node is not None
             ret = actual_node.replace_all_uses_with(
                 actual_replace_with, delete_user_cb, propagate_meta=propagate_meta
             )
@@ -414,6 +417,7 @@ class IterGraph(fx.Graph):
                 actual_user_node = self._lookup_node(user, graph)
             else:
                 actual_user_node = user
+            assert actual_node is not None
             actual_node.users[actual_user_node] = 1
 
     def node_remove_user(self, node: fx.Node, user: Any) -> None:
@@ -423,6 +427,7 @@ class IterGraph(fx.Graph):
                 actual_user_node = self._lookup_node(user, graph)
             else:
                 actual_user_node = user
+            assert actual_node is not None
             del actual_node.users[actual_user_node]
 
     def keep_unused_nodes(self) -> None:
