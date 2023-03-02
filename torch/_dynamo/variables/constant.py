@@ -11,7 +11,7 @@ from .base import typestr, VariableTracker
 
 class ConstantVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(ConstantVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert not isinstance(value, torch.Tensor)
         assert not isinstance(value, torch.SymInt)
         assert not isinstance(value, torch.SymFloat)
@@ -96,7 +96,7 @@ class ConstantVariable(VariableTracker):
             const_args = [a.as_python_constant() for a in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
-            return super(ConstantVariable, self).call_method(tx, name, args, kwargs)
+            return super().call_method(tx, name, args, kwargs)
 
         def has_arith_binop(num_ty):
             return (
@@ -138,7 +138,7 @@ class ConstantVariable(VariableTracker):
 
 class EnumVariable(VariableTracker):
     def __init__(self, value, **kwargs):
-        super(EnumVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def as_proxy(self):

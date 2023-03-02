@@ -55,15 +55,13 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
 
 # exclude SparseAdam because other areas of the stack don't support it yet
 # the others are handled specially above
-exclude = set(
-    [
-        "SGD",  # Handled above
-        "Optimizer",
-        "SparseAdam",  # Unsupported
-        "LBFGS",  # Unsupported
-        "RAdam",  # Has data dependent control for rectification (needs symint)
-    ]
-)
+exclude = {
+    "SGD",  # Handled above
+    "Optimizer",
+    "SparseAdam",  # Unsupported
+    "LBFGS",  # Unsupported
+    "RAdam",  # Has data dependent control for rectification (needs symint)
+}
 
 optimizers = [
     opt
@@ -82,9 +80,6 @@ class End2EndTests(torch._dynamo.test_case.TestCase):
     # https://github.com/pytorch/torchdynamo/issues/1604
     def test_optimizing_over_tensor_with_requires_grad(self):
         class Net(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = torch.bmm(x, y)
                 z = torch.flatten(z, 1)

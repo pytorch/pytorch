@@ -27,13 +27,13 @@ class Pareto(TransformedDistribution):
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha, validate_args=validate_args)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
-        super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Pareto, _instance)
         new.scale = self.scale.expand(batch_shape)
         new.alpha = self.alpha.expand(batch_shape)
-        return super(Pareto, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def mean(self):

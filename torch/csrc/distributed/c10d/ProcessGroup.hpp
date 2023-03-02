@@ -236,15 +236,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     static auto op =
         c10::Dispatcher::singleton()
             .findSchemaOrThrow("c10d::_allgather_base_", "")
-            .typed<c10::intrusive_ptr<Work>(
+            .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                 at::Tensor&,
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&)>();
 
-    return op.call(
+    return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
-        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this));
+        c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this)));
   }
 
   // This function is deprecated and will be moved out of ProcessGroup to comms:
@@ -339,18 +339,18 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const ReduceScatterOptions& opts = ReduceScatterOptions()) {
     static auto op = c10::Dispatcher::singleton()
                          .findSchemaOrThrow("c10d::_reduce_scatter_base_", "")
-                         .typed<c10::intrusive_ptr<Work>(
+                         .typed<std::tuple<at::Tensor, c10::intrusive_ptr<Work>>(
                              at::Tensor&,
                              at::Tensor&,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              const c10::intrusive_ptr<::c10d::ReduceOp>&,
                              int64_t)>();
-    return op.call(
+    return std::get<1>(op.call(
         outputBuffer,
         inputBuffer,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
         c10::make_intrusive<::c10d::ReduceOp>(opts.reduceOp),
-        opts.timeout.count());
+        opts.timeout.count()));
   }
 
   virtual c10::intrusive_ptr<Work> alltoall_base(
@@ -383,16 +383,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const AllToAllOptions& opts = AllToAllOptions()) {
     static auto op = c10::Dispatcher::singleton()
                          .findSchemaOrThrow("c10d::alltoall_", "")
-                         .typed<c10::intrusive_ptr<::c10d::Work>(
-                             at::TensorList,
-                             at::TensorList,
+                         .typed<std::tuple<std::vector<at::Tensor>, c10::intrusive_ptr<Work>>(
+                             const at::TensorList&,
+                             const at::TensorList&,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t)>();
-    return op.call(
+    return std::get<1>(op.call(
         outputTensors,
         inputTensors,
         c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(this),
-        opts.timeout.count());
+        opts.timeout.count()));
   }
 
   virtual void monitoredBarrier(

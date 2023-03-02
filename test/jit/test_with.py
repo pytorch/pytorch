@@ -581,9 +581,6 @@ class TestWith(JitTestCase):
         # Check that @torch.jit.ignored functions respect no_grad when it is
         # called in JIT mode.
         class NoGradModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             @torch.jit.ignore
             def adder(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 w = x + y

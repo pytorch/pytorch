@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>

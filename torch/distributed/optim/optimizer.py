@@ -198,7 +198,7 @@ class DistributedOptimizer:
         if self.is_functional_optim:
             optimizer_new_func = _new_script_local_optimizer
         else:
-            logger.warn(
+            logger.warning(
                 f"Creating the optimizer {optimizer_class} without TorchScript support, "
                 "this might result in slow computation time in multithreading environment"
                 "(i.e. Distributed Model Parallel training on CPU) due to the Python's "

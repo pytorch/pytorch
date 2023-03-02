@@ -219,10 +219,10 @@ class PerChannelDetector(DetectorBase):
 
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
-        "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
-        "x86": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "fbgemm": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "qnnpack": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "onednn": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
+        "x86": {nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d},
     }
 
     def __init__(self, backend: str = torch.backends.quantized.engine):
@@ -230,7 +230,7 @@ class PerChannelDetector(DetectorBase):
 
         # store the backend information
         self.backend_chosen = backend
-        self.supported_modules = set([])
+        self.supported_modules = set()
         if self.backend_chosen in self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES:
             self.supported_modules = self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[self.backend_chosen]
         else:
@@ -413,17 +413,17 @@ class DynamicStaticDetector(DetectorBase):
     IS_CURRENTLY_SUPPORTED_KEY = "is_dynamic_supported"
 
     # modules that are supported both dynamic and static for this report function
-    DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
+    DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = {nn.Linear}
 
     # modules that will be supported soon for both
-    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = set([nn.Conv1d, nn.Conv2d, nn.Conv3d])
+    DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED = {nn.Conv1d, nn.Conv2d, nn.Conv3d}
 
     def __init__(self, tolerance=0.5):
         super().__init__()
 
         # set tolerance level and initialize a set to keep track of useful fqn locations
         self.tolerance = tolerance
-        self.useful_observer_fqns: Set[str] = set([])
+        self.useful_observer_fqns: Set[str] = set()
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""
@@ -737,9 +737,14 @@ class InputWeightEqualizationDetector(DetectorBase):
     * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    SUPPORTED_MODULES: Set[Callable] = set(
-        [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]
-    )
+    SUPPORTED_MODULES: Set[Callable] = {nn.Linear,
+                                        nn.Conv1d,
+                                        nn.Conv2d,
+                                        nn.Conv3d,
+                                        nnqat.Linear,
+                                        nnqat.Conv1d,
+                                        nnqat.Conv2d,
+                                        nnqat.Conv3d}
 
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"

@@ -493,8 +493,7 @@ class _ValgrindWrapper:
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
                 ).returncode
 
         self._build_type: Optional[str] = None
@@ -635,9 +634,9 @@ class _ValgrindWrapper:
                 run_loop_cmd = [
                     run_loop_exec,
                     "--number", str(number),
-                    "--number_warmup", str(min(number, 10)),
+                    "--number-warmup", str(min(number, 10)),
                     "--repeats", str(repeats),
-                    "--number_threads", str(task_spec.num_threads),
+                    "--number-threads", str(task_spec.num_threads),
                 ]
 
             valgrind_invocation, valgrind_invocation_output = run([

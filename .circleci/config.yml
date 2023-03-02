@@ -1037,7 +1037,7 @@ jobs:
                 $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
             }
 
-            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake requests typing_extensions --yes
+            retry conda install numpy ninja pyyaml mkl mkl-include setuptools cmake requests typing-extensions --yes
 
             # sync submodules
             cd ${PROJ_ROOT}
@@ -1101,7 +1101,7 @@ jobs:
             cd ${PROJ_ROOT}/ios/TestApp/benchmark
             mkdir -p ../models
             if [ ${USE_COREML_DELEGATE} == 1 ]; then
-              pip install coremltools==5.0b5 protobuf==3.20.1 six==1.16.0
+              pip install coremltools==5.0b5 protobuf==3.20.1
               python coreml_backend.py
             else
               cd "${PROJ_ROOT}"

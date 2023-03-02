@@ -153,7 +153,7 @@ can use this pattern:
     # A module with two linear layers
     >>> class MyModule(torch.nn.Module):
           def __init__(self):
-            super(MyModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 
@@ -218,7 +218,7 @@ this:
     # A module with control flow
     >>> class ControlFlowModule(torch.nn.Module):
           def __init__(self):
-            super(ControlFlowModule, self).__init__()
+            super().__init__()
             self.l0 = torch.nn.Linear(4, 2)
             self.l1 = torch.nn.Linear(2, 1)
 

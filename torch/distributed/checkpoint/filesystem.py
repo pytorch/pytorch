@@ -319,7 +319,7 @@ class FileSystemWriter(StorageWriter):
     def __init__(
         self,
         path: Union[str, os.PathLike],
-        single_file_per_rank: bool = False,
+        single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,

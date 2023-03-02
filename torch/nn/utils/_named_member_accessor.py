@@ -296,7 +296,7 @@ class NamedMemberAccessor:
         Check that the given keys are valid.
         """
         keys = set(keys)
-        valid_keys = set(name for name, _ in self.named_tensors(remove_duplicate=False))
+        valid_keys = {name for name, _ in self.named_tensors(remove_duplicate=False)}
         missing_keys = valid_keys - keys
         unexpected_keys = keys - valid_keys
         return sorted(missing_keys), sorted(unexpected_keys)

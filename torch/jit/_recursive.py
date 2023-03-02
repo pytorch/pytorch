@@ -89,7 +89,7 @@ def jit_ignored_properties(module):
     user_annotated_ignored_attributes = getattr(module, "__jit_ignored_attributes__", list())
 
     def get_properties_names(module):
-        return set(k for k, v in vars(module).items() if isinstance(v, property))
+        return {k for k, v in vars(module).items() if isinstance(v, property)}
 
     properties = get_properties_names(type(module))
     user_annoted_ignored_properties = set()
@@ -122,7 +122,7 @@ def _get_valid_constant(attr, v, owner_type):
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
     def __init__(self, source, filename, file_lineno, leading_whitespace_len):
-        super(SourceContext, self).__init__(source, filename, file_lineno, leading_whitespace_len)
+        super().__init__(source, filename, file_lineno, leading_whitespace_len)
 
 
 def infer_concrete_type_builder(nn_module, share_types=True):

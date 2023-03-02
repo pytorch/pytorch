@@ -32,7 +32,7 @@ class _QLinearBenchmarkBase(op_bench.TorchBenchmarkBase):
 
 class QLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT, device):
-        super(QLinearBenchmark, self).init(N, IN, OUT, nnq.Linear(IN, OUT))
+        super().init(N, IN, OUT, nnq.Linear(IN, OUT))
         self.inputs = {
             "input": self.qX
         }
@@ -41,7 +41,7 @@ class QLinearBenchmark(_QLinearBenchmarkBase):
 
 class QDynamicLinearBenchmark(_QLinearBenchmarkBase):
     def init(self, N, IN, OUT, device):
-        super(QDynamicLinearBenchmark, self).init(N, IN, OUT, nnqd.Linear(IN, OUT))
+        super().init(N, IN, OUT, nnqd.Linear(IN, OUT))
         self.inputs = {
             "input": self.X
         }

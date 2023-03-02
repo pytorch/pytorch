@@ -16,7 +16,7 @@ class TestGetDefaultAttr(JitTestCase):
 
         class A(torch.nn.Module):
             def __init__(self):
-                super(A, self).__init__()
+                super().__init__()
                 self.init_attr_val = 1.0
 
             def forward(self, x):

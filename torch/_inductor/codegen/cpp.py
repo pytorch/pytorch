@@ -363,11 +363,11 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"({a} != 0) | ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -383,6 +383,69 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def reciprocal(a):
         return f"{a}.reciprocal()"
+
+    @staticmethod
+    def atan(x):
+        return f"{x}.atan()"
+
+    @staticmethod
+    def acos(x):
+        return f"{x}.acos()"
+
+    @staticmethod
+    def asin(x):
+        return f"{x}.asin()"
+
+    @staticmethod
+    def cosh(x):
+        return f"{x}.cosh()"
+
+    @staticmethod
+    def sinh(x):
+        return f"{x}.sinh()"
+
+    @staticmethod
+    def log10(x):
+        return f"{x}.log10()"
+
+    @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
+
+    @staticmethod
+    def nextafter(x):
+        return f"{x}.nextafter()"
+
+    @staticmethod
+    def copysign(a, b):
+        return f"{a}.copysign({b})"
+
+    @staticmethod
+    def atan2(a, b):
+        return f"{a}.atan2({b})"
+
+    @staticmethod
+    def hypot(a, b):
+        return f"{a}.hypot({b})"
+
+    @staticmethod
+    def atanh(x):
+        # For real x, atanh(x) = 1/2 * log((1+x)/(1-x))
+        vec_one = f"decltype({x})(1)"
+        vec_one_half = f"decltype({x})(0.5)"
+        return f"{vec_one_half} * (({vec_one} + {x})/({vec_one} - {x})).log()"
+
+    @staticmethod
+    def asinh(x):
+        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
+
+    @staticmethod
+    def acosh(x):
+        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
 
     @staticmethod
     def constant(val, dtype):
@@ -631,6 +694,62 @@ class CppOverrides(OpOverrides):
         return f"std::lgamma({x})"
 
     @staticmethod
+    def acos(x):
+        return f"std::acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"std::acosh({x})"
+
+    @staticmethod
+    def cosh(x):
+        return f"std::cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"std::sinh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"std::asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"std::asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"std::atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"std::atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"std::atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"std::copysign({x}, {y})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"std::hypot({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
+    def log10(x):
+        return f"std::log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"std::nextafter({x}, {y})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -716,8 +835,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
+        return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
     def sign(x):
@@ -740,7 +858,7 @@ class CppKernel(Kernel):
     suffix = ";"
 
     def __init__(self, args, num_threads):
-        super(CppKernel, self).__init__(args)
+        super().__init__(args)
         self.call_ranges = None
         self.ranges = None
         self.itervars = None
@@ -962,7 +1080,7 @@ class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
     def __init__(self, args, num_threads, tiling_factor=0):
-        super(CppVecKernel, self).__init__(args, num_threads)
+        super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
             tiling_factor = codecache.pick_vec_isa().nelements()
@@ -1267,14 +1385,14 @@ class CppTile2DTailKernel(CppKernel):
 
 class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
-        super(CppVecKernelChecker, self).__init__(args, num_threads, tiling_factor)
+        super().__init__(args, num_threads, tiling_factor)
 
-        # Since this kernel is only for checker but does not genreate any
+        # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
         metrics.generated_cpp_vec_kernel_count -= 1
 
-        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
         self._orig_wrapper_code = None
 
@@ -1440,7 +1558,7 @@ class CppVecKernelChecker(CppVecKernel):
             if _node.op in skip_io_nodes:
                 continue
 
-            if _node.target not in ["load", "get_index"]:
+            if _node.target not in ["load", "get_index", "constant"]:
                 # The body contains non load node
                 is_load_only = False
                 break
@@ -1449,6 +1567,23 @@ class CppVecKernelChecker(CppVecKernel):
                 _, name, _ = _node.args
                 load_dtype = V.graph.get_dtype(name)
                 is_load_only = True
+
+            # Support "constant" node
+            if _node.target == "constant":
+                _, _, load_dtype = _node.args
+
+                # Create and record the context
+                opt_ctx = OptimizationContext()
+                opt_ctx.dtype = load_dtype
+                opt_ctx.ops_name = _node.target
+                _node.meta[OptimizationContext.key] = opt_ctx
+
+                # TODO: Support BF16 and FP16
+                if load_dtype in [torch.float32, torch.int32]:
+                    is_load_only = True
+                else:
+                    is_load_only = False
+                    break
 
         return is_load_only, load_dtype
 
@@ -1459,11 +1594,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
-        # Recorde the graph wrapper code. The wrapper_code status could be
+        # Record the graph wrapper code. The wrapper_code status could be
         # changed during graph run. Regarding this checker, we also need to
         # run the graph but we don't expect to change any status that would
-        # impact the code generation. Hence, we record the graph wapper code
-        # and replace it with a dummy warpper_code and then restore to the
+        # impact the code generation. Hence, we record the graph wrapper code
+        # and replace it with a dummy wrapper_code and then restore to the
         # original one as long as the checker is finished.
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
@@ -1658,6 +1793,13 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     def check_can_tile2d(self, name: str, index: sympy.Expr):
         if not self.can_tile2d:
             return
+        # make sure the transpose_mxn(src, ld_src, dst, ld_dst) ld_src doesn't depend on most inner var.
+        if len(self.itervars) > 0 and not self.is_invariant_under(
+            self.itervars[-1], self.stride_at(self.itervars[-1], index)
+        ):
+            self.can_tile2d = False
+            return
+
         # check contiguity from any of the outer loops
         has_stride1 = False
         for loop_idx, itervar in enumerate(self.itervars[:-1]):
@@ -1671,6 +1813,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
                 else:
                     self.outer_tiling_idx = loop_idx
                 has_stride1 = True
+
         if not has_stride1 and not self.could_vec(name, index):
             self.can_tile2d = False
         return self.can_tile2d
@@ -1709,9 +1852,7 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
 
 class CppKernelProxy(CppKernel):
     def __init__(self, kernel_group):
-        super(CppKernelProxy, self).__init__(
-            kernel_group.args, kernel_group.ws.num_threads
-        )
+        super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.kernel_group = kernel_group
         self.loop_nest = None
         self.call_ranges = None
@@ -1769,7 +1910,6 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
             ) as vec_checker:

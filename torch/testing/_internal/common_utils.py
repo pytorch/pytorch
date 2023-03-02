@@ -65,7 +65,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._six import string_classes
 from torch._utils_internal import get_writable_path
 from torch.nn import (
     ModuleDict,
@@ -125,6 +124,18 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
 
 class _TestParametrizer:
     """
@@ -501,9 +512,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit_executor', type=str)
+parser.add_argument('--jit-executor', '--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
@@ -589,7 +600,7 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
     return wait_for_process(p)
 
@@ -737,14 +748,16 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
+        pytest_args = argv
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
+            pytest_args = pytest_args + [f'--junit-xml-reruns={test_report_path}']
 
         import pytest
         os.environ["NO_COLOR"] = "1"
         os.environ["USING_PYTEST"] = "1"
-        exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
+        exit_code = pytest.main(args=pytest_args)
         del os.environ["USING_PYTEST"]
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
@@ -896,9 +909,6 @@ TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
-# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-# See #64427
-TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -1925,7 +1935,7 @@ class UnittestPair(Pair):
 
 
 class StringPair(UnittestPair):
-    CLS = string_classes
+    CLS = str
     TYPE_NAME = "string"
 
 
@@ -2132,18 +2142,15 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
-        if TEST_WITH_TORCHDYNAMO:
+        super_run = super().run
+        # TODO remove version check once dynamo supports 3.11
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
@@ -3614,8 +3621,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     torch = kwargs.get('torch', globals()['torch'])
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    data = dict([((i, i), float(i + 1) / matrix_size)
-                 for i in range(matrix_size)])
+    data = {(i, i): float(i + 1) / matrix_size
+            for i in range(matrix_size)}
 
 
     def multiply(data, N, i, j, cs, sn, left=True):

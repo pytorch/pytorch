@@ -109,8 +109,7 @@ class LowRankMultivariateNormal(Distribution):
         self._unbroadcasted_cov_factor = cov_factor
         self._unbroadcasted_cov_diag = cov_diag
         self._capacitance_tril = _batch_capacitance_tril(cov_factor, cov_diag)
-        super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
-                                                        validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(LowRankMultivariateNormal, _instance)

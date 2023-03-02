@@ -390,9 +390,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_simple_tensor_ops(self):
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = x + y
                 return z
@@ -433,9 +430,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_nodes_before_cat(self):
         # verify that nodes before cat get matched
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)
@@ -468,9 +462,6 @@ class TestFXGraphMatcher(QuantizationTestCase):
     def test_dict_return_type(self):
         # verify that we can traverse up nodes which return dictionaries
         class M(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x0):
                 x1 = torch.add(x0, 1.0)
                 y1 = torch.add(x0, 1.0)

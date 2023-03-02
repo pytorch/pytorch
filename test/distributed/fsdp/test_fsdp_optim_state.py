@@ -286,7 +286,7 @@ class NestedModel(torch.nn.Module):
 
 class TestFSDPOptimState(FSDPTest):
     def __init__(self, *args, **kwargs):
-        super(TestFSDPOptimState, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self._model_class = {
             _ModelClass.NESTED: self._init_nested_model,
             _ModelClass.TRANSFORMER: self._init_transformer_model,
@@ -1655,7 +1655,7 @@ class TestFSDPOptimState(FSDPTest):
     def test_with_empty_optimizer_state(self):
         class TestDummyModel(torch.nn.Module):
             def __init__(self):
-                super(TestDummyModel, self).__init__()
+                super().__init__()
                 torch.manual_seed(0)
                 self.net1 = nn.Sequential(nn.Linear(8, 16), nn.ReLU())
                 self.net2 = nn.Sequential(nn.Linear(16, 32), nn.ReLU())

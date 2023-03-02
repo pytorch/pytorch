@@ -73,7 +73,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
             if isinstance(cell, torch.jit.quantized.QuantizedLSTMCell):
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
+                        super().__init__()
                         self.cell = cell
 
                     @torch.jit.script_method
@@ -85,7 +85,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
+                        super().__init__()
                         self.cell = cell
 
                     @torch.jit.script_method
@@ -197,7 +197,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
             if isinstance(cell, torch.jit.quantized.QuantizedGRU):
                 class ScriptWrapper(torch.jit.ScriptModule):
                     def __init__(self, cell):
-                        super(ScriptWrapper, self).__init__()
+                        super().__init__()
                         self.cell = cell
 
                     @torch.jit.script_method
@@ -209,7 +209,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
                 for cell in [cell_int8, cell_fp16]:
                     class ScriptWrapper(torch.jit.ScriptModule):
                         def __init__(self, cell):
-                            super(ScriptWrapper, self).__init__()
+                            super().__init__()
                             self.cell = cell
 
                         @torch.jit.script_method
@@ -227,7 +227,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
 
             class FooBar(torch.nn.Module):
                 def __init__(self):
-                    super(FooBar, self).__init__()
+                    super().__init__()
                     self.linear1 = torch.nn.Linear(K1, N1).float()
 
                 def forward(self, x):
@@ -261,7 +261,7 @@ class TestDeprecatedJitQuantized(JitTestCase):
     def test_erase_class_tensor_shapes(self):
         class Linear(torch.nn.Module):
             def __init__(self, in_features, out_features):
-                super(Linear, self).__init__()
+                super().__init__()
                 qweight = torch._empty_affine_quantized(
                     [out_features, in_features], scale=1, zero_point=0,
                     dtype=torch.qint8)

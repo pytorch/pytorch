@@ -11,21 +11,16 @@
 namespace at::native {
 
 template <typename scalar_t, typename out_t=scalar_t>
-void std_var_kernel_impl(TensorIterator& iter, int32_t correction, bool take_sqrt) {
+void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt) {
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
   using accscalar_t = at::acc_type<scalar_t, true>;
-  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, float, thrust::pair<out_t, out_t>>;
-  gpu_reduce_kernel<scalar_t, out_t, 2>(
-      iter, ops_t{correction, take_sqrt}, typename ops_t::acc_t{});
+  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, thrust::pair<out_t, out_t>>;
+  ops_t ops(static_cast<accscalar_t>(correction), take_sqrt);
+  gpu_reduce_kernel<scalar_t, out_t, 2>(iter, ops, typename ops_t::acc_t{});
 }
 
-static void std_var_kernel_cuda(TensorIterator& iter, int64_t correction, bool take_sqrt) {
-  using limits = std::numeric_limits<int32_t>;
-  TORCH_CHECK(
-      correction < limits::max() && correction > limits::min(),
-      "The correction argument for std and var computation on CUDA must "
-      "fit within a 32-bit integer, but got ", correction);
+static void std_var_kernel_cuda(TensorIterator& iter, double correction, bool take_sqrt) {
   const auto input_dtype = iter.input_dtype();
   if (input_dtype == kHalf && iter.dtype() == kFloat) {
     // type promotion that does cast and reduction in a single kernel

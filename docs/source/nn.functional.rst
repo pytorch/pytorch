@@ -49,6 +49,15 @@ Pooling functions
     fractional_max_pool2d
     fractional_max_pool3d
 
+Attention Mechanisms
+-------------------------------
+
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    scaled_dot_product_attention
+
 Non-linear activation functions
 -------------------------------
 

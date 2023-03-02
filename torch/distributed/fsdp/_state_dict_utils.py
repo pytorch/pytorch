@@ -6,7 +6,6 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -127,7 +126,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+        _clear_grads_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -393,8 +392,11 @@ def _local_post_state_dict_hook(
     shard_offset = flat_param.numel() * fsdp_state.rank
     valid_data_size = flat_param.numel() - flat_param._shard_numel_padded
     if valid_data_size > 0:
-        if flat_param._shard_numel_padded > 0:
-            flat_param = flat_param.narrow(0, 0, valid_data_size)
+        # If FlatParameter is returned, FlatParameter._local_shard cause a
+        # pickling issue (can be torch.save but not torch.load). Since there
+        # is no benefit for state_dict to return the actual FlatParameter class,
+        # a view (which is a tensor) of the FlatParameter will be returned.
+        flat_param = flat_param[:valid_data_size].view(valid_data_size)
         local_shards = [
             Shard.from_tensor_and_offsets(flat_param, [shard_offset], fsdp_state.rank)
         ]

@@ -4,7 +4,7 @@ from functools import total_ordering
 from typing import Type, Dict, Callable, Tuple
 
 import torch
-from torch._six import inf
+from torch import inf
 
 from .bernoulli import Bernoulli
 from .beta import Beta

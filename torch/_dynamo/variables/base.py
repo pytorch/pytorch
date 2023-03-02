@@ -259,7 +259,7 @@ class VariableTracker(metaclass=HasPostInit):
         mutable_local: MutableLocal = None,
         recursively_contains: Optional[Set] = None,
     ):
-        super(VariableTracker, self).__init__()
+        super().__init__()
         self.guards = guards or set()
         self.source = source
         self.mutable_local = mutable_local

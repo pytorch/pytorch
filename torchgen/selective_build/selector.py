@@ -231,7 +231,7 @@ class SelectiveBuilder:
             ret["debug_info"] = sorted(self._debug_info)
 
         ret["kernel_metadata"] = {
-            k: sorted(list(v)) for (k, v) in self.kernel_metadata.items()
+            k: sorted(v) for (k, v) in self.kernel_metadata.items()
         }
 
         ret["custom_classes"] = sorted(self.custom_classes)
