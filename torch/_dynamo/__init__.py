@@ -6,6 +6,7 @@ from .eval_frame import (
     disable,
     explain,
     export,
+    is_dynamo_supported,
     optimize,
     optimize_assert,
     OptimizedModule,
