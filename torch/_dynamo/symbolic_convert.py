@@ -374,9 +374,21 @@ def break_graph_if_unsupported(*, push):
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                kw_names = self.kw_names.value if self.kw_names is not None else ()
+                if len(kw_names) > 0:
+                    self.output.add_output_instructions(
+                        [
+                            create_instruction(
+                                "KW_NAMES",
+                                PyCodegen.get_const_index(self.code_options, kw_names),
+                            ),
+                        ]
+                    )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
+            # Reconstruct the context variables in the block stack
             for b in self.block_stack:
                 self.output.add_output_instructions(
                     [

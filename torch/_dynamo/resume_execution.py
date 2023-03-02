@@ -83,7 +83,7 @@ class ReenterWith:
         if sys.version_info < (3, 9):
             epilogue = [
                 create_instruction("POP_BLOCK"),
-                PyCodegen.create_begin_finally(),
+                create_instruction("BEGIN_FINALLY"),
                 except_jump_target,
                 *reset,
                 create_instruction("END_FINALLY"),
