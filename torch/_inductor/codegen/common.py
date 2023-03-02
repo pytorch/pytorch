@@ -9,6 +9,8 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+import torch
+
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
@@ -91,6 +93,10 @@ class PythonPrinter(ExprPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"math.floor({self.paren(self._print(expr.args[0]))})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
 
 
 class OpOverrides:
@@ -305,9 +311,14 @@ class KernelArgs:
 
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
-        buffer_types.update(
-            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
-        )
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Expr):
+                if val.is_integer:
+                    buffer_types[name] = torch.int64
+                else:
+                    buffer_types[name] = torch.float64
+            else:
+                buffer_types[name] = val.get_dtype()
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )

@@ -374,7 +374,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler in (
+                    if compiler in (
                         "inductor",
                         "inductor_no_cudagraphs",
                     ):
