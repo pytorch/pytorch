@@ -599,7 +599,6 @@ def export(
         gm: torch.fx.GraphModule, example_inputs
     ):
         nonlocal graph
-
         assert graph is None, "whole graph export entails exactly one graph"
         graph = gm
 
@@ -693,7 +692,13 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
-    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
+    if isinstance(f, torch.nn.Module):
+        inspect_fn = f.forward
+    else:
+        inspect_fn = f
+    arg_names = list(inspect.signature(inspect_fn).parameters.keys())
+    assert len(arg_names) == len(args)
+    input_strs = [arg_names[i] for i in range(len(args))] + list(kwargs.keys())
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
             input_strs,
