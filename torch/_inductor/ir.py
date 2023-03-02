@@ -2118,11 +2118,10 @@ class ComputedBuffer(Buffer):
             else None
             for reads_name in body.reads_name2expr.keys()
         ]
-        # prioritize reads layout/loop_ordering over writes
-        if len(body.reads_name2expr.values()) > 0:
-            memory_addrs = [*body.reads_name2expr.values()]
-        else:
-            memory_addrs = [*body.writes_name2expr.values()]
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
         index_vars = []
         reduce_vars = []
         index_size = []
