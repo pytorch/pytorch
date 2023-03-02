@@ -186,7 +186,7 @@ class TensorParallelStyleTest(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             AssertionError,
-            "device_mesh has dims 2 but expcted to be 1 for output.",
+            "device_mesh has dims 2 but expected to be 1 for output.",
         ):
             func(dtensor, device_mesh)
 
