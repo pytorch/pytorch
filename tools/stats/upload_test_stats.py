@@ -11,7 +11,7 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
-    upload_workflow_stats_to_s3,
+    upload_to_s3,
 )
 
 
@@ -340,14 +340,14 @@ if __name__ == "__main__":
         test_case_summary, pytest_parallel_times
     )
 
-    upload_workflow_stats_to_s3(
+    upload_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
         test_case_summary,
     )
 
-    upload_workflow_stats_to_s3(
+    upload_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "invoking_file_times",
@@ -356,6 +356,6 @@ if __name__ == "__main__":
 
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
-        upload_workflow_stats_to_s3(
+        upload_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )
