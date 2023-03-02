@@ -4,7 +4,6 @@ import unittest
 
 import numpy as np
 import torch
-from torch.backends.cuda import sdp_kernel
 import torch.nn
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -1862,28 +1861,27 @@ class TestNestedTensorDeviceType(TestCase):
 
         dropout_p = 0.0  # no dropout for reproducibility
 
-        with sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
-            # Success case: no attn_mask set and is_causal=False.
-            actual = torch.nn.functional.scaled_dot_product_attention(
-                query, key, value, attn_mask=None, is_causal=False, dropout_p=dropout_p)
+        # Success case: no attn_mask set and is_causal=False.
+        actual = torch.nn.functional.scaled_dot_product_attention(
+            query, key, value, attn_mask=None, is_causal=False, dropout_p=dropout_p)
 
-            expected_outputs = []
-            for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
-                output = torch.nn.functional.scaled_dot_product_attention(
-                    q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p)
-                expected_outputs.append(output.squeeze(0))
-            expected_output_nested = torch.nested.nested_tensor(expected_outputs)
-            self.assertEqual(actual, expected_output_nested)
+        expected_outputs = []
+        for q, k, v in zip(query.unbind(), key.unbind(), value.unbind()):
+            output = torch.nn.functional.scaled_dot_product_attention(
+                q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0), attn_mask=None, dropout_p=dropout_p)
+            expected_outputs.append(output.squeeze(0))
+        expected_output_nested = torch.nested.nested_tensor(expected_outputs)
+        self.assertEqual(actual, expected_output_nested)
 
-            # Error case: explicit attn_mask set.
-            with self.assertRaisesRegex(RuntimeError, "not supported when an explicit attn_mask is set"):
-                torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value, attn_mask=attn_mask, dropout_p=dropout_p)
+        # Error case: explicit attn_mask set.
+        with self.assertRaisesRegex(RuntimeError, "not supported when an explicit attn_mask is set"):
+            torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=attn_mask, dropout_p=dropout_p)
 
-            # Error case: is_causal=True.
-            with self.assertRaisesRegex(RuntimeError, "not supported when is_causal=True"):
-                torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value, dropout_p=dropout_p, is_causal=True)
+        # Error case: is_causal=True.
+        with self.assertRaisesRegex(RuntimeError, "not supported when is_causal=True"):
+            torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, dropout_p=dropout_p, is_causal=True)
 
     @dtypes(torch.float, torch.float16, torch.double)
     def test_empty_like(self, device, dtype):

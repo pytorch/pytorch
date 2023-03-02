@@ -127,9 +127,9 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
 
 inline bool check_for_nested_inputs(sdp_params params){
   if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
-    return false;
+    return true;
   }
-  return true;
+  return false;
 }
 
 inline bool try_broadcast_param_size(int64_t q_size,
@@ -197,7 +197,7 @@ inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(at:
 
 inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
-  if (check_for_nested_inputs(params)) {
+  if (!check_for_nested_inputs(params)) {
     return true;
   }
 
@@ -276,7 +276,7 @@ inline bool check_requires_grad(sdp_params params, bool debug) {
 
 inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (!check_for_nested_inputs(params) && !check_requires_grad(params, false)){
+  if (check_for_nested_inputs(params) && !check_requires_grad(params, false)){
     if (debug){
       TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
@@ -314,6 +314,20 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_safe_kv_broadcast(at::Tensor param, bool debug){
+  const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
+  auto seq_len = nt_tensor_impl->opt_size(2);
+  if (!seq_len.has_value()) {
+    if (debug) {
+      TORCH_WARN("For both fused kernels, if one of key/value batch_size requires "
+                 "broadcasting and the other does not, then the other must have a ",
+                 "consistent seq_len dim.")
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the size()
   // calls won't error since the inputs are all 4 dimensional
@@ -321,8 +335,7 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   auto k_batch_size = params.key.size(0);
   auto v_batch_size = params.value.size(0);
 
-  // Flip because check_for_nested_inputs returns false if there exists a nested input
-  bool has_nested_input = !check_for_nested_inputs(params);
+  bool has_nested_input = check_for_nested_inputs(params);
   bool same_batch_size = q_batch_size == k_batch_size && q_batch_size == v_batch_size;
 
   // num_heads logic for nested input is checked in check_for_seq_len_0_nested_tensor
@@ -340,29 +353,11 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
       // if only one of k or v require broadcasting of batch size, the other
       // must have a consistent seq_len dim
       if (broadcastable_batch_size) {
-        if (k_batch_size == 1 && v_batch_size != 1) {
-          const auto v_nt_tensor_impl = at::native::get_nested_tensor_impl(params.value);
-          auto seq_len = v_nt_tensor_impl->opt_size(2);
-          if (!seq_len.has_value()) {
-            if (debug) {
-              TORCH_WARN("For both fused kernels, if key batch_size requires "
-                          "broadcasting and value does not, value must have a ",
-                          "consistent seq_len dim.")
-            }
-            return false;
-          }
+        if (k_batch_size == 1 && v_batch_size != 1 && !check_safe_kv_broadcast(params.value, debug)) {
+          return false;
         }
-        if (v_batch_size == 1 && k_batch_size != 1) {
-          const auto k_nt_tensor_impl = at::native::get_nested_tensor_impl(params.key);
-          auto seq_len = k_nt_tensor_impl->opt_size(2);
-          if (!seq_len.has_value()) {
-            if (debug) {
-              TORCH_WARN("For both fused kernels, if value batch_size requires "
-                          "broadcasting and key does not, key must have a ",
-                          "consistent seq_len dim.")
-            }
-            return false;
-          }
+        if (v_batch_size == 1 && k_batch_size != 1 && !check_safe_kv_broadcast(params.key, debug)) {
+          return false;
         }
       }
     }
