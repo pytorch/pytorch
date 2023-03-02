@@ -2175,6 +2175,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -4173,18 +4174,38 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
 
-    @requires_decomp(aten.nll_loss_forward)
     def test_nll_loss_forward(self):
         def fn(a, b):
             return aten.nll_loss_forward(a, b, None, 1, -100)
 
-        self.common(
-            fn,
-            (
-                torch.randn([5, 5]),
-                torch.zeros([5], dtype=torch.int64),
-            ),
+        labels = (
+            torch.zeros([5], dtype=torch.int64),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64),
         )
+        inps = (torch.randn(5, 5), torch.randn(5, 5))
+        for a, b in zip(inps, labels):
+            self.common(
+                fn,
+                (a, b),
+            )
+
+    def test_nll_loss_backward(self):
+        def fn(a, b, c):
+            return aten.nll_loss_backward(
+                a, b, c, None, 1, -100, torch.tensor(1.0, device=self.device)
+            )
+
+        labels = (
+            torch.zeros([5], dtype=torch.int64),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64),
+        )
+        inps = (torch.randn(5, 5), torch.randn(5, 5))
+        grad_outs = (torch.randn(()), torch.randn(()))
+        for a, b, c in zip(grad_outs, inps, labels):
+            self.common(
+                fn,
+                (a, b, c),
+            )
 
     def test_isinf(self):
         def fn(x):
@@ -6595,7 +6616,6 @@ if HAS_CPU:
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
-            assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

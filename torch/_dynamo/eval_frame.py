@@ -137,7 +137,7 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True):
+def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
@@ -154,6 +154,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=False,
     ):
         super().__init__()
@@ -163,6 +164,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         patch_fn()
 
@@ -177,7 +179,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -223,7 +225,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -289,7 +291,15 @@ class OptimizeContext(_TorchDynamoContext):
     def _different_backend(old, new):
         return not (old == new or old is None)
 
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
+    def __init__(
+        self,
+        callback,
+        backend_ctx_ctor,
+        first_ctx=False,
+        *,
+        export=False,
+        dynamic=False,
+    ):
         def on_enter():
             global most_recent_backend
             if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
@@ -310,6 +320,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
         )
 
@@ -361,12 +372,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
     )
 
@@ -728,6 +740,7 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
         convert_frame.convert_frame_assert(backend, export=export),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
     )
 
