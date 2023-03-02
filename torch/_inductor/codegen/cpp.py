@@ -1847,10 +1847,11 @@ class CppTileKernel(CppKernel):
                 f"for (long {loopvar} = 0; {loopvar} < {self.tile_sizes[self.tile_loop_indices.index(loop_idx)]}; {loopvar}++) {{",
             )
             self.code.add_indent()
+            self.indent += 1
 
         def loop_exit():
-            global indent
             self.code.add_indent(-1)
+            self.indent -= 1
             self.code.writeline(None, "}")
 
         # Remove unused tile buffers and the code lines that do tile slice store to them

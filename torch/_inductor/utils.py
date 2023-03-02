@@ -432,6 +432,10 @@ class IndentedBuffer:
 
         return ctx()
 
+    def add_indent(self, offset=1):
+        """For dynamically controlling indentation"""
+        self._indent += offset
+
     def splice(self, other_code, strip=False):
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
