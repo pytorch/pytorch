@@ -804,10 +804,7 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print(f'Test results will be stored in {test_report_path}')
-        unittest_args = argv.copy()
-        unittest_args.remove("-rfEX")
-        unittest_args.remove("--reruns=2")
-        unittest.main(argv=unittest_args, testRunner=xmlrunner.XMLTestRunner(
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
             output=test_report_path,
             verbosity=2 if verbose else 1,
             resultclass=XMLTestResultVerbose))
