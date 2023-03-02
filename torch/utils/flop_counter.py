@@ -126,9 +126,9 @@ def sdpa_flop_count(query_shape, key_shape):
     assert b == b2 and h == h2 and d == d2
     total_flops = 0
     # [b, h, s, d] @ [b, h, d, s2] -> [b, h, s, s2]
-    total_flops += bmm_flop([(b*h, s, d), (b*h, d, s2)])
+    total_flops += bmm_flop([(b * h, s, d), (b * h, d, s2)])
     # [b, h, s, s2] @ [b, h, s2, d] -> [b, h, s2, d]
-    total_flops += bmm_flop([(b*h, s, s2), (b*h, s2, d)])
+    total_flops += bmm_flop([(b * h, s, s2), (b * h, s2, d)])
     return total_flops
 
 
