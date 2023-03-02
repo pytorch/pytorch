@@ -335,7 +335,9 @@ class TracingContext:
         self.aot_autograd_arg_pos_to_source: List[Source] = list()
 
     def register(self, name: str, source: Source):
-        assert name not in self.param_and_attr_names_to_sources
+        if name in self.param_and_attr_names_to_sources:
+            assert self.param_and_attr_names_to_sources[name] == source
+            return
         self.param_and_attr_names_to_sources[name] = source
 
 
