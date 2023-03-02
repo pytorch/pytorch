@@ -34,11 +34,11 @@ from .guards import GuardBuilder
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (
-    AttrSource,
     ConstantSource,
     is_constant_source,
     LocalInputSource,
     LocalSource,
+    ParamBufferSource,
     ShapeEnvSource,
 )
 from .utils import (
@@ -50,6 +50,7 @@ from .utils import (
     counters,
     dynamo_timed,
     format_graph_tabular,
+    is_lazy_module,
     normalize_attr_name,
     same,
 )
@@ -478,19 +479,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.nn_modules[name] = target
                 assert self.nn_modules_sources is not None
                 self.nn_modules_sources[name] = source
-                if isinstance(target, torch.nn.Module):
+                if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
                         for n, p in target.named_parameters():
-                            new_source = AttrSource(source, n)
+                            new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_buffers"):
                         for n, p in target.named_buffers():
-                            new_source = AttrSource(source, n)
+                            new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
