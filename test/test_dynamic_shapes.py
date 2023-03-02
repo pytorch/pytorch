@@ -397,6 +397,30 @@ class TestPySymInt(TestCase):
         r = torch.empty_strided((a0, 7), (1, a0), device='meta')
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
+    def test_specialize_zero_one(self):
+        shape_env = ShapeEnv(specialize_zero_one=True)
+        a0 = create_symint(shape_env, 5)
+        assert a0 != 1
+        self.assertEqual(len(shape_env.guards), 0)
+
+        shape_env = ShapeEnv(specialize_zero_one=False)
+        a0 = create_symint(shape_env, 5)
+        assert a0 != 1
+        self.assertEqual(len(shape_env.guards), 1)
+
+    def test_duck_shape(self):
+        shape_env = ShapeEnv(duck_shape=True)
+        a0 = create_symint(shape_env, 5)
+        a1 = create_symint(shape_env, 5)
+        assert a0 == a1
+        self.assertEqual(len(shape_env.guards), 0)
+
+        shape_env = ShapeEnv(duck_shape=False)
+        a0 = create_symint(shape_env, 5)
+        a1 = create_symint(shape_env, 5)
+        assert a0 == a1
+        self.assertEqual(len(shape_env.guards), 1)
+
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)

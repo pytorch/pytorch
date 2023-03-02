@@ -289,7 +289,7 @@ class WrapperCodeGen(CodeGen):
                 """
                 import triton
                 import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
@@ -504,6 +504,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -536,6 +539,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()

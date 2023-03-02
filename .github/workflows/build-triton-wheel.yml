@@ -84,6 +84,7 @@ jobs:
           esac
 
           docker exec -t "${container_name}" yum install -y zlib-devel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 

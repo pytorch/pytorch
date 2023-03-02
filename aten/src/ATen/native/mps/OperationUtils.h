@@ -239,6 +239,9 @@ struct MPSGraphCache
 
 };
 
+// Common math operations
+MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
+
 
 } // namespace mps
 } // namespace native

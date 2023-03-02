@@ -129,7 +129,7 @@ proposed solution. The PyTorch team can provide guidance that saves you
 time.
 
 Issues that are labeled first-new-issue, low, or medium priority provide
-the best entrance point are great places to start.
+the best entrance point and are great places to start.
 
 Adding Tutorials
 ~~~~~~~~~~~~~~~~

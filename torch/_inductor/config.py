@@ -49,7 +49,9 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+search_autotune_cache = (
+    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
+)
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -123,6 +125,11 @@ profiler_mark_wrapper_call = False
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
+_profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
+profile_bandwidth = _profile_var != ""
+profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+
+
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()
@@ -189,6 +196,10 @@ class triton:
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
+
+    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 
 
 # create a directory containing lots of debug information

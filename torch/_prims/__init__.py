@@ -347,7 +347,7 @@ def _elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    strides = utils.compute_elementwise_output_strides(*args_)
+    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -398,7 +398,8 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
+        assert shape is not None
+        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
@@ -1277,10 +1278,41 @@ broadcast_in_dim = _make_prim(
 )
 
 
+def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
+    # Special-case for zero dimensional tensors
+    ndim = max(1, a.dim())
+    utils.validate_idx(ndim, start)
+    utils.validate_idx(ndim, end)
+
+    # Verifies end is strictly greater than start
+    # (Collapse requires a non-empty interval)
+    utils.check(
+        end >= start,
+        lambda: f"Attempting to collapse but end, {end}, is less than start, {start}!",
+        ValueError,
+    )
+
+
+def _collapsed_shape(shape: ShapeType, start: int, end: int) -> Tuple[int, ...]:
+    """
+    Returns the shape of a with dims in [start, end) merged into a single dimension.
+    """
+    # Special-case for zero dimensional tensors
+    shape = (1,) if len(shape) == 0 else tuple(shape)
+
+    dim_length = 1
+    for s in shape[start : end + 1]:
+        dim_length = dim_length * s
+
+    return shape[0:start] + (dim_length,) + shape[end + 1 :]
+
+
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int
 ) -> Tuple[Optional[ShapeType], Optional[StrideType]]:
     assert isinstance(a, TensorLike)
+
+    _validate_collapse_args(a, start, end)
 
     # Special-case for zero dimensional tensors
     if a.ndim == 0:
@@ -1290,23 +1322,12 @@ def _collapse_view_helper(
         shape = a.shape  # type: ignore[assignment]
         strides = a.stride()  # type: ignore[assignment]
 
-    utils.validate_idx(len(shape), start)
-    utils.validate_exclusive_idx(len(shape), end)
-
-    # Verifies end is strictly greater than start
-    # (Collapse requires a non-empty interval)
-    if end <= start:
-        msg = "Attempting to collapse but end, {0}, is less than or equal to start, {1}!".format(
-            end, start
-        )
-        raise ValueError(msg)
-
-    if a.ndim == 0 or (end - 1 == start):
+    if a.ndim == 0 or (end == start):
         return shape, strides
 
-    length = shape[end - 1]
-    stride = strides[end - 1]
-    for idx in reversed(range(start, end - 1)):
+    length = shape[end]
+    stride = strides[end]
+    for idx in range(end - 1, start - 1, -1):
         if shape[idx] == 0 or shape[idx + 1] == 0:
             length = 0
             stride = 0
@@ -1325,8 +1346,8 @@ def _collapse_view_helper(
         ):
             return None, None
 
-    new_shape = shape[:start] + (length,) + shape[end:]
-    new_strides = strides[:start] + (stride,) + strides[end:]
+    new_shape = shape[:start] + (length,) + shape[end + 1 :]
+    new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
     if a.numel() == 0:
@@ -1342,25 +1363,12 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
         msg = "Attempting to view a collapsed tensor, but no such view exists!"
         raise ValueError(msg)
 
-    if new_strides is None:
-        return a.view(new_shape)
-    else:
-        return a.as_strided(new_shape, new_strides, a.storage_offset())
+    assert new_strides is not None
+    return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
 def _collapse_view_aten(a: Tensor, start: int, end: int) -> Tensor:
-    # Special-cases zero-dim tensors
-    if a.ndim == 0:
-        shape = (1,)
-    else:
-        shape = a.shape  # type: ignore[assignment]
-
-    dim_length = 1
-    for idx in range(start, end):
-        dim_length = dim_length * shape[idx]
-
-    new_shape = shape[0:start] + (dim_length,) + shape[end:]
-
+    new_shape = _collapsed_shape(a.shape, start, end)
     return a.view(new_shape)
 
 
@@ -1839,19 +1847,35 @@ as_strided_scatter = _make_prim(
 #
 # Shape operations
 #
-def collapse(a: Tensor, start: int, end: int) -> Tensor:
-    """
-    Wrapper around reshape that collapses a span of dimensions.
 
-    See collapse_view for the corresponding view operation.
-    """
 
-    dim_length = 1
-    for idx in range(start, end):
-        dim_length = dim_length * a.shape[idx]
+def _collapse_meta(a: Tensor, start: int, end: int) -> Tensor:
+    # Special-case for zero dimensional tensors
+    _validate_collapse_args(a, start, end)
+    new_shape = _collapsed_shape(a.shape, start, end)
+    return a.new_empty(new_shape)
 
-    new_shape = a.shape[0:start] + (dim_length,) + a.shape[end:]
-    return reshape(a, new_shape)
+
+def _collapse_aten(a: Tensor, start: int, end: int) -> Tensor:
+    new_shape = _collapsed_shape(a.shape, start, end)
+    out = a.new_empty(new_shape)
+    with torch.no_grad():
+        out.view_as(a).copy_(a)
+    return out
+
+
+_collapse_doc = """
+Collapse a span of neighboring dimensions into one.
+
+See collapse_view for the corresponding view operation.
+"""
+collapse = _make_prim(
+    schema="collapse(Tensor a, int start, int end) -> Tensor",
+    meta=_collapse_meta,
+    impl_aten=_collapse_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc=_collapse_doc,
+)
 
 
 # TODO: review stride logic
@@ -2306,7 +2330,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,

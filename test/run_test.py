@@ -320,6 +320,13 @@ CI_SERIAL_LIST = [
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    'test_utils',  # OOM
+    'test_sort_and_select',  # OOM
+    'test_backward_compatible_arguments',  # OOM
+    'test_module_init',  # OOM
+    'test_autocast',  # OOM
+    'test_native_mha',  # OOM
+    'test_module_hooks',  # OOM
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected

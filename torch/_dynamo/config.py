@@ -161,6 +161,13 @@ repro_tolerance = 1e-3
 # This requires dynamic_shapes to be True.
 capture_scalar_outputs = False
 
+# Not all backends support operators that have dynamic output shape (e.g.,
+# nonzero, unique).  When this flag is set to False, we introduce a graph
+# break instead of capturing.  This requires dynamic_shapes to be True.
+# If you set this to True, you probably also want capture_scalar_outputs
+# (these are separated for historical reasons).
+capture_dynamic_output_shape_ops = False
+
 # Should almost always be true in prod. This relaxes the requirement that cond's true_fn and
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True

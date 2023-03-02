@@ -2664,6 +2664,19 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    # From https://github.com/pytorch/pytorch/issues/94775
+    def test_max_pool2d7(self):
+        # ceil mode turns on
+        def fn(x):
+            return torch.nn.functional.max_pool2d(
+                x, 1, stride=(2, 2), padding=0, ceil_mode=True
+            )
+
+        self.common(
+            fn,
+            (torch.randn([1, 1, 6, 7]),),
+        )
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -3957,6 +3970,20 @@ class CommonTemplate:
 
         self.common(fn, (a, b))
 
+    # This test is meant to check for issues from the logic
+    # that drops xmask from trito load/store if XBLOCK divides xnumel
+
+    @requires_cuda()
+    def test_xblock_divides_xnumel(self):
+        def fn(a):
+            b = a + 1
+            return (b,)
+
+        # assumption is that XBLOCK is always a divisor of 1024
+        # so xmask will be dropped iff xnumel is multiple of 1024
+        self.common(fn, (torch.randn(1024),))
+        self.common(fn, (torch.randn(1025),))
+
     def test_inplace_mixed_dtype_ops(self):
         @torch._dynamo.optimize("inductor")
         def fn(x, y):
@@ -4974,6 +5001,7 @@ class CommonTemplate:
         )
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
             return torch.mm(a.view(32, 32), b.view(32, 32))
@@ -5046,6 +5074,7 @@ class CommonTemplate:
         self.assertTrue(same(r2, r3))
         self.assertTrue(same(g2, g3))
 
+    @config.patch(search_autotune_cache=False)
     def test_lowmem_dropout2(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -5526,7 +5555,7 @@ class CommonTemplate:
             e.name for e in prof.profiler.function_events
         )
 
-    @config.patch(cpp_wrapper=True)
+    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def test_cpp_wrapper(self):
         if self.device == "cuda":
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
@@ -5612,6 +5641,22 @@ class CommonTemplate:
             inductor_out = compiled(args)
             eager_out = eager_mod(*eager_args)
             self.assertEqual(inductor_out, eager_out)
+
+    def test_where_with_logical_op(self):
+        def fn_and(x, y):
+            return torch.where(torch.logical_and(x, y), 1.0, 0.0)
+
+        def fn_or(x, y):
+            return torch.where(torch.logical_or(x, y), 1.0, 0.0)
+
+        self.common(
+            fn_and,
+            (torch.randn(32), torch.randn(32)),
+        )
+        self.common(
+            fn_or,
+            (torch.randn(32), torch.randn(32)),
+        )
 
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
@@ -5917,6 +5962,8 @@ if HAS_CPU:
                 "randn",
                 "isnan",
                 "rand",
+                "logical_and",
+                "logical_or",
             ]
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
