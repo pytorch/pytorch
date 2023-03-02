@@ -1040,6 +1040,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.call_function(fn, args, kwargs)
 
     def LOAD_METHOD(self, inst):
+        self.LOAD_ATTR(inst)
+        obj = self.pop()
         if sys.version_info >= (3, 11):
             # always follow the NULL + fn convention, since if obj
             # is actually a method, self is already bound to it, so it

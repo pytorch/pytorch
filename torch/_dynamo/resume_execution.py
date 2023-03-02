@@ -10,6 +10,7 @@ from .bytecode_transformation import (
     create_jump_absolute,
     Instruction,
     transform_code_object,
+    unique_id,
 )
 from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
@@ -45,7 +46,7 @@ class ReenterWith:
                 )
                 for val in self.target_values
             ]
-        ctx_name = f"___context_manager_{self.stack_index}"
+        ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
 
