@@ -329,6 +329,8 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "norm"),
     # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
     (None, None, "native_batch_norm"),
+
+    (None, None, "_upsample_bilinear2d_aa"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {

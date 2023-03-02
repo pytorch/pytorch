@@ -39,6 +39,8 @@ from torchgen.api.autograd import (
 )
 
 from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     DispatcherSignature,
@@ -1224,6 +1226,10 @@ def emit_body(
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
                 expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+            elif type == ArrayRefCType(
+                elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+            ):
+                expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:

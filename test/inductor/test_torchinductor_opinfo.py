@@ -429,6 +429,7 @@ torch._dynamo.variables.torch.tensor_dunder_fns.append(
 inductor_override_kwargs = {
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
+    "empty_permuted": {"assert_equal": False},
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},

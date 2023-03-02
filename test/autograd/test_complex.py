@@ -15,11 +15,11 @@ class TestAutogradComplex(TestCase):
         x1 = torch.view_as_complex(x0)
         x2 = torch.view_as_real(x1)
         x2.mul_(2)
-        x2.sum().backward()
+        x2.sum().abs().backward()
 
         y0 = y.clone()
         y0.mul_(2)
-        y0.sum().backward()
+        y0.sum().abs().backward()
 
         self.assertEqual(x.grad, y.grad)
 
@@ -35,11 +35,11 @@ class TestAutogradComplex(TestCase):
 
         x0 = fn(x)
         x0.mul_(2)
-        x0.sum().backward()
+        x0.sum().abs().backward()
 
         y0 = fn(y)
         y1 = y0.mul(2)
-        y1.sum().backward()
+        y1.sum().abs().backward()
 
         self.assertEqual(x.grad, y.grad)
 
@@ -55,11 +55,11 @@ class TestAutogradComplex(TestCase):
 
         x0 = fn(x)
         x0.mul_(2)
-        x0.sum().backward()
+        x0.sum().abs().backward()
 
         y0 = fn(y)
         y1 = y0.mul(2)
-        y1.sum().backward()
+        y1.sum().abs().backward()
 
         self.assertEqual(x.grad, y.grad)
 

@@ -78,7 +78,26 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -370,6 +389,21 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
+def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
+
+
 def optimize(
     backend="inductor",
     *,
@@ -403,6 +437,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -412,10 +447,6 @@ def optimize(
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
-    if sys.platform == "win32":
-        raise RuntimeError("Windows not yet supported for torch.compile")
-    if sys.version_info >= (3, 11):
-        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
 
     backend = get_compiler_fn(backend)
 
@@ -517,6 +548,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
@@ -638,7 +670,10 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace

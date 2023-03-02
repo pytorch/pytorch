@@ -75,15 +75,18 @@ def main() -> None:
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, args.pr_num)
 
+    exit_code = 0
     try:
         if not has_required_labels(pr):
+            exit_code = 1
             print(ERR_MSG)
             add_comment(pr)
-            exit(1)
         else:
             delete_comments(pr)
     except Exception as e:
         pass
+
+    exit(exit_code)
 
 
 if __name__ == "__main__":
