@@ -81,7 +81,9 @@ def create_tensor():
 def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32):
     i = [[0, 1, 1], [2, 0, 2]]
     v = [3.2, 4.1, 5.3]
-    tensor = torch.sparse_coo_tensor(i, v, (3, 3), requires_grad=requires_grad, dtype=dtype)
+    tensor = torch.sparse_coo_tensor(
+        i, v, (3, 3), requires_grad=requires_grad, dtype=dtype
+    )
     if coalesce:
         tensor = tensor.coalesce()
     return tensor
@@ -2375,7 +2377,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 i = torch.ones(1, 1, dtype=torch.long)
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
-                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                ngrad = torch.sparse_coo_tensor(ni, nv, (10, 3), dtype=torch.float32)
                 NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
                 return ngrad, ngrad
 

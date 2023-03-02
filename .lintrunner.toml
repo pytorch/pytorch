@@ -367,6 +367,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -854,6 +855,8 @@ include_patterns = [
     'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
     'test/test_value_ranges.py',
+    'torch/utils/_sympy/interp.py',
+    'torch/utils/_sympy/reference.py',
 ]
 command = [
     'python3',
@@ -893,3 +896,24 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'BAZEL_LINTER'
+include_patterns = ['WORKSPACE']
+command = [
+    'python3',
+    'tools/linter/adapters/bazel_linter.py',
+    '--binary=.lintbin/bazel',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=bazel',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=bazel',
+]
+is_formatter = true
