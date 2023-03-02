@@ -3854,7 +3854,7 @@ class TestNLLLoss(TestCaseMPS):
 
     @unittest.skipIf(product_version < 13.3, "Long data type supported from macOS 13.3 and above")
     def test_reduction_sum_max_long_val(self):
-        x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize -5, sys.maxsize -18], device="mps")
+        x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
         x_cpu = x_mps.detach().clone().cpu()
 
         res_mps = torch.sum(x_mps)
