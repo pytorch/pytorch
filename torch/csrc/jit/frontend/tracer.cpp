@@ -552,6 +552,15 @@ void TracingState::setValue(const IValue& v, Value* value) {
     auto& var = v.toTensor();
     AT_ASSERT(var.defined());
     env_stack.back()[v] = value;
+
+    // If the value comes from a CallFunction or CallMethod, it may not have
+    // shape information attached. For debuggability, we enhance the type
+    // information by assigning the concrete value's tupe to the jit::Value.
+    if (auto tensor_type = value->type()->cast<TensorType>()) {
+      if (!tensor_type->isComplete()) {
+        value->inferTypeFrom(var);
+      }
+    }
   } else if (v.isTensorList()) {
     auto outputs = v.toTensorList();
     Node* unpack_node =

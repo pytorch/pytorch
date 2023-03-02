@@ -4577,7 +4577,7 @@ class TestQuantizeFx(QuantizationTestCase):
         prepare_custom_config = PrepareCustomConfig() \
             .set_float_to_observed_mapping(torch.nn.LSTM, UserLSTM)
         convert_custom_config = ConvertCustomConfig() \
-            .set_observed_to_quantized_mapping(UserLSTM, torch.ao.nn.quantized.LSTM)
+            .set_observed_to_quantized_mapping(torch.ao.nn.quantizable.LSTM, torch.ao.nn.quantized.LSTM)
         model = MyModel()
         model = prepare_fx(model, qconfig_mapping, example_inputs, prepare_custom_config=prepare_custom_config)
 
@@ -4599,10 +4599,11 @@ class TestQuantizeFx(QuantizationTestCase):
         validate_qparams(cell.fgate_cx_igate_cgate, 2 ** -11, 0, torch.qint32)
         validate_qparams(cell.ogate_cy, 2 ** -7, 2 ** 7, torch.quint8)
 
-        # Make sure the rest of the flow runs
+        # Ensure the final converted model is quantized
         model(*example_inputs)
         model = convert_fx(model, convert_custom_config=convert_custom_config, _remove_qconfig=False)
         model(*example_inputs)
+        self.assertEqual(type(model.my_lstm), torch.ao.nn.quantized.LSTM)
 
     def test_reroute_tuple_getitem_patterns(self):
         """
@@ -8311,6 +8312,41 @@ class TestQuantizeFxOps(QuantizationTestCase):
             expected_node_occurrence=expected_occurrence)
         # verify no crash
         res = mq(*example_inputs)
+
+    def test_pixel_shuffle(self):
+        class MyBias(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = nn.Parameter(torch.randn(8))
+
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(8, 8, 1, bias=False)
+                self.bias = MyBias()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = nn.functional.pixel_shuffle(x, 2)
+                x = x.view(-1, 8, 2, 2)
+                bias = self.bias.bias
+                return x + bias
+
+        backend_config = get_qnnpack_backend_config()
+        qconfig_mapping = get_default_qconfig_mapping("qnnpack")
+        model = MyModel()
+        m = prepare_fx(
+            model,
+            qconfig_mapping=qconfig_mapping,
+            example_inputs=(torch.randn(1, 8, 3, 3),),
+            backend_config=backend_config
+        )
+        m = convert_fx(m)
+        expected_occurrence = {
+            ns.call_function(torch.quantize_per_tensor): 2,
+            ns.call_method("dequantize"): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=expected_occurrence)
 
 class TestQuantizeFxModels(QuantizationTestCase):
     @skipIfNoFBGEMM

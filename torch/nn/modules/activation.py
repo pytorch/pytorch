@@ -886,6 +886,24 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
+def _arg_cuda_or_cpu(x: Optional[torch.Tensor]) -> bool:
+    if x is None:
+        return True
+    else:
+        return x.is_cuda or 'cpu' in str(x.device)
+
+    return False
+
+
+def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+    if x is None:
+        return False
+    else:
+        return x.requires_grad
+
+    return True
+
+
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information
     from different representation subspaces as described in the paper:
@@ -1098,7 +1116,9 @@ class MultiheadAttention(Module):
             why_not_fast_path = "non-self attention was used (query, key, and value are not the same Tensor)"
         elif self.in_proj_bias is not None and query.dtype != self.in_proj_bias.dtype:
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_bias ({self.in_proj_bias.dtype}) don't match"
-        elif self.in_proj_weight is not None and query.dtype != self.in_proj_weight.dtype:
+        elif self.in_proj_weight is None:
+            why_not_fast_path = "in_proj_weight was None"
+        elif query.dtype != self.in_proj_weight.dtype:
             # this case will fail anyway, but at least they'll get a useful error message.
             why_not_fast_path = f"dtypes of query ({query.dtype}) and self.in_proj_weight ({self.in_proj_weight.dtype}) don't match"
         elif self.training:
@@ -1133,28 +1153,29 @@ class MultiheadAttention(Module):
             # generator expressions.
             if torch.overrides.has_torch_function(tensor_args):
                 why_not_fast_path = "some Tensor argument has_torch_function"
-            elif not all([(x is None or x.is_cuda or 'cpu' in str(x.device)) for x in tensor_args]):
+            elif not all([_arg_cuda_or_cpu(x) for x in tensor_args]):
                 why_not_fast_path = "some Tensor argument is neither CUDA nor CPU"
-            elif torch.is_grad_enabled() and any([x is not None and x.requires_grad for x in tensor_args]):
+            elif torch.is_grad_enabled() and any([_arg_requires_grad(x) for x in tensor_args]):
                 why_not_fast_path = ("grad is enabled and at least one of query or the "
                                      "input/output projection weights or biases requires_grad")
             if not why_not_fast_path:
                 merged_mask, mask_type = self.merge_masks(attn_mask, key_padding_mask, query)
 
-                return torch._native_multi_head_attention(
-                    query,
-                    key,
-                    value,
-                    self.embed_dim,
-                    self.num_heads,
-                    self.in_proj_weight,
-                    self.in_proj_bias,
-                    self.out_proj.weight,
-                    self.out_proj.bias,
-                    merged_mask,
-                    need_weights,
-                    average_attn_weights,
-                    mask_type)
+                if self.in_proj_bias is not None and self.in_proj_weight is not None:
+                    return torch._native_multi_head_attention(
+                        query,
+                        key,
+                        value,
+                        self.embed_dim,
+                        self.num_heads,
+                        self.in_proj_weight,
+                        self.in_proj_bias,
+                        self.out_proj.weight,
+                        self.out_proj.bias,
+                        merged_mask,
+                        need_weights,
+                        average_attn_weights,
+                        mask_type)
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
         assert not any_nested, ("MultiheadAttention does not support NestedTensor outside of its fast path. " +
