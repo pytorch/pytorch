@@ -1009,7 +1009,8 @@ def wrap_fx_proxy_cls(
                 )
             else:
                 unpacked.append(
-                    wrap_fx_proxy(
+                    wrap_fx_proxy_cls(
+                        target_cls,
                         tx,
                         proxy.tracer.create_proxy(
                             "call_function", operator.getitem, (proxy, i), {}

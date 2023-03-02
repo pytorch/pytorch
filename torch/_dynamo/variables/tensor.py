@@ -337,7 +337,25 @@ class TensorVariable(VariableTracker):
             and not config.dynamic_shapes
         ):
             unimplemented("dynamic Tensor.repeat")
-        elif name in ("tolist", "numpy", "backward", "data_ptr"):
+        elif name == "numpy":
+            from .builder import wrap_fx_proxy_cls
+
+            assert not args, "Tensor.numpy() doesn't take args."
+            # TODO: support force
+            if kwargs and "force" in kwargs:
+                unimplemented(f"Tensor.numpy(force={kwargs['force']})")
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyTensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "detach",
+                    *proxy_args_kwargs([self], {}),
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name in ("tolist", "backward", "data_ptr"):
             unimplemented(f"Tensor.{name}")
         elif name == "nonzero" and not config.dynamic_shapes:
             unimplemented(f"Tensor.{name}")
@@ -602,6 +620,25 @@ class TensorWithTFOverrideVariable(VariableTracker):
         # example tensor from going into the override.
         with torch._C.DisableTorchFunctionSubclass():
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
+
+
+class NumpyTensorVariable(TensorVariable):
+    """
+    Represents a numpy.ndarray. Use this for Tensor.numpy() call.
+    """
+    def var_getattr(self, tx, name):
+        unimplemented(f"numpy_ndarray.{name}")
+
+    def call_isinstance(self, tensor_type):
+        return False
+
+    def call_method(
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented(f"numpy_ndarray.{name}()")
 
 
 class UnspecializedPythonVariable(TensorVariable):

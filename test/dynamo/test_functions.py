@@ -14,7 +14,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
-from torch._dynamo.testing import requires_static_shapes
+from torch._dynamo.testing import (
+    requires_numpy,
+    requires_numpy_pytorch_interop,
+    requires_static_shapes,
+)
 from torch._dynamo.utils import same
 from torch.nn import functional as F
 
@@ -818,6 +822,31 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     #             return x * param
     #         case {"b": param}:
     #             return x / param
+
+    @make_test
+    @requires_numpy_pytorch_interop
+    def test_numpy_meshgrid(x, y):
+        import numpy as np
+
+        r1, r2 = np.meshgrid(x.numpy(), y.numpy())
+        return torch.from_numpy(r1), torch.from_numpy(r2)
+
+    @make_test
+    @requires_numpy
+    def test_torch_from_numpy(x):
+        a = x.numpy()
+        b = torch.from_numpy(a)
+        if b.size(0) == 1:
+            return torch.tensor(True)
+        else:
+            return torch.tensor(False)
+
+    @make_test
+    def test_torch_size(x):
+        if x.size(0) == 1:
+            return torch.tensor(True)
+        else:
+            return torch.tensor(False)
 
 
 def global_func_with_default_tensor_args(
