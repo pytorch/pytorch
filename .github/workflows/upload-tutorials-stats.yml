@@ -4,7 +4,6 @@ name: Upload tutorials stat
 
 # Controls when the workflow will run
 on:
-  pull_request: # DO NOT MERGE
   schedule:
   # Run this once per day.
     - cron: "0 0 * * *"
