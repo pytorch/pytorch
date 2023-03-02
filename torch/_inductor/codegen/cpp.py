@@ -1538,8 +1538,8 @@ class TileBufferUseTracker(V.WrapperHandler):
                     }
                     result = getattr(self._inner, name)(*args, **kwargs)
                     if (
-                        not isinstance(result, CppTileCSEVariable)
-                        or result.name not in uses
+                        not isinstance(result, CppTileCSEVariable)  # store or reduction
+                        or result.name not in uses  # a new variable defined
                     ):
                         V.kernel.tile_bufs_used.update(
                             {use for use in uses if use in V.kernel.tile_bufs_defined}
@@ -1869,6 +1869,7 @@ class CppTileKernel(CppKernel):
         # Declare used tile buffers
         for tile_buf_name in sorted(self.tile_bufs_used):
             tile_buf = self.tile_bufs_defined[tile_buf_name]
+            assert tile_buf.meta.rank() == self.tile_rank()
             self.code.writeline(
                 None,
                 f"__at_align__ {DTYPE_TO_CPP[tile_buf.meta.dtype]} {tile_buf}[{math.prod(self.tile_sizes)}];",
@@ -1879,6 +1880,7 @@ class CppTileKernel(CppKernel):
         self.stores.lines.sort(reverse=False, key=lambda line: len(line.indices))
 
         # Generate inner loops
+        self.indent = 0
         loop_indices = []
         for line in itertools.chain(
             self.loads.lines, self.compute.lines, self.stores.lines
