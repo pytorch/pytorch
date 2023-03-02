@@ -78,7 +78,26 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -117,12 +136,17 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True):
+def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True, specialize_int_float=False):
-        yield
+    # If export, we should respect original specialize_int_float flag
+    if export:
+        with config.patch(dynamic_shapes=True):
+            yield
+    else:
+        with config.patch(dynamic_shapes=True, specialize_int_float=False):
+            yield
 
 
 class _TorchDynamoContext:
@@ -134,6 +158,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=False,
     ):
         super().__init__()
@@ -143,6 +168,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         patch_fn()
 
@@ -157,7 +183,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -203,7 +229,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -269,7 +295,15 @@ class OptimizeContext(_TorchDynamoContext):
     def _different_backend(old, new):
         return not (old == new or old is None)
 
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
+    def __init__(
+        self,
+        callback,
+        backend_ctx_ctor,
+        first_ctx=False,
+        *,
+        export=False,
+        dynamic=False,
+    ):
         def on_enter():
             global most_recent_backend
             if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
@@ -290,6 +324,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
         )
 
@@ -341,12 +376,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
     )
 
@@ -375,6 +411,14 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
         raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
 
 
 def optimize(
@@ -643,7 +687,10 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
@@ -695,6 +742,7 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
         convert_frame.convert_frame_assert(backend, export=export),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
     )
 
