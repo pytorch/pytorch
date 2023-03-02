@@ -187,6 +187,27 @@ class Guard:
         self.obj_weakref = obj_weakref
 
 
+# Subclasses can be found in torch/_dynamo/source.py
+@dataclasses.dataclass
+class Source:
+    def reconstruct(self, codegen):
+        raise NotImplementedError()
+
+    def guard_source(self) -> GuardSource:
+        raise NotImplementedError()
+
+    def name(self) -> str:
+        raise NotImplementedError()
+
+    def make_guard(self, fn, is_volatile=False) -> Guard:
+        if self.guard_source() is GuardSource.CONSTANT:
+            raise NotImplementedError()
+        return Guard(self.name(), self.guard_source(), fn, is_volatile)
+
+    def is_nn_module(self) -> bool:
+        return self.guard_source().is_nn_module()
+
+
 T = TypeVar("T")
 
 """
@@ -325,6 +346,13 @@ class TracingContext:
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
+        self.param_and_attr_names_to_sources: Dict[str, Source] = dict()
+
+    def register(self, name: str, source: Source):
+        if name in self.param_and_attr_names_to_sources:
+            assert self.param_and_attr_names_to_sources[name] == source
+            return
+        self.param_and_attr_names_to_sources[name] = source
 
 
 """
@@ -343,24 +371,3 @@ def tracing(context: TracingContext):
         yield _CURRENT_TRACING_CONTEXT
     finally:
         _CURRENT_TRACING_CONTEXT = old_context
-
-
-# Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass
-class Source:
-    def reconstruct(self, codegen):
-        raise NotImplementedError()
-
-    def guard_source(self) -> GuardSource:
-        raise NotImplementedError()
-
-    def name(self) -> str:
-        raise NotImplementedError()
-
-    def make_guard(self, fn, is_volatile=False) -> Guard:
-        if self.guard_source() is GuardSource.CONSTANT:
-            raise NotImplementedError()
-        return Guard(self.name(), self.guard_source(), fn, is_volatile)
-
-    def is_nn_module(self) -> bool:
-        return self.guard_source().is_nn_module()
