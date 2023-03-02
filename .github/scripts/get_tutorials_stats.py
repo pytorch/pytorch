@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os.path
 from typing import List, Optional, Tuple, Dict, Union
-import boto # type: ignore[import]
+import boto3 # type: ignore[import]
 from botocore.exceptions import ClientError # type: ignore[import]
 from pprint import pprint
 
