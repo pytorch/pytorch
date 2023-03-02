@@ -493,7 +493,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.mkldnn._linear_pointwise.default,
                                 torch.ops.mkldnn._linear_pointwise.binary,
                             ]
-                            if torch._C.hastorch._C.has_mkl:
+                            if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
                         if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
