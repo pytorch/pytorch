@@ -1568,8 +1568,9 @@ class CppTileOverrides:
 
 @dataclasses.dataclass
 class TileCodeOrLine:
+    # name of the buffers to store, tile buffer or in/out buffer
     name: str = None
-    compute_at: list = None
+    indices: list = None
     code_or_line: Union[IndentedBuffer, str] = None
 
 
@@ -1581,12 +1582,7 @@ class TileCodeGenBuffer(IndentedBuffer):
         self.lines = []
 
     def _writeline(self, name, line):
-        compute_at = [
-            i
-            for i in range(len(V.kernel.tile_loop_indices))
-            if i not in V.kernel.current_tile_indices
-        ]
-        self.lines.append(TileCodeOrLine(name, compute_at, line))
+        self.lines.append(TileCodeOrLine(name, V.kernel.current_tile_indices, line))
 
     def writeline(self, line):
         self._writeline(V.kernel.current_slice_store_name, line)
@@ -1596,13 +1592,10 @@ class TileCodeGenBuffer(IndentedBuffer):
             self.writeline(line)
 
     def splice(self, code):
-        compute_at = [
-            i
-            for i in range(len(V.kernel.tile_loop_indices))
-            if i not in V.kernel.current_tile_indices
-        ]
         self.lines.append(
-            TileCodeOrLine(V.kernel.current_slice_store_name, compute_at, code)
+            TileCodeOrLine(
+                V.kernel.current_slice_store_name, V.kernel.current_tile_indices, code
+            )
         )
 
 
@@ -1883,15 +1876,19 @@ class CppTileKernel(CppKernel):
                 )
 
             # Sorting for maximum loop fusion
-            self.loads.lines.sort(reverse=False, key=lambda line: len(line.compute_at))
-            self.stores.lines.sort(reverse=True, key=lambda line: len(line.compute_at))
+            self.loads.lines.sort(reverse=True, key=lambda line: len(line.indices))
+            self.stores.lines.sort(reverse=False, key=lambda line: len(line.indices))
 
             # Generate inner loops
             loop_indices = []
             for line in itertools.chain(
                 self.loads.lines, self.compute.lines, self.stores.lines
             ):
-                new_loop_indices = [self.tile_loop_indices[i] for i in line.compute_at]
+                new_loop_indices = [
+                    self.tile_loop_indices[i]
+                    for i in range(self.tile_rank())
+                    if i not in line.indices
+                ]
                 common_indices = [
                     old
                     for old, new in zip(loop_indices, new_loop_indices)
