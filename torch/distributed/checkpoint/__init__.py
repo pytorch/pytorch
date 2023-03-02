@@ -19,3 +19,4 @@ from .planner import (
     WriteItem,
 )
 from .default_planner import DefaultSavePlanner, DefaultLoadPlanner
+from .optimizer import load_sharded_optimizer_state_dict

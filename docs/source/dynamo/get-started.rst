@@ -6,13 +6,12 @@ significant speedups the newer your GPU is.
 
 .. code:: python
 
-   from torch._dynamo import optimize
    import torch
    def fn(x, y):
        a = torch.cos(x).cuda()
        b = torch.sin(y).cuda()
        return a + b
-   new_fn = optimize("inductor")(fn)
+   new_fn = torch.compile(fn, backend="inductor")
    input_tensor = torch.randn(10000).to(device="cuda:0")
    a = new_fn(input_tensor, input_tensor)
 
@@ -54,7 +53,7 @@ with the actual generated kernel being
        tmp2 = tl.sin(tmp1)
        tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)
 
-And you can verify that fusing the two ``sins`` did actually occur
+And you can verify that fusing the two ``sin`` did actually occur
 because the two ``sin`` operations occur within a single Triton kernel
 and the temporary variables are held in registers with very fast access.
 
@@ -69,13 +68,12 @@ hub.
 .. code-block:: python
 
    import torch
-   import torch._dynamo as dynamo
    model = torch.hub.load('pytorch/vision:v0.10.0', 'resnet18', pretrained=True)
-   opt_model = dynamo.optimize("inductor")(model)
+   opt_model = torch.compile(model, backend="inductor")
    model(torch.randn(1,3,64,64))
 
 And that is not the only available backend, you can run in a REPL
-``dynamo.list_backends()`` to see all the available backends. Try out the
+``torch._dynamo.list_backends()`` to see all the available backends. Try out the
 ``cudagraphs`` or ``nvfuser`` next as inspiration.
 
 Let’s do something a bit more interesting now, our community frequently
@@ -92,11 +90,10 @@ HuggingFace hub and optimize it:
 
    import torch
    from transformers import BertTokenizer, BertModel
-   import torch._dynamo as dynamo
    # Copy pasted from here https://huggingface.co/bert-base-uncased
    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
    model = BertModel.from_pretrained("bert-base-uncased").to(device="cuda:0")
-   model = dynamo.optimize("inductor")(model) # This is the only line of code that we changed
+   model = torch.compile(model, backend="inductor") # This is the only line of code that we changed
    text = "Replace me by any text you'd like."
    encoded_input = tokenizer(text, return_tensors='pt').to(device="cuda:0")
    output = model(**encoded_input)
@@ -116,7 +113,7 @@ Similarly let’s try out a TIMM example
    import torch._dynamo as dynamo
    import torch
    model = timm.create_model('resnext101_32x8d', pretrained=True, num_classes=2)
-   opt_model = dynamo.optimize("inductor")(model)
+   opt_model = torch.compile(model, backend="inductor")
    opt_model(torch.randn(64,3,7,7))
 
 Our goal with Dynamo and inductor is to build the highest coverage ML compiler
@@ -132,16 +129,16 @@ or ``torch._dynamo.list_backends()`` each of which with its optional dependencie
 Some of the most commonly used backends include:
 
 **Training & inference backends**:
-  * ``dynamo.optimize("inductor")`` - Uses ``TorchInductor`` backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
-  * ``dynamo.optimize("aot_ts_nvfuser")`` - nvFuser with AotAutograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  * ``dynamo.optimize("nvprims_nvfuser")`` - nvFuser with PrimTorch. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
-  * ``dynamo.optimize("cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
+  * ``torch.compile(m, backend="inductor")`` - Uses ``TorchInductor`` backend. `Read more <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747>`__
+  * ``torch.compile(m, backend="aot_ts_nvfuser")`` - nvFuser with AotAutograd/TorchScript. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+  * ``torch.compile(m, backend=""nvprims_nvfuser")`` - nvFuser with PrimTorch. `Read more <https://dev-discuss.pytorch.org/t/tracing-with-primitives-update-1-nvfuser-and-its-primitives/593>`__
+  * ``torch.compile(m, backend="cudagraphs")`` - cudagraphs with AotAutograd. `Read more <https://github.com/pytorch/torchdynamo/pull/757>`__
 
 **Inference-only backends**:
-  * ``dynamo.optimize("onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__
-  * ``dynamo.optimize("tensorrt")`` - Uses ONNXRT to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
-  * ``dynamo.optimize("ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
-  * ``dynamo.optimize("tvm")`` - Uses Apach TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
+  * ``torch.compile(m, backend="onnxrt")`` - Uses ONNXRT for inference on CPU/GPU. `Read more <https://onnxruntime.ai/>`__
+  * ``torch.compile(m, backend="tensorrt")`` - Uses ONNXRT to run TensorRT for inference optimizations. `Read more <https://github.com/onnx/onnx-tensorrt>`__
+  * ``torch.compile(m, backend="ipex")`` - Uses IPEX for inference on CPU. `Read more <https://github.com/intel/intel-extension-for-pytorch>`__
+  * ``torch.compile(m, backend="tvm")`` - Uses Apach TVM for inference optimizations. `Read more <https://tvm.apache.org/>`__
 
 Why do you need another way of optimizing PyTorch code?
 -------------------------------------------------------
