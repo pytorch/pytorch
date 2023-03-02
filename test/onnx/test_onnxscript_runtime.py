@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 
 """Test the support on onnxscript in PyTorch-ONNX converter with onnxruntime."""
+from __future__ import annotations
+
 from typing import List
 
 import onnx_test_common
@@ -8,6 +10,7 @@ import onnxscript
 import torch
 from onnxscript.onnx_types import FLOAT
 from torch.onnx._internal import jit_utils
+from torch.onnx._internal.fx import function_dispatcher
 from torch.testing._internal import common_utils
 
 
@@ -124,6 +127,38 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         self.run_test(model, (x, y, z))
+
+
+class TestATenlibtRuntime(onnx_test_common._TestONNXRuntime):
+
+    # This class shows how we can utilize existing ATenLib on torch.onnx.export
+    # torch.onnx.export relies on multiple "ONNX C++ passes" applied to its node-level
+    # graph, but the passes are not compatible with onnxscript functions. Therefore, to
+    # leverage the existing passes with torch.onnx.export, we embedds ATenLib into
+    # node-level graph as a custom operator.
+
+    # NOTE: opset18 is the only supported by ATenLib now (latest ORT supporting version).
+    opset_version = 18
+
+    def test_atenlib_selu(self):
+
+        x = torch.randn(1, 2, 3, 4, requires_grad=True)
+        model = torch.nn.SELU()
+
+        # function_dispatcher is experimental and subject to change,
+        # but how an OnnxFunction is written can be referenced
+        Selu = function_dispatcher._ATENLIB_ONNX_FUNCTIONS.get("aten::selu", None)
+        self.assertIsNotNone(Selu)
+
+        def custom_selu(g: jit_utils.GraphContext, X):
+            return g.onnxscript_op(Selu, X).setType(X.type())
+
+        torch.onnx.register_custom_op_symbolic(
+            symbolic_name="aten::selu",
+            symbolic_fn=custom_selu,
+            opset_version=self.opset_version,
+        )
+        self.run_test(model, x)
 
 
 if __name__ == "__main__":

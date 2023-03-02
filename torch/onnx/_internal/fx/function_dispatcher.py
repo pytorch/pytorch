@@ -148,6 +148,13 @@ _ATENLIB_FUNCTIONS = {
     "prims::convert_element_type": prims_convert_element_type,
 }
 
+# Only include trace_only=False
+_ATENLIB_ONNX_FUNCTIONS = {
+    k: v
+    for k, v in _ATENLIB_FUNCTIONS.items()
+    if isinstance(v, onnxscript.OnnxFunction)
+}
+
 
 def _create_op_overload_to_exporter_key_table() -> Dict[
     Union[torch._ops.OpOverload, Callable], str
