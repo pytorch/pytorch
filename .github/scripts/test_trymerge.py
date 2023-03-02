@@ -428,6 +428,16 @@ class TestGitHubPR(TestCase):
         repo = GitRepoCoDev()
         self.assertRaisesRegex(PostCommentError, "landed via phabricator", lambda: validate_revert(repo, pr, comment_id=1372496233))
 
+    def test_pr_changed_submodule_detection(self, *args: Any) -> None:
+        # Updates submodule during dev-cycle but reverts it later
+        pr  = GitHubPR("pytorch", "pytorch", 95045)
+        self.assertEqual(pr.get_changed_submodules(), [])
+
+        # PR updates ideep
+        pr = GitHubPR("pytorch", "pytorch", 94939)
+        self.assertEqual(pr.get_changed_submodules(), ["third_party/ideep"])
+
+
 @mock.patch("trymerge.get_rockset_results", side_effect=mocked_rockset_results)
 @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
 class TestBypassFailures(TestCase):

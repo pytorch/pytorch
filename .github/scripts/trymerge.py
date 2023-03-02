@@ -751,6 +751,10 @@ class GitHubPR:
             self.submodules = [s["path"] for s in info["nodes"]]
         return self.submodules
 
+    def get_changed_submodules(self) -> List[str]:
+        submodules = self.get_submodules()
+        return [f for f in self.get_changed_files() if f in submodules]
+
     def _get_reviews(self) -> List[Tuple[str, str]]:
         if self._reviews is None:
             self._reviews = []
