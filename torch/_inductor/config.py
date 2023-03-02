@@ -85,6 +85,8 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
@@ -173,9 +175,6 @@ class triton:
 
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
-
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
