@@ -479,12 +479,24 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        if user.target in (
+                        need_fixed_layout = [
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
-                        ):
+                        ]
+                        if torch._C.has_mkldnn:
+                            need_fixed_layout += [
+                                torch.ops.mkldnn._convolution_pointwise.default,
+                                torch.ops.mkldnn._convolution_pointwise.binary,
+                                torch.ops.mkldnn._convolution_pointwise_.binary,
+                                torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                            ]
+                            if torch._C.has_mkl:
+                                need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
+                        if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
