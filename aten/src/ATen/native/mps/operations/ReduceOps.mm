@@ -140,7 +140,9 @@ void reduction_out_mps(
   const std::string& func_name) {
 
   // issue 103641234, reduction ops does not have int64 support
-  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 reduction ops, casting it to int32");
+  if (input_t.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: no support for int64 reduction ops, casting it to int32");
+  }
   IntArrayRef input_shape = input_t.sizes();
 
   if (opt_dim.has_value()) {
@@ -1265,7 +1267,9 @@ Tensor min_max_mps
   (const Tensor& input_t,
    MPSReductionType reduction_type,
    const std::string& func_name) {
-  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
+  if (input_t.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: no support for int64 min/max ops, casting it to int32");
+  }
 
   using CachedGraph = MPSUnaryCachedGraph;
 
