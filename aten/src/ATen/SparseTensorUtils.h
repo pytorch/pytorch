@@ -124,20 +124,23 @@ template <size_t static_shape_max_len>
 class TensorGeometryHolder {
   using geometry_holder_t = std::array<int64_t, static_shape_max_len>;
 
-public:
-  explicit TensorGeometryHolder(IntArrayRef sizes, IntArrayRef strides, TensorOptions options = {}) {
+ public:
+  explicit TensorGeometryHolder(
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options = {}) {
     std::copy(sizes.begin(), sizes.end(), t_sizes.begin());
     std::copy(strides.begin(), strides.end(), t_strides.begin());
   }
 
-  explicit TensorGeometryHolder(const Tensor& t) : TensorGeometryHolder(t.sizes(), t.strides()) {
-  }
+  explicit TensorGeometryHolder(const Tensor& t)
+      : TensorGeometryHolder(t.sizes(), t.strides()) {}
 
   auto operator*() const {
     return std::make_tuple(t_sizes, t_strides);
   }
 
-private:
+ private:
   geometry_holder_t t_sizes;
   geometry_holder_t t_strides;
 };
@@ -146,13 +149,15 @@ template <>
 class TensorGeometryHolder<0> {
   using geometry_holder_t = Tensor;
 
-public:
-  explicit TensorGeometryHolder(IntArrayRef sizes, IntArrayRef strides, TensorOptions options) {
+ public:
+  explicit TensorGeometryHolder(
+      IntArrayRef sizes,
+      IntArrayRef strides,
+      TensorOptions options) {
     const int64_t t_ndims = sizes.size();
     const auto cpu_options = TensorOptions(options).dtype(kLong).device(kCPU);
     Tensor t_sizes_and_strides_cpu = at::empty({2, t_ndims}, cpu_options);
-    t_sizes_and_strides_cpu.select(0, 0).copy_(
-        at::tensor(sizes, cpu_options));
+    t_sizes_and_strides_cpu.select(0, 0).copy_(at::tensor(sizes, cpu_options));
     t_sizes_and_strides_cpu.select(0, 1).copy_(
         at::tensor(strides, cpu_options));
     const Tensor t_sizes_and_strides =
@@ -161,8 +166,8 @@ public:
     t_strides = t_sizes_and_strides.select(0, 1);
   }
 
-  explicit TensorGeometryHolder(const Tensor& t) : TensorGeometryHolder(t.sizes(), t.strides(), t.options()) {
-  }
+  explicit TensorGeometryHolder(const Tensor& t)
+      : TensorGeometryHolder(t.sizes(), t.strides(), t.options()) {}
 
   auto operator*() const {
     return std::make_tuple(
@@ -170,7 +175,7 @@ public:
         t_strides.template data_ptr<int64_t>());
   }
 
-private:
+ private:
   geometry_holder_t t_sizes;
   geometry_holder_t t_strides;
 };
