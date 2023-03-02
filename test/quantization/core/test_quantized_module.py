@@ -1203,6 +1203,25 @@ class TestStaticQuantizedModule(QuantizationTestCase):
     def test_sigmoid(self):
         self._test_activation_module_impl("Sigmoid", nn.Sigmoid, nnq.Sigmoid, {})
 
+    def _test_hard_swish_serialization(self):
+        scale_original = 10.0 / 256
+        zero_point_original = 1.0
+
+        quant_mod_original = nnq.Hardswish(scale_original, zero_point_original)
+        state_dict = quant_mod_original.state_dict()
+
+        scale_new = 5.0 / 256
+        zero_point_new = 2.0
+        quant_mod_new = nnq.Hardswish(scale_new, zero_point_new)
+        quant_mod_new.load_state_dict(state_dict)
+
+        self.assertEqual(quant_mod_original.scale, quant_mod_new.scale)
+        self.assertEqual(quant_mod_original.zero_point, quant_mod_new.zero_point)
+
+    def test_hard_swish(self):
+        self._test_activation_module_impl("Hardswish", nn.Hardswish, nnq.Hardswish, {})
+        self._test_hard_swish_serialization()
+
     @given(
         num_embeddings=st.integers(10, 50),
         embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),

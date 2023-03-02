@@ -296,6 +296,12 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_gql_retrieve_checksuites(self, mocked_gql: Any, *args: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        pr = GitHubPR("pytorch", "pytorch", 94787)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     def test_team_members(self, mocked_gql: Any, *args: Any) -> None:
         "Test fetching team members works"
@@ -413,6 +419,19 @@ class TestGitHubPR(TestCase):
         pr = GitHubPR("pytorch", "pytorch", 79694)
         repo = DummyGitRepo()
         self.assertIsNotNone(validate_revert(repo, pr, comment_id=1189459845))
+
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_get_changed_files(self, mock_gql: Any, *args: Any) -> None:
+        """
+        Tests that the list changed files in a PR doesn't include duplicates
+        """
+        pr = GitHubPR("pytorch", "pytorch", 95233)
+        try:
+            changed_files = pr.get_changed_files()
+        except RuntimeError as error:
+            self.fail(f"get_changed_files throws an exception: {error}")
+
+        self.assertEqual(len(changed_files), pr.get_changed_files_count())
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_revert_codev_fails(self, mock_gql: Any, *args: Any) -> None:
