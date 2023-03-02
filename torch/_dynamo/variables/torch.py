@@ -787,6 +787,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    nn_modules_sources=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
