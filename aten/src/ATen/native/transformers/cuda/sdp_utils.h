@@ -341,7 +341,7 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   // num_heads logic for nested input is checked in check_for_seq_len_0_nested_tensor
   // as there is handling there to make sure num_heads is not ragged
   if (has_nested_input) {
-    bool broadcastable_batch_size = true, kv_broadcasting_safe = true;
+    bool broadcastable_batch_size = true;
     if (!same_batch_size) {
       // try to broadcast batchsize
       broadcastable_batch_size = try_broadcast_param_size(q_batch_size,
@@ -361,7 +361,7 @@ inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
         }
       }
     }
-    return broadcastable_batch_size && kv_broadcasting_safe;
+    return broadcastable_batch_size;
   }
 
   auto q_num_heads = params.query.size(1);
