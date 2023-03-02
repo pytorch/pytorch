@@ -1271,10 +1271,13 @@ class BenchmarkRunner:
             correct_rerun_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
+            # Two eager runs should have exactly same result
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
+                fp64_ref=None,
+                cos_similarity=False,
+                tol=0,
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
