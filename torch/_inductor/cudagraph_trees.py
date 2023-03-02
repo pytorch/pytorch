@@ -433,7 +433,7 @@ class CUDAGraphNode(object):
 
     @property
     def path_to_root(self):
-        "Returns all nodes in the path starting at se;f and ending at root"
+        "Returns all nodes in the path starting at self and ending at root"
         node = self
         while node:
             yield node
@@ -441,7 +441,7 @@ class CUDAGraphNode(object):
 
     @property
     def path_from_root(self):
-        "Returns all nodes in the path starting at the rppt and ending at self"
+        "Returns all nodes in the path starting at the root and ending at self"
         nodes = reversed(list(self.path_to_root))
         for node in nodes:
             yield node
@@ -589,7 +589,7 @@ class CUDAGraphNode(object):
 
         return recording_inputs
 
-    def check_invariants(self, inputs):
+    def check_invariants(self, inputs: List[Tensor]) -> bool:
         """
         Checks if this node can be run. The same pattern of tensor liveness and tensors
         managed in the cudagraph private pool must remain stable.
@@ -620,7 +620,7 @@ class CUDAGraphNode(object):
         )
         return True
 
-    def num_descendants(self):
+    def num_descendants(self) -> int:
         "Total number of descendents of this node"
         num_desc = 0
         for children in self.children.values():
@@ -692,7 +692,7 @@ class CUDAGraphTreeManager(object):
         self.debug_checkpointing_counter = 0
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
-        # we will try to end the current execution when , since
+        # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path
         if self.in_recording:
@@ -711,11 +711,18 @@ class CUDAGraphTreeManager(object):
                     self.current_gen = self.get_curr_generation()
                     return self.execute_node(child, new_inputs)
 
+            # now that we know the new function can't be run as a child of the
+            # current node, if it is a root, try to end the current execution.
+            # as noted above, we want to do this lazily to avoid having to
+            # check all existing outputs
             if self.current_node is not None and function_id in self.roots:
                 self.try_end_curr_execution()
+
+                # run again to hit the root matching case which must succeed
                 if self.current_node is None:
                     return self.run(new_inputs, function_id)
 
+            # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
             self.try_end_curr_execution()
@@ -726,7 +733,7 @@ class CUDAGraphTreeManager(object):
         self.current_gen = self.get_curr_generation()
         return self.record_function(new_inputs, function_id)
 
-    def record_function(self, new_inputs, function_id):
+    def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
             self.new_graph_id(),
@@ -742,14 +749,14 @@ class CUDAGraphTreeManager(object):
         self.in_recording = True
         return node.run(new_inputs)
 
-    def execute_node(self, node: CUDAGraphNode, new_inputs):
+    def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
         self.current_node = node
         return node.run(new_inputs)
 
-    def new_graph_id(self):
+    def new_graph_id(self) -> GraphID:
         return GraphID(next(self.graph_counter))
 
-    def new_func_id(self):
+    def new_func_id(self) -> FunctionID:
         return FunctionID(next(self.func_counter))
 
     def add_function(self, model, inputs, static_input_idxs) -> Callable:
@@ -770,10 +777,15 @@ class CUDAGraphTreeManager(object):
                 yield node
 
     @staticmethod
-    def get_curr_generation():
+    def get_curr_generation() -> int:
         return GenerationTracker.generation
 
-    def try_end_curr_recording(self):
+    def try_end_curr_recording(self) -> None:
+        """
+        Check if the current recording can be terminated, either because all outputs of the
+        previously recorded node are dead or because it was executed in a different
+        generation. Will set current_node to None and in_recording to False if successful.
+        """
         assert self.in_recording
 
         if self.current_node is None:
@@ -797,7 +809,13 @@ class CUDAGraphTreeManager(object):
             self.in_recording = False
             return
 
-    def try_end_curr_execution(self):
+    def try_end_curr_execution(self) -> None:
+        """
+        Check if the current executng node can be terminated, either because all outputs of the
+        previously executed node are dead or because it was executed in a different generation.
+        Will set current_node to None if successful.
+        """
+
         assert not self.in_recording
         if self.current_node is None:
             return
