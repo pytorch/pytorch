@@ -1,24 +1,34 @@
-import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
-import sys
 import builtins
-import itertools
-import operator
-import math
+import collections
 import functools
+import itertools
+import logging
+import math
+import operator
+import os
+import sys
+import textwrap
 import threading
+import traceback
 from contextlib import contextmanager
 from functools import lru_cache
-import traceback
-import collections
-import textwrap
-import logging
+from typing import cast, Dict, List, Optional, Set, Type, Union
+
+import torch
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
+from torch import (  # noqa: F401
+    sym_float,
+    sym_max,
+    sym_min,
+    sym_not,
+    SymBool,
+    SymFloat,
+    SymInt,
+)
 from torch._guards import ShapeGuard, Source
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeAnalysis
 from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -705,6 +715,12 @@ reflectable_magic_methods = {
 
 def error():
     raise AssertionError("shouldn't be hit")
+
+
+def get_debugging_stack():
+    # cut this frame and the caller's frame
+    return ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+
 
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
@@ -1786,11 +1802,11 @@ class ShapeEnv:
             # problem
         )
 
-    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr"):
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
         if a not in self.replacements or expr != self.replacements[a]:
             if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
-                stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-                torch._dynamo.guards.log.warning(f"Specializing {a} to {expr}:\n{stack}")
+                torch._dynamo.guards.log.warning(f"Specializing {a} to {expr}")
+                torch._dynamo.guards.log.debug(f"Stack when specializing:\n{get_debugging_stack()}")
             self.replacements[a] = expr
 
     @_lru_cache
@@ -1876,10 +1892,12 @@ class ShapeEnv:
         return self.simplify(expr)
 
     def _add_guard(self, expr: "sympy.Expr") -> None:
-        stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        stack = get_debugging_stack()
         guard = ShapeGuard(expr, stack)
-        if torch._dynamo.config.print_shape_guards:
-            torch._dynamo.guards.log.warning(f"Adding shape guard {expr}:\n{stack}")
+        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+            # reusing flag that prints guards
+            torch._dynamo.guards.log.warning(f"Adding shape guard {expr}")
+            torch._dynamo.guards.log.debug(f"Stack when adding shape guard:\n{stack}")
         self.guards.append(guard)
 
     @lru_cache(256)
