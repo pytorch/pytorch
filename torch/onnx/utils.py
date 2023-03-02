@@ -1470,6 +1470,15 @@ def _export(
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
+    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn(
+            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
+            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "

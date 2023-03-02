@@ -9,11 +9,13 @@ on:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
   pull_request:
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
       - .github/ci_commit_pins/triton.txt
+      - .ci/docker/ci_commit_pins/triton.txt
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -84,6 +86,7 @@ jobs:
           esac
 
           docker exec -t "${container_name}" yum install -y zlib-devel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 

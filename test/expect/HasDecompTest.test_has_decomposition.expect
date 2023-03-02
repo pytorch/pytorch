@@ -575,6 +575,7 @@ aten::affine_grid_generator
 aten::affine_grid_generator.out
 aten::alias_copy
 aten::alias_copy.out
+aten::all_gather_into_tensor
 aten::all_reduce
 aten::allclose
 aten::aminmax
@@ -719,6 +720,8 @@ aten::embedding_renorm_
 aten::empty.memory_format
 aten::empty.names
 aten::empty.names_out
+aten::empty_permuted
+aten::empty_permuted.out
 aten::empty_quantized
 aten::empty_quantized.out
 aten::equal
