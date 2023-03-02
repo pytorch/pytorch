@@ -103,6 +103,12 @@ rewrite_assert_with_torch_assert = True
 # Show a warning on every graph break
 print_graph_breaks = False
 
+# Show a warning for every shape guard
+print_shape_guards = False
+
+# Show a warning for every specialization
+print_specializations = False
+
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
