@@ -7389,6 +7389,44 @@ class TestViewOpsMPS(TestCaseMPS):
         v[6] = 0
         self.assertEqual(t[1, 1], v[6])
 
+    def test_reshape_storage_offset(self):
+        # issue https://github.com/pytorch/pytorch/issues/95883
+        B = 4
+        T = 1
+
+        lin_cpu = nn.Linear(10, 256)
+        lin_mps = nn.Linear(10, 256, device="mps")
+
+        # Use the same weights and bias as the ones from the cpu
+        lin_mps.weight.data = lin_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+        lin_mps.bias.data   = lin_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+        x_mps = torch.rand([B, T, 10], device="mps", requires_grad=True)
+        x_cpu = x_mps.detach().clone().cpu().requires_grad_()
+        x_mps = lin_mps(x_mps)
+        x_cpu = lin_cpu(x_cpu)
+
+        self.assertEqual(x_mps.shape, (B, T, 256))
+        self.assertEqual(x_cpu.shape, (B, T, 256))
+
+        cls_token_mps = torch.rand([1, 256], device="mps", requires_grad=True).repeat(B, 1, 1)
+        cls_token_cpu = cls_token_mps.detach().clone().cpu()
+        x_mps = torch.cat([cls_token_mps, x_mps], dim=1)
+        x_cpu = torch.cat([cls_token_cpu, x_cpu], dim=1)
+
+        x_mps = x_mps.transpose(0, 1)
+        x_cpu = x_cpu.transpose(0, 1)
+
+        target_mps = torch.rand_like(x_mps)
+        target_cpu = target_mps.detach().clone().cpu()
+        loss_mps = F.mse_loss(x_mps, target_mps)
+        loss_cpu = F.mse_loss(x_cpu, target_cpu)
+        self.assertEqual(loss_mps, loss_cpu)
+
+        loss_mps.backward()
+        loss_cpu.backward()
+        self.assertEqual(x_mps.grad, x_cpu.grad)
+
     def test_reshape_as_view(self, device="mps"):
         t = torch.ones(5, 5, device=device)
         e = torch.empty((25,), device=device)
