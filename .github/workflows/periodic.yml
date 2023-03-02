@@ -43,8 +43,9 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_7-py3-gcc7-slow-gradcheck-test:

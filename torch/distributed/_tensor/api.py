@@ -1,12 +1,13 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import warnings
-from typing import Callable, cast, Dict, Optional, Sequence
+from typing import Callable, cast, Dict, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
 
 import torch.distributed._tensor.dispatch as op_dispatch
+from torch.fx.passes.shape_prop import TensorMetadata
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import (
     _Partial,
@@ -49,22 +50,21 @@ __all__ = ["DTensor", "distribute_tensor", "distribute_module"]
 class _ToTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input: "DTensor"):  # type: ignore[override]
-        ctx.dtensor_device_mesh = input.device_mesh
-        ctx.dtensor_placements = input.placements
-        ctx.dtensor_shape = input.shape
-        ctx.dtensor_requires_grad = input.requires_grad
+        ctx.dtensor_spec = input._spec
         return input._local_tensor.detach()
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
-        device_mesh = ctx.dtensor_device_mesh
-        placements = ctx.dtensor_placements
+        dtensor_spec = ctx.dtensor_spec
+        dtensor_meta = dtensor_spec.tensor_meta
         return DTensor(
             grad_output,
-            device_mesh,
-            placements,
-            size=ctx.dtensor_shape,
+            dtensor_spec.mesh,
+            dtensor_spec.placements,
+            shape=dtensor_meta.shape,
+            dtype=dtensor_meta.dtype,
             requires_grad=grad_output.requires_grad,
+            stride=dtensor_meta.stride
         )
 
 
@@ -80,7 +80,31 @@ class _FromTorchTensor(torch.autograd.Function):
         ctx.previous_placement = placements
         ctx.previous_device_mesh = device_mesh
 
-        if run_check:
+        # if it's not by default run_check, we assume user is certain that each
+        # rank has the same tensor shape, and we just use that to calculate the
+        # global shape
+        tensor_shape = list(input.size())
+        tensor_stride = list(input.stride())
+        for idx, placement in enumerate(placements):
+            if placement.is_shard():
+                shard_dim = cast(Shard, placement).dim
+                local_dim_size = tensor_shape[shard_dim]
+                tensor_shape[shard_dim] = local_dim_size * device_mesh.size(idx)
+
+                # recover tensor stride by modifying the stride that larger than
+                # the current stride on the shard_dim
+                for i in range(len(tensor_stride)):
+                    if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
+                        # rescale the stride by the shard size
+                        tensor_stride[i] = tensor_stride[i] * device_mesh.size(idx)
+            elif not isinstance(placement, (Replicate, _Partial)):
+                raise RuntimeError(f"placement type {type(placement)} not supported!")
+
+        if device_mesh.get_coordinate() is None:
+            # if the global rank is not participating in the device mesh, we
+            # simply set the local tensor to an empty tensor
+            input = input.new_empty(0, requires_grad=input.requires_grad)
+        elif run_check:
             # TODO: by default check tensor metas across rank
             # TODO: See if we need to make this run_check logic
             # have a corresponding backward.
@@ -91,24 +115,16 @@ class _FromTorchTensor(torch.autograd.Function):
                     input = input.contiguous()
                     device_mesh.broadcast(input, mesh_dim=idx)
 
-        # if it's not by default run_check, we assume user is certain that each
-        # rank has the same tensor shape, and we just use that to calculate the
-        # global shape
-        tensor_shape = list(input.size())
-        for idx, placement in enumerate(placements):
-            if placement.is_shard():
-                shard_dim = cast(Shard, placement).dim
-                local_dim_size = tensor_shape[shard_dim]
-                tensor_shape[shard_dim] = local_dim_size * device_mesh.size(idx)
-
         dist_tensor = DTensor(
             input,
             device_mesh,
             placements,
-            size=torch.Size(tensor_shape),
+            shape=torch.Size(tensor_shape),
+            dtype=input.dtype,
             # requires_grad of the dist tensor depends on if input
             # requires_grad or not
             requires_grad=input.requires_grad,
+            stride=tuple(tensor_stride),
         )
         return dist_tensor
 
@@ -154,8 +170,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         device_mesh: DeviceMesh,
         placements: Sequence[Placement],
         *,
-        size: torch.Size,
-        requires_grad: bool = False,
+        shape: torch.Size,
+        dtype: torch.dtype,
+        requires_grad: bool,
+        stride: Tuple[int, ...],
     ) -> "DTensor":
         """
         Construct a DTensor from a local tensor, device mesh, and placement and
@@ -167,25 +185,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             already have tensor initialized and want to shard this tensor),
             consider using `distribute_tensor`.
         """
-        # recover tensor strides from local tensor strides and global size info
-        # in the case of sharding
-        # TODO: we should try to use meta tensor for shape and stride calculation
-        tensor_stride = list(local_tensor.stride())
-        local_size = list(local_tensor.size())
-        for placement in placements:
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                # recover tensor stride by modifying the stride that larger than
-                # the current stride on the shard_dim
-                for i in range(len(tensor_stride)):
-                    if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
-                        # rescale the stride by the shard size
-                        tensor_stride[i] = (
-                            tensor_stride[i] // local_size[shard_dim]
-                        ) * size[shard_dim]
-            elif not isinstance(placement, (Replicate, _Partial)):
-                raise RuntimeError(f"placement type {type(placement)} not supported!")
-
         if requires_grad != local_tensor.requires_grad:
             warnings.warn(
                 "To construct DTensor from torch.Tensor, it's recommended to "
@@ -196,15 +195,26 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # placement spec, it does not do actual distribution
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            size,
-            strides=tensor_stride,
-            dtype=local_tensor.dtype,
+            shape,
+            strides=stride,
+            dtype=dtype,
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
         )
+
+        # TODO: populate all tensor meta fields properly
+        tensor_meta = TensorMetadata(
+            shape,
+            dtype,
+            requires_grad,
+            stride,
+            torch.contiguous_format,
+            False,
+            {}
+        )
         # deepcopy and set spec
-        r._spec = DTensorSpec(device_mesh, copy.deepcopy(placements), shape=r.size())
+        r._spec = DTensorSpec(device_mesh, copy.deepcopy(placements), tensor_meta=tensor_meta)
         # detach local tensor from autograd graph as we initialize the
         # distributed tensor and autograd will be working on top of
         # the wrapper tensor directly instead of local torch.Tensor
@@ -279,6 +289,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         # strategy, where we broadcast the replication from the first rank
         # in the mesh dimension
         device_mesh = get_global_device_mesh() if device_mesh is None else device_mesh
+
         # convert the local tensor to desired device base on device mesh's device_type
         if not local_tensor.is_meta:
             local_tensor = local_tensor.to(device_mesh.device_type)
@@ -442,8 +453,8 @@ def distribute_tensor(
             output.requires_grad_(tensor.requires_grad)
             local_tensor = output
         elif placement.is_replicate():
-            local_tensor = local_tensor.contiguous()
-            device_mesh.broadcast(local_tensor, mesh_dim=idx)
+            placement = cast(Replicate, placement)
+            local_tensor = placement._replicate_tensor(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
@@ -454,8 +465,10 @@ def distribute_tensor(
         local_tensor,
         device_mesh,
         placements,
-        size=tensor.size(),
+        shape=tensor.size(),
+        dtype=tensor.dtype,
         requires_grad=tensor.requires_grad,
+        stride=tensor.stride(),
     )
 
 

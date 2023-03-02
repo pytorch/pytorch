@@ -86,6 +86,10 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
+                if not out.dtype.is_floating_point:
+                    msg = ("grad can be implicitly created only for real scalar outputs"
+                           f" but got {out.dtype}")
+                    raise RuntimeError(msg)
                 new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
