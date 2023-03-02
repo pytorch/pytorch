@@ -9,8 +9,8 @@ from typing import Any, Dict
 import torch._C
 
 from torch import _utils_internal
+from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
 from torch._functorch.pyfunctorch import dispatch_functorch
-from torch._dispatch.python import no_python_dispatcher, enable_python_dispatcher
 
 # Query `hasattr` only once.
 
@@ -194,12 +194,14 @@ class PyOperator(PyOperatorABC):
     def _fallthrough_fn(self, operator, dispatch_key):
         def inner(*args, **kwargs):
             with no_python_dispatcher():
-                all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
-                all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
-                    args, kwargs
+                all_keys_after_current = torch._C._dispatch_keyset_full_after(
+                    dispatch_key
+                )
+                all_keys_after_current_masked = (
+                    all_keys_after_current & _compute_keyset(args, kwargs)
                 )
                 highest_key = all_keys_after_current_masked.highestPriorityTypeId()
-                
+
             return self.dispatch(highest_key, *args, **kwargs)
 
         return inner
