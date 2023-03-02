@@ -1,16 +1,17 @@
-from typing import Any, Tuple, Union, List, cast
+import warnings
 
 import weakref
-import warnings
+from typing import Any, cast, List, Tuple, Union
 
 import sys
 import torch
 import torch.distributed as dist
 
+import torch.distributed.distributed_c10d as c10d
+
 from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map
 
-import torch.distributed.distributed_c10d as c10d
 """
 New traceable, functional collectives.
 RFC: https://github.com/pytorch/pytorch/issues/93173
@@ -81,7 +82,9 @@ def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
     version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
     if version is None:
-        warnings.warn("Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone")
+        warnings.warn(
+            "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
+        )
     else:
         weakref.finalize(tensor_wrapper, _clear_tensor, tensor.data_ptr(), version)
 
@@ -165,6 +168,30 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
 
     return out_tensor
 
+def _reduce_scatter_tensor(
+    input: torch.Tensor,
+    reduceOp: str,
+    scatter_dim: int,
+    tag: str,
+    ranks: List[int],
+    group_size: int,
+):
+    # TODO add dim support?
+    assert scatter_dim == 0, "Only scatter_dim = 0 is supported for now."
+    group = c10d._find_or_create_pg_by_ranks_and_tag(tag, ranks, group_size)
+    assert group is not None
+    op = _str_to_reduce_op(reduceOp)
+    out_size = list(input.size())
+    out_size[scatter_dim] //= group_size
+    out_tensor = input.new_empty(out_size)
+    work = dist.reduce_scatter_tensor(
+        out_tensor, input, op=op, group=group, async_op=True
+    )
+    _register_tensor_work(out_tensor, work)
+
+    return out_tensor
+
+
 RANK_TYPES = Union[List[int], List[List[int]], dist.ProcessGroup, "dist._tensor.DeviceMesh", Tuple["dist._tensor.DeviceMesh", int]]
 
 def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int]:
@@ -179,7 +206,9 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> Tuple[str, List[int], int
             for rs in nested_list:
                 rankset.extend(rs)
                 if group_size != -1 and group_size != len(rs):
-                    raise ValueError(f"group sizes must be identical found {group_size} and {len(rs)}")
+                    raise ValueError(
+                        f"group sizes must be identical found {group_size} and {len(rs)}"
+                    )
                 group_size = len(rs)
         else:
             rankset = cast(List[int], group)
@@ -240,6 +269,38 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     _register_wrapper_tensor(res, tensor)
     return res
 
+def reduce_scatter_tensor(
+    self: torch.Tensor,
+    reduceOp: str,
+    scatter_dim: int,
+    group: RANK_TYPES,
+    tag: str = "",
+):
+    """
+    Reduces the tensor data across all machines in such a way that all get
+    the final result, then scatter the results to correponding ranks.
+
+    Note that it currently only supports scatter_dim = 0.
+
+    The input tensor is left unmodified.
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    tag, rankset, group_size = _expand_group(group, tag)
+    assert (
+        self.size(0) % group_size == 0
+    ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
+    tensor = torch._C._nn.reduce_scatter_tensor(self, reduceOp, scatter_dim, tag, rankset, group_size)  # type: ignore[attr-defined]
+    res = AsyncCollectiveTensor(tensor)
+    _register_wrapper_tensor(res, tensor)
+    return res
+
 
 c10_lib_cpu = torch.library.Library("aten", "IMPL", "CPU")
 c10_lib_cuda = torch.library.Library("aten", "IMPL", "CUDA")
@@ -253,6 +314,9 @@ def _register_ops():
 
     c10_lib_cpu.impl("all_gather_into_tensor", _all_gather_into_tensor)
     c10_lib_cuda.impl("all_gather_into_tensor", _all_gather_into_tensor)
+
+    c10_lib_cpu.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
+    c10_lib_cuda.impl("reduce_scatter_tensor", _reduce_scatter_tensor)
 
 if sys.executable != 'torch_deploy':
     _register_ops()
