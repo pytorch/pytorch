@@ -1514,6 +1514,8 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLCPU
         elif self.device.type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
+        elif torch_device_type == "ort":
+            device_type = DLDeviceType.kDLMAIA
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
