@@ -1217,6 +1217,12 @@ def _register_post_backward_hooks(
     We register the post-backward hook only once in the *first* forward that a
     ``FlatParameter`` participates in. This relies on the ``AccumulateGrad``
     object being preserved through multiple forwards.
+
+    NOTE: We follow this heuristic to prefer the *first* forward to target the
+    parameter mixed precision case, where there are *separate*
+    ``AccumulateGrad`` objects across the different forwards. (Without
+    parameter mixed precision, the ``AccumulateGrad`` objects are the same.) If
+    we instead prefer the *last* forward, then the hook runs early.
     """
     # If there is no gradient computation, then there is no need for
     # post-backward logic

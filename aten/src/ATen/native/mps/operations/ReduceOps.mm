@@ -140,7 +140,9 @@ void reduction_out_mps(
   const std::string& func_name) {
 
   // issue 103641234, reduction ops does not have int64 support
-  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 reduction ops, casting it to int32");
+  if (input_t.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: no support for int64 reduction ops, casting it to int32");
+  }
   IntArrayRef input_shape = input_t.sizes();
 
   if (opt_dim.has_value()) {
@@ -344,7 +346,7 @@ Tensor nansum_mps(
 Tensor trace_mps_out(const Tensor& self) {
   Tensor output_t = at::native::empty_mps(
                     {},
-                    self.scalar_type(),
+                    get_dtype_from_self(self, c10::nullopt, true),
                     c10::nullopt,
                     kMPS,
                     c10::nullopt,
@@ -717,7 +719,7 @@ Tensor _cdist_forward_mps(const Tensor& x1, const Tensor& x2, const double p, c1
 Tensor std_var_common_impl_mps(
   const Tensor & input_t,
   at::OptionalIntArrayRef dim,
-  c10::optional<int64_t> correction,
+  const c10::optional<Scalar>& correction,
   bool keepdim,
   StdVarType stdVarType) {
   using CachedGraph = MPSUnaryCachedGraph;
@@ -737,8 +739,8 @@ Tensor std_var_common_impl_mps(
     }
   }
 
-  bool use_correction = !(correction.has_value() && correction.value() == 0);
-  const auto correction_value = correction.value_or(1);
+  bool use_correction = !(correction.has_value() && correction.value().toDouble() == 0);
+  const auto correction_value = correction.value_or(1.0).toDouble();
   int64_t correction_n = 1;
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -858,7 +860,8 @@ Tensor std_var_common_impl_mps(
     return output_t;
   }
 
-  double bessel_correction = static_cast<double>(correction_n) / static_cast<double>(correction_n - correction_value);
+  double dof = std::max(0.0, correction_n - correction_value);
+  double bessel_correction = correction_n / dof;
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
@@ -929,7 +932,7 @@ Tensor std_var_common_impl_mps(
 Tensor var_mps(
   const Tensor & input_t,
   at::OptionalIntArrayRef dim,
-  c10::optional<int64_t> correction,
+  const c10::optional<Scalar>& correction,
   bool keepdim)
 {
   return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_VARIANCE);
@@ -938,7 +941,7 @@ Tensor var_mps(
 Tensor std_mps(
    const Tensor & input_t,
    at::OptionalIntArrayRef dim,
-   c10::optional<int64_t> correction,
+   const c10::optional<Scalar>& correction,
    bool keepdim)
 {
   return std_var_common_impl_mps(input_t, dim, correction, keepdim, STANDARD_DEVIATION);
@@ -1265,7 +1268,9 @@ Tensor min_max_mps
   (const Tensor& input_t,
    MPSReductionType reduction_type,
    const std::string& func_name) {
-  TORCH_WARN_ONCE(input_t.scalar_type() != ScalarType::Long, "MPS: no support for int64 min/max ops, casting it to int32");
+  if (input_t.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: no support for int64 min/max ops, casting it to int32");
+  }
 
   using CachedGraph = MPSUnaryCachedGraph;
 

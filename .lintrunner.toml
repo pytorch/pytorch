@@ -367,6 +367,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',

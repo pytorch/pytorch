@@ -33,7 +33,16 @@ class ConstDictVariable(VariableTracker):
         return self.user_cls
 
     def reconstruct(self, codegen):
-        for key, value in self.items.items():
+        # instructions to load collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            codegen.extend_output(
+                [
+                    codegen.create_load_python_module(collections),
+                    create_instruction("LOAD_METHOD", "OrderedDict"),
+                ]
+            )
+        # instructions to build the dict keys and values
+        for key in self.items.keys():
             if istensor(key):
                 codegen.append_output(
                     codegen.create_load_global(global_key_name(key), True, add=True)
@@ -42,8 +51,15 @@ class ConstDictVariable(VariableTracker):
             else:
                 codegen.append_output(codegen.create_load_const(key))
             codegen(self.items[key])
-
-        return [create_instruction("BUILD_MAP", len(self.items))]
+        # BUILD_MAP and calling collections.OrderedDict if necessary
+        if self.user_cls is collections.OrderedDict:
+            return [
+                create_instruction("BUILD_MAP", len(self.items)),
+                create_instruction("CALL_METHOD", 1),
+            ]
+        # BUILD_MAP only if user_cls is dict
+        else:
+            return [create_instruction("BUILD_MAP", len(self.items))]
 
     def getitem_const(self, arg: VariableTracker):
         return self.items[ConstDictVariable.get_key(arg)].add_options(self, arg)

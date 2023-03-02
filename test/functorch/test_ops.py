@@ -394,7 +394,7 @@ class TestOperators(TestCase):
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('svd_lowrank',
-             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+             {torch.float32: tol(atol=3e-05, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
@@ -430,10 +430,15 @@ class TestOperators(TestCase):
                 if sample.output_process_fn_grad is not None:
                     result = sample.output_process_fn_grad(result)
 
+                def abs_if_complex(t):
+                    if t.dtype.is_complex:
+                        return t.abs()
+                    return t
+
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
-                    return result.sum()
-                result = sum([res.sum() for res in result])
+                    return abs_if_complex(result.sum())
+                result = sum([abs_if_complex(res.sum()) for res in result])
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)

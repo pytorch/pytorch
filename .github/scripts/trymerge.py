@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+# NB: the following functions are used in Meta-internal workflows
+# (github_first_try_merge/my_handler.py) and thus have functionality limitations
+# (no `git` command access, no network access besides the strict allow list):
+#
+# find_matching_merge_rule
+# read_merge_rules
+#
+# Also any signature changes of these functions, as well as changes to the `GitHubPR`
+# class, will likely require corresponding changes for the internal workflows.
+
 import base64
 import json
 import os
@@ -18,11 +28,8 @@ from typing import (
     Optional,
     Pattern,
     Tuple,
-    Union,
     cast,
 )
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 from warnings import warn
 from pathlib import Path
 
@@ -33,6 +40,14 @@ from gitutils import (
     get_git_repo_dir,
     patterns_to_regex,
 )
+from github_utils import (
+    GitHubComment,
+    gh_fetch_json_list,
+    gh_fetch_url,
+    gh_post_commit_comment,
+    gh_post_pr_comment,
+)
+from label_utils import gh_add_labels
 from trymerge_explainer import (
     TryMergeExplainer,
     get_revert_message,
@@ -440,71 +455,8 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 
 
-def _fetch_url(url: str, *,
-               headers: Optional[Dict[str, str]] = None,
-               data: Optional[Dict[str, Any]] = None,
-               method: Optional[str] = None,
-               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
-    if headers is None:
-        headers = {}
-    token = os.environ.get("GITHUB_TOKEN")
-    if token is not None and url.startswith('https://api.github.com/'):
-        headers['Authorization'] = f'token {token}'
-    data_ = json.dumps(data).encode() if data is not None else None
-    try:
-        with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
-            return reader(conn)
-    except HTTPError as err:
-        if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"""Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}""")
-        raise
-
-def _fetch_json_any(
-    url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None
-) -> Any:
-    headers = {'Accept': 'application/vnd.github.v3+json'}
-    if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return _fetch_url(url, headers=headers, data=data, reader=json.load)
-
-def fetch_json_list(url: str,
-                    params: Optional[Dict[str, Any]] = None,
-                    data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    return cast(List[Dict[str, Any]], _fetch_json_any(url, params, data))
-
-def fetch_json_dict(url: str,
-                    params: Optional[Dict[str, Any]] = None,
-                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
-    return cast(Dict[str, Any], _fetch_json_any(url, params, data))
-
-def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    if dry_run:
-        print(comment)
-        return []
-    return fetch_json_list(url, data={"body": comment})
-
-
-def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments', comment, dry_run)
-
-
-def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/commits/{sha}/comments', comment, dry_run)
-
-
-def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
-    fetch_json_list(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
-                    data={"labels": labels})
-
-
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
+    rc = gh_fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
         raise RuntimeError(f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}")
     return cast(Dict[str, Any], rc)
@@ -598,10 +550,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -681,15 +635,6 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             )
     return entire_stack
 
-@dataclass
-class GitHubComment:
-    body_text: str
-    created_at: str
-    author_login: str
-    author_association: str
-    editor_login: Optional[str]
-    database_id: int
-
 
 class GitHubPR:
     def __init__(self, org: str, project: str, pr_num: int) -> None:
@@ -762,10 +707,10 @@ class GitHubPR:
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
             info = self.info
-            self.changed_files = []
+            unique_changed_files = set()
             # Do not try to fetch more than 10K files
             for _ in range(100):
-                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                unique_changed_files.update([x["path"] for x in info["files"]["nodes"]])
                 if not info["files"]["pageInfo"]["hasNextPage"]:
                     break
                 rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
@@ -774,6 +719,7 @@ class GitHubPR:
                                 number=self.pr_num,
                                 cursor=info["files"]["pageInfo"]["endCursor"])
                 info = rc["data"]["repository"]["pullRequest"]
+            self.changed_files = list(unique_changed_files)
 
         if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
@@ -1144,9 +1090,14 @@ def gen_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    """Returns the list of all merge rules for the repo or project.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
-        json_data = _fetch_url(
+        json_data = gh_fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
             headers={'Accept': 'application/vnd.github.v3+json'},
             reader=json.load,
@@ -1176,7 +1127,11 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     land_check_commit: Optional[str] = None,
 ) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception"""
+    """Returns merge rule matching to this pr or raises an exception.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
 
@@ -1193,7 +1148,17 @@ def find_matching_merge_rule(
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
     checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-    checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+    base_rev = None
+    try:
+        # is allowed to fail if git is not available
+        base_rev = pr.get_merge_base()
+    except Exception as e:
+        print(
+            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
+            f"{type(e)}\n{e}"
+        )
+    if base_rev is not None:
+        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1331,7 +1296,7 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
 
 def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
-        return [FlakyRule(**rule) for rule in fetch_json_list(url)]
+        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
     except Exception as e:
         print(f"Could not download {url} because: {e}.")
         if num_retries > 0:
@@ -1516,7 +1481,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         return
     response = cast(
         Dict[str, Any],
-        fetch_json_list(
+        gh_fetch_json_list(
             "https://api.github.com/search/issues",
             params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
