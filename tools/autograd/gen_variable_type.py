@@ -552,6 +552,8 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "_nested_tensor_strides",
     # Functional collectives keep an internal ref through the Work object
     "all_reduce",
+    "all_gather_into_tensor",
+    "wait_tensor",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
