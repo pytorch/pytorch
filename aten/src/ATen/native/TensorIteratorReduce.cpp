@@ -10,7 +10,6 @@
 #endif
 
 #include <c10/util/irange.h>
-
 /// Contains the implementation of parallel reductions in TensorIterator.
 
 namespace at {
@@ -73,21 +72,32 @@ static void two_pass_reduction(TensorIteratorBase& iter, loop2d_t loop) {
 
 /// Chooses a dimension over which to parallelize. Prefers the outer-most
 /// dimension thats larger than the number of available threads.
-static int find_split_dim(TensorIteratorBase& iter) {
+static int find_split_dim(
+  TensorIteratorBase& iter,
+  bool round_columns=false,
+  bool choose_reduce_dim=false) {
+
   int num_threads = at::get_num_threads();
   auto shape = iter.shape();
+  int64_t cols = 128 / iter.element_size(1);
 
   // start with the outer-most dimension
   int best_dim = iter.ndim() - 1;
-  for (int dim = best_dim; dim >= 0 && !iter.is_dim_reduced(dim); dim--) {
-    if (shape[dim] >= num_threads) {
+  for (int dim = best_dim; dim >= 0; dim--) {
+    if (!choose_reduce_dim && iter.is_dim_reduced(dim)) {
+      break;
+    }
+    // Consider the case: When parallel dim is the dim with contiguous stride,
+    // make sure the rounded columns are enough to be parallelized
+    auto round_dim_size = (round_columns && iter.strides(1)[dim] == iter.element_size(1)) ? (shape[dim] + cols - 1) / cols: shape[dim];
+    auto round_best_dim_size = (round_columns && iter.strides(1)[best_dim] == iter.element_size(1)) ? (shape[best_dim] + cols - 1) / cols: shape[best_dim];
+    if (round_dim_size >= num_threads) {
       return dim;
-    } else if (shape[dim] > shape[best_dim]) {
+    } else if (round_dim_size > round_best_dim_size) {
       best_dim = dim;
     }
   }
 
-  AT_ASSERT(!iter.is_dim_reduced(best_dim));
   return best_dim;
 }
 
@@ -103,25 +113,60 @@ round_columns(TensorIteratorBase& iter, int dim, int multiple, int64_t begin, in
 
 static void parallel_dim_reduction(TensorIteratorBase& iter, loop2d_t loop) {
   AT_ASSERT(iter.ndim() >= 1);
-  int dim = find_split_dim(iter);
+  const int max_threads = at::get_num_threads();
+  int dim = find_split_dim(iter, true, true);
+  if (iter.is_dim_reduced(dim)) {
+    auto dim_size = iter.shape()[dim];
+    // data size per thread should be much larger than buffer size per thread.
+    if (dim_size < max_threads * 64 || iter.numel() < max_threads * 10240) {
+      dim = find_split_dim(iter);
+    }
+  }
   int64_t cols = iter.shape()[dim];
   int element_size = iter.element_size(/*arg=*/1);
 
   bool should_round_columns = iter.strides(1)[dim] == element_size;
-  at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
-    if (should_round_columns) {
-      // round columns to multiples of 128 bytes if adjacent columns are
-      // contiguous in memory.
-      int64_t cols_per_128_bytes = 128 / element_size;
-      std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
-    }
-    if (begin == end) {
-      return;
-    }
-    auto sub_iter = TensorIterator(iter);
-    sub_iter.narrow(dim, begin, end - begin);
-    sub_iter.for_each(loop);
-  });
+  if (iter.is_dim_reduced(dim)) {
+    const auto& dst = iter.output(0);
+    auto unsqueezed = dst.unsqueeze(0);
+    auto buffer_shape = DimVector(unsqueezed.sizes());
+    buffer_shape[0] = max_threads;
+    auto buffer = at::empty(buffer_shape, dst.options());
+    // Fill with the identity
+    buffer.copy_(unsqueezed);
+    auto buffer_stride = buffer.strides()[0] * buffer.element_size();
+    auto base_ptr = buffer[0].data_ptr();
+    // first step
+    int64_t grain_size = should_round_columns ? 128 / element_size : 1;
+    at::parallel_for(0, cols, grain_size, [&](int64_t begin, int64_t end) {
+      const auto thread_num = at::get_thread_num();
+      auto sub_iter = TensorIterator(iter);
+      auto result_data = static_cast<char*>(base_ptr) + buffer_stride * thread_num;
+      sub_iter.unsafe_replace_operand(0, result_data);
+      sub_iter.narrow(dim, begin, end - begin);
+      sub_iter.for_each(loop);
+    });
+    // second step
+    auto final_reduce = TensorIterator::reduce_op(unsqueezed, buffer);
+    final_reduce.for_each(loop);
+  } else {
+    at::parallel_for(0, cols, 1, [&](int64_t begin, int64_t end) {
+      if (should_round_columns) {
+        // round columns to multiples of 128 bytes if adjacent columns are
+        // contiguous in memory.
+        int64_t cols_per_128_bytes = 128 / element_size;
+        std::tie(begin, end) = round_columns(iter, dim, cols_per_128_bytes, begin, end);
+      }
+      if (begin == end) {
+        return;
+      }
+      auto sub_iter = TensorIterator(iter);
+      sub_iter.narrow(dim, begin, end - begin);
+      sub_iter.for_each(loop);
+    });
+
+  }
+
 }
 
 void TensorIteratorBase::foreach_reduced_elt(loop_subiter_t loop, bool parallelize) {

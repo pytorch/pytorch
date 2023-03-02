@@ -469,6 +469,29 @@ class TestReductions(TestCase):
                 op(x, dim=-1)
 
     @onlyCPU
+    def test_parallel_reduce_dim(self, device):
+        num_threads = torch.get_num_threads()
+        def helper(shape, format):
+            input = torch.rand(shape, dtype=torch.float, device=device).to(memory_format=format).requires_grad_(True)
+            dim_list = [0, 1, 2, 3, (0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)] if len(shape) == 4 else [0, 1, (0, 1), ]
+            ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std]
+            for op in ops:
+                for dim in dim_list:
+                    torch.set_num_threads(1)
+                    out_ref = op(input, dim)
+                    torch.set_num_threads(num_threads)
+                    out = op(input, dim)
+                    self.assertEqual(out_ref, out, atol=5e-5, rtol=5e-5)
+
+        shapes = [(32, 384, 8, 8), (1, 600, 30, 100), (20, 200, 200, 16), (4096, 256), (4096, 128), (32, 768), (4096, 768), (4096, 3072), (128, 32, 12, 64),]
+        for shape in shapes:
+            for memory_format in [torch.channels_last, torch.contiguous_format]:
+                if len(shape) != 4:
+                    memory_format = torch.contiguous_format
+                helper(shape, memory_format)
+
+
+    @onlyCPU
     @dtypes(torch.float, torch.bfloat16)
     def test_dim_reduction_lastdim(self, device, dtype):
         x = torch.randn(3, 5, 40, device=device, dtype=dtype)
