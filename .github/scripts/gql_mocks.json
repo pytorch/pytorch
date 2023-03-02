@@ -28079,5 +28079,688 @@
         }
       }
     }
+  },
+  "query_sha=5b184e34a1b44cf9343216f538130dc787a8b220a7a687dfa4cfbc050008d691 name=pytorch number=95045 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": ".github/workflows/_mac-test-mps.yml"
+              },
+              {
+                "path": ".github/workflows/mac-mps.yml"
+              },
+              {
+                "path": ".github/workflows/trunk.yml"
+              },
+              {
+                "path": "aten/src/ATen/native/mps/operations/ReduceOps.mm"
+              },
+              {
+                "path": "test/test_mps.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=5b184e34a1b44cf9343216f538130dc787a8b220a7a687dfa4cfbc050008d691 name=pytorch number=94939 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_value_ranges.py"
+              },
+              {
+                "path": "third_party/ideep"
+              },
+              {
+                "path": "torch/utils/_sympy/value_ranges.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=73b33a76356fba10082dfe2068a786b3427fb1114c5a69b815791ec7fc3f4bbc name=pytorch number=94939 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "title": "Add exhaustive testing to ValueRanges, fix bugs",
+          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* #95063\n* #94985\n* #94944\n* __->__ #94939\n* #94906\n\r\nSince I didn't want to deal with nondeterministic tests, I went the exhaustive testing route for a fixed list of constants to look at. The tests generate random ranges, propagate the range through the function, and then pick elements in the range and check that the result on the operation is in the resulting range. This caught bugs in log, sqrt and pow.\r\n\r\nMy resolution for pow was a little special, because I had trouble figuring out the correct semantics under all inputs domains. Instead, I picked two input domains (pow on two point ranges, and pow where exponent is known) and only implemented those. Everything else we give up. I think this is unlikely to affect perf.\r\n\r\nSigned-off-by: Edward Z. Yang <ezyang@meta.com>\n\ncc @gujinghui @PenghuiCheng @XiaobingSuper @jianyuh @jgong5 @mingfeima @sanchitintel @ashokei @jingxu10 @min-jean-cho @yanbing-j @Guobing-Chen @Xia-Weiwen",
+          "labels": {
+            "nodes": [
+              {
+                "name": "module: mkldnn"
+              },
+              {
+                "name": "Merged"
+              },
+              {
+                "name": "ciflow/trunk"
+              },
+              {
+                "name": "topic: bug fixes"
+              },
+              {
+                "name": "release notes: inductor"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          },
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_value_ranges.py"
+              },
+              {
+                "path": "third_party/ideep"
+              },
+              {
+                "path": "torch/utils/_sympy/value_ranges.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=73b33a76356fba10082dfe2068a786b3427fb1114c5a69b815791ec7fc3f4bbc name=pytorch number=95045 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "title": "[MPS][BE] Introduce xfail",
+          "body": "Add `mps_ops_modifier` function that adds `unittest.expectedFailure` decorators to the operators that supposed to fail on MPS.\r\n\r\nThis allows one to know whether or not operation will fail, rather than skip it. \r\nFor example:\r\n```\r\n% python test_mps.py -v -k test_output_match_dot\r\ntest_output_match_dot_cpu_float32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int16 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int64 (__main__.TestConsistencyCPU) ... expected failure\r\ntest_output_match_dot_cpu_uint8 (__main__.TestConsistencyCPU) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 5 tests in 0.175s\r\n\r\nOK (expected failures=1)\r\n```\r\n\r\nMoved a few functions from blocklist to xfail, and find out that some of the functions in the list actually work, for example `torch.long`.\r\n\r\nAlso, allow `None` to be used in `ALLOWLIST`  instead of specifying all types explicitly (which aligns with `DecorateInfo` semantic)\r\n\r\nEventually, we should get rid of `ALLOWLIST` (i.e. all ops are allowed), keep small `BLOCKLIST` and move the rest to `XFAILLIST`\r\n\r\nAdd step to print HW/SW info before running MPS tests.\r\n\r\nFix type promotion in `trace_mps_out`\r\n\r\nIntroduce `MACOS_12_X_XFAILLIST` and skip almost every function for `torch.uint8`,  although some of those doesn't make much sense and feels like a regression from PyTorch-1.13\r\n\r\nRe-enabled MPS testing on MacOS 12, as runners seems to be available again",
+          "labels": {
+            "nodes": [
+              {
+                "name": "Merged"
+              },
+              {
+                "name": "topic: bug fixes"
+              },
+              {
+                "name": "release notes: mps"
+              },
+              {
+                "name": "ciflow/mps"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NA",
+              "hasNextPage": false
+            }
+          },
+          "files": {
+            "nodes": [
+              {
+                "path": ".github/workflows/_mac-test-mps.yml"
+              },
+              {
+                "path": ".github/workflows/mac-mps.yml"
+              },
+              {
+                "path": ".github/workflows/trunk.yml"
+              },
+              {
+                "path": "aten/src/ATen/native/mps/operations/ReduceOps.mm"
+              },
+              {
+                "path": "test/test_mps.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
   }
 }
