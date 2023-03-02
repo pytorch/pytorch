@@ -49,6 +49,9 @@ class ReenterWith:
         ctx_name = unique_id(f"___context_manager_{self.stack_index}")
         if ctx_name not in code_options["co_varnames"]:
             code_options["co_varnames"] += (ctx_name,)
+        for name in ["__enter__", "__exit__"]:
+            if name not in code_options["co_names"]:
+                code_options["co_names"] += (name,)
 
         except_jump_target = create_instruction("NOP")
         cleanup_complete_jump_target = create_instruction("NOP")
