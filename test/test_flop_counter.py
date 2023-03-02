@@ -18,8 +18,8 @@ def FlopCounterMode(*args, **kwargs):
 def get_total_flops(mode):
     return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
 
-def T(*shape):
-    return torch.randn(*shape)
+def T(*shape, requires_grad=False):
+    return torch.randn(*shape, requires_grad=requires_grad)
 
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
@@ -27,11 +27,12 @@ class TestFlopCounter(TestCase):
         mod = torch.nn.Linear(9, 10)
         with mode:
             torch.mm(T(4, 5), T(5, 6))
+            torch.addmm(T(4, 6), T(4, 5), T(5, 6), beta=0.5, alpha=0.5)
             torch.matmul(T(5, 6), T(6, 7))
             torch.einsum("ab,bc->ac", T(6, 7), T(7, 8))
             mod(T(8, 9))
 
-        self.assertExpectedInline(get_total_flops(mode), """2852""")
+        self.assertExpectedInline(get_total_flops(mode), """3012""")
 
     def test_op(self):
         mode = FlopCounterMode()
@@ -50,14 +51,14 @@ class TestFlopCounter(TestCase):
             torch.addmm(T(4, 1), T(4, 5), T(5, 6))
             torch.addmm(T(6), T(4, 5), T(5, 6))
 
-        # 4 * 6 * 2 * 5 + 4 * 6 = 264
-        self.assertExpectedInline(get_total_flops(mode), """792""")
+        # 4 * 6 * 2 * 5 = 240
+        self.assertExpectedInline(get_total_flops(mode), """720""")
 
         with mode:
             torch.baddbmm(T(3, 4, 6), T(3, 4, 5), T(3, 5, 6))
 
-        # 3 * 4 * 6 * 2 * 5 + 3 * 4 * 6 = 792
-        self.assertExpectedInline(get_total_flops(mode), """792""")
+        # 3 * 4 * 6 * 2 * 5 = 720
+        self.assertExpectedInline(get_total_flops(mode), """720""")
 
         with mode:
             torch.conv2d(T(2, 3, 6, 6), T(6, 3, 4, 4), padding=1)
@@ -86,14 +87,45 @@ class TestFlopCounter(TestCase):
     def test_backward(self):
         mode = FlopCounterMode()
         with mode:
-            a = T(4, 5)
-            a = a.requires_grad_(True)
+            a = T(4, 5, requires_grad=True)
             a = torch.mm(a, T(5, 6))
             a = a.unsqueeze(0).expand(7, 4, 6)
             a = torch.bmm(a, T(7, 6, 7))
             a.sum().backward()
 
         self.assertExpectedInline(get_total_flops(mode), """5184""")
+
+    def test_torchscript(self):
+        def foo(x):
+            return torch.mm(x, x)
+        mode = FlopCounterMode()
+        with mode:
+            foo(T(5, 5))
+        unscripted_flops = get_total_flops(mode)
+        ts_foo = torch.jit.script(foo)
+        with mode:
+            ts_foo(T(5, 5))
+        self.assertEqual(unscripted_flops, get_total_flops(mode))
+
+    def test_autograd_op(self):
+        class _CustomOp(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input: torch.Tensor) -> torch.Tensor:
+                return torch.mm(input, input)
+
+            @staticmethod
+            def backward(ctx, grad_output: torch.Tensor) -> torch.Tensor:
+                return torch.mm(grad_output, grad_output) + torch.mm(grad_output, grad_output)
+
+        a = T(5, 5, requires_grad=True)
+        mode = FlopCounterMode()
+        with mode:
+            a = _CustomOp.apply(a)
+            a.sum().backward()
+
+        self.assertExpectedInline(get_total_flops(mode), """750""")
+
+
 
     @skipIfNoTorchVision
     def test_module(self):
@@ -103,10 +135,10 @@ class TestFlopCounter(TestCase):
             a = T(1, 3, 224, 224)
             resnet18(a)
 
-        self.assertExpectedInline(get_total_flops(mode), """3628147688""")
+        self.assertExpectedInline(get_total_flops(mode), """3628146688""")
         layer1_conv_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution]
         layer1_conv_back_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution_backward]
-        self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
+        self.assertExpectedInline(str(layer1_conv_flops), """0""")
         self.assertExpectedInline(str(layer1_conv_back_flops), """0""")
 
     def test_custom(self):
@@ -116,6 +148,11 @@ class TestFlopCounter(TestCase):
             a + a
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
+
+    def test_noop(self):
+        mode = FlopCounterMode()
+        with mode:
+            T(4, 5).cos()
 
 
 

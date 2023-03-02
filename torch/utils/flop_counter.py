@@ -1,9 +1,9 @@
 import torch
 from torch.utils._pytree import tree_map
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional, Union
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-import functools
+from math import prod
 
 aten = torch.ops.aten
 
@@ -11,12 +11,6 @@ def get_shape(i):
     if isinstance(i, torch.Tensor):
         return i.shape
     return i
-
-def prod(x):
-    res = 1
-    for i in x:
-        res *= i
-    return res
 
 def mm_flop(input_shapes: List[Any], _=None) -> int:
     """
@@ -38,10 +32,7 @@ def addmm_flop(input_shapes: List[Any], _=None) -> int:
     """
     assert len(input_shapes) == 3
     _, a_shape, b_shape = input_shapes
-    mm_flops = mm_flop([a_shape, b_shape])
-    batch_size, _ = a_shape
-    _, output_dim = b_shape
-    return mm_flops + batch_size * output_dim
+    return mm_flop([a_shape, b_shape])
 
 def bmm_flop(input_shapes: List[Any], _=None) -> int:
     """
@@ -67,11 +58,7 @@ def baddbmm_flop(input_shapes: List[Any], _=None) -> int:
     # Inputs contains the shapes of three tensors.
     assert len(input_shapes) == 3, len(input_shapes)
     _, a_shape, b_shape = input_shapes
-    bmm_flops = bmm_flop([a_shape, b_shape])
-    b, m, _ = a_shape
-    _, _, n = b_shape
-    flop = bmm_flops + b * m * n
-    return flop
+    return bmm_flop([a_shape, b_shape])
 
 
 def conv_flop_count(
@@ -82,7 +69,7 @@ def conv_flop_count(
 ) -> int:
     """
     Count flops for convolution. Note only multiplication is
-    counted. Computation for addition and bias is ignored.
+    counted. Computation for bias are ignored.
     Flops for a transposed convolution are calculated as
     flops = (x_shape[2:] * prod(w_shape) * batch_size).
     Args:
@@ -163,7 +150,7 @@ class FlopCounterMode(TorchDispatchMode):
     ``FlopCounterMode`` is a context manager that counts the number of
     flops within its context. It does this using a ``TorchDispatchMode``.
 
-    It also supports hierarchical output by passing a module to FlopCounterMode on construction.
+    It also supports hierarchical output by passing a module (or list of modules) to FlopCounterMode on construction.
 
     Example usage
 
@@ -175,40 +162,53 @@ class FlopCounterMode(TorchDispatchMode):
             mod.sum().backward()
 
     """
-    def __init__(self, mod: torch.nn.Module = None, depth: int = 2, display: bool = True, custom_mapping: Dict[Any, Any] = None):
-        self.flop_counts: Dict[Any, Any] = defaultdict(lambda: defaultdict(int))
+    def __init__(
+            self,
+            mods: Optional[Union[torch.nn.Module, List[torch.nn.Module]]] = None,
+            depth: int = 2,
+            display: bool = True,
+            custom_mapping: Dict[Any, Any] = None):
+        self.flop_counts: Dict[str, Dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.parents = ["Global"]
         self.display = display
         if custom_mapping is None:
             custom_mapping = {}
-        if mod is not None:
-            for name, module in dict(mod.named_modules()).items():
-                module.register_forward_pre_hook(self._enter_module(name))
-                module.register_forward_hook(self._exit_module(name))
+        if isinstance(mods, torch.nn.Module):
+            mods = [mods]
+        self.mods = mods
+        if mods is not None:
+            for mod in mods:
+                prefix = type(mod).__name__
+                for name, module in dict(mod.named_modules()).items():
+                    if name == "":
+                        name = prefix
+                    else:
+                        name = ".".join([prefix, name])
+                    module.register_forward_pre_hook(self._enter_module(name))
+                    module.register_forward_hook(self._exit_module(name))
         self.flop_mapping = {**flop_mapping, **custom_mapping}
 
     def _enter_module(self, name):
         def f(module, inputs):
-            self.parents.append(name)
             inputs = normalize_tuple(inputs)
-            out = self._create_backwards_pop(name)(*inputs)
+            out = self._create_pre_module(name)(*inputs)
             return out
 
         return f
 
     def _exit_module(self, name):
         def f(module, inputs, outputs):
-            assert(self.parents[-1] == name)
-            self.parents.pop()
             outputs = normalize_tuple(outputs)
-            return self._create_backwards_push(name)(*outputs)
+            return self._create_post_module(name)(*outputs)
         return f
 
-    def _create_backwards_push(self, name):
+    def _create_post_module(self, name):
         class PushState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
+                assert(self.parents[-1] == name)
+                self.parents.pop()
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 if len(args) == 1:
                     return args[0]
@@ -221,10 +221,11 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PushState.apply
 
-    def _create_backwards_pop(self, name):
+    def _create_pre_module(self, name):
         class PopState(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
+                self.parents.append(name)
                 args = tree_map(lambda x: x.clone() if isinstance(x, torch.Tensor) else x, args)
                 if len(args) == 1:
                     return args[0]
@@ -238,54 +239,70 @@ class FlopCounterMode(TorchDispatchMode):
 
         return PopState.apply
 
-    def register_hierarchy(self, f, name):
-        @functools.wraps(f)
-        def wrapped_f(*args, **kwargs):
-            self.parents.append(name)
-            args = self._create_backwards_pop(name)(*args)
-            out = f(*args, **kwargs)
-            assert(self.parents[-1] == name)
-            self.parents.pop()
-            out = normalize_tuple(out)
-            out = self._create_backwards_push(name)(*out)
-            return out
-        return wrapped_f
+    def get_flop_counts(self) -> Dict[str, Dict[Any, int]]:
+        """Returns the flop counts as a dictionary of dictionaries. The outer
+        dictionary is keyed by module name, and the inner dictionary is keyed by
+        operation name.
+
+        Returns:
+            Dict[str, Dict[Any, int]]: The flop counts as a dictionary.
+        """
+        return dict(self.flop_counts)
 
     def get_table(self, depth=None):
         if depth is None:
             depth = self.depth
         if depth is None:
             depth = 999999
+
         import tabulate
         tabulate.PRESERVE_WHITESPACE = True
         header = ["Module", "FLOPS"]
         values = []
+        max_flops = 0
+
+        def process_mod(mod_name, depth):
+            nonlocal max_flops
+
+            total_flops = sum(self.flop_counts[mod_name].values())
+            max_flops = max(total_flops, max_flops)
+
+            padding = " " * depth
+            values = []
+            values.append([padding + mod_name, convert_num_to_suffix_str(total_flops)])
+            for k, v in self.flop_counts[mod_name].items():
+                values.append([padding + " - " + str(k), convert_num_to_suffix_str(v)])
+            return values
 
         for mod in self.flop_counts.keys():
-            total_flops = sum(self.flop_counts[mod].values())
-            mod_str = mod
-            mod_depth = mod.count(".")
-
-            if mod_str == "":
+            if mod == 'Global':
                 continue
-            elif mod_str != "Global":
-                mod_depth += 1
+            mod_depth = mod.count(".") + 1
             if mod_depth > depth:
                 continue
 
-            padding = " " * mod_str.count(".")
-            values.append([padding + mod_str, total_flops])
-            for k, v in self.flop_counts[mod].items():
-                values.append([padding + " - " + str(k), v])
+            cur_values = process_mod(mod, mod_depth - 1)
+            for value in cur_values:
+                values.append(value)
+
+        # We do a bit of messing around here to only output the "Global" value
+        # if there are any FLOPs in there that aren't already fully contained by
+        # a module.
+        if 'Global' in self.flop_counts and sum(self.flop_counts['Global'].values()) > max_flops:
+            for idx, value in enumerate(values):
+                values[idx][0] = " " + values[idx][0]
+
+            values = process_mod('Global', 0) + values
+
         if len(values) == 0:
-            values = [["Global", 0]]
-        for value in values:
-            value[1] = convert_num_to_suffix_str(value[1])
+            values = [["Global", "0"]]
+
         return tabulate.tabulate(values, headers=header, colalign=("left", "right"))
 
     def __enter__(self):
         self.flop_counts.clear()
         super().__enter__()
+        return self
 
     def __exit__(self, *args):
         if self.display:
