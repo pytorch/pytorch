@@ -4204,7 +4204,7 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernel):
+class Wait(ExternKernelAlloc):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
     with a collective op that produces a work to wait on.
@@ -4216,8 +4216,7 @@ class Wait(ExternKernel):
         inputs,
         constant_args=(),
     ):
-        super().__init__(None, layout, inputs, constant_args)
-        self.name = V.graph.register_buffer(self)
+        super().__init__(layout, inputs, constant_args)
 
     def should_allocate(self):
         return False
@@ -4237,6 +4236,8 @@ class Wait(ExternKernel):
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
+        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
+        collective_op.decide_layout()
         return Wait(
             layout=collective_op.get_layout(),
             inputs=[collective_op],
@@ -4270,9 +4271,6 @@ class AllReduce(ExternKernel):
         # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
-        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
-        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
-        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         return AllReduce(
             layout=new_layout,
             inputs=[x],

@@ -331,7 +331,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         out = torch.ops.aten.all_reduce(x, "sum", **self.get_world_trs())
         assert x.size() == out.size()
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
