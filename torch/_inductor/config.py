@@ -153,9 +153,6 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
-
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 

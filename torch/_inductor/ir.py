@@ -2184,20 +2184,10 @@ class ComputedBuffer(Buffer):
             for reads_name in body.reads_name2expr.keys()
         ]
         priority_idx = []
-        if config.triton.convolution == "aten":
-            memory_addrs = [
-                *body.reads_name2expr.values(),
-                *body.writes_name2expr.values(),
-            ]
-        else:
-            # prioritize reads layout/loop_ordering over writes
-            if len(body.reads_name2expr.values()) > 0:
-                memory_addrs = [*body.reads_name2expr.values()]
-            else:
-                memory_addrs = [*body.writes_name2expr.values()]
-            for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
-                    priority_idx.append(i)
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -3140,12 +3130,8 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
-        if config.triton.convolution == "aten":
-            weight = cls.require_stride_order(weight, req_stride_order)
-            x = cls.require_stride_order(x, req_stride_order)
-        else:
-            x = cls.require_stride1(cls.realize_input(x))
-            weight = cls.require_stride1(cls.realize_input(weight))
+        weight = cls.require_stride_order(weight, req_stride_order)
+        x = cls.require_stride_order(x, req_stride_order)
 
         stride = tuple(stride_)
         padding = tuple(padding_)
@@ -3163,7 +3149,7 @@ class Convolution(ExternKernelAlloc):
         _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
-        config_conv = config.triton.convolution
+        config_conv = "aten"
         if (
             config_conv == "aten"
             or len(kernel_size) != 2  # triton conv only supports conv2d
@@ -3196,7 +3182,7 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
-        transform_x_layout = config.triton.convolution != "aten"
+        transform_x_layout = False
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
         else:
