@@ -752,11 +752,8 @@ class GitHubPR:
         return self.submodules
 
     def get_changed_submodules(self) -> List[str]:
-        files = self.get_changed_files()
-        if len(files) == 0:
-            return files
         submodules = self.get_submodules()
-        return [f for f in files if f in submodules]
+        return [f for f in self.get_changed_files() if f in submodules]
 
     def has_invalid_submodule_updates(self) -> bool:
         """ Submodule updates in PR are invalid if submodule keyword
