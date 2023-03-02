@@ -66,12 +66,16 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
                                                                 axis:(NSInteger)dim
                                                                 descending:(BOOL)descending
                                                                 name:@"sort_out"];
-            sortedTensor = castFromIHFTypes(mpsGraph, sortedTensor, values, /*includesInt64=*/macOS13_3_plus);
+            if ([sortedTensor dataType] != getMPSDataType(values.scalar_type())) {
+              sortedTensor = castMPSTensor(mpsGraph, sortedTensor, values.scalar_type());
+            }
             MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim
                                                                      descending:(BOOL)descending
                                                                      name:@"argsort_out"];
-            argSortedTensor = castFromIHFTypes(mpsGraph, argSortedTensor, indices, /*includesInt64=*/macOS13_3_plus);
+            if ([argSortedTensor dataType] != getMPSDataType(indices.scalar_type())) {
+              argSortedTensor = castMPSTensor(mpsGraph, argSortedTensor, indices.scalar_type());
+            }
             newCachedGraph->valuesTensor = sortedTensor;
             newCachedGraph->indicesTensor = argSortedTensor;
         }
