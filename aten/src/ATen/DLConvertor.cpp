@@ -90,6 +90,9 @@ DLDevice getDLDevice(const Tensor& tensor, const int64_t& device_id) {
     case DeviceType::HIP:
       ctx.device_type = DLDeviceType::kDLROCM;
       break;
+    case DeviceType::ORT:
+      ctx.device_type = DLDeviceType::kDLExtDev;
+      break;
     default:
       TORCH_CHECK(false, "Cannot pack tensors on " + tensor.device().str());
   }
@@ -114,6 +117,8 @@ static Device getATenDevice(const DLDevice& ctx) {
 #else
       return at::Device(DeviceType::HIP, ctx.device_id);
 #endif
+    case DLDeviceType::kDLExtDev:
+      return at::Device(DeviceType::ORT, ctx.device_id);
     default:
       TORCH_CHECK(
           false, "Unsupported device_type: " + c10::to_string(ctx.device_type));
