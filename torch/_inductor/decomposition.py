@@ -18,17 +18,20 @@ aten = torch.ops.aten
 inductor_decompositions = get_decompositions(
     [
         aten.arange,
+        aten.bitwise_and_,
+        aten.bitwise_or_,
+        aten.clamp_min_,
         aten.flip,
+        aten.lcm,
         aten.linalg_vector_norm,
+        aten.sin_,
+        aten.sqrt_,
         aten.std,
         aten.std_mean,
         aten._to_copy,
-        aten.triu_indices,
         aten.tril_indices,
-        aten.sqrt_,
-        aten.lcm,
-        aten.clamp_min_,
-        aten.sin_,
+        aten.triu_indices,
+        aten.unsafe_split,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -56,6 +59,18 @@ def clamp(x, min=None, max=None):
 @register_decomposition([aten.floor_divide.default])
 def floordiv(a, b):
     return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+
+
+# Not really sure how to put this into the main library.  PrimTorch wants
+# empty_permuted to go to the prim, and typically users don't really want
+# to decompose to empty_strided (but inductor is OK with it, because we are
+# cool with strides and everything goes to empty_strided)
+@register_decomposition([aten.empty_permuted.default])
+def empty_permuted(size, physical_layout, **kwargs):
+    perm = [0] * len(size)
+    for p, l in enumerate(physical_layout):
+        perm[l] = p
+    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 def get_alignment_size(x):
@@ -210,8 +225,8 @@ def should_pad_bench(mat1, mat2, op, input=None):
                 fast_flush=True,
             )[0]
 
-        # Shape padding introduces addtional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
-        # tradeoff between performance improvement from shape padding and overhead from addtional memory ops
+        # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
+        # tradeoff between performance improvement from shape padding and overhead from additional memory ops
         # TODO: Build a learned model which would be better than this heuristic
         return ori_time > pad_time * 1.1
 
@@ -328,8 +343,8 @@ def all(input):
 
 
 @register_decomposition([aten.all.dim])
-def all_dim(input, dim, keeepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keeepdim))
+def all_dim(input, dim, keepdim=False):
+    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
 
 
 # NB: this decomposition is not stride accurate, do not put it in the main
@@ -384,6 +399,9 @@ extra_random_decomps = get_decompositions(
         aten.exponential_,
         aten.geometric,
         aten.geometric_,
+        aten.normal,
+        aten.normal_,
+        aten.normal_functional,
         aten.log_normal,
         aten.log_normal_,
         aten.uniform_,

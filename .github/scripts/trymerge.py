@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+# NB: the following functions are used in Meta-internal workflows
+# (github_first_try_merge/my_handler.py) and thus have functionality limitations
+# (no `git` command access, no network access besides the strict allow list):
+#
+# find_matching_merge_rule
+# read_merge_rules
+#
+# Also any signature changes of these functions, as well as changes to the `GitHubPR`
+# class, will likely require corresponding changes for the internal workflows.
+
 import base64
 import json
 import os
@@ -456,7 +466,11 @@ def _fetch_url(url: str, *,
             return reader(conn)
     except HTTPError as err:
         if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
+            print(f"""Rate limit exceeded:
+                Used: {err.headers['X-RateLimit-Used']}
+                Limit: {err.headers['X-RateLimit-Limit']}
+                Remaining: {err.headers['X-RateLimit-Remaining']}
+                Resets at: {err.headers['x-RateLimit-Reset']}""")
         raise
 
 def _fetch_json_any(
@@ -594,10 +608,12 @@ def add_workflow_conclusions(
                 else:
                     checkruns = None
 
-    add_conclusions(checksuites["edges"])
+    all_edges = checksuites["edges"].copy()
     while bool(checksuites["pageInfo"]["hasNextPage"]):
         checksuites = get_next_checksuites(checksuites)
-        add_conclusions(checksuites["edges"])
+        all_edges.extend(checksuites["edges"])
+
+    add_conclusions(all_edges)
 
     # Flatten the dictionaries.  If there exists jobs in the workflow run, put
     # the jobs in but don't put the workflow in.  We care more about the jobs in
@@ -1107,10 +1123,13 @@ class GitHubPR:
         repo._run_git('push', 'origin', '-d', land_check_branch)
 
 
-class MandatoryChecksMissingError(Exception):
+class MergeRuleFailedError(RuntimeError):
     def __init__(self, message: str, rule: Optional['MergeRule'] = None) -> None:
         super().__init__(message)
         self.rule = rule
+
+class MandatoryChecksMissingError(MergeRuleFailedError):
+    pass
 
 class PostCommentError(Exception):
     pass
@@ -1137,6 +1156,11 @@ def gen_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    """Returns the list of all merge rules for the repo or project.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
         json_data = _fetch_url(
@@ -1169,7 +1193,11 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     land_check_commit: Optional[str] = None,
 ) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception"""
+    """Returns merge rule matching to this pr or raises an exception.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
 
@@ -1186,7 +1214,17 @@ def find_matching_merge_rule(
         reject_reason = f"Rejecting the merge as no rules are defined for the repository in {MERGE_RULE_PATH}"
         raise RuntimeError(reject_reason)
     checks = get_combined_checks_from_pr_and_land_validation(pr, land_check_commit)
-    checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+    base_rev = None
+    try:
+        # is allowed to fail if git is not available
+        base_rev = pr.get_merge_base()
+    except Exception as e:
+        print(
+            f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
+            f"{type(e)}\n{e}"
+        )
+    if base_rev is not None:
+        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1225,7 +1263,7 @@ def find_matching_merge_rule(
         if len(rule.approved_by) > 0 and len(approved_by) == 0:
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
-                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet (Rule {rule_name})"
+                reject_reason = f"PR #{pr.pr_num} has not been reviewed yet"
             continue
 
         # Does the PR have the required approvals for this rule?
@@ -1242,7 +1280,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 10000:
                 reject_reason_score = 10000
                 reject_reason = "\n".join((
-                    f"Approval needed from one of the following (Rule '{rule_name}'):",
+                    "Approval needed from one of the following:",
                     f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}"
                 ))
             continue
@@ -1261,7 +1299,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 30000:
                 reject_reason_score = 30000
                 reject_reason = "\n".join((
-                    f"{len(failed_checks)} mandatory check(s) failed (Rule `{rule_name}`).  The first few are:",
+                    f"{len(failed_checks)} mandatory check(s) failed.  The first few are:",
                     *checks_to_markdown_bullets(failed_checks),
                     "",
                     f"Dig deeper by [viewing the failures on hud]({hud_link})"
@@ -1271,7 +1309,7 @@ def find_matching_merge_rule(
             if reject_reason_score < 20000:
                 reject_reason_score = 20000
                 reject_reason = "\n".join((
-                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run (Rule `{rule_name}`).  The first few are:",
+                    f"{len(pending_checks)} mandatory check(s) are pending/not yet run.  The first few are:",
                     *checks_to_markdown_bullets(pending_checks),
                     "",
                     f"Dig deeper by [viewing the pending checks on hud]({hud_link})"
@@ -1285,7 +1323,7 @@ def find_matching_merge_rule(
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
-    raise RuntimeError(reject_reason)
+    raise MergeRuleFailedError(reject_reason, rule)
 
 
 def get_land_checkrun_conclusions(org: str, project: str, commit: str) -> JobNameToStateDict:
@@ -1720,15 +1758,20 @@ def main() -> None:
     def handle_exception(e: Exception, title: str = "Merge failed") -> None:
         exception = f"**Reason**: {e}"
 
+        failing_rule = None
+        if (isinstance(e, MergeRuleFailedError)):
+            failing_rule = e.rule.name if e.rule else None
+
         internal_debugging = ""
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             # Hide this behind a collapsed bullet since it's not helpful to most devs
-            internal_debugging = "\n".join((
+            internal_debugging = "\n".join(line for line in (
                 "<details><summary>Details for Dev Infra team</summary>",
-                f"Raised by <a href=\"{run_url}\">workflow job</a>",
+                f"Raised by <a href=\"{run_url}\">workflow job</a>\n",
+                f"Failing merge rule: {failing_rule}" if failing_rule else "",
                 "</details>"
-            ))
+            ) if line)  # ignore empty lines during the join
 
         msg = "\n".join((
             f"## {title}",

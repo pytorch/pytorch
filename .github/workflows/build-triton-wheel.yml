@@ -65,9 +65,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.7)
-            PYTHON_EXECUTABLE=/opt/python/cp37-cp37m/bin/python
-            ;;
           3.8)
             PYTHON_EXECUTABLE=/opt/python/cp38-cp38/bin/python
             ;;
@@ -86,7 +83,8 @@ jobs:
             ;;
           esac
 
-          docker exec -t "${container_name}" yum install -y llvm11 llvm11-devel llvm11-static llvm11-libs zlib-devel
+          docker exec -t "${container_name}" yum install -y zlib-devel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==67.4.0
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" /pytorch/.github/scripts/build_triton_wheel.py
           docker exec -t "${container_name}" chown -R 1000.1000 /artifacts
 

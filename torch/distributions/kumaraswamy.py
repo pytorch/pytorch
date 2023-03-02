@@ -1,5 +1,5 @@
 import torch
-from torch._six import nan
+from torch import nan
 from torch.distributions import constraints
 from torch.distributions.uniform import Uniform
 from torch.distributions.transformed_distribution import TransformedDistribution

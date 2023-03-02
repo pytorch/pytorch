@@ -49,6 +49,7 @@ def fully_shard(
     """
     Applies ``FullyShardedDataParallel` (FSDP) semantics to ``module``.
     """
+    torch._C._log_api_usage_once("torch.distributed.fully_shard")
     # Enforce the new auto wrap policy
     if policy is not None and not isinstance(policy, _FSDPPolicy):
         raise ValueError(f"Expects an `_FSDPPolicy` but got {policy}")

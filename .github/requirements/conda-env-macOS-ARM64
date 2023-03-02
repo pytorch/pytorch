@@ -5,7 +5,6 @@ cmake=3.22.*
 typing-extensions=4.3.0
 dataclasses=0.8
 pip=22.2.2
-six=1.16.0
 pillow=9.2.0
 pkg-config=0.29.2
 wheel=0.37.1

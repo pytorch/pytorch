@@ -296,6 +296,12 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(pr.get_checkrun_conclusions()), 3)
         self.assertGreater(pr.get_commit_count(), 60)
 
+    @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
+    def test_gql_retrieve_checksuites(self, mocked_gql: Any, *args: Any) -> None:
+        "Fetch comments and conclusions for PR with 60 commits"
+        pr = GitHubPR("pytorch", "pytorch", 94787)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     def test_team_members(self, mocked_gql: Any, *args: Any) -> None:
         "Test fetching team members works"

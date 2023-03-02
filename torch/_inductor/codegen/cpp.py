@@ -361,6 +361,8 @@ class CppVecOverrides(OpOverrides):
     def lgamma(x):
         return f"{x}.lgamma()"
 
+    """
+    #TODO: support logical_and and logical_or vectorization
     @staticmethod
     def logical_and(a, b):
         return f"{a} && {b}"
@@ -368,6 +370,7 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def logical_or(a, b):
         return f"{a} || {b}"
+    """
 
     @staticmethod
     def tan(a):
@@ -383,6 +386,61 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def reciprocal(a):
         return f"{a}.reciprocal()"
+
+    @staticmethod
+    def atan(x):
+        return f"{x}.atan()"
+
+    @staticmethod
+    def acos(x):
+        return f"{x}.acos()"
+
+    @staticmethod
+    def asin(x):
+        return f"{x}.asin()"
+
+    @staticmethod
+    def log10(x):
+        return f"{x}.log10()"
+
+    @staticmethod
+    def erfc(x):
+        return f"{x}.erfc()"
+
+    @staticmethod
+    def nextafter(x):
+        return f"{x}.nextafter()"
+
+    @staticmethod
+    def copysign(a, b):
+        return f"{a}.copysign({b})"
+
+    @staticmethod
+    def atan2(a, b):
+        return f"{a}.atan2({b})"
+
+    @staticmethod
+    def hypot(a, b):
+        return f"{a}.hypot({b})"
+
+    @staticmethod
+    def atanh(x):
+        # For real x, atanh(x) = 1/2 * log((1+x)/(1-x))
+        vec_one = f"decltype({x})(1)"
+        vec_one_half = f"decltype({x})(0.5)"
+        return f"{vec_one_half} * (({vec_one} + {x})/({vec_one} - {x})).log()"
+
+    @staticmethod
+    def asinh(x):
+        # For real x, asinh(x) = log(x + sqrt(1 + x**2))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({vec_one} + {x}*{x}).sqrt()).log()"
+
+    @staticmethod
+    def acosh(x):
+        # For real x, acosh(x) = log(x + sqrt(x**2 -1))
+        vec_one = f"decltype({x})(1)"
+        return f"({x} + ({x}*{x} - {vec_one}).sqrt()).log()"
 
     @staticmethod
     def constant(val, dtype):
@@ -631,6 +689,54 @@ class CppOverrides(OpOverrides):
         return f"std::lgamma({x})"
 
     @staticmethod
+    def acos(x):
+        return f"std::acos({x})"
+
+    @staticmethod
+    def acosh(x):
+        return f"std::acosh({x})"
+
+    @staticmethod
+    def asin(x):
+        return f"std::asin({x})"
+
+    @staticmethod
+    def asinh(x):
+        return f"std::asinh({x})"
+
+    @staticmethod
+    def atan2(x, y):
+        return f"std::atan2({x}, {y})"
+
+    @staticmethod
+    def atan(x):
+        return f"std::atan({x})"
+
+    @staticmethod
+    def atanh(x):
+        return f"std::atanh({x})"
+
+    @staticmethod
+    def copysign(x, y):
+        return f"std::copysign({x}, {y})"
+
+    @staticmethod
+    def hypot(x, y):
+        return f"std::hypot({x}, {y})"
+
+    @staticmethod
+    def erfc(x):
+        return f"std::erfc({x})"
+
+    @staticmethod
+    def log10(x):
+        return f"std::log10({x})"
+
+    @staticmethod
+    def nextafter(x, y):
+        return f"std::nextafter({x}, {y})"
+
+    @staticmethod
     def relu(x):
         return f"{x} * ({x}>0)"
 
@@ -716,8 +822,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
+        return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
     def sign(x):
@@ -1269,12 +1374,12 @@ class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
         super().__init__(args, num_threads, tiling_factor)
 
-        # Since this kernel is only for checker but does not genreate any
+        # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
         metrics.generated_cpp_vec_kernel_count -= 1
 
-        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
         self._orig_wrapper_code = None
 
@@ -1459,11 +1564,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
-        # Recorde the graph wrapper code. The wrapper_code status could be
+        # Record the graph wrapper code. The wrapper_code status could be
         # changed during graph run. Regarding this checker, we also need to
         # run the graph but we don't expect to change any status that would
-        # impact the code generation. Hence, we record the graph wapper code
-        # and replace it with a dummy warpper_code and then restore to the
+        # impact the code generation. Hence, we record the graph wrapper code
+        # and replace it with a dummy wrapper_code and then restore to the
         # original one as long as the checker is finished.
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
