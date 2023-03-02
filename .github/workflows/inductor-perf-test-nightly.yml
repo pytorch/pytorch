@@ -2,17 +2,14 @@ name: inductor-A100-perf
 
 on:
   schedule:
-    - cron: 45 1,9,17 * * *
-  pull_request:
-    paths:
-      - .github/workflows/inductor-perf-test-nightly.yml
+    - cron: 45 1 * * *
   push:
     tags:
       - ciflow/inductor-perf-test-nightly/*
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 jobs:
