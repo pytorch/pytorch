@@ -15,6 +15,9 @@ class no_grad(_DecoratorContextManager):
 
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
+    There is an exception! All factory functions, or functions that create
+    a new Tensor and take a requires_grad kwarg, will NOT be affected by
+    this mode.
 
     This context manager is thread local; it will not affect computation
     in other threads.
@@ -44,6 +47,11 @@ class no_grad(_DecoratorContextManager):
         >>> z = doubler(x)
         >>> z.requires_grad
         False
+        >>> # factory function exception
+        >>> with torch.no_grad():
+        ...     a = torch.nn.Parameter(torch.rand(10))
+        >>> a.requires_grad
+        True
     """
     def __init__(self) -> None:
         if not torch._jit_internal.is_scripting():

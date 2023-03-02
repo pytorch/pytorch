@@ -30,29 +30,31 @@ Tensor cat_feature(
   for (const at::Tensor& tensor : tensors) {
     ch_interval += tensor.sizes()[1];
   }
+  ch_interval = api::utils::align_up(ch_interval, INT64_C(4));
 
   for (const at::Tensor& tensor : tensors) {
     const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
     const vTensor& v_self = convert(self);
 
+    uint32_t in_channels = safe_downcast<uint32_t>(v_self.sizes()[1]);
+    uint32_t in_ch_aligned = api::utils::align_up(in_channels, 4u);
+
     const struct Block final {
-      uvec3 size; // output texture size
-      uint32_t fill0; // dummy
-      uvec3 isize; // input texture size
-      uint32_t fill1; // dummy
-      uint32_t batchSize; // input tensor's batch size
-      uint32_t chSize; // input tensor's channel size
-      uint32_t
-          chInterval; // channel interval (total # of channels for all tensors)
-      uint32_t
-          chSizeAllprior; // # of channels for tensor 0 to i-1 at ith tensor
+      ivec3 out_extents;
+      int32_t fill0;
+      ivec3 in_extents;
+      int32_t fill1;
+      uint32_t batchSize;
+      uint32_t chSize;
+      uint32_t chInterval;
+      uint32_t chSizeAllprior;
     } block{
-        v_output.extents(),
-        0u,
-        v_self.extents(),
-        0u,
+        api::utils::make_ivec3(v_output.extents()),
+        0,
+        api::utils::make_ivec3(v_self.extents()),
+        0,
         safe_downcast<uint32_t>(v_self.sizes()[0]),
-        safe_downcast<uint32_t>(v_self.sizes()[1]),
+        in_ch_aligned,
         safe_downcast<uint32_t>(ch_interval),
         safe_downcast<uint32_t>(ch_size_allprior),
     };
