@@ -82,11 +82,6 @@ add_needs_realized_inputs(
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
         aten._int_mm,
-        torch.ops.mkldnn._convolution_pointwise,
-        torch.ops.mkldnn._convolution_pointwise_,
-        torch.ops.mkldnn._convolution_transpose_pointwise,
-        torch.ops.mkldnn._linear_pointwise,
-        torch.ops.mkl._mkl_linear,
     ]
 )
 
