@@ -2,6 +2,7 @@
 #define C10_UTIL_LOGGING_H_
 
 #include <climits>
+#include <cstring>
 #include <exception>
 #include <functional>
 #include <limits>

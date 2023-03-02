@@ -14,7 +14,6 @@
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/tensor.h>
 #include <ATen/ops/result_type.h>
 #endif
 
@@ -237,24 +236,11 @@ void _sparse_binary_op_intersection_kernel_impl(
       broadcasted_shape.begin() + probably_coalesced.sparse_dim()
     );
     auto strides = c10::contiguous_strides(broadcasted_sparse_dim_shape);
-
-    if constexpr (max_static_len > 0) {
-      std::array<int64_t, max_static_len> strides_as_array;
-      std::copy(strides.begin(), strides.end(), strides_as_array.begin());
-      return strides_as_array;
-    } else {
-      auto strides_as_tensor = at::tensor(strides, probably_coalesced._indices().options().device(kCPU).dtype(kLong));
-      strides_as_tensor = strides_as_tensor.to(probably_coalesced.device());
-      return strides_as_tensor;
-    }
+    return at::sparse::TensorGeometryHolder<max_static_len>(strides, strides, probably_coalesced.options());
   }();
 
   const auto hash_coeffs = [&]() -> auto {
-    if constexpr (max_static_len > 0) {
-      return hash_coeffs_storage;
-    } else {
-      return hash_coeffs_storage.template data_ptr<int64_t>();
-    }
+    return std::get<0>(*hash_coeffs_storage);
   }();
 
   const auto nnz_arange = at::arange(
