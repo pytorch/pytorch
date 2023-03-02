@@ -4223,9 +4223,11 @@ class Wait(ExternKernel):
         return False
 
     def codegen(self, wrapper):
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _wait_tensor"
+        )
         (input_collective,) = [t.codegen_reference() for t in self.inputs]
-        work = f"{input_collective}_work"  # hacky way to name work objs..
-        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
 
         # wait op still needs to produce a 'buffer' that represents the tensor output.
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
@@ -4280,7 +4282,7 @@ class AllReduce(ExternKernel):
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
         )
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
@@ -4308,6 +4310,7 @@ class AllReduce(ExternKernel):
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllGatherIntoTensor(ExternKernel):
@@ -4347,7 +4350,9 @@ class AllGatherIntoTensor(ExternKernel):
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
         )
-
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _register_tensor_work"
+        )
         # extract references to our args in string form for codegen output
         (input_name,) = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
@@ -4363,3 +4368,4 @@ class AllGatherIntoTensor(ExternKernel):
             f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_name}, async_op=True,"
             f" group={output_name}_pg)"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
