@@ -1604,13 +1604,7 @@ def sub(
                 )
             )
             raise ValueError(msg)
-        if isinstance(b, torch.Tensor):
-            b = prims.mul(b, alpha)
-        else:
-            # Carefully not to use prims.mul if b is a scalar / symint.
-            # prims.mul always returns a tensor,
-            # which will mess with type promotion.
-            b = b * alpha
+        b = prims.mul(b, alpha)
 
     return prims.sub(a, b)
 

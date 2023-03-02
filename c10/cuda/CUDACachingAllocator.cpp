@@ -886,29 +886,12 @@ class DeviceCachingAllocator {
           stats.reserved_bytes[static_cast<int64_t>(StatType::AGGREGATE)]
               .current,
           c10::Device(c10::DeviceType::CUDA, static_cast<DeviceIndex>(device)));
-
-      auto allocated_bytes =
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current;
-      auto reserved_bytes =
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
-              .current;
-      auto observers_local = oom_observers_;
-
-      // Make sure we do not have the device lock before calling our
-      // observers which might need hold the GIL
-      // It is safe to release at this point because will no longer
-      // be reading any allocator state.
-
-      lock.unlock();
-
-      for (const auto& obs : observers_local) {
+      for (const auto& obs : oom_observers_) {
         obs(device,
             alloc_size,
             set_fraction ? allowed_memory_maximum : device_total,
             device_free);
       }
-
       // "total capacity": total global memory on GPU
       // "allowed": memory is allowed to use, which set by fraction.
       // "already allocated": memory allocated by the program using the
@@ -937,12 +920,16 @@ class DeviceCachingAllocator {
           "; ",
           format_size(device_total),
           " total capacity; ",
-          format_size(allocated_bytes),
+          format_size(
+              stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                  .current),
           " already allocated; ",
           format_size(device_free),
           " free; ",
           allowed_info,
-          format_size(reserved_bytes),
+          format_size(
+              stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+                  .current),
           " reserved in total by PyTorch)",
           " If reserved memory is >> allocated memory try setting max_split_size_mb to avoid"
           " fragmentation.  See documentation for Memory Management and PYTORCH_CUDA_ALLOC_CONF",

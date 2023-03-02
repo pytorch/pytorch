@@ -211,9 +211,7 @@ def _build_dummy_add_graph(
     assert len(placeholders) == 2
     assert len(call_functions) == 1
     node_to_obj[placeholders[0]] = dt
-    node_to_obj[placeholders[1]] = DTensor.from_local(
-        zero, dt.device_mesh, [Replicate()], run_check=False
-    )
+    node_to_obj[placeholders[1]] = zero
 
     traced_dispatch = _get_dtensor_dispatch_graph(
         call_functions[0], node_to_obj
@@ -251,7 +249,7 @@ def _convert_output(
 
         traced_dispatch, result_obj = _build_dummy_add_graph(dt, node_to_obj)
 
-        wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm"]
+        wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm" or n.name == "wait_tensor"]
         add = [n for n in traced_dispatch.graph.nodes if n.name == "add"]
         assert len(wait) == 1 and len(add) == 1
 

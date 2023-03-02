@@ -418,7 +418,7 @@ class IterGraph(fx.Graph):
             else:
                 actual_user_node = user
             assert actual_node is not None
-            actual_node.users[actual_user_node] = 1
+            actual_node.users[actual_user_node] = None  # type: ignore[index]
 
     def node_remove_user(self, node: fx.Node, user: Any) -> None:
         for graph in self._all_graphs:
@@ -428,7 +428,7 @@ class IterGraph(fx.Graph):
             else:
                 actual_user_node = user
             assert actual_node is not None
-            del actual_node.users[actual_user_node]
+            del actual_node.users[actual_user_node]  # type: ignore[arg-type]
 
     def keep_unused_nodes(self) -> None:
         for node in self.nodes:

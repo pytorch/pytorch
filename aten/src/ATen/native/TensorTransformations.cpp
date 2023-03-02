@@ -99,7 +99,7 @@ Tensor flip(const Tensor& self, IntArrayRef dims) {
   return out_tensor;
 }
 
-Tensor roll(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) { // Used by CPU and MPS dispatch.
+Tensor roll_cpu(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   if (dims.size() != 1 || shifts.size() != 1) {
     return roll_common(self, shifts, dims);
   }

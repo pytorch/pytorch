@@ -56,7 +56,8 @@ if HAS_PYDOT:
         Visualize a torch.fx.Graph with graphviz
         Basic usage:
             g = FxGraphDrawer(symbolic_traced, "resnet18")
-            g.get_dot_graph().write_svg("a.svg")
+            with open("a.svg", "w") as f:
+                f.write(g.get_dot_graph().create_svg())
         """
 
         def __init__(

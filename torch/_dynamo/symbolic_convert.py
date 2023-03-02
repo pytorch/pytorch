@@ -291,7 +291,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 + if_jump
             )
         elif isinstance(value, NNModuleVariable):
-            # Equivalent of "self.nn_module is not None"
+            # Equivant of "self.nn_module is not None"
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
@@ -1930,7 +1930,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0 and not self.export:
+        if self.output.count_calls() == 0:
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(

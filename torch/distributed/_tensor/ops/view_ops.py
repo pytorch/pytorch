@@ -614,10 +614,12 @@ def register_prop_rule_map(
             output_dtensor_spec = DTensorSpec(
                 mesh=input_dtensor_spec.mesh,
                 placements=shard_out,
+                shape=torch.Size(global_out_shape),
+                ndim=len(global_out_shape),
             )
-            local_out_shape = output_dtensor_spec._local_shape_from_global_shape(list(global_out_shape))
+            local_out_shape = output_dtensor_spec.local_shape
 
-            # We only need the local shape to lower the call into the local op
+            # We only need the local shape to lower he call into the local op
             args = op_schema.args_schema
             shape_argnum = spec.shape_argnum
             if shape_argnum is not None:
@@ -649,7 +651,8 @@ def register_prop_rule_map(
                             DTensorSpec(
                                 placements=suggested_placements,
                                 mesh=input_dtensor_spec.mesh,
-                                tensor_meta=input_dtensor_spec.tensor_meta,
+                                ndim=input_dtensor_spec.ndim,
+                                shape=input_dtensor_spec.shape,
                             ),
                         )
                         + op_schema.args_schema[1:],

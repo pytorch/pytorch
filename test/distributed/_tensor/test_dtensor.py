@@ -44,23 +44,13 @@ class DTensorTest(DTensorTestBase):
             local_tensor,
             device_mesh,
             shard_spec,
-            shape=dist_tensor_shape,
-            dtype=local_tensor.dtype,
+            size=dist_tensor_shape,
             requires_grad=True,
-            stride=local_tensor.stride()
         )
         self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
 
         with self.assertWarnsRegex(UserWarning, "To construct"):
-            DTensor(
-                local_tensor,
-                device_mesh,
-                shard_spec,
-                shape=dist_tensor_shape,
-                dtype=local_tensor.dtype,
-                requires_grad=False,
-                stride=local_tensor.stride()
-            )
+            DTensor(local_tensor, device_mesh, shard_spec, size=dist_tensor_shape)
 
         local_tensor = torch.randn(3, 3, requires_grad=False)
         with self.assertWarnsRegex(UserWarning, "To construct"):
@@ -68,10 +58,8 @@ class DTensorTest(DTensorTestBase):
                 local_tensor,
                 device_mesh,
                 shard_spec,
-                shape=dist_tensor_shape,
-                dtype=local_tensor.dtype,
+                size=dist_tensor_shape,
                 requires_grad=True,
-                stride=local_tensor.stride()
             )
 
     @with_comms
@@ -132,14 +120,14 @@ class DTensorTest(DTensorTestBase):
         shard0_spec = [Shard(0)]
         local_tensor = torch.randn(4, 8)
         global_shape = torch.Size([self.world_size * 4, 8])
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard0_spec)
+        dist_tensor = DTensor(local_tensor, device_mesh, shard0_spec, size=global_shape)
         # won't affect stride
         self.assertEqual(dist_tensor.stride(), (8, 1))
 
         shard1_spec = [Shard(1)]
         local_tensor = torch.randn(8, 4)
         global_shape = torch.Size([8, self.world_size * 4])
-        dist_tensor = DTensor.from_local(local_tensor, device_mesh, shard1_spec)
+        dist_tensor = DTensor(local_tensor, device_mesh, shard1_spec, size=global_shape)
         # will affect stride after DT initialized
         self.assertEqual(dist_tensor.stride(), (4 * self.world_size, 1))
 
@@ -148,8 +136,8 @@ class DTensorTest(DTensorTestBase):
         local_tensor_t = local_tensor.permute(1, 2, 0)
         global_shape = torch.Size([4, self.world_size * 8, 8])
         self.assertEqual(local_tensor_t.stride(), (8, 1, 32))
-        dist_tensor = DTensor.from_local(
-            local_tensor_t, device_mesh, shard1_spec
+        dist_tensor = DTensor(
+            local_tensor_t, device_mesh, shard1_spec, size=global_shape
         )
         global_stride = (8 * self.world_size, 1, 32 * self.world_size)
         self.assertEqual(dist_tensor.stride(), global_stride)
@@ -204,10 +192,8 @@ class DTensorTest(DTensorTestBase):
             local_tensor_with_grad,
             device_mesh,
             shard_spec,
-            shape=dist_tensor_shape,
-            dtype=local_tensor_with_grad.dtype,
+            size=dist_tensor_shape,
             requires_grad=True,
-            stride=local_tensor_with_grad.stride()
         )
         self.assertEqual(sharded_tensor.size(), dist_tensor_shape)
         self.assertEqual(sharded_tensor.to_local(), local_tensor_with_grad)
@@ -414,30 +400,6 @@ class DTensorMeshTest(DTensorTestBase):
         for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
             self.assertEqual(expected_shard_offsets, dtensor._spec.local_offsets)
-
-    @with_comms
-    def test_from_local_sub_mesh(self):
-        mesh = DeviceMesh(self.device_type, [0, 2])
-        local_tensor = torch.ones(3, 4)
-
-        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
-        self.assertEqual(dtensor.size(), torch.Size([6, 4]))
-
-        if self.rank == 0 or self.rank == 2:
-            self.assertEqual(dtensor.to_local(), torch.ones(3, 4))
-        else:
-            self.assertEqual(dtensor.to_local(), torch.tensor([]))
-
-        # test dtensor created in submesh, the operation should only
-        # be applied to the local shard inside the mesh, not the whole
-        # world, so only 0/2 really run the computation
-        new_dtensor = dtensor + 2
-
-        if self.rank == 0 or self.rank == 2:
-            self.assertEqual(new_dtensor.to_local(), torch.ones(3, 4) + 2)
-        else:
-            self.assertEqual(new_dtensor.to_local(), torch.tensor([]))
-
 
 
 if __name__ == "__main__":

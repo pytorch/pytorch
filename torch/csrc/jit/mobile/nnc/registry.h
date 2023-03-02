@@ -15,7 +15,7 @@ struct TORCH_API NNCKernel {
   virtual int execute(void** /* args */) = 0;
 };
 
-TORCH_DECLARE_REGISTRY(NNCKernelRegistry, NNCKernel);
+C10_DECLARE_REGISTRY(NNCKernelRegistry, NNCKernel);
 
 #define REGISTER_NNC_KERNEL(id, kernel, ...)     \
   extern "C" {                                   \

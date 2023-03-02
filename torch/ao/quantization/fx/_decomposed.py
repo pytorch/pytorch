@@ -178,14 +178,13 @@ def dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant
 
 quantized_decomposed_lib.define(
     "choose_qparams.tensor(Tensor input, int quant_min, int quant_max, "
-    "float eps, ScalarType dtype) -> (Tensor, Tensor)")
+    "ScalarType dtype) -> (Tensor, Tensor)")
 
 @impl(quantized_decomposed_lib, "choose_qparams.tensor", "CompositeExplicitAutograd")
 def choose_qparams_tensor(
         input: torch.Tensor,
         qmin: int,
         qmax: int,
-        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
@@ -209,18 +208,17 @@ def choose_qparams_tensor(
     min_val, max_val = torch.aminmax(input)
 
     return determine_qparams(
-        min_val, max_val, qmin, qmax, dtype, torch.Tensor([eps]), has_customized_qrange=False)
+        min_val, max_val, qmin, qmax, dtype, torch.Tensor([torch.finfo(torch.float32).eps]), has_customized_qrange=False)
 
 quantized_decomposed_lib.define(
     "choose_qparams_symmetric.tensor(Tensor input, int quant_min, int quant_max, "
-    "float eps, ScalarType dtype) -> (Tensor, Tensor)")
+    "ScalarType dtype) -> (Tensor, Tensor)")
 
 @impl(quantized_decomposed_lib, "choose_qparams_symmetric.tensor", "CompositeExplicitAutograd")
 def choose_qparams_symmetric_tensor(
         input: torch.Tensor,
         qmin: int,
         qmax: int,
-        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """ Given an input Tensor, derive the per tensor affine quantization parameter
@@ -248,7 +246,7 @@ def choose_qparams_symmetric_tensor(
         qmin,
         qmax,
         dtype,
-        torch.Tensor([eps]),
+        torch.Tensor([torch.finfo(torch.float32).eps]),
         has_customized_qrange=False,
         qscheme=torch.per_tensor_symmetric
     )
@@ -258,7 +256,6 @@ def choose_qparams_tensor_meta(
         input: torch.Tensor,
         quant_min: int,
         quant_max: int,
-        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
@@ -271,7 +268,6 @@ def choose_qparams_symmetric_tensor_meta(
         input: torch.Tensor,
         quant_min: int,
         quant_max: int,
-        eps: float,
         dtype: torch.dtype
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     return torch.empty(1, dtype=torch.float, device=input.device), torch.empty(1, dtype=torch.int32, device=input.device)

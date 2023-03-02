@@ -36,6 +36,10 @@ def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     stats_spec = DTensorSpec(
         mesh=weight.mesh,
         placements=input.placements,
+        shape=torch.Size(
+            input.shape[:batch_ndim] + (1,) * len(normalized_shape)
+        ),
+        ndim=input.ndim,
     )
     return OutputSharding(output_spec=(input, stats_spec, stats_spec))
 
@@ -65,10 +69,14 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     weight_grad = DTensorSpec(
         mesh=weight.mesh,
         placements=[_Partial()] * weight.mesh.ndim,
+        shape=weight.shape,
+        ndim=weight.ndim,
     )
     bias_grad = DTensorSpec(
         mesh=bias.mesh,
         placements=[_Partial()] * bias.mesh.ndim,
+        shape=bias.shape,
+        ndim=bias.ndim,
     )
     return OutputSharding(
         # NOTE: type errors below are legit. This is because DTensor currently
@@ -95,7 +103,9 @@ def _refine_sharding(
         DTensorSpec(
             mesh=s.mesh,  # type: ignore[attr-defined]
             placements=s.placements,  # type: ignore[attr-defined]
-            tensor_meta=s.tensor_meta,  # type: ignore[attr-defined]
+            shape=s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]  # type: ignore[attr-defined]
+            if active_dim is not None
+            else s.shape,  # type: ignore[attr-defined]
         )
         for s in op_schema.args_schema[:2]
     ]
@@ -163,6 +173,8 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=DTensorSpec(
                 mesh=input.mesh,
                 placements=input.placements,
+                shape=input.shape,
+                ndim=input.ndim,
             )
         )
     else:
@@ -176,12 +188,14 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
                         DTensorSpec(
                             mesh=input.mesh,
                             placements=input_suggestion,
-                            tensor_meta=input.tensor_meta,
+                            shape=input.shape,
+                            ndim=input.ndim,
                         ),
                         DTensorSpec(
                             mesh=src.mesh,
                             placements=input_suggestion,
-                            tensor_meta=src.tensor_meta,
+                            shape=src.shape,
+                            ndim=src.ndim,
                         ),
                     )
                     + op_schema.args_schema[2:],
