@@ -132,6 +132,9 @@ class TestControlFlowTraced(TestCase):
                 all_ops_in_true_branch.append(node.target)
 
         self.assertFalse(any([op._schema.is_mutable for op in all_ops_in_true_branch]))
+        
+        graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
+        self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
         graph_module = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
@@ -177,6 +180,9 @@ class TestControlFlowTraced(TestCase):
 
         graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
+        
+        graph_module1 = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
+        self.assertEqual(graph_module1(*example_inputs), f(*example_inputs))
 
         gm_true_true_branch = graph_module.true_graph_0.true_graph_0
 

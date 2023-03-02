@@ -8,7 +8,7 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import PyOperator
-from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -150,19 +150,13 @@ def cond_fake_tensor_mode(pred, true_fn, false_fn, operands):
     return true_outs
 
 
-# We cannot directly call fallthrough here due to issue #89037.
-@cond.py_impl(DispatchKey.PythonDispatcher)
-def cond_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return cond(*args)
-
-
 def _has_potential_branch_input_mutation(branch, inputs):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
+
     try:
         gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
@@ -184,6 +178,7 @@ def _has_potential_branch_input_mutation(branch, inputs):
                         return True
 
     return False
+
 
 def _has_potential_branch_input_alias(branch, inputs):
     """
@@ -211,7 +206,6 @@ def _has_potential_branch_input_alias(branch, inputs):
                     return True
 
     return False
-
 
 
 @cond.py_impl(torch._C._functorch.TransformType.Functionalize)
@@ -244,6 +238,7 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())
 
 # TODO(voz): Make this automatic for keys, this is very ugly atm
+cond.fallthrough(DispatchKey.PythonDispatcher)
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
