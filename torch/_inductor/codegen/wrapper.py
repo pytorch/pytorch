@@ -837,7 +837,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
 
 
-class CppAOTWrapperCodeGen(CppWrapperCodeGen):
+class CppAotWrapperCodeGen(CppWrapperCodeGen):
     """
     The AOT-version outer wrapper that calls the kernels in C++
     """

@@ -23,7 +23,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppAOTWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -533,12 +533,12 @@ class GraphLowering(torch.fx.Interpreter):
             if self._can_use_cpp_wrapper:
                 self.sizevars = CppSizeVarAllocator(self._shape_env)
                 self.wrapper_code = (
-                    CppAOTWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
                 )
+                return
             else:
                 assert not self.aot_mode, "Model does not support AOT compilation"
-        else:
-            self.wrapper_code = WrapperCodeGen()
+        self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
         from .scheduler import Scheduler
