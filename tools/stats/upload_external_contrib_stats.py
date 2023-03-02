@@ -3,10 +3,11 @@ import datetime
 import json
 import os
 import urllib.parse
-from typing import Any, Callable, cast, Dict, List, Optional
+from typing import Any, Callable, cast, Dict, List, Optional, Set
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+# import time
 from tools.stats.upload_stats_lib import upload_to_s3
 
 FILTER_OUT_USERS = set(["pytorchmergebot", "facebook-github-bot", "pytorch-bot[bot]"])
@@ -61,7 +62,7 @@ def get_external_pr_data(
     period_begin_date = start_date
 
     pr_count = 0
-    users = set([Dict[str, Any]])
+    users: Set[str] = set()
     while period_begin_date < end_date:
         period_end_date = period_begin_date + datetime.timedelta(days=period_length - 1)
         page = 1
