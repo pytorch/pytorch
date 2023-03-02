@@ -10932,11 +10932,7 @@ op_db: List[OpInfo] = [
                     dtypesIfROCM=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
-                    )),
+                    supports_rhs_python_scalar=False),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.bfloat16),
