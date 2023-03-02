@@ -1198,16 +1198,19 @@ class CppVecKernel(CppKernel):
 
 @dataclasses.dataclass
 class TileMeta:
-    """Metadata describing an N-dim tile variable of fixed sizes"""
+    """
+    Metadata describing an N-dim tile variable of fixed sizes.
+    Tile variables are valid within the scope of CppTileKernel and their
+    sizes are defined by CppTileKernel.tile_sizes. The tile variable defines
+    the dim mapping with `indices` attribute to the kernel itervars on which
+    tiling is applied.
+    """
 
     dtype: torch.dtype = torch.float32
 
     # indices into tile_loop_indices of the CppTileKernel. This decides
     # the loop axes and order the tile variable corresponds to.
     indices: list = None
-
-    # TODO: move outside
-    tile_buf: "CppTileCSEVariable" = None
 
     # whether the tile variable resides in register
     in_register: bool = True
@@ -1352,7 +1355,7 @@ class CppTile1DOverrides(CppVecOverrides):
         slice = V.kernel.cse.generate(
             V.kernel.compute,
             f"at::vec::Vectorized<{DTYPE_TO_CPP[tile_var.meta.dtype]}>::loadu"
-            "(&{tile_var}[{cexpr(V.kernel.tile_indexing(tile_var.meta, slice_indices))}]) /* slice load */",
+            f"(&{tile_var}[{cexpr(V.kernel.tile_indexing(tile_var.meta, slice_indices))}]) /* slice load */",
         )
         return slice
 
@@ -1411,8 +1414,9 @@ class CppTile2DOverrides:
 
         load_line = (
             f"([&]() {{ alignas(64) std::array<float,{math.prod(tile_sizes)}> {dst}; "
+            f"at::vec::transpose_mxn<float,{tile_sizes[1]},{tile_sizes[0]}>({src}, {ld_src}, &{dst}[0], {ld_dst}); "
+            f"return {dst}; }})()"
         )
-        "at::vec::transpose_mxn<float,{tile_sizes[1]},{tile_sizes[0]}>({src}, {ld_src}, &{dst}[0], {ld_dst}); return tmp; }})()"
 
         tile_var = self.cse.generate(self.loads, load_line)
         return tile_var
@@ -1603,6 +1607,7 @@ class CppTileKernel(CppKernel):
         self.tile_sizes = tile_sizes
         self.tile_loop_indices = loop_indices
 
+        self.tile_bufs = {}
         self.tile_bufs_defined = {}
         self.tile_bufs_used = set()
 
@@ -1715,15 +1720,15 @@ class CppTileKernel(CppKernel):
     def define_tile_buf(self, value, code=None):
         """Define and return the tile buffer for the tile variable `value`"""
         with contextlib.ExitStack() as stack:
-            if value.meta.tile_buf is not None:
-                return value.meta.tile_buf
+            if value.name in self.tile_bufs:
+                return self.tile_bufs[value.name]
             if code is not None:
                 stack.enter_context(self.swap_buffers(code, cb=code, sb=code))
             tile_buf = self.tile_new_buf(value.meta.dtype)
             if self.current_tile_rank() != value.meta.rank():
                 stack.enter_context(self.set_current_tile_indices(value.meta.indices))
             ops.tile_slice_store(tile_buf, value)
-            value.meta.tile_buf = tile_buf
+            self.tile_bufs[value.name] = tile_buf
             return tile_buf
 
     def get_tile_slice(self, value, slice_indices):
