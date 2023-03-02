@@ -117,6 +117,29 @@ def conv_backward_flop(input_shapes: List[Any], output_shapes: List[Any]) -> int
 
     return flop_count
 
+def sdpa_flop_count(query_shape, key_shape):
+    """
+    Count flops for self-attention.
+    """
+    b, h, s, d = query_shape
+    b2, h2, s2, d2 = key_shape
+    assert b == b2 and h == h2 and d == d2
+    total_flops = 0
+    # [b, h, s, d] @ [b, h, d, s2] -> [b, h, s, s2]
+    total_flops += bmm_flop([(b*h, s, d), (b*h, d, s2)])
+    # [b, h, s, s2] @ [b, h, s2, d] -> [b, h, s2, d]
+    total_flops += bmm_flop([(b*h, s, s2), (b*h, s2, d)])
+    return total_flops
+
+
+
+def sdpa_flop(input_shapes: List[Any], _=None) -> int:
+    """
+    Count flops for self-attention.
+    """
+    # NB: We aren't accounting for causal attention here
+    query_shape, key_shape, value_shape, *_ = input_shapes
+    return sdpa_flop_count(query_shape, key_shape)
 
 flop_mapping = {
     aten.mm: mm_flop,
@@ -126,6 +149,8 @@ flop_mapping = {
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.convolution_backward: conv_backward_flop,
+    aten._scaled_dot_product_efficient_attention: sdpa_flop,
+    aten._scaled_dot_product_flash_attention: sdpa_flop,
 }
 
 def normalize_tuple(x):
@@ -312,6 +337,7 @@ class FlopCounterMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
         out = func(*args, **kwargs)
+        print(func)
         func_packet = func._overloadpacket
         if func_packet in self.flop_mapping:
             flop_count_func = self.flop_mapping[func_packet]
