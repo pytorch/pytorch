@@ -6,7 +6,7 @@ from typing import Any, Optional, Union
 from torch._guards import GuardSource, Source
 
 from . import utils
-from .bytecode_transformation import create_instruction
+from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr, rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
@@ -87,7 +87,7 @@ class GlobalSource(Source):
     global_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.global_name, add=True)]
+        return [codegen.create_load_global(self.global_name, False, add=True)]
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -102,9 +102,8 @@ class GlobalWeakRefSource(Source):
 
     def reconstruct(self, codegen):
         return [
-            codegen.create_load_global(self.global_name, add=True),
-            create_instruction("CALL_FUNCTION", 0),
-        ]
+            codegen.create_load_global(self.global_name, True, add=True),
+        ] + create_call_function(0, False)
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -275,10 +274,13 @@ class GetItemSource(Source):
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
-        return self.base.reconstruct(codegen) + [
-            codegen.create_load_const(self.index),
-            create_instruction("CALL_FUNCTION", 2),
-        ]
+        return (
+            self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+            ]
+            + create_call_function(2, True)
+        )
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -293,7 +295,7 @@ class TypeSource(Source):
 
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
-        return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -316,7 +318,7 @@ class SuperSource(Source):
         return (
             self.type.reconstruct(codegen)
             + self.obj.reconstruct(codegen)
-            + [create_instruction("CALL_FUNCTION", 2)]
+            + create_call_function(2, True)
         )
 
     def guard_source(self):
@@ -340,8 +342,8 @@ class ODictGetItemSource(Source):
             + self.base.reconstruct(codegen)
             + [
                 codegen.create_load_const(self.index),
-                create_instruction("CALL_FUNCTION", 2),
             ]
+            + create_call_function(2, True)
         )
 
     def guard_source(self):
@@ -375,7 +377,7 @@ class ConstantSource(Source):
     source_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.source_name, add=False)]
+        return [codegen.create_load_global(self.source_name, False, add=False)]
 
     def guard_source(self):
         return GuardSource.CONSTANT

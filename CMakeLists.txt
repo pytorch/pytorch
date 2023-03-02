@@ -479,13 +479,6 @@ if(MSVC)
         string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
       endif(${flag_var} MATCHES "/Z[iI]")
     endif(MSVC_Z7_OVERRIDE)
-    # Turn off warnings on Windows.  In an ideal world we'd be warning
-    # clean on Windows too, but this is too much work for our
-    # non-Windows developers.
-
-    # Turn off warnings (Windows build is currently is extremely warning
-    # unclean and the warnings aren't telling us anything useful.)
-    string(APPEND ${flag_var} " /w")
 
     if(${CAFFE2_USE_MSVC_STATIC_RUNTIME})
       if(${flag_var} MATCHES "/MD")
@@ -809,13 +802,11 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-Werror=braced-scalar-init" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=range-loop-construct" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=bool-operation" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Winconsistent-missing-override" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wnarrowing" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-missing-field-initializers" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-type-limits" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-array-bounds" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unknown-pragmas" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wunused-local-typedefs" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-parameter" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-function" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-unused-result" CMAKE_CXX_FLAGS)
@@ -866,21 +857,16 @@ if(NOT MSVC)
   endif()
 
   append_cxx_flag_if_supported("-Wno-error=pedantic" CMAKE_CXX_FLAGS)
-  append_cxx_flag_if_supported("-Wno-error=redundant-decls" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Wno-error=old-style-cast" CMAKE_CXX_FLAGS)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     append_cxx_flag_if_supported("-Wconstant-conversion" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-invalid-partial-specialization" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-typedef-redefinition" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-inconsistent-missing-override" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-aligned-allocation-unavailable" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wunused-lambda-capture" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wunused-local-typedef" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Qunused-arguments" CMAKE_CXX_FLAGS)
     if(${USE_COLORIZE_OUTPUT})
     endif()
@@ -914,6 +900,35 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
+else()
+  # skip unwanted includes from windows.h
+  add_compile_definitions(WIN32_LEAN_AND_MEAN)
+  # Windows SDK broke compatibility since version 25131, but introduced this
+  # define for backward compatibility.
+  add_compile_definitions(_UCRT_LEGACY_INFINITY)
+  # disable min/max macros
+  add_compile_definitions(NOMINMAX)
+  # The source code is in utf-8 encoding
+  append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
+  # Turn off these warnings on Windows.
+  # destructor was implicitly defined as delete
+  append_cxx_flag_if_supported("/wd4624" CMAKE_CXX_FLAGS)
+  # unknown pragma
+  append_cxx_flag_if_supported("/wd4068" CMAKE_CXX_FLAGS)
+  # unexpected tokens following preprocessor directive - expected a newline
+  append_cxx_flag_if_supported("/wd4067" CMAKE_CXX_FLAGS)
+  # conversion from 'size_t' to 'unsigned int', possible loss of data
+  append_cxx_flag_if_supported("/wd4267" CMAKE_CXX_FLAGS)
+  # no suitable definition provided for explicit template instantiation request
+  append_cxx_flag_if_supported("/wd4661" CMAKE_CXX_FLAGS)
+  # recursive on all control paths, function will cause runtime stack overflow
+  append_cxx_flag_if_supported("/wd4717" CMAKE_CXX_FLAGS)
+  # conversion from '_Ty' to '_Ty', possible loss of data
+  append_cxx_flag_if_supported("/wd4244" CMAKE_CXX_FLAGS)
+  # unsafe use of type 'bool' in operation
+  append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
+  # inconsistent dll linkage
+  append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
@@ -981,7 +996,6 @@ if(APPLE)
     endif()
     append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
     append_cxx_flag_if_supported("-Wno-missing-braces" CMAKE_CXX_FLAGS)
-    append_cxx_flag_if_supported("-Wno-constexpr-not-const" CMAKE_CXX_FLAGS)
 endif()
 
 if(EMSCRIPTEN)
@@ -1122,6 +1136,10 @@ if(BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUDAToolkit.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
 
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
@@ -1168,6 +1186,7 @@ if(BUILD_NVFUSER)
   else()
     add_subdirectory(third_party/nvfuser nvfuser)
   endif()
+  add_compile_definitions(BUILD_NVFUSER)
 endif()
 
 include(cmake/Summary.cmake)
