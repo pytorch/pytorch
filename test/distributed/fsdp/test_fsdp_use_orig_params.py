@@ -507,7 +507,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
+        optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         fsdp_kwargs["use_orig_params"] = True
         fsdp_model_orig_params = TransformerWithSharedParams.init(
             self.process_group,
@@ -516,7 +516,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim_orig_params = torch.optim.Adam(fsdp_model_orig_params.parameters(), lr=LR)
+        optim_orig_params = torch.optim.Adam(
+            fsdp_model_orig_params.parameters(), foreach=False, lr=LR
+        )
         return fsdp_model, optim, fsdp_model_orig_params, optim_orig_params
 
     def _check_fsdp_parameter_parity(self, fsdp1: FSDP, fsdp2: FSDP) -> None:

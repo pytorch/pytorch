@@ -87,6 +87,9 @@ comment_origin = False
 conv_1x1_as_mm = False
 
 
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
+
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
 

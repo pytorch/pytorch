@@ -566,6 +566,17 @@ def developer_warning(msg):
         log.info(msg)
 
 
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )
+
+
 def is_ones(items):
     return all(x == 1 for x in items)
 
