@@ -284,7 +284,7 @@ class PythonArgument:
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
-            return f"{name}: {type_str}={default}"
+            return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
 
