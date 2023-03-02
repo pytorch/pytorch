@@ -159,7 +159,7 @@ def is_live(weak_ref):
 class TensorWeakRef(object):
     """
     Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required
-    when unwarpping a Tensor weakref.
+    when unwrapping a Tensor weakref.
     """
 
     ref: WeakRef[Tensor]
@@ -194,7 +194,7 @@ class CUDAGraphNode(object):
     is unaffected when the graph is replayed.
 
     In order to support recording a subsequent cuda graph recording after execution of this graph,
-    we checkpoint the state of the memory pool so that it may be resumed.
+    we checkpoint the state of the memory pool so that it may later be resumed.
 
     See [setCheckpointPoolState] for further explanation.
     """
