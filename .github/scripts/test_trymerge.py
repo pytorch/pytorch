@@ -136,7 +136,9 @@ def mock_merge(pr_num: int, repo: GitRepo,
     pass
 
 def mock_gh_get_info() -> Any:
-    return {"closed": False, "isCrossRepository": False}
+    return {"closed": False,
+            "isCrossRepository": False,
+            "files": {"nodes": [], "pageInfo": {"hasNextPage": False}}, "changedFiles": 0}
 
 
 def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:

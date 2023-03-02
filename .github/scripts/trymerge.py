@@ -752,8 +752,11 @@ class GitHubPR:
         return self.submodules
 
     def get_changed_submodules(self) -> List[str]:
+        files = self.get_changed_files()
+        if len(files) == 0:
+            return files
         submodules = self.get_submodules()
-        return [f for f in self.get_changed_files() if f in submodules]
+        return [f for f in files if f in submodules]
 
     def has_invalid_submodule_updates(self) -> bool:
         """ Submodule updates in PR are invalid if submodule keyword
@@ -1774,7 +1777,7 @@ def main() -> None:
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if pr.has_invalid_submodule_updates() and not args.force:
+    if not args.force and pr.has_invalid_submodule_updates():
         message = f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
         message += "\nIf those updates are intentional, please add \"submodule\" keyword to PR title/description."
         gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
