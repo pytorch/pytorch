@@ -78,13 +78,26 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
     def __call__(self, *args, **kwargs):
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
-        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
-        # Warning: usually you don't want to call this.  You probably want to go through
-        # __call__ intstead.  If you go through __call__, you'll get hooks support.
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -381,6 +394,14 @@ def check_if_dynamo_supported():
         raise RuntimeError("Windows not yet supported for torch.compile")
     if sys.version_info >= (3, 11):
         raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
 
 
 def optimize(

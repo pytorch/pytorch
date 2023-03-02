@@ -7,6 +7,7 @@ import torch
 from torch.distributed.distributed_c10d import (
     _get_default_group,
     all_gather,
+    all_reduce,
     all_to_all,
     broadcast,
     get_global_rank,
@@ -22,9 +23,6 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
-import torch.distributed.distributed_c10d as c10d
-
-import torch.distributed._functional_collectives as funcol
 
 _global_device_mesh: Optional["DeviceMesh"] = None
 
@@ -293,12 +291,12 @@ class DeviceMesh:
     def get_rank(self) -> int:
         return get_rank()
 
-    def get_coordinate_on_dim(self, dim: int) -> Optional[int]:
+    def get_coordinate(self) -> Optional[List[int]]:
         """
         Return the relative index of this rank relative to a given
         dimension of the mesh. If this rank is not part of the mesh, return None.
         """
-        return self._coordinate_on_dim[dim] if self._coordinate_on_dim else None
+        return self._coordinate_on_dim if self._coordinate_on_dim else None
 
     def scatter(
         self,
@@ -420,7 +418,8 @@ class DeviceMesh:
         tensor: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
-    ) -> torch.Tensor:
+        async_op: bool = False,
+    ) -> Optional[Work]:
         """
         all_reduce the tensor on each rank on a device mesh dimension, and
         return an output tensor on each rank after all_reduce.
@@ -433,10 +432,10 @@ class DeviceMesh:
                 to reduce on.
 
         Returns:
-            A :class:`torch.Tensor` object
+            A :class:`Work` object
         """
-        op_name: str = op.name  # type: ignore[attr-defined]
-        return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
+        dim_group = self._dim_groups[mesh_dim]
+        return all_reduce(tensor, op=op, group=dim_group, async_op=async_op)
 
     def reduce_scatter(
         self,
@@ -474,7 +473,7 @@ class DeviceMesh:
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate_on_dim(mesh_dim)
+            my_coordinate = self.get_coordinate()
             # TODO: what should happen if rank is not in the mesh?
             # see issue https://github.com/pytorch/tau/pull/492
             assert (
@@ -494,11 +493,11 @@ class DeviceMesh:
             flat_tensor = torch.cat(flattened_list).clone(
                 memory_format=torch.contiguous_format
             )
-            dim_group = self._dim_groups[mesh_dim]
-            fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
-
+            fut = self.all_reduce(
+                flat_tensor, op=op, mesh_dim=mesh_dim, async_op=async_op
+            )
             # scatter the tensor
-            output_offset = offset_list[my_coordinate]
+            output_offset = offset_list[my_coordinate[mesh_dim]]
             output.copy_(
                 flat_tensor[output_offset : output_offset + output.numel()].view(
                     output.shape

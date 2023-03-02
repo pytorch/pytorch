@@ -2513,3 +2513,21 @@ class TestMixTracingScripting(JitTestCase):
         top = TopModule()
         top_example_input = torch.ones(1)
         torch.jit.trace(top, top_example_input)
+
+    def test_jit_trace_callfunction_return_shapes(self):
+        # a torch.jit.script function gets inserted as a CallFunction node
+        @torch.jit.script
+        def inner_fn(x):
+            return torch.cat((x, x))
+
+        def outer_fn(x, y):
+            return inner_fn(x + y).relu()
+
+        x, y = [torch.rand((2, 2), dtype=torch.float) for _ in range(2)]
+        fn_t = torch.jit.trace(outer_fn, (x, y))
+
+        # expect that the CallFunction node return type has shape information on it.
+        FileCheck().check("Float").check("4, 2").check("CallFunction").run(fn_t.graph)
+        for n in fn_t.graph.nodes():
+            if n.kind() == "prim::CallFunction":
+                self.assertTrue(n.output().isCompleteTensor())

@@ -125,6 +125,11 @@ profiler_mark_wrapper_call = False
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
+_profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
+profile_bandwidth = _profile_var != ""
+profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+
+
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()

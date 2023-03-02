@@ -547,10 +547,6 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
-        # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel._replicated_tensor_ddp_utils import _set_ddp_with_replicated_tensor
-        _set_ddp_with_replicated_tensor(True)
-
         if BACKEND == "nccl" and not torch.cuda.is_available():
             sys.exit(TEST_SKIPS["no_cuda"].exit_code)
         self = cls(test_name)
@@ -7144,8 +7140,6 @@ class DistributedTest:
                 # Materialize new params. These are not registered in DDP and thus
                 # don't have autograd hooks installed on them.
                 ddp.module.fc2 = nn.Linear(1, 1, bias=False).to(device_id)
-                # Rebuild replicated_module to pick up the changes.
-                ddp._build_replicated_tensor_module()
 
                 # local model with the new materialized parameters.
                 local_model = copy.deepcopy(ddp.module).cuda(self.rank)
@@ -9103,15 +9097,10 @@ class DistributedTest:
 
             device = self.rank
             module = MockModule().to(device)
-            # Disable DDP + ReplicatedTensor since stateless looks for 'module'
-            # whereas with ReplicatedTensor, we run '_replicated_tensor_module'
-            # in the forward pass.
-            from torch.nn.parallel._replicated_tensor_ddp_utils import _ddp_replicated_tensor
-            with _ddp_replicated_tensor(False):
-                module = torch.nn.parallel.DistributedDataParallel(
-                    module,
-                    device_ids=[device]
-                )
+            module = torch.nn.parallel.DistributedDataParallel(
+                module,
+                device_ids=[device]
+            )
             x = torch.rand((1, 1)).to(device)
             weight = torch.tensor([[1.0]], device=device, requires_grad=True)
             bias = torch.tensor([0.0], device=device, requires_grad=True)
