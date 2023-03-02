@@ -311,6 +311,8 @@ def is_foreach_func(f: NativeFunction) -> bool:
     return base_op_name.base.startswith("_foreach_") and not base_op_name.inplace
 
 
+# Checks if `function_schema` is a native, non-foreach function which `f`, a foreach function
+# reference to generate derivatives.
 def is_reference_for_foreach(
     f: NativeFunction,
     function_schema: FunctionSchema,
@@ -363,7 +365,7 @@ def gen_foreach_derivativeinfo(
     if ref_diff_info is None:
         return None
 
-    refarg_indices, map_refarg2foreacharg, map_name2arg = {}, {}, {}
+    map_refarg2foreacharg, map_name2arg = {}, {}
     for i, (arg, ref_arg) in enumerate(
         zip(
             foreach_function.func.arguments.flat_non_out,
@@ -372,9 +374,7 @@ def gen_foreach_derivativeinfo(
     ):
         map_refarg2foreacharg[ref_arg.name] = arg.name
         map_name2arg[arg.name] = arg
-        refarg_indices[ref_arg.name] = i
 
-    num_ref_derivatives = len(ref_diff_info.derivatives)
     all_saved_inputs, all_saved_outputs, all_var_names = [], [], []
     modified_derivative_formulas = []
     for i, derivative in enumerate(ref_diff_info.derivatives):
@@ -382,6 +382,7 @@ def gen_foreach_derivativeinfo(
             "result", "result[i]"
         )
         saved_inputs, saved_outputs = [], []
+        # note(crcrpar): This context seems necessary to call `cpp.argument_type`
         with local.parametrize(
             use_const_ref_for_mutable_tensors=foreach_function.use_const_ref_for_mutable_tensors,
             use_ilistref_for_tensor_lists=foreach_function.part_of_structured_group,
