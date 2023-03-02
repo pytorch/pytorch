@@ -29,7 +29,7 @@ except ImportError:
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
-from torch._dynamo.utils import ifdyn
+from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 
 
@@ -903,7 +903,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifdyn(42, 4))
+        self.assertEqual(cnt.op_count, ifunspec(42, ifdyn(38, 4)))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -1004,7 +1004,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # a Tensor in element 0.  We graph break on that (reflected here)
         # but really we shouldn't have gotten a Tensor at all, as
         # the operation is between an int and an item() result
-        self.assertEqual(cnt.frame_count, ifdyn(6, 5))
+        self.assertEqual(cnt.frame_count, ifunspec(6, 5))
         # TODO(jansel): figure out why op count depends on imports
         self.assertIn(cnt.op_count, (38, 31, 36, 35, 34, 29, 28))
 
@@ -1185,8 +1185,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
-        # With dynamic shapes, maximum computation is preserved
-        self.assertEqual(cnt.op_count, ifdyn(4, 3))
+        # With unspec int, maximum computation is preserved
+        self.assertEqual(cnt.op_count, ifunspec(4, 3))
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)

@@ -47,7 +47,7 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
-    tensor_shape_should_be_static,
+    tensor_always_has_static_shape,
     tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
@@ -181,15 +181,10 @@ class VariableBuilder:
             # too
             0,
             1,
-            # Some well known float constants; but do we really want to
-            # specialize these??
-            0.1,
-            0.01,
-            0.001,
-            0.5,
-            0.05,
-            1.873536229133606,
-            4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
+            # NB: There used to be more constants here, but honestly it was
+            # pretty confusing.  Note we specialize floats by default, and
+            # DON'T specialize ints by default.  This all only matters with
+            # dynamic_shapes
         }
 
     @staticmethod
@@ -308,6 +303,10 @@ class VariableBuilder:
         id_dispatch = self._id_dispatch().get(id(value))
         if id_dispatch is not None:
             return id_dispatch(self, value)
+
+        # Note - There are some nested values where types mismatch!
+        # We want to get those out and wrap those.
+        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if istype(value, config.traceable_tensor_subclasses):
@@ -674,11 +673,7 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if (
-            type(value) is int
-            and not config.specialize_int
-            and config.dynamic_shapes
-        ):
+        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if (
@@ -1058,7 +1053,7 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_shape_should_be_static(e, source, is_tensor)
+        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

@@ -21,8 +21,8 @@ import torch
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
     from torch._inductor.ir import CleanDiv
+    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
 
     # TODO: CeilDiv, ModularIndexing
 
