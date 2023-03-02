@@ -18,6 +18,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
+    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
@@ -44,6 +45,7 @@ lowerings = {}
 layout_constraints = {}
 fallbacks = set()
 aten = torch.ops.aten
+tr_c10d = torch.ops.tr_c10d
 prims = torch.ops.prims
 needs_realized_inputs = set()
 
@@ -79,6 +81,7 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
+        aten._int_mm,
     ]
 )
 
@@ -1403,10 +1406,6 @@ make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
 
-# TODO(fdrocha): this should be removed once the register_pointwise(aten.bitwise_right_shift) below is uncommented
-make_fallback(aten.bitwise_right_shift, warn=False)
-
-
 add_layout_constraint(aten.convolution, constrain_to_fx_strides)
 
 
@@ -1716,10 +1715,15 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
-    if isinstance(value, (int, float, sympy.Expr)):
+    if isinstance(value, (int, float)):
 
         def inner_fn(index):
             return ops.constant(value, dtype)
+
+    elif isinstance(value, sympy.Expr):
+
+        def inner_fn(index):
+            return ops.index_expr(value, dtype)
 
     else:
         assert len(value.get_size()) == 0
@@ -1899,11 +1903,15 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
-def gather(x, dim, index):
+def gather(x, dim, index, sparse_grad=False):
+    # sparse_grad doesn't affect forward computation,
+    # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
     offset = len(x.get_size()) == 0
@@ -2553,7 +2561,7 @@ def reflection_pad2d_backward(grad_output, x, padding):
         # -----------------------------------------
         #   bottom-left |   bottom  |   bottom-right
         #
-        # The center area is the orignial matrix. Other areas are reflections.
+        # The center area is the original matrix. Other areas are reflections.
 
         center_x, center_y = x + top, y + left
         top_reflect_x, left_reflect_y = top - x, left - y
@@ -2697,7 +2705,10 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
         x_alt = ir.FloorDiv(
             x + 2 * padding[i] - (kernel_size[i] - 1) + 2 * (stride[i] - 1), stride[i]
         )
-
+        if V.graph.sizevars.size_hint((x_alt - 1) * stride[i] - x - padding[i]) >= 0:
+            # Sliding windows must start within the input or left padding
+            x_alt -= 1
+            V.graph.sizevars.guard_leq(0, x_alt * stride[i] - x - padding[i])
         if V.graph.sizevars.size_hint(x_out - x_alt) == 0:
             # ceil mode is actually a no-op, lets guard on that
             V.graph.sizevars.guard_equals(x_out, x_alt)
@@ -3766,9 +3777,7 @@ register_pointwise(aten.bitwise_not, override_fn_when_input_bool="logical_not")
 register_pointwise(aten.bitwise_or)
 register_pointwise(aten.bitwise_xor)
 register_pointwise(aten.bitwise_left_shift)
-# TODO(fdrocha): once https://github.com/openai/triton/pull/1153 is merged and we advance the triton pin past it
-# this should be uncommented
-# register_pointwise(aten.bitwise_right_shift)
+register_pointwise(aten.bitwise_right_shift)
 register_pointwise_numeric(aten.lgamma)
 erf = register_pointwise_numeric(aten.erf)
 register_lowering(
@@ -3791,12 +3800,12 @@ register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
-register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ge, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.eq, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ne, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.le, override_return_dtype=torch.bool)
+register_pointwise(aten.lt, override_return_dtype=torch.bool)
+register_pointwise(aten.ge, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.eq, override_return_dtype=torch.bool)
+register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
     aten.logical_and,
     type_promotion_kind=None,
@@ -3885,6 +3894,30 @@ def _realize(x):
     x.realize()
     return clone(x)
 
+
+try:
+    import torch.distributed._functional_collectives
+
+    @register_lowering(aten.wait_tensor)
+    def wait(input):
+        return TensorBox.create(ir.Wait.create(input))
+
+    @register_lowering(aten.all_reduce)
+    def allreduce(input, reduce_op, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.AllReduce.create(input, reduce_op, tag, ranks, group_size)
+        )
+
+    @register_lowering(aten.all_gather_into_tensor)
+    def all_gather_into_tensor(shard, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
+        )
+
+except ImportError:
+    log.info(
+        "Inductor support for distributed collectives depends on building torch.distributed"
+    )
 
 # populate lowerings defined in kernel/*
 from . import kernel

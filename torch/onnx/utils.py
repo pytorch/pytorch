@@ -1169,14 +1169,14 @@ def _model_to_graph(
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    if training is None or training == _C_onnx.TrainingMode.EVAL:
-        params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
-
     if (
         do_constant_folding
         and GLOBALS.export_onnx_opset_version
         >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
+        if training is None or training == _C_onnx.TrainingMode.EVAL:
+            params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
@@ -1469,6 +1469,15 @@ def _export(
 
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
+
+    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn(
+            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
+            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(

@@ -363,11 +363,11 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"({a} != 0) | ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -819,8 +819,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
+        return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
     def sign(x):
@@ -1372,12 +1371,12 @@ class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
         super().__init__(args, num_threads, tiling_factor)
 
-        # Since this kernel is only for checker but does not genreate any
+        # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
         metrics.generated_cpp_vec_kernel_count -= 1
 
-        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
         self._orig_wrapper_code = None
 
@@ -1543,7 +1542,7 @@ class CppVecKernelChecker(CppVecKernel):
             if _node.op in skip_io_nodes:
                 continue
 
-            if _node.target not in ["load", "get_index"]:
+            if _node.target not in ["load", "get_index", "constant"]:
                 # The body contains non load node
                 is_load_only = False
                 break
@@ -1552,6 +1551,23 @@ class CppVecKernelChecker(CppVecKernel):
                 _, name, _ = _node.args
                 load_dtype = V.graph.get_dtype(name)
                 is_load_only = True
+
+            # Support "constant" node
+            if _node.target == "constant":
+                _, _, load_dtype = _node.args
+
+                # Create and record the context
+                opt_ctx = OptimizationContext()
+                opt_ctx.dtype = load_dtype
+                opt_ctx.ops_name = _node.target
+                _node.meta[OptimizationContext.key] = opt_ctx
+
+                # TODO: Support BF16 and FP16
+                if load_dtype in [torch.float32, torch.int32]:
+                    is_load_only = True
+                else:
+                    is_load_only = False
+                    break
 
         return is_load_only, load_dtype
 
@@ -1562,11 +1578,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
-        # Recorde the graph wrapper code. The wrapper_code status could be
+        # Record the graph wrapper code. The wrapper_code status could be
         # changed during graph run. Regarding this checker, we also need to
         # run the graph but we don't expect to change any status that would
-        # impact the code generation. Hence, we record the graph wapper code
-        # and replace it with a dummy warpper_code and then restore to the
+        # impact the code generation. Hence, we record the graph wrapper code
+        # and replace it with a dummy wrapper_code and then restore to the
         # original one as long as the checker is finished.
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
@@ -1878,7 +1894,6 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
             ) as vec_checker:

@@ -208,7 +208,14 @@ class BaseSchedulerNode:
             return
 
         if (
-            isinstance(self, (SchedulerNode,))
+            (
+                isinstance(self, (SchedulerNode,))
+                # o what have i done.  lets make this an api
+                or (
+                    isinstance(self, ExternKernelSchedulerNode)
+                    and isinstance(self.node, ir.AllReduce)
+                )
+            )
             and config.inplace_buffers
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.triton.TritonKernel)
@@ -248,15 +255,20 @@ class BaseSchedulerNode:
                         V.graph.wrapper_code.codegen_inplace_reuse(
                             input_node.node, self.node
                         )
-                        V.kernel.args.make_inplace(
-                            input_node.get_name(), self.get_name()
-                        )
-                        # mutations not tracked in cpp kernels
-                        if isinstance(
-                            V.kernel, torch._inductor.codegen.triton.TritonKernel
-                        ):
-                            V.kernel.mutations.add(input_node.get_name())
-                            V.kernel.mutations.add(self.get_name())
+                        # hacky check for if V.kernel is a real kernel or NullHandler
+                        if hasattr(V.kernel, "args"):
+                            # if there isn't a triton kernel, then we don't need to call triton-specific things.
+                            # but TODO this might be a convenient place to signal to the Collective kernels to inplace
+                            # (and, can we make "kernel" less generic of a name?)
+                            V.kernel.args.make_inplace(
+                                input_node.get_name(), self.get_name()
+                            )
+                            # mutations not tracked in cpp kernels
+                            if isinstance(
+                                V.kernel, torch._inductor.codegen.triton.TritonKernel
+                            ):
+                                V.kernel.mutations.add(input_node.get_name())
+                                V.kernel.mutations.add(self.get_name())
                         return
 
         V.graph.wrapper_code.codegen_allocation(self.node)
@@ -312,6 +324,25 @@ class ExternKernelSchedulerNode(BaseSchedulerNode):
 
     def is_extern(self):
         return True
+
+    def can_inplace(self, read_dep: dependencies.MemoryDep):
+        if self.get_aliases() or self.is_template():
+            return False
+
+        if read_dep.name not in self.scheduler.name_to_node:
+            # don't allow reuse of an 'input' buffer, we don't own it
+            # (would this have been fixed if I tracked mutations properly above?)
+            return False
+
+        if not isinstance(self.node, torch._inductor.ir.AllReduce):
+            # TODO make this a property of the IR
+            return False
+
+        if len(self.read_writes.writes) == 1:
+            write_dep = next(iter(self.read_writes.writes))
+            return read_dep.numbytes_hint() == write_dep.numbytes_hint()
+
+        return False
 
 
 class NopKernelSchedulerNode(BaseSchedulerNode):

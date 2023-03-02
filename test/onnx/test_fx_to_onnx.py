@@ -20,7 +20,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             z = y.relu()
             return (y, z)
 
-        onnx_model = fx_onnx.export(func, self.opset_version, torch.randn(1, 1, 2))
+        _ = fx_onnx.export(func, torch.randn(1, 1, 2), opset_version=self.opset_version)
 
     @unittest.skip(
         "Conv Op is not supported at the time. https://github.com/microsoft/onnx-script/issues/397"
@@ -48,7 +48,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_model = fx_onnx.export(MNISTModel(), self.opset_version, tensor_x)
+        _ = fx_onnx.export(MNISTModel(), tensor_x, opset_version=self.opset_version)
 
     def test_trace_only_op_with_evaluator(self):
         model_input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
@@ -64,8 +64,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        onnx_model = fx_onnx.export(
-            ArgminArgmaxModel(), self.opset_version, model_input
+        _ = fx_onnx.export(
+            ArgminArgmaxModel(), model_input, opset_version=self.opset_version
         )
 
     def test_multiple_outputs_op_with_evaluator(self):
@@ -74,7 +74,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.topk(x, 3)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        onnx_model = fx_onnx.export(TopKModel(), self.opset_version, x)
+        _ = fx_onnx.export(TopKModel(), x, opset_version=self.opset_version)
 
 
 if __name__ == "__main__":

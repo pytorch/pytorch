@@ -503,6 +503,7 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.functional.max_pool1d,
         torch.nn.functional.max_pool2d,
         torch.nn.functional.max_pool3d,
+        torch.nn.functional.pixel_shuffle,
         torch.nn.functional.relu,
         torch.nn.functional.relu6,
         torch.avg_pool1d,

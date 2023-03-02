@@ -736,6 +736,15 @@ class SerializationMixin:
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 torch.save([a.storage(), s_bytes], f)
 
+    def test_safe_load_basic_types(self):
+        with tempfile.NamedTemporaryFile() as f:
+            data = {"int": 123, "str": "world", "float": 3.14, "bool": False}
+            torch.save(data, f)
+            f.seek(0)
+            loaded_data = torch.load(f, weights_only=True)
+            self.assertEqual(data, loaded_data)
+
+
 class serialization_method:
     def __init__(self, use_zip):
         self.use_zip = use_zip

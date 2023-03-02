@@ -317,6 +317,7 @@ class AutocastCPUTestLists:
             ("conv_transpose1d", conv_args_fp32[0]),
             ("conv_transpose2d", conv_args_fp32[1]),
             ("conv_transpose3d", conv_args_fp32[2]),
+            ("prelu", pointwise0_fp32 + element0_fp32),
         ]
         self.torch_fp32 = [
             ("poisson_nll_loss", mat0_bf16 + mat1_bf16 + (True, False, 1.e-8, torch.nn._reduction.get_enum('mean'))),

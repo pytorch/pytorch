@@ -23,7 +23,11 @@ class C10_API SymBool {
     return std::move(ptr_).release();
   }
 
+  // Only valid if is_symbolic()
   SymNode toSymNodeImpl() const;
+
+  // Guaranteed to return a SymNode, wrapping using base if necessary
+  SymNode wrap_node(const SymNode& base) const;
 
   bool expect_bool() const {
     TORCH_CHECK(!is_symbolic());
@@ -48,6 +52,8 @@ class C10_API SymBool {
   // that value.  Note that C++ comparison operations default to returning
   // bool, so it's not so common to have to call this
   bool guard_bool(const char* file, int64_t line) const;
+
+  bool has_hint() const;
 
   C10_ALWAYS_INLINE bool is_symbolic() const {
     return ptr_;

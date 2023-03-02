@@ -1,3 +1,4 @@
+import collections
 import inspect
 import types
 from typing import Dict, List
@@ -6,7 +7,7 @@ import torch._C
 from torch._guards import Guard, GuardSource
 
 from .. import variables
-from ..bytecode_transformation import create_instruction
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
@@ -33,9 +34,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return [create_instruction("CALL_FUNCTION", 2)]
+            return create_call_function(2, True)
         else:
-            return [create_instruction("CALL_FUNCTION", 1)]
+            return create_call_function(1, True)
 
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -354,12 +355,23 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
 
     def enter(self, tx):
-        tx.output.create_proxy(
-            "call_function",
-            torch.cuda.set_stream,
-            (self.target_values[0].as_proxy(),),
-            {},
-        )
+        # CUDA stream generated inside of traced function
+        if self.target_values[0].as_proxy() is not None:
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.set_stream,
+                (self.target_values[0].as_proxy(),),
+                {},
+            )
+        # CUDA stream passed from outside of traced function
+        else:
+            stream = self.target_values[0].value
+            tx.output.create_proxy(
+                "call_function",
+                torch._C._cuda_setStream,
+                (stream.stream_id, stream.device_index, stream.device_type),
+                {},
+            )
         torch.cuda.set_stream(self.target_values[0].value)
 
     def exit(self, tx, *args):
@@ -371,13 +383,16 @@ class CUDAStreamContextVariable(ContextWrappingVariable):
         )
         torch.cuda.set_stream(self.initial_values[0].value)
 
+    def module_name(self):
+        return "torch.cuda"
+
     def fn_name(self):
-        return "cuda.stream"
+        return "stream"
 
 
 class CUDAStreamVariable(VariableTracker):
     def __init__(self, proxy, value, **kwargs):
-        if "example_value" in proxy.node.meta:
+        if proxy is not None and "example_value" in proxy.node.meta:
             assert proxy.node.meta["example_value"] == value
         super().__init__(**kwargs)
         self.proxy = proxy
@@ -422,7 +437,7 @@ class WithExitFunctionVariable(VariableTracker):
             output.extend(loads)
             output.extend(
                 [
-                    create_instruction("CALL_FUNCTION", len(loads)),
+                    *create_call_function(len(loads), True),
                     create_instruction("SETUP_WITH", target=self.target),
                     create_instruction("POP_TOP"),
                 ]
@@ -673,8 +688,18 @@ class SkipFilesVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builtin import BuiltinVariable
+        from .dicts import ConstDictVariable
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
+        elif self.value is collections.OrderedDict and (
+            len(args) == 0 or len(args) == 1 and isinstance(args[0], ConstDictVariable)
+        ):
+            return BuiltinVariable.call_dict_helper(
+                collections.OrderedDict, None if len(args) == 0 else args[0]
+            )
         else:
             try:
                 path = inspect.getfile(self.value)
@@ -739,3 +764,17 @@ class NumpyVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+
+# Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
+class NullVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NullVariable, self).__init__(**kwargs)
+
+    def __str__(self):
+        return "NullVariable"
+
+    def reconstruct(self, codegen):
+        if sys.version_info < (3, 11):
+            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+        return [create_instruction("PUSH_NULL")]

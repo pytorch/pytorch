@@ -849,6 +849,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
+    @requires_cuda()
+    def test_sub_alpha_scalar_repro(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device="cuda", dtype=torch.float64))
+
+    def test_embedding_backward_broadcasting_decomp(self):
+        def f(grad_output, indices):
+            num_weights = 10
+            padding_idx = 1
+            scale_grad_by_freq = True
+            return torch.ops.aten.embedding_dense_backward(
+                grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
+            )
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        grad_output = torch.ones(2, 4, 3, dtype=torch.float16)
+        indices = torch.ones(2, 4, dtype=torch.int64)
+
+        out_ref = f(grad_output, indices)
+        out_test = f_compiled(grad_output, indices)
+
+        self.assertEqual(out_ref, out_test)
+
     def test_reformer_eval(self):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
@@ -2360,6 +2387,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f, torch.randn(4, 5), aten_graph=True, tracing_mode="symbolic"
         )
         self.assertEqual(gm(inp).shape, f(inp).shape)
+
+    @torch._dynamo.config.patch("dynamic_shapes", True)
+    def test_dynamic_shapes_implicit_guard(self):
+        def f(x):
+            y = x * x.size(x.shape[0])
+            torch.sum(y, [y.shape[0]])
+            return y
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        opt_fn(torch.randn(3, 1, 1, 1, 1))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch("dynamic_shapes", True)
+    def test_dynamic_shapes_float_guard(self):
+        def f(x):
+            return torch.nn.functional.dropout(x, x.shape[0] / 6)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        opt_fn(torch.randn(3))
+        self.assertEqual(cnt.frame_count, 1)
 
     @torch._dynamo.config.patch(dynamic_shapes=True, capture_scalar_outputs=True)
     def test_tensor_item(self):

@@ -124,6 +124,18 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
+
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
 
 class _TestParametrizer:
     """
@@ -2130,18 +2142,15 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
-        if TEST_WITH_TORCHDYNAMO:
+        super_run = super().run
+        # TODO remove version check once dynamo supports 3.11
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():

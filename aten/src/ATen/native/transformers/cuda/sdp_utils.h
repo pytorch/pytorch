@@ -29,6 +29,15 @@ To bit_cast(From f) {
   return t;
 }
 
+// This helper function creates a constexpr std::array
+// From a compile time list of values
+template <typename V, typename... T>
+constexpr auto array_of(T&&... t)
+    -> std::array < V, sizeof...(T) >
+{
+    return {{ std::forward<T>(t)... }};
+}
+
 struct sdp_params {
   const at::Tensor& query;
   const at::Tensor& key;
@@ -115,7 +124,7 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
@@ -138,9 +147,34 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
 
   // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
   for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] == 0) {
+      if (debug) {
+        TORCH_WARN("Memory efficient attention does not support sequence_length == 0");
+      }
+      return false;
+    }
+  }
+
+  return true;
+}
+
+inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
+  if (!params.query.is_nested()) {
+    return true;
+  }
+
+  const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
+  const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = params.query.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
+        TORCH_WARN("Packed projection for fused kernels does not support sequence_length <= 1");
       }
       return false;
     }
@@ -160,12 +194,10 @@ inline bool check_for_nested_inputs(sdp_params params, bool debug){
 }
 
 inline bool check_requires_grad(sdp_params params, bool debug) {
-  bool any_tensors_are_subclass =
-      at::areAnyTensorSubclassLike({params.query, params.key, params.value});
   const bool any_inputs_require_grad = params.query.requires_grad() ||
       params.key.requires_grad() || params.value.requires_grad();
   const bool gradmode_enabled = at::GradMode::is_enabled();
-  if ((any_inputs_require_grad && gradmode_enabled) || any_tensors_are_subclass) {
+  if ((any_inputs_require_grad && gradmode_enabled)) {
     if (debug) {
       TORCH_WARN("Flash Attention does not currently support training.");
     }
@@ -395,6 +427,18 @@ inline bool check_gpu_sm86_head_dim_128(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_requires_grad_and_head_dim_128_and_sm86(sdp_params params, bool debug){
+  // Flash Attention will raise an error in the backward pass if the head_dim size is 128
+  // And the device is not sm80, the other head_dim check catches everything but sm86
+  if (!check_requires_grad(params, false) && !check_gpu_sm86_head_dim_128(params, false)){
+    if (debug){
+      TORCH_WARN("Flash attention currently doesn't support training with head_dim == 128 on sm86.");
+    }
+    return false;
+  }
+  return true;
+}
+
 inline bool check_use_deterministic_algorithms(sdp_params params, bool debug) {
   auto& ctx = at::globalContext();
   if (ctx.deterministicAlgorithms()) {
@@ -421,16 +465,18 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 8> constraints {{
+
+  // Define gate functions that determine if a flash kernel can be ran
+  // Replace with std::to_array when we migrate to c++20
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_runtime_disabled_flash,
       check_tensor_shapes,
       check_equal_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
-      check_for_nested_inputs,
-      check_for_seq_len_1_nested_tensor}};
+      check_requires_grad_and_head_dim_128_and_sm86,
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -439,10 +485,10 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
 
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
-    static const std::array<at::ScalarType, 2> sm80_flash_dtypes{at::kHalf, at::kBFloat16};
+    constexpr auto sm80_flash_dtypes = array_of<at::ScalarType> (at::kHalf, at::kBFloat16);
     return check_tensor_dtype(params, sm80_flash_dtypes, debug);
   } else {
-    static const std::array<at::ScalarType, 1> default_flash_dtypes{at::kHalf};
+    constexpr auto default_flash_dtypes = array_of<at::ScalarType> (at::kHalf);
     return check_tensor_dtype(params, default_flash_dtypes, debug);
   }
 }
@@ -452,12 +498,12 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
   TORCH_CHECK(!debug, "Torch was not compiled with flash attention.");
   return false;
 #endif
-  // Constraints specific to flash attention
-  static const std::vector<caffe2::ScalarType> flash_dtypes{
-      at::kHalf, at::kFloat, at::kBFloat16};
+  // Constraints specific to mem efficient attention
+  constexpr auto mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
 
   //  Define gate functions that determine if a flash kernel can be ran
-  constexpr std::array<bool(*)(sdp_params, bool), 11> constraints{{
+  constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_gpu_sm50_or_greater,
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
@@ -466,15 +512,15 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_gpu_sm86_head_dim_128,
-      check_for_seq_len_1_nested_tensor,
+      check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
-      check_use_deterministic_algorithms}};
+      check_use_deterministic_algorithms);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
     }
   }
-  if (!check_tensor_dtype(params, flash_dtypes, debug)) {
+  if (!check_tensor_dtype(params, mem_efficient_dtypes, debug)) {
     return false;
   }
   return true;
