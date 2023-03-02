@@ -18,6 +18,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
+    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
@@ -1902,11 +1903,15 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
 @register_lowering(aten.gather, type_promotion_kind=None)
-def gather(x, dim, index):
+def gather(x, dim, index, sparse_grad=False):
+    # sparse_grad doesn't affect forward computation,
+    # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
     assert index.get_dtype() == torch.int64
     offset = len(x.get_size()) == 0
@@ -3795,12 +3800,12 @@ register_pointwise(aten.sign, override_fn_when_input_bool="identity")
 register_pointwise(aten.ceil)
 register_pointwise(aten.signbit, override_return_dtype=torch.bool)
 
-register_pointwise(aten.le, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.lt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ge, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.gt, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.eq, type_promotion_kind=None, override_return_dtype=torch.bool)
-register_pointwise(aten.ne, type_promotion_kind=None, override_return_dtype=torch.bool)
+register_pointwise(aten.le, override_return_dtype=torch.bool)
+register_pointwise(aten.lt, override_return_dtype=torch.bool)
+register_pointwise(aten.ge, override_return_dtype=torch.bool)
+register_pointwise(aten.gt, override_return_dtype=torch.bool)
+register_pointwise(aten.eq, override_return_dtype=torch.bool)
+register_pointwise(aten.ne, override_return_dtype=torch.bool)
 logical_and = register_pointwise(
     aten.logical_and,
     type_promotion_kind=None,
