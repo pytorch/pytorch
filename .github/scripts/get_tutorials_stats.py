@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 import os.path
 from typing import List, Optional, Tuple, Dict, Union
-import boto3
-from botocore.exceptions import ClientError
+import boto # type: ignore[import]
+from botocore.exceptions import ClientError # type: ignore[import]
 from pprint import pprint
 
 dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
