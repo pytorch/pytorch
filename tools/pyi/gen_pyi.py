@@ -300,7 +300,11 @@ def gen_nn_functional(fm: FileManager) -> None:
         "one_hot",
         "scaled_dot_product_attention",
     ]
-    import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
+    import_code = [
+        "from .. import (",
+        *[f"    {i}," for i in imports],
+        ")",
+    ]
     # TODO make these types more precise
     dispatch_code = ["{}: Callable".format(_) for _ in (dispatches + from_c)]
     fm.write_with_template(
