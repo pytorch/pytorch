@@ -5,6 +5,8 @@ from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
 from math import prod
 
+__all__ = ["FlopCounterMode"]
+
 aten = torch.ops.aten
 
 def get_shape(i):
