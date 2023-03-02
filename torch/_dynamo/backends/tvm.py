@@ -125,14 +125,16 @@ def tvm(gm, example_inputs, *, scheduler=None, trials=20000):
     def exec_tvm(*i_args):
         args = [a.contiguous() for a in i_args]
         shape_info, _ = m.get_input_info()
-        active_inputs = set(name for name, _ in shape_info.items())
+        active_inputs = {name for name, _ in shape_info.items()}
         for idx, arg in enumerate(args, 0):
             if arg.dim() != 0:
                 if arg.requires_grad:
                     arg = arg.detach()
                 inp_name = f"inp_{idx}"
                 if inp_name not in active_inputs:
-                    log.warning(f"input {inp_name} skipped as not found in tvm's runtime library")
+                    log.warning(
+                        f"input {inp_name} skipped as not found in tvm's runtime library"
+                    )
                     continue
                 m.set_input(
                     inp_name,

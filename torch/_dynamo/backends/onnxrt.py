@@ -82,11 +82,13 @@ def onnxrt(gm, example_inputs, *, filename=None, provider=None):
 
     def _call(*initial_args):
         binding = session.io_binding()
-        active_inputs = set(inp.name for inp in session.get_inputs())
+        active_inputs = {inp.name for inp in session.get_inputs()}
         args = [a.contiguous() for a in initial_args]
         for name, value in zip(input_names, args):
             if name not in active_inputs:
-                log.warning(f"input {name} skipped as not found in onnx inference session")
+                log.warning(
+                    f"input {name} skipped as not found in onnx inference session"
+                )
                 continue
             dev = value.device
             binding.bind_input(
