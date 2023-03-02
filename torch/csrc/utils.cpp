@@ -195,15 +195,6 @@ void THPPointer<THPStorage>::free() {
     Py_DECREF(ptr);
 }
 
-void storage_copy(at::Storage dst, at::Storage src, bool non_blocking) {
-  auto dst_options = c10::TensorOptions().device(dst.device()).dtype(at::kByte);
-  auto dst_t = at::empty({0}, {}, dst_options).set_(dst);
-
-  auto src_options = c10::TensorOptions().device(src.device()).dtype(at::kByte);
-  auto src_t = at::empty({0}, {}, src_options).set_(src);
-  dst_t.copy_(src_t, non_blocking);
-}
-
 void storage_fill(at::Storage self, uint8_t value) {
   auto options = c10::TensorOptions().device(self.device()).dtype(at::kByte);
   auto self_t = at::empty({0}, {}, options).set_(self);

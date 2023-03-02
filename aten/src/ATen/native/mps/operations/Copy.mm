@@ -300,22 +300,27 @@ at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
   TORCH_CHECK(dst.defined(), "dst is undefined");
   TORCH_CHECK(src.defined(), "src is undefined");
 
+  bool needs_broadcasting = false;
+
   if (src.numel() == 0 || dst.is_same(src)) {
     return dst;
   }
   if (dst.numel() == 0) {
     dst.resize_as_(src);
   }
+  if (dst.dim() > src.dim()) {
+    needs_broadcasting = true;
+  }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kCPU) {
-    return copy_from_mps_(dst, src, non_blocking);
+    return copy_from_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   if (src.device().type() == at::kCPU && dst.device().type() == at::kMPS) {
-    return copy_to_mps_(dst, src, non_blocking);
+    return copy_to_mps_(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
 
   if (src.device().type() == at::kMPS && dst.device().type() == at::kMPS) {
-    return copy_kernel_mps(dst, src, non_blocking);
+    return copy_kernel_mps(dst, needs_broadcasting ? src.expand_as(dst) : src, non_blocking);
   }
   TORCH_INTERNAL_ASSERT(
       src.device().type() == DeviceType::MPS,

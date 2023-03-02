@@ -79,9 +79,9 @@ class PersistentCache:
         self.global_cache_path = config.global_cache_path
 
         if torch.cuda.is_available():
-            self.dinfo = repr(
-                torch.cuda.get_device_properties(torch.cuda.current_device())
-            )
+            self.dinfo = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).name
             self.vinfo = torch.version.cuda
 
     def get_local_cache(self):
@@ -166,6 +166,7 @@ class PersistentCache:
                 benchmark(choice),
                 True,
             )
+            timings[choice] = local_cache[name][inputs][choice_hash]
 
         if benchmarked:
             self.update_local_cache(local_cache)

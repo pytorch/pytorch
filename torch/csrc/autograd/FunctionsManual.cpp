@@ -453,10 +453,14 @@ Tensor pow_backward_exponent(
   } else {
     cond = at::logical_and(self == 0, exponent >= 0);
   }
+  auto promoted_dtype = at::result_type(self, exponent);
+  // `.to()` is no-op if dtype is same.
+  auto self_ = self.to(promoted_dtype);
+
   auto out =
       grad *
       at::where(
-          cond, at::zeros({}, grad.options()), (result * self.log()).conj());
+          cond, at::zeros({}, grad.options()), (result * self_.log()).conj());
   return handle_r_to_c(exponent, std::move(out));
 }
 
@@ -466,6 +470,9 @@ Tensor pow_backward_exponent(
     const Tensor& exponent,
     Tensor result) {
   auto grad_lambda = [](Tensor a, Scalar b) { return (a * b.log()).conj(); };
+  auto base_ = exponent.is_complex() && !base.isComplex()
+      ? base.toComplexDouble()
+      : base;
   if (base.equal(0.0)) {
     auto cond = [](auto exp) {
       if (exp.is_complex()) {
@@ -477,10 +484,10 @@ Tensor pow_backward_exponent(
     auto out = grad *
         at::where(cond(exponent),
                   at::zeros({}, grad.options()),
-                  grad_lambda(std::move(result), base));
+                  grad_lambda(std::move(result), base_));
     return handle_r_to_c(exponent, std::move(out));
   } else {
-    auto out = grad * grad_lambda(std::move(result), base);
+    auto out = grad * grad_lambda(std::move(result), base_);
     return handle_r_to_c(exponent, std::move(out));
   }
 }
@@ -1562,13 +1569,12 @@ Tensor var_backward(
     Tensor grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<at::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
+  const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
-    // To apease ASAN
-    auto n = self.numel();
-    if (n == correction) {
+    const auto dof = c10::SymFloat(self.sym_numel()) - correction;
+    if (dof <= 0) {
       // when n == correction, 2 / (n - correction) is infinity
       // when self == self.mean(), we return NaN because infinity * 0 = NaN
       // otherwise, we return infinity because infinity * c = infinity, for all
@@ -1579,18 +1585,16 @@ Tensor var_backward(
                  std::numeric_limits<double>::quiet_NaN(),
                  std::numeric_limits<double>::infinity());
     } else {
-      return (c10::SymFloat(2.0) /
-              c10::SymFloat(self.sym_numel() - correction)) *
-          grad * (self - self.mean());
+      return (c10::SymFloat(2.0) / dof) * grad * (self - self.mean());
     }
   }
   auto dim = dim_opt.value();
   if (!keepdim && self.dim() > 1) {
     grad = unsqueeze_multiple(grad, dim, self.sym_sizes().size());
   }
-  const c10::SymInt dof = _safe_size(self.sym_sizes(), dim) - correction;
+  const c10::SymFloat rnumel(_safe_size(self.sym_sizes(), dim));
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-  return (c10::SymFloat(2.0) / c10::SymFloat(dof)) * grad *
+  return (c10::SymFloat(2.0) / (rnumel - correction)) * grad *
       (self - self.mean(dim, /*keepdim=*/true));
 }
 
@@ -1599,10 +1603,10 @@ Tensor std_backward(
     const Tensor& grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
-  return var_backward(std::move(grad_var), self, dim, correction, keepdim);
+  return var_backward(std::move(grad_var), self, dim, correction_opt, keepdim);
 }
 
 Tensor var_mean_backward(
@@ -1610,12 +1614,11 @@ Tensor var_mean_backward(
     const Tensor& gmean,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
   Tensor gself;
   if (gvar.defined()) {
-    gself = var_backward(gvar, self, dim_opt, correction, keepdim);
+    gself = var_backward(gvar, self, dim_opt, correction_opt, keepdim);
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
@@ -1635,12 +1638,11 @@ Tensor std_mean_backward(
     const Tensor& self,
     const Tensor& std,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
-  auto correction = correction_opt.value_or(1);
   Tensor gself;
   if (gstd.defined()) {
-    gself = std_backward(std, gstd, self, dim_opt, correction, keepdim);
+    gself = std_backward(std, gstd, self, dim_opt, correction_opt, keepdim);
   }
   if (gmean.defined()) {
     auto aux = mean_backward(
@@ -1990,12 +1992,8 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction) {
-  auto grad_target = [&] {
-    if (self.is_mps()) {
-      return self.neg().log1p_().sub_(self.log());
-    }
-    return at::logit(self).neg_();
-  }();
+  auto grad_target = at::logit(self).neg_();
+
   if (!areAnyTensorSubclassLike({grad})) {
     grad_target.mul_(grad);
   } else {

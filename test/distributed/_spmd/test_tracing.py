@@ -47,10 +47,9 @@ class TraceDeviceMeshTestBase:
             ]
 
             def fn(tensor: torch.Tensor):
-                tensor_to_reduce = CommTensor(tensor.clone())
-                mesh.all_reduce(tensor_to_reduce, mesh_dim=dim)
+                tensor = mesh.all_reduce(tensor, mesh_dim=dim)
                 # multiply with 1 to trigger wait on read during tracing.
-                return tensor_to_reduce * 1
+                return tensor * 1
 
             # use a local_tensor + 1 for tracing to make sure that we are not
             # simply replaying recorded tensor value
