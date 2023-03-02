@@ -617,6 +617,11 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     # After that, weight is a MKLDNN tensor and it replaces the original one in graph
     gm = prepack_weight_in_graph(gm)
 
+    # Since oneDNN requires inverse scales of PyTorch's scale
+    # We should move it weight_scale's inverse from kernel run time into the graph preprocess.
+    # It will reduce the runtime overhead.
+    gm = inverse_weight_scale_in_graph(gm)
+
     return gm
 
 def prepare_dequant_for_fusion(gm: torch.fx.GraphModule):
@@ -790,6 +795,59 @@ def _prepack_linear_weight(gm: torch.fx.GraphModule):
 def prepack_weight_in_graph(gm: torch.fx.GraphModule):
     gm = _prepack_conv_weight(gm)
     gm = _prepack_linear_weight(gm)
+    return gm
+
+def _replace_weight_scale_by_inv_weight_scale(gm: torch.fx.GraphModule,
+                                     w_scales_node: torch.fx.Node):
+    w_scales = getattr(gm, w_scales_node.target)
+    inv_w_scales = (1.0 / w_scales.to(dtype=torch.float64)).to(dtype=torch.float32)
+    w_scales_attr_name = w_scales_node.target
+    inv_w_scales_attr_name = w_scales_attr_name + '_inv'
+    gm.graph.owning_module._buffers[inv_w_scales_attr_name] = inv_w_scales
+    setattr(gm, inv_w_scales_attr_name, gm.graph.owning_module._buffers[inv_w_scales_attr_name])
+    w_scales_node.target = inv_w_scales_attr_name
+    delattr(gm, w_scales_attr_name)
+
+def _inverse_conv_weight_scales(gm: torch.fx.GraphModule):
+    # Since the scale in PyTorch is an inverse to what's oneDNN needed
+    decomposed = torch.ops.quantized_decomposed
+    for node in gm.graph.nodes:
+        if node.target == decomposed.conv_unary_inductor:
+            # node args = (qx, x_scale, x_zp,
+            #              qw, w_scale, w_zp, w_axis,
+            #              bias, stride, padding, dilation, groups,
+            #              y_scale, y_zp, unary_post_op_name)
+            w_scales_node = node.args[4]
+            _replace_weight_scale_by_inv_weight_scale(gm, w_scales_node)
+        elif node.target == decomposed.conv_binary_inductor:
+            # node args = (qx, x_scale, x_zp,
+            #              qaccum, accum_scale, accum_zp,
+            #              qw, w_scale, w_zp, w_axis,
+            #              bias, stride, padding, dilation, groups,
+            #              y_scale, y_zp, unary_post_op_name)
+            w_scales_node = node.args[7]
+            _replace_weight_scale_by_inv_weight_scale(gm, w_scales_node)
+    gm.graph.lint()
+    gm.recompile()
+    return gm
+
+def _inverse_linear_weight_scales(gm: torch.fx.GraphModule):
+    # Since the scale in PyTorch is an inverse to what's oneDNN needed
+    decomposed = torch.ops.quantized_decomposed
+    for node in gm.graph.nodes:
+        if node.target == decomposed.linear_unary_inductor:
+            # node arges = (qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis,
+            #               bias, y_scale, y_zp, unary_post_op_name)
+            w_scales_node = node.args[4]
+            _replace_weight_scale_by_inv_weight_scale(gm, w_scales_node)
+    gm.graph.lint()
+    gm.recompile()
+    return gm
+
+def inverse_weight_scale_in_graph(gm: torch.fx.GraphModule):
+    # Since oneDNN requires inverse scales of PyTorch's scale
+    gm = _inverse_conv_weight_scales(gm)
+    gm = _inverse_linear_weight_scales(gm)
     return gm
 
 def _quantize_and_replace_weight(
