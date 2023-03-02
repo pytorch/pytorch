@@ -435,7 +435,7 @@ AARCH64_ASM_MICROKERNEL_SRCS = [
 ] + [
     "xnnpack_wrappers/qc8-gemm/gen/qc8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
     "xnnpack_wrappers/qs8-gemm/gen/qs8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
-] if read_config("pt", "is_oss", "0") == "0" else []
+] if native.read_config("pt", "is_oss", "0") == "0" else []
 
 PROD_NEONFP16ARITH_AARCH64_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/amalgam/neonfp16arith-aarch64.c",
@@ -1665,7 +1665,7 @@ ALL_F16C_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/math/cvt-f32-f16-f16c.c",
 ] + [
     "xnnpack_wrappers/f16-avgpool/f16-avgpool-9p8x-minmax-f16c-c8.c",
-] if read_config("pt", "is_oss", "0") == "0" else []
+] if native.read_config("pt", "is_oss", "0") == "0" else []
 
 ALL_FMA3_MICROKERNEL_SRCS = [
     "xnnpack_wrappers/f16-dwconv/gen/f16-dwconv-3p8c-minmax-fma3-acc2.c",
