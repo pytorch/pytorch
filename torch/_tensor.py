@@ -1362,6 +1362,8 @@ class Tensor(torch._C._TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
+        elif torch_device_type == "ort":
+            device_type = DLDeviceType.kDLExtDev
         else:
             raise ValueError(
                 "Unknown device type {} for Dlpack".format(torch_device_type)
