@@ -306,10 +306,11 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
       self_dim == 4 && self.is_contiguous() &&
       mat2_dim == 4 && mat2.is_contiguous() &&
       !(GradMode::is_enabled() && (self.requires_grad() || mat2.requires_grad()))) {
-    auto n_heads = self_sizes.select(0, 1).select(0, 0).item<int64_t>();
-    auto self_first_dim_n_heads = at::all(self_sizes.select(1, 0) == n_heads).item<bool>();
-    auto mat2_first_dim_n_heads = at::all(mat2_sizes.select(1, 0) == n_heads).item<bool>();
-    if (self_first_dim_n_heads && mat2_first_dim_n_heads) {
+    const auto& self_opt_head_dim = self_ptr->opt_size(1);
+    const auto& mat2_opt_head_dim = mat2_ptr->opt_size(1);
+    if (self_opt_head_dim.has_value() &&
+        mat2_opt_head_dim.has_value() &&
+        self_opt_head_dim.value() == mat2_opt_head_dim.value()) {
       return matmul_with_bmm_nested(self, mat2);
     }
   }

@@ -7431,6 +7431,7 @@
   dispatch:
     CPU: masked_scatter__cpu
     CUDA: masked_scatter__cuda
+    MPS: masked_scatter__mps
   autogen: masked_scatter.out
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
@@ -9563,6 +9564,7 @@
   structured: True
   dispatch:
     CPU, CUDA: pow_Scalar_out
+    MPS: pow_Scalar_out_mps
   tags: pointwise
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor

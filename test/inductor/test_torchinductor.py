@@ -20,6 +20,7 @@ import sympy
 import torch
 
 import torch._dynamo
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
@@ -95,6 +96,7 @@ slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
+
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
 # avx512vl, and avx512dq at least. So we will skip the test case if one processor
@@ -432,7 +434,6 @@ def check_model(
                     assert correct_val.dtype == actual_val.dtype
 
     if check_gradient:
-
         # generate random unit norm gradients
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
@@ -820,6 +821,13 @@ class CommonTemplate:
         a = torch.randint(256, (1,), dtype=torch.uint8)
         b = torch.randint(256, (8390,), dtype=torch.uint8)
         self.common(fn, (a, b))
+
+    def test_compar(self):
+        def fn(x):
+            return x.gt(3.5), x.ge(3.5), x.eq(3.5), x.le(2.5), x.lt(3.5), x.ne(3.5)
+
+        a = torch.tensor([3])
+        self.common(fn, (a,))
 
     def test_horizonal_fusion1(self):
         def fn(a, b, c):
@@ -2167,6 +2175,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -3113,7 +3122,6 @@ class CommonTemplate:
             ),
             torch.randint(16, (16, 16), device=self.device),
         ):
-
             inputs = (
                 torch.randint(0, 1, [1, 16], dtype=torch.bool, device=self.device),
                 inp,
@@ -4166,18 +4174,38 @@ class CommonTemplate:
 
         self.common(fn, (torch.zeros([4, 256, 296, 304]), torch.zeros([2292, 5])))
 
-    @requires_decomp(aten.nll_loss_forward)
     def test_nll_loss_forward(self):
         def fn(a, b):
             return aten.nll_loss_forward(a, b, None, 1, -100)
 
-        self.common(
-            fn,
-            (
-                torch.randn([5, 5]),
-                torch.zeros([5], dtype=torch.int64),
-            ),
+        labels = (
+            torch.zeros([5], dtype=torch.int64),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64),
         )
+        inps = (torch.randn(5, 5), torch.randn(5, 5))
+        for a, b in zip(inps, labels):
+            self.common(
+                fn,
+                (a, b),
+            )
+
+    def test_nll_loss_backward(self):
+        def fn(a, b, c):
+            return aten.nll_loss_backward(
+                a, b, c, None, 1, -100, torch.tensor(1.0, device=self.device)
+            )
+
+        labels = (
+            torch.zeros([5], dtype=torch.int64),
+            torch.tensor([-100, -100, 3, -100, -100], dtype=torch.int64),
+        )
+        inps = (torch.randn(5, 5), torch.randn(5, 5))
+        grad_outs = (torch.randn(()), torch.randn(()))
+        for a, b, c in zip(grad_outs, inps, labels):
+            self.common(
+                fn,
+                (a, b, c),
+            )
 
     def test_isinf(self):
         def fn(x):
@@ -5166,7 +5194,6 @@ class CommonTemplate:
 
     def test_conv_backward(self):
         def fn(rank4_inps, rank3_inps, rank5_inps):
-
             out1 = aten.convolution_backward(
                 *rank4_inps,
                 [C],
@@ -5458,7 +5485,6 @@ class CommonTemplate:
             self.assertTrue(same(opt(*inputs), fn(*inputs)))
 
     def test_list_clearing(self):
-
         if self.device == "cpu":
             contexts = [contextlib.nullcontext]
         else:
@@ -5984,8 +6010,6 @@ if HAS_CPU:
                 "randn",
                 "isnan",
                 "rand",
-                "logical_and",
-                "logical_or",
             ]
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
@@ -6033,6 +6057,59 @@ if HAS_CPU:
                     compiled = compile_fx_inner(traced, [x])
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test__adaptive_avg_pool2d(self):
+            def wrap_fn(oh, ow):
+                def fn(x):
+                    return torch._adaptive_avg_pool2d(x, (oh, ow))
+
+                return fn
+
+            bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()]
+            ih = [16, 65]
+            iw = ih
+            oh = ih
+            ow = ih
+            for _ih, _iw, _oh, _ow, _simd_len in itertools.product(
+                ih, iw, oh, ow, bit_widths
+            ):
+                x = torch.randn(2, 3, _ih, _iw).to(memory_format=torch.channels_last)
+                _fn = wrap_fn(_oh, _ow)
+                with config.patch({"cpp.simdlen": _simd_len}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    compiled = torch.compile(_fn)
+                    compiled(x)
+                    assert same(_fn(x), compiled(x), equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_vec_logical_and_or(self):
+            def wrap_fn(op: Callable):
+                def fn(x: torch.Tensor, y: torch.Tensor):
+                    return torch.where(op(x, y), 1.0, 0.0)
+
+                return fn
+
+            x = torch.randn(64)
+            y = torch.randn(64)
+            logical_fns = [torch.logical_and, torch.logical_or]
+            for logical_fn in logical_fns:
+                _fn = wrap_fn(logical_fn)
+                torch._dynamo.reset()
+                metrics.reset()
+                compiled = torch.compile(_fn)
+
+                compiled(x, y)
+                assert same(_fn(x, y), compiled(x, y), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6539,7 +6616,6 @@ if HAS_CPU:
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
-            assert metrics.generated_cpp_vec_kernel_count == 0
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -6929,9 +7005,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 output_res = model_opt(input)
                 output_ref.sum().backward()
                 output_res.sum().backward()
-                for (p_ref, p_res) in zip(
-                    model_ref.parameters(), model_opt.parameters()
-                ):
+                for p_ref, p_res in zip(model_ref.parameters(), model_opt.parameters()):
                     self.assertEqual(p_ref.grad, p_res.grad)
                 with torch.no_grad():
                     for param in model_ref.parameters():
@@ -7327,6 +7401,53 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             model = torch._dynamo.optimize("inductor")(model)
             x = torch.rand(1024, 20, 16).to(device)
             model(x)
+
+
+if HAS_CPU:
+
+    class TestFull(TestCase):
+        def test_full_dtype(self):
+            pytypes = (
+                bool,
+                int,
+                float,
+                # TODO: Triton's JITFunction._type_of has no support for complex
+                # complex,
+            )
+
+            dtypes = (
+                torch.bool,
+                torch.int32,
+                torch.int64,
+                torch.float32,
+                torch.float64,
+                None,
+                # torch.complex64,
+                # torch.complex128,
+            )
+
+            def fn(pytype, dtype):
+                if pytype is bool:
+                    fill_value = True
+                elif pytype is int:
+                    fill_value = 42
+                elif pytype is float:
+                    fill_value = 42.0
+                else:
+                    raise AssertionError(f"Unexpected Python type: {pytype}")
+
+                return torch.full(
+                    (4, 6), fill_value, dtype=dtype, device=torch.device("cpu")
+                )
+
+            fn_opt = torch._dynamo.optimize("inductor")(fn)
+
+            for pytype, dtype in itertools.product(pytypes, dtypes):
+                with enable_python_dispatcher():
+                    with torch.no_grad():
+                        ret_opt = fn_opt(pytype, dtype)
+
+                self.assertEqual(ret_opt, fn(pytype, dtype))
 
 
 if __name__ == "__main__":
