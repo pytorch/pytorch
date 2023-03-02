@@ -2867,10 +2867,7 @@ def nll_loss_forward(
     if reduction == Reduction.SUM.value:
         result = result.sum()
     elif reduction == Reduction.MEAN.value:
-        if weight is None:
-            result = result.sum() / total_weight
-        else:
-            result = result.sum() / total_weight
+        result = result.sum() / total_weight
 
     return result, total_weight
 
