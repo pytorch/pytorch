@@ -17,8 +17,7 @@ jobs:
     with:
       sync-tag: macos-12-py3-arm64-build
       build-environment: macos-12-py3-arm64
-      xcode-version: "13.3.1"
-      runner-type: macos-12-xl
+      runner-type: macos-m1-12
       build-generates-artifacts: true
       # To match the one pre-installed in the m1 runners
       python_version: 3.9.12
@@ -31,7 +30,6 @@ jobs:
       MACOS_SCCACHE_S3_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
 
   macos-12-py3-arm64-mps-test:
-    if: false
     name: macos-12-py3-arm64-mps
     uses: ./.github/workflows/_mac-test-mps.yml
     needs: macos-12-py3-arm64-build

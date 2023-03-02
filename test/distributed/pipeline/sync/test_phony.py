@@ -9,6 +9,7 @@
 import torch
 
 from torch.distributed.pipeline.sync.phony import get_phony
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_phony_size():
@@ -50,3 +51,7 @@ def test_phony_in_autograd_function():
     assert p1 is not p2
     assert p1.grad_fn is not None
     assert p2.grad_fn is None
+
+
+if __name__ == "__main__":
+    run_tests()
