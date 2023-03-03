@@ -1284,23 +1284,23 @@ class AOTConfig:
     aot_id: int
     keep_inference_input_mutations: bool
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     with enable_python_dispatcher():
-        _fw_metadata = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             flat_fn,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
         )(
             *flat_args
         )
 
-    _input_info = _fw_metadata.input_info
+    _input_info = fw_metadata.input_info
 
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
         flat_args, _input_info, is_inference=True
     )
     metadata_ = CompiledRuntimeMetadata(
         synthetic_base_info=_synthetic_base_info,
-        fw_metadata=_fw_metadata,
+        fw_metadata=fw_metadata,
     )
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
@@ -1676,54 +1676,36 @@ def format_guard_bug_msg(aot_config, expected):
 # everything.
 #
 def aot_wrapper_dedupe(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, compiler_fn
+    flat_fn,
+    flat_args: List[Tensor],
+    aot_config: AOTConfig,
+    *,
+    compiler_fn,
+    fw_metadata,
 ):
-    # Get information about whether or not flat_fn mutates its arguments
-    # or not
-    try:
-        with enable_python_dispatcher():
-            fw_metadata = run_functionalized_fw_and_collect_metadata(
-                flat_fn,
-                # For the purpose of checking for dupes that are mutated,
-                # we always want our metadata to correctly reflect input mutations
-                keep_input_mutations=False,
-            )(
-                *flat_args
-            )
-    except RuntimeError as e:
-        log.warning(
-            "Failed to collect metadata on function, produced code may be suboptimal.  "
-            "Known situations this can occur are inference mode only compilation involving "
-            "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
-            "if your situation looks different please file a bug to PyTorch.",
-            exc_info=True,
-        )
-        # Analysis failed, fall back to duplicate specialize
-        # TODO: Known analysis problems:
-        #   - resize_: TestInductorOpInfoCPU.test_comprehensive_resize__cpu_bool
-        #   - prims: test_tmp_not_defined_issue1_cpu
-        pass
-    else:
-        # Strategy 1: For any input that is not mutated, we can leafify it if we
-        # need to remove a duplicate.
-        leaf_flat_args = []
-        args_set = set()
-        ok = True
+    # Use information about whether or not flat_fn mutates its arguments
+    # or not to handle dupe args
 
-        for i, a in enumerate(flat_args):
-            if not isinstance(a, torch.Tensor):
-                leaf_flat_args.append(a)
-            elif a not in args_set:
-                args_set.add(a)
-                leaf_flat_args.append(a)
-            elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
-                leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
-            else:
-                ok = False
-                break
+    # Strategy 1: For any input that is not mutated, we can leafify it if we
+    # need to remove a duplicate.
+    leaf_flat_args = []
+    args_set = set()
+    ok = True
 
-        if ok:
-            return compiler_fn(flat_fn, leaf_flat_args, aot_config)
+    for i, a in enumerate(flat_args):
+        if not isinstance(a, torch.Tensor):
+            leaf_flat_args.append(a)
+        elif a not in args_set:
+            args_set.add(a)
+            leaf_flat_args.append(a)
+        elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
+            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+        else:
+            ok = False
+            break
+
+    if ok:
+        return compiler_fn(flat_fn, leaf_flat_args, aot_config, fw_metadata=fw_metadata)
 
     # Strategy 2: Duplicate specialize.
     #
@@ -1812,7 +1794,7 @@ def aot_wrapper_dedupe(
     def wrapped_flat_fn(*args):
         return flat_fn(*add_dupe_args(args))
 
-    compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config)
+    compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=fw_metadata)
 
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -2058,10 +2040,10 @@ def create_runtime_wrapper(
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
+def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
 
     with enable_python_dispatcher():
-        _fw_metadata = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             flat_fn,
             # Note: in the non-inference path, we are currently not passing input mutations into the graph directly.
             # This is mainly difficult due to the partitioner, but we are leaving (a bit of) perf on the table.
@@ -2076,7 +2058,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
     traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        _fw_metadata.traced_tangents,
+        fw_metadata.traced_tangents,
     )
 
     # merge_view_inputs() is used again at runtime to create synthetic bases out of aliased inputs.
@@ -2085,16 +2067,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     # When that happens, we replace the aliased inputs with a synthetic base, and in the traced forward
     # we later generate the input views
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
-        flat_args, _fw_metadata.input_info, is_inference=False,
+        flat_args, fw_metadata.input_info, is_inference=False,
     )
 
     # pre-compute, so we can bail out quickly in the hotpath
     metadata_ = CompiledRuntimeMetadata(
         synthetic_base_info=_synthetic_base_info,
-        fw_metadata=_fw_metadata,
+        fw_metadata=fw_metadata,
     )
 
-    assert len(_fw_metadata.requires_grad_info) == metadata_.num_mutated_inputs + metadata_.num_outputs
+    assert len(fw_metadata.requires_grad_info) == metadata_.num_mutated_inputs + metadata_.num_outputs
 
     joint_forward_backward = create_forward_or_joint_functionalized(
         flat_fn,
@@ -2138,7 +2120,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
-            num_inner_fwd_outputs = metadata_.num_mutated_inputs + metadata_.num_outputs + _fw_metadata.num_intermediate_bases
+            num_inner_fwd_outputs = metadata_.num_mutated_inputs + metadata_.num_outputs + fw_metadata.num_intermediate_bases
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
@@ -2524,6 +2506,12 @@ def create_aot_dispatcher_function(
             any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
             and torch.is_grad_enabled()
         )
+        with enable_python_dispatcher():
+            fw_metadata = run_functionalized_fw_and_collect_metadata(
+                flat_fn,
+                keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+            )(*fake_flat_args)
+
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
@@ -2531,10 +2519,10 @@ def create_aot_dispatcher_function(
         else:
             compiler_fn = aot_dispatch_base
 
-        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
+        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn, fw_metadata=fw_metadata)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
+        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
