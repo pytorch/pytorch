@@ -36,14 +36,7 @@ if [ -n "$ROCM_VERSION" ]; then
   curl --retry 3 http://repo.radeon.com/misc/.sccache_amd/sccache -o /opt/cache/bin/sccache
 else
   ID=$(grep -oP '(?<=^ID=).+' /etc/os-release | tr -d '"')
-  case "$ID" in
-    ubuntu)
-      install_ubuntu
-      ;;
-    *)
-      install_binary
-      ;;
-  esac
+  install_binary
 fi
 chmod a+x /opt/cache/bin/sccache
 
