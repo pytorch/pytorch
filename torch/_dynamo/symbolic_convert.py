@@ -1997,7 +1997,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         suffix = ''
         if config.output_code:
-            suffix = '\n{dis.Bytecode(code).dis()}'
+            suffix = f'\n{dis.Bytecode(code).dis()}'
         log.debug(f"INLINING {code}{suffix}")
 
         tracer: InliningInstructionTranslator
