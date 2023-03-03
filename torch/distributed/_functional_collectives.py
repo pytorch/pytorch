@@ -66,6 +66,7 @@ data_ptr_to_work = dict()
 work_version = 0
 
 def _register_tensor_work(tensor, work):
+    # Note: called directly by inductor codegen currently
     global data_ptr_to_work
     global work_version
     data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
