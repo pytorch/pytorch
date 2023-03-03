@@ -447,20 +447,19 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   }
   SymIntArrayRef sizes = extra_meta_->sizes_;
   SymIntArrayRef strides = extra_meta_->strides_;
-  return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  auto n = normalize_sym_sizes_strides(sizes, strides);
+  if (n.has_value()) {
+    SymNode base;
+    std::vector<SymNode> size_nodes;
+    std::vector<SymNode> stride_nodes;
+    std::tie(base, size_nodes, stride_nodes) = *n;
+    return SymBool(base->is_contiguous(size_nodes, stride_nodes));
+  } else {
+    return _compute_contiguous(sizes, strides, extra_meta_->numel_);
+  }
 }
 
 // The rest of them
-#define DEFINE_EAGER_SYMBOOL_COMPUTE(name, nodeimpl, fallback) \
-  SymBool TensorImpl::name(identity<SymBool>) const {          \
-    if (is_sparse()) {                                         \
-      return false;                                            \
-    }                                                          \
-    SymIntArrayRef sizes = extra_meta_->sizes_;                \
-    SymIntArrayRef strides = extra_meta_->strides_;            \
-    return fallback(sizes, strides);                           \
-  }
-
 #define DEFINE_SYMBOOL_COMPUTE(name, nodeimpl, fallback)        \
   SymBool TensorImpl::name(identity<SymBool>) const {           \
     if (is_sparse()) {                                          \
@@ -481,10 +480,10 @@ SymBool TensorImpl::compute_contiguous(identity<SymBool>) const {
   }
 
 // clang-format off
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
-DEFINE_EAGER_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
+DEFINE_SYMBOOL_COMPUTE(compute_channels_last_contiguous_2d, is_channels_last_contiguous_2d, _compute_channels_last_contiguous_2d)
+DEFINE_SYMBOOL_COMPUTE(compute_channels_last_contiguous_3d, is_channels_last_contiguous_3d, _compute_channels_last_contiguous_3d)
+DEFINE_SYMBOOL_COMPUTE(compute_strides_like_channels_last_2d, is_channels_last_strides_2d, is_channels_last_strides_2d)
+DEFINE_SYMBOOL_COMPUTE(compute_strides_like_channels_last_3d, is_channels_last_strides_3d, is_channels_last_strides_3d)
 DEFINE_SYMBOOL_COMPUTE(compute_non_overlapping_and_dense, is_non_overlapping_and_dense, _compute_non_overlapping_and_dense)
 // clang-format on
 
