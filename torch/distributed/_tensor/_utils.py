@@ -5,10 +5,10 @@ from torch._prims_common import ShapeType
 
 
 def compute_local_shape(
-        global_shape: ShapeType,
-        mesh: DeviceMesh,
-        placements: Sequence[Placement]
-    ) -> Tuple[int, ...]:
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement]
+) -> Tuple[int, ...]:
     """
     Compute the shape of a local shard of the given DTensor on its current
     coordinate of the mesh.
@@ -38,10 +38,10 @@ def compute_local_shape(
 
 
 def compute_local_offset(
-        global_shape: ShapeType,
-        mesh: DeviceMesh,
-        placements: Sequence[Placement]
-    ) -> Tuple[int, ...]:
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement]
+) -> Tuple[int, ...]:
     """
     Compute the offsets of a local shard of the given DTensor on its current
     global rank. This is mostly used by distributed checkpointing to know the
