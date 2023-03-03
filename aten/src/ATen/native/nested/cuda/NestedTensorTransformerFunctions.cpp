@@ -559,6 +559,7 @@ inline auto sdpa_nested_preprocessing(
 
   const int64_t q_num_heads = query.size(1);
   const int64_t k_num_heads = key.size(1);
+  const int64_t v_num_heads = value.size(1);
 
   if (!(q_batch_size == k_batch_size && q_batch_size == v_batch_size) ||
       !(q_num_heads == k_num_heads && k_num_heads == v_num_heads)) {
@@ -567,6 +568,15 @@ inline auto sdpa_nested_preprocessing(
 
   const int64_t num_heads = query.size(1);
   const int64_t head_dim_qk = query.size(3);
+  const int64_t head_dim_v = value.size(3);
+
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
+
+  auto cumulative_and_max_q_and_nnz_q = cumulative_and_max_seq_len(q_t);
+  auto cumulative_and_max_kv_and_nnz_kv = cumulative_and_max_seq_len(k_t);
+
   // [TODO] K and V have to have the same Nnz, should probably torch_check
   // assume in order to not iterate over v
 
@@ -679,7 +689,8 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask) {
+    bool return_debug_mask,
+    c10::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
@@ -706,7 +717,8 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           max_seqlen_batch_kv,
           dropout_p,
           is_causal,
-          return_debug_mask);
+          return_debug_mask,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
@@ -727,7 +739,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
-    bool is_causal) {
+    bool is_causal,
+    c10::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
