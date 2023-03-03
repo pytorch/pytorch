@@ -177,9 +177,9 @@ void div_mode_template(const Tensor& self, const Tensor& other,
                        c10::optional<c10::string_view> rounding_mode,
                        const Tensor& output, const string op_name)
 {
-  if(rounding_mode.has_value() && *rounding_mode == "floor"){
-    TORCH_CHECK(self.scalar_type() != ScalarType::Long,
-                "MPS: does not support floor_divide op with int64 input");
+  if(rounding_mode.has_value() && *rounding_mode == "trunc"){
+    TORCH_CHECK(self.scalar_type() != ScalarType::Half,
+                "MPS: does not support trunc_divide op with float16 input");
   }
   BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
@@ -345,6 +345,28 @@ TORCH_IMPL_FUNC(add_out_mps) (const Tensor& self, const Tensor& other, const Sca
 
 TORCH_IMPL_FUNC(sub_out_mps) (const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output) {
   mps::add_sub_template(self, other, alpha, output, "sub");
+}
+
+TORCH_IMPL_FUNC(pow_Scalar_out_mps) (const Scalar& base, const Tensor& exp, const Tensor& out) {
+  if (base.equal(1.0)) {
+    out.fill_(1);
+  } else {
+    // Copied and modified from aten/stc/ATen/ScalarOps.h
+    // as MPS doesn't support float64 tensor.
+    Tensor base_tensor;
+    if (base.isFloatingPoint()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kFloat));
+    } else if (base.isBoolean()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kBool));
+    } else if (base.isComplex()) {
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kComplexDouble));
+    } else {
+      AT_ASSERT(base.isIntegral(false));
+      base_tensor = at::scalar_tensor(base, at::device(exp.device()).dtype(at::kLong));
+    }
+    base_tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
+    at::pow_out(const_cast<Tensor&>(out), base_tensor, exp); // redispatch!
+  }
 }
 
 Tensor& floor_divide_out_mps(const Tensor& self, const Tensor& other, Tensor& result) {
