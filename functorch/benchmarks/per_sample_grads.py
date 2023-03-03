@@ -37,7 +37,7 @@ def functorch_per_sample_grad():
     torch.cuda.synchronize()
     end = time.time()
 
-    return result, end - start  # end - start in seconds
+    return result, end - start  # end - start in seconds dude
 
 torch.manual_seed(0)
 model_opacus = convert_batchnorm_modules(models.resnet18(num_classes=10))
