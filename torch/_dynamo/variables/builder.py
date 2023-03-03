@@ -684,6 +684,10 @@ class VariableBuilder:
                     isinstance(self.source, AttrSource)
                     and isinstance(self.source.base, GlobalSource)
                 )
+                # Assume that integers that came from NN modules want to be
+                # specialized (as we don't expect users to be changing the
+                # NN modules on the fly)
+                or self.source.guard_source().is_nn_module()
             ):
                 return ConstantVariable(
                     value=value,
