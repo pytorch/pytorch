@@ -245,7 +245,7 @@ unittest-xml-reporting<=3.2.0,>=2.0.0
 #test that import:
 
 lintrunner==0.10.7
-#Description: all about linters
+#Description: all about linters!
 #Pinned versions: 0.10.7
 #test that import:
 
