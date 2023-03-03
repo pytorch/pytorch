@@ -10,7 +10,7 @@ on:
 jobs:
 
   upload-contribution-stats:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux.2xlarge]
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
@@ -24,8 +24,6 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
         run: |
           echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
