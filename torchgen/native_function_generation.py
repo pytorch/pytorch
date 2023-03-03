@@ -75,8 +75,8 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nested_tensor_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
-    "_cusparselt_create_meta",  # returns an int
-    "_cusparselt_destroy_meta",  # no return
+    "_cusparselt_create_sparse_gemm",  # returns an int
+    "_cusparselt_destroy_sparse_gemm",  # no return
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [

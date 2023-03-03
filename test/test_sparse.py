@@ -4516,12 +4516,12 @@ class TestSparseAny(TestCase):
 
                 c1 = torch.mm(a_dense, b)
 
-                meta = torch._cusparselt_create_meta(mask.cpu())
+                handle = torch._cusparselt_create_sparse_gemm(a_sparse, b, mask)
 
-                c0 = torch._cusparselt_linear(a_sparse, b, meta)
+                c0 = torch._cusparselt_linear(a_sparse, b, handle)
                 torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
 
-                torch._cusparselt_destroy_meta(meta)
+                torch._cusparselt_destroy_sparse_gemm(handle)
 
                 # sparse_t = benchmark_torch_function_in_microseconds(torch._cusparselt_linear, a_sparse, b, meta)
                 # dense_t = benchmark_torch_function_in_microseconds(torch.mm, a, b)
@@ -4530,7 +4530,7 @@ class TestSparseAny(TestCase):
         for (m, n, k) in itertools.product(range(8), range(8), range(8)):
             m = (m + 1) * 32
             n = (n + 1) * 32
-            k = (k + 2) * 32
+            k = (k + 1) * 64
             run_test(m, n, k)
 
 
