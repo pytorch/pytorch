@@ -528,7 +528,11 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             if name in ignored_properties:
                 continue
             item = getattr(nn_module, name, None)
-            if inspect.ismethod(item) and _jit_internal.is_ignored_fn(item):
+
+            if inspect.ismethod(item) and (
+                _jit_internal.is_ignored_fn(item)
+                or name == "_update_has_hooks"
+            ):
                 unbound_function = getattr(nn_module, name).__func__
                 bound_method = unbound_function.__get__(script_module)
                 setattr(script_module, name, bound_method)
@@ -540,7 +544,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
     # Actually create the ScriptModule, initializing it with the function we just defined
     script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
-
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)

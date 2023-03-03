@@ -447,6 +447,8 @@ class Module:
     _modules: Dict[str, Optional['Module']]
     _has_hooks: bool = False
     call_super_init: bool = False
+    # we want _has_hooks to be copied to the ScriptModule so eager usage of __call__ works
+    __jit_ignored_attributes__ = ["_has_hooks"]
 
     def __init__(self, *args, **kwargs) -> None:
         """
