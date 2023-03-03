@@ -5605,8 +5605,7 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
-    def test_checkpoint_custom_context(self):
-        x = torch.tensor(1., requires_grad=True)
+    def test_checkpoint_with_context_fn(self):
         class VerboseTorchDispatchMode(TorchDispatchMode):
             def __init__(self):
                 self.operators = []
@@ -5617,20 +5616,62 @@ for shape in [(1,), ()]:
                 self.operators.append(func.__name__)
                 return func(*args, **kwargs)
 
+        x = torch.tensor(1., requires_grad=True)
         verbose_mode = VerboseTorchDispatchMode()
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, forward_context=verbose_mode)
+
+        def context_fn():
+            return verbose_mode, contextlib.nullcontext()
+        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
         self.assertEqual(verbose_mode.operators, ['sin.default'])
 
         verbose_mode.operators = []
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, recompute_context=verbose_mode)
+
+        def context_fn():
+            return contextlib.nullcontext(), verbose_mode
+        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
         out.backward()
         self.assertEqual(verbose_mode.operators, ['detach.default', 'detach.default', 'sin.default'])
 
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
-            out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, forward_context=verbose_mode)
+            out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, context_fn=context_fn)
 
-        with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
-            out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, recompute_context=verbose_mode)
+    def test_selective_checkpoint_correct(self):
+        def _relu_policy(func, *args, **kwargs):
+            return func == torch.ops.aten.relu.default
+
+        for policy in (None, [], _relu_policy):
+            for input_requires_grad in (True, False):
+                if policy is None:
+                    context_fn = torch.utils.checkpoint.get_selective_checkpoint_context_fn()
+                else:
+                    context_fn = torch.utils.checkpoint.get_selective_checkpoint_context_fn(policy=policy)
+
+                module = nn.Sequential(
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                    nn.Linear(10, 10),
+                    nn.ReLU(),
+                )
+
+                # Run model with and without checkpointing and verify gradients are
+                # equivalent, regardless of if inputs require grads or not.
+                module_copy = deepcopy(module)
+
+                inputs = torch.rand(32, 10)
+                inputs_copy = inputs.clone()
+                inputs.requires_grad_(input_requires_grad)
+                inputs_copy.requires_grad_(input_requires_grad)
+                out = inputs
+                out_copy = inputs_copy
+                for _ in range(10):
+                    out = checkpoint(module, out, use_reentrant=False, context_fn=context_fn)
+                    out_copy = module_copy(out_copy)
+
+                self.assertTrue(torch.allclose(out, out_copy))
+                out.sum().backward()
+                out_copy.sum().backward()
+                for p, p_copy in zip(module.parameters(), module_copy.parameters()):
+                    self.assertTrue(torch.allclose(p.grad, p_copy.grad))
 
     def test_access_saved_tensor_twice_without_recomputation_works(self):
 

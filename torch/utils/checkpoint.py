@@ -1,7 +1,7 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Callable, Iterable, List, Tuple, Generator, Union
+from typing import Any, Callable, ContextManager, Iterable, List, Sequence, Tuple, Union
 import contextlib
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -9,12 +9,13 @@ from torch.utils._pytree import tree_map
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "list_operators", "get_selective_checkpoint_modes"
+    "set_device_states", "list_operators", "get_selective_checkpoint_context_fn"
 ]
 
 def list_operators(function, *args, **kwargs):
     """
-    Utility to return the list of operators used inside ``function``
+    Utility to return the list of operators invoked by :attr:`function` that can
+    be used with :func:`get_selective_checkpoint_context_fn`
 
     Example::
 
@@ -36,34 +37,43 @@ def list_operators(function, *args, **kwargs):
         function(*args, **kwargs)
     return verbose_mode.operators
 
-def get_selective_checkpoint_contexts(policy: Union[List, Callable] = None):
+_selective_checkpoint_default_allow_list = [
+    torch.ops.aten.addmm.default,
+    torch.ops.aten.mm.default,
+]
+
+def get_selective_checkpoint_context_fn(
+    policy: Union[Sequence, Callable] = _selective_checkpoint_default_allow_list
+) -> Callable:
     """
     Utility to enable checkpointing to selectively decide what to store and
-    recompute based on a provided policy. This function will return
-    two contexts that should be passed to ``checkpoint`` as ``forward_context``
-    and ``recompute_context`` respectively.
+    recompute based on a provided policy.
 
-    There are two ways to specify ``policy``:
+    Given a :attr:`policy`, this function returns a Callable that should be passed
+    to :func:`checkpoint` as the ``context_fn`` argument.
 
-    ``policy`` can be a list of ops if you simply wish to specify particular
-    operators that you would like ``checkpoint`` to store instead of recompute
-    e.g. compute-intensive operations like ``torch.ops.aten.mm.default``.
+    :attr:`policy` can be either a Sequence or a Callable.
 
-    ``policy`` can also be a function of form (op, *args, **kwargs) -> bool,
-    which allows one to conditionally save depending on the particular inputs
-    passed to the function.
+    :attr:`policy` can be a list of operators for which you would like ``checkpoint``
+    to store the output of. instead of recompute. The op should be in the format
+    ``torch.ops.***``, e.g. ``torch.ops.aten.mm.default``. You can use the
+    ``torch.utils.checkpoint.list_operators`` utility to check which operators
+    can be used with the policy list or function.
 
-    The op should be in the format `torch.ops.***`. You can use the
-    ``torch.utils.checkpoint.list_operators`` utility to check
-    which operators can be used with the policy list or function.
+    ``policy`` can also be a Callable of form ``(op, *args, **kwargs) -> bool``.
+    that returns ``True`` when you would like ``checkpoint`` to store the
+    output for a particular invocation of an operator. The ops passed to this
+    function will be like the ones in ``torch.ops.***``.
 
     Args:
-        policy(Union[List[Op], Callable]): policy for deciding what to
-            store (instead of recompute).
+        policy(Union[Sequence[Op], Callable]): policy for deciding what to
+            store (instead of recompute). By default, the policy is a list
+            containing ``torch.ops.aten.addmm.default`` and
+            ``torch.ops.aten.mm.default`` (subject to change).
 
     Returns:
-        Two contexts that can be passed to checkpoint as ``forward_context``
-        and ``recompute_context`` respectively.
+        A callable that can be passed to ``checkpoint`` as the ``context_fn``
+        argument.
 
     Example::
 
@@ -72,73 +82,54 @@ def get_selective_checkpoint_contexts(policy: Union[List, Callable] = None):
         [<OpOverload(op='aten.clone', overload='default')>, <OpOverload(op='aten.sin', overload='default')>]
         >>> allow_list = [torch.ops.aten.clone]
         >>>
-        >>> caching_mode, cached_mode = get_selective_checkpoint_modes(policy_fn=allow_list)
-        >>> out = checkpoint(fn, use_reentrant=False, forward_context=caching_mode, \
-        ...                  recompute_context=cached_mode, *args, **kwargs)
+        >>> context_fn = get_selective_checkpoint_context_fn(policy_fn=allow_list)
+        >>> out = checkpoint(fn, use_reentrant=False, context_fn=context_fn, *args, **kwargs)
         >>>
         >>> def _relu_policy(func, *args, **kwargs):
         ...     return func == torch.ops.aten.relu.default
-        >>> caching_mode, cached_mode = get_selective_checkpoint_modes(policy_fn=_relu_policy)
-        >>> out = checkpoint(fn, use_reentrant=False, forward_context=caching_mode, \
-        ...                  recompute_context=cached_mode, *args, **kwargs)
+        >>> context_fn = get_selective_checkpoint_context_fn(policy_fn=_relu_policy)
+        >>> out = checkpoint(fn, use_reentrant=False, context_fn=context_fn, *args, **kwargs)
     """
+    if isinstance(policy, Sequence):
+        policy_fn = lambda func, *args, **kwargs: func in policy
+    elif callable(policy):
+        policy_fn = policy
+    else:
+        raise ValueError("Expected `policy` to a Callable or Sequence but got: ",
+                         type(policy))
+
     class CachingTorchDispatchMode(TorchDispatchMode):
-        def __init__(self, policy_fn, storage):
-            self.policy_fn = policy_fn
+        def __init__(self, storage):
             self.storage = storage
 
         def __torch_dispatch__(self, func, types, args=(), kwargs=None):
             if kwargs is None:
                 kwargs = {}
-            if self.policy_fn(func, *args, **kwargs):
+            if policy_fn(func, *args, **kwargs):
                 out = func(*args, **kwargs)
-                out_detached = tree_map(_detach, out)
+                out_detached = tree_map(lambda x: x.detach() if isinstance(x, torch.Tensor) else x, out)
                 self.storage.append(out_detached)
                 return out
             return func(*args, **kwargs)
 
     class CachedTorchDispatchMode(TorchDispatchMode):
-        def __init__(self, policy_fn, storage):
-            self.policy_fn = policy_fn
+        def __init__(self, storage):
             self.storage = storage
 
         def __torch_dispatch__(self, func, types, args=(), kwargs=None):
             if kwargs is None:
                 kwargs = {}
-            if self.policy_fn(func, *args, **kwargs):
-                out = self.storage.pop(0)
-                return out
+            if policy_fn(func, *args, **kwargs):
+                return self.storage.pop(0)
             return func(*args, **kwargs)
 
-    def _detach(x):
-        if isinstance(x, torch.Tensor):
-            return x.detach()
-        return x
+    def context_fn():
+        storage = []
+        caching_mode = CachingTorchDispatchMode(storage)
+        cached_mode = CachedTorchDispatchMode(storage)
+        return caching_mode, cached_mode
 
-    def _get_default_policy(allow_list=None):
-        _default_allow_list = [
-            torch.ops.aten.addmm.default,
-            torch.ops.aten.mm.default,
-        ]
-        if allow_list is None:
-            allow_list = _default_allow_list
-
-        def _default_policy(func, *args, **kwargs):
-            return func in allow_list
-
-        return _default_policy
-
-    if policy_fn is None:
-        policy_fn = _get_default_policy()
-    elif isinstance(policy_fn, list):
-        policy_fn = _get_default_policy(policy_fn)
-    else:
-        assert callable(policy_fn), "policy_fn should be None, list or a callable"
-
-    temp_storage = []
-    caching_mode = CachingTorchDispatchMode(policy_fn, temp_storage)
-    cached_mode = CachedTorchDispatchMode(policy_fn, temp_storage)
-    return caching_mode, cached_mode
+    return context_fn
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -292,12 +283,15 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
+def noop_context_fn():
+    return contextlib.nullcontext(), contextlib.nullcontext()
+
+
 def checkpoint(
     function,
     *args,
     use_reentrant: bool = True,
-    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
-    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model
@@ -373,12 +367,10 @@ def checkpoint(
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
             Default: ``True``
-        forward_context: The function will be run under the provided context
-            manager during forward. This should only be specified if
-            ``use_reentrant=False``.
-        recompute_context: The function will be run under the provided context
-            manager during its recomputation. This should only be specified if
-            ``use_reentrant=False``.
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively. This
+            argument can only be passed if ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -397,17 +389,14 @@ def checkpoint(
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
-        if forward_context is not contextlib.nullcontext or \
-           recompute_context is not contextlib.nullcontext:
-            raise ValueError("Passing forward_context and recompute_context are only supported "
-                             "when use_reentrant=False.")
+        if context_fn is not noop_context_fn:
+            raise ValueError("Passing context_fn is only supported when use_reentrant=False.")
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         return _checkpoint_without_reentrant(
             function,
             preserve,
-            forward_context,
-            recompute_context,
+            context_fn,
             *args,
             **kwargs,
         )
@@ -495,8 +484,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 def _checkpoint_without_reentrant(
     function,
     preserve_rng_state=True,
-    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
-    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     *args,
     **kwargs
 ):
@@ -507,16 +495,16 @@ def _checkpoint_without_reentrant(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        forward_context: the function will be run under the provided context
-            manager during forward.
-        recompute_context: the function will be run under the provided context
-            manager during its recomputation.
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively.
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
