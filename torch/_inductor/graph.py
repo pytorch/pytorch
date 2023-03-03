@@ -116,7 +116,6 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
     ):
         super().__init__(gm)
-        self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -355,9 +354,8 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
-                raise LoweringException(e, target, args, kwargs).with_traceback(
-                    e.__traceback__
-                ) from None
+                log.exception("Error from lowering")
+                raise LoweringException(e, target, args, kwargs) from e
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
