@@ -24,9 +24,9 @@ from ..utils import (
     specialize_args_kwargs,
 )
 from .base import MutableLocal, typestr, VariableTracker
-from .constant import ConstantVariable
+from .constant import ConstantVariable, EnumVariable
 from .dicts import ConstDictVariable
-from .lists import BaseListVariable, ListVariable, TupleVariable
+from .lists import BaseListVariable, ListIteratorVariable, ListVariable, TupleVariable
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
 from .user_defined import UserDefinedVariable
 
@@ -746,19 +746,55 @@ class BuiltinVariable(VariableTracker):
     call_list = _call_iter_tuple_list
 
     @staticmethod
-    def call_dict_helper(user_cls, arg):
-        if arg is None:
-            return variables.ConstDictVariable(
-                {}, user_cls, mutable_local=MutableLocal()
+    def is_supported_call_dict_arg(tx, arg):
+        return (
+            arg is None
+            or isinstance(arg, ConstDictVariable)
+            or (
+                isinstance(
+                    arg,
+                    (
+                        ListVariable,
+                        TupleVariable,
+                        ListIteratorVariable,
+                    ),
+                )
+                and all(
+                    isinstance(x, (ListVariable, TupleVariable))
+                    and isinstance(
+                        x.unpack_var_sequence(tx)[0], (ConstantVariable, EnumVariable)
+                    )
+                    for x in arg.unpack_var_sequence(tx)
+                )
             )
+        )
+
+    @staticmethod
+    def call_dict_helper(tx, user_cls, arg):
+        if arg is None:
+            return ConstDictVariable({}, user_cls, mutable_local=MutableLocal())
         elif isinstance(arg, variables.ConstDictVariable):
             return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+        elif isinstance(
+            arg,
+            (
+                ListVariable,
+                TupleVariable,
+                ListIteratorVariable,
+            ),
+        ):
+            items = user_cls()
+            for x in arg.unpack_var_sequence(tx):
+                k = x.unpack_var_sequence(tx)[0].as_python_constant()
+                v = x.unpack_var_sequence(tx)[1]
+                items.update({k: v})
+            return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 
     def call_dict(self, tx, obj=None):
-        if obj is None or isinstance(obj, variables.ConstDictVariable):
-            return self.call_dict_helper(dict, obj)
+        if self.is_supported_call_dict_arg(tx, obj):
+            return self.call_dict_helper(tx, dict, obj)
 
     def call_zip(self, tx, *args):
         options = VariableTracker.propagate(self, args)
