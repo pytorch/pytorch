@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
+from torch.utils.debug_mode import DebugMode
 from torch.utils._pytree import tree_map, tree_map_only
 from torch.utils._python_dispatch import TorchDispatchMode, _get_current_dispatch_mode, _get_current_dispatch_mode_stack
 
@@ -1721,6 +1722,27 @@ class TestPythonDispatcher(TestCase):
         r = torch._C._EnablePythonDispatcher()
         python_disp_shape = torch.linalg.lstsq(a, b).solution.shape
         self.assertEqual(expected_shape, python_disp_shape)
+
+class TestDebugMode(TestCase):
+    def test_embedding_bag(self):
+        device = 'cpu'
+        with DebugMode():
+            with torch.device(device):
+                e = torch.nn.EmbeddingBag(10, 2)
+                x = torch.tensor([[100, 0, 9, 101]])
+                err_msg = "embedding_bag: Received invalid indices"
+                with self.assertRaisesRegex(RuntimeError, err_msg):
+                    e(x)
+
+    def test_embedding(self):
+        device = 'cpu'
+        with DebugMode():
+            with torch.device(device):
+                e = torch.nn.Embedding(100, 10)
+                x = torch.tensor([[100, 0, 9, 101]])
+                err_msg = "embedding: Received invalid indices"
+                with self.assertRaisesRegex(RuntimeError, err_msg):
+                    e(x)
 
 if __name__ == '__main__':
     run_tests()

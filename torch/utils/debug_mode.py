@@ -9,8 +9,10 @@ def embedding_check(op_name, args):
         raise RuntimeError(msg)
 
 class DebugMode(TorchDispatchMode):
+    def __init__(self, on_failure_callback = None) -> None:
+        self.on_failure_callback = on_failure_callback
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        print(func)
         if func == torch.ops.aten.embedding.default:
             embedding_check("embedding", args)
         if func == torch.ops.aten._embedding_bag.default:
