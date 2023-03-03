@@ -39,7 +39,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests, onlyMPS
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, onlyMPS
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
@@ -10308,6 +10308,19 @@ class TestCommon(TestCase):
         inputs = op.reference_inputs(device, dtype) if not broken_on_ref_inputs else op.sample_inputs(device, dtype)
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
+
+    @onlyMPS
+    @dtypes(*get_all_dtypes())
+    def test_tensor_creation(self, device, dtype):
+        def ones(device):
+            return torch.ones((2, 2), dtype=dtype, device=device)
+        if dtype not in MPS_DTYPES:
+            with self.assertRaises(TypeError):
+                ones(device)
+        else:
+            mps_tensor = ones(device)
+            cpu_tensor = ones("cpu")
+            self.assertEqual(mps_tensor.cpu(), cpu_tensor)
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
