@@ -180,9 +180,9 @@ class TracerBase:
         if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy
