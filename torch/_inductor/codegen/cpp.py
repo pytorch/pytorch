@@ -187,6 +187,25 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            return f"{expr.p}"
+        return f"{expr.p}.0/{expr.q}.0"
+
 
 cexpr = CppPrinter().doprint
 
@@ -2040,12 +2059,7 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
-
-        if not V.graph.aot_mode or self.count == 1:
-            code.writeline(cpp_prefix())
-
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -2060,12 +2074,9 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        if V.graph.aot_mode:
-            codecache_def.splice(code)
-        else:
-            codecache_def.writeline("async_compile.cpp('''")
-            codecache_def.splice(code)
-            codecache_def.writeline("''')")
+        codecache_def.writeline("async_compile.cpp('''")
+        codecache_def.splice(code)
+        codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does

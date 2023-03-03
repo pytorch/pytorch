@@ -7385,18 +7385,25 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
             ),
-            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
             # Test Pow directly.
-            (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
-            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
-            (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
+            (
+                sympy.Pow(s1 + s2, 0),
+                lambda _: "1",
+            ),  # note: simplified before _print_Pow
+            (
+                sympy.Pow(s1 + s2, -3),
+                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
+            ),
+            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
         )
 
         for expr, result in cases:
-            self.assertEqual(cexpr(expr), result)
-            self.assertEqual(texpr(expr), result)
+            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
+            self.assertEqual(texpr(expr), result(1))
+            self.assertEqual(pexpr(expr), result(1))
 
     def test_print_floor(self):
         s1 = sympy.Symbol("s1", integer=False)
