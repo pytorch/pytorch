@@ -14,10 +14,10 @@ from torch.onnx._internal.fx import _pass
 
 class ShapeInferenceWithFakeTensor(_pass.Transform):
     @_beartype.beartype
-    def _run(
-        self, module: torch.fx.GraphModule, *args, **kwargs
-    ) -> torch.fx.GraphModule:
+    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "`kwargs` is not supported."
+        module = self.module
+
         # Use this FakeTensorMode to
         # 1. convert nn.Parameter's in nn.Module to FakeTensor
         # 2. run FakeTensorProp

@@ -33,20 +33,23 @@ def _rename_placeholder_targets(
 
 
 class Decompose(_pass.Transform):
-    def __init__(self, decomposition_table: Dict[torch._ops.OpOverload, Callable]):
+    def __init__(
+        self,
+        module: torch.fx.GraphModule,
+        decomposition_table: Dict[torch._ops.OpOverload, Callable],
+    ):
+        super().__init__(module)
         self.decomposition_table = decomposition_table
 
     @_beartype.beartype
-    def _run(
-        self, module: torch.fx.GraphModule, *args, **kwargs
-    ) -> torch.fx.GraphModule:
+    def _run(self, *args, **kwargs) -> torch.fx.GraphModule:
         assert not kwargs, "kwargs is not supported in Decompose."
         # A trick adopted from `dynamo.export` in `eval_frame.py`.
         # Running graph with interpreter is needed for propagating the stack_trace.
 
         def graph_with_interpreter(*args):
             with fx_traceback.preserve_node_meta():
-                return torch.fx.Interpreter(module).run(*args)
+                return torch.fx.Interpreter(self.module).run(*args)
 
         # Apply decomposition table to the input graph.
         # Make sure the feed-in "module" is stateless.
@@ -58,6 +61,6 @@ class Decompose(_pass.Transform):
         )(*args)
         # Rename placeholder targets to match the original module's signature since
         # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
-        _rename_placeholder_targets(decomposed_module, module)
+        _rename_placeholder_targets(decomposed_module, self.module)
 
         return decomposed_module
