@@ -3914,6 +3914,14 @@ try:
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
         )
 
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
+        )
+
 except ImportError:
     log.info(
         "Inductor support for distributed collectives depends on building torch.distributed"
