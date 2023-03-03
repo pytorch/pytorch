@@ -1059,7 +1059,7 @@ def set_flush_denormal(arg: _bool) -> _bool: ...  # THPModule_setFlushDenormal
 def get_default_dtype() -> _dtype: ...  # THPModule_getDefaultDtype
 def _get_default_device() -> str: ...  # THPModule_getDefaultDevice
 def _get_qengine() -> _int: ...  # THPModule_qEngine
-def _set_qengine(qegine: _int) -> None: ...  # THPModule_setQEngine
+def _set_qengine(qengine: _int) -> None: ...  # THPModule_setQEngine
 def _supported_qengines() -> List[_int]: ...  # THPModule_supportedQEngines
 def _is_xnnpack_enabled() -> _bool: ...  # THPModule_isEnabledXNNPACK
 def _check_sparse_tensor_invariants() -> _bool: ...  # THPModule_checkSparseTensorInvariants
@@ -1102,7 +1102,7 @@ class _LinalgBackend:
 
 class ConvBackend(Enum): ...
 
-# Defined in `valgrind.h` and `callgrind.h` respecitively.
+# Defined in `valgrind.h` and `callgrind.h` respectively.
 def _valgrind_supported_platform() -> _bool: ...  # NVALGRIND
 def _valgrind_toggle() -> None: ...  # CALLGRIND_TOGGLE_COLLECT
 def _valgrind_toggle_and_dump_stats() -> None: ...  # CALLGRIND_TOGGLE_COLLECT and CALLGRIND_DUMP_STATS
@@ -1227,7 +1227,7 @@ def _jit_pass_cse(Graph) -> _bool: ...
 def _jit_pass_dce(Graph) -> None: ...
 def _jit_pass_lint(Graph) -> None: ...
 
-# Defined in torch/csrc/jit/python/python_custome_class.cpp
+# Defined in torch/csrc/jit/python/python_custom_class.cpp
 def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
 
 # Defined in torch/csrc/Module.cpp
