@@ -91,7 +91,9 @@ def get_selective_checkpoint_context_fn(
         >>> out = checkpoint(fn, use_reentrant=False, context_fn=context_fn, *args, **kwargs)
     """
     if isinstance(policy, Sequence):
-        policy_fn = lambda func, *args, **kwargs: func in policy
+        def policy_fn(func, *args, **kwargs):
+            assert isinstance(policy, Sequence)  # to appease mypy
+            return func in policy
     elif callable(policy):
         policy_fn = policy
     else:
@@ -124,7 +126,7 @@ def get_selective_checkpoint_context_fn(
             return func(*args, **kwargs)
 
     def context_fn():
-        storage = []
+        storage: List[torch.Tensor] = []
         caching_mode = CachingTorchDispatchMode(storage)
         cached_mode = CachedTorchDispatchMode(storage)
         return caching_mode, cached_mode
