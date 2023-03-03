@@ -1,4 +1,5 @@
 import tempfile
+import torch
 import contextlib
 from . import cudart, check_error
 
@@ -19,6 +20,10 @@ def init(output_file, flags=None, output_mode='key_value'):
     rt = cudart()
     if not hasattr(rt, 'cudaOutputMode'):
         raise AssertionError("HIP does not support profiler initialization!")
+    if hasattr(torch.version, "cuda") and torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12:
+        # Check https://github.com/pytorch/pytorch/pull/91118
+        # cudaProfilerInitialize is no longer needed after CUDA 12
+        raise AssertionError("CUDA12+ does not need profiler initialization!")
     flags = DEFAULT_FLAGS if flags is None else flags
     if output_mode == 'key_value':
         output_mode_enum = rt.cudaOutputMode.KeyValuePair
