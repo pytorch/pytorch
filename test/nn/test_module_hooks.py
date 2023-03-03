@@ -628,7 +628,6 @@ class TestModuleGlobalHooks(TestCase):
         nn.modules.module._global_forward_hooks = OrderedDict()
         nn.modules.module._global_forward_pre_hooks = OrderedDict()
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_hooks(self):
         module = nn.Sigmoid
 
@@ -749,7 +748,6 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_global_forward_preforward_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -771,7 +769,6 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_preforward_hook_removable(self):
         """
         This test is to test when multiple pre-forward hook functions can be
@@ -807,7 +804,6 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
