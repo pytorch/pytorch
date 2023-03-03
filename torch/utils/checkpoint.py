@@ -1,7 +1,8 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Iterable, List, Tuple
+from typing import Any, Iterable, List, Tuple, Generator
+import contextlib
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
@@ -161,7 +162,14 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
-def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
+def checkpoint(
+    function,
+    *args,
+    use_reentrant: bool = True,
+    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
+    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    **kwargs
+):
     r"""Checkpoint a model or part of the model
 
     Checkpointing works by trading compute for memory. Rather than storing all
@@ -235,6 +243,12 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
             Default: ``True``
+        forward_context: The function will be run under the provided context
+            manager during forward. This should only be specified if
+            ``use_reentrant=False``.
+        recompute_context: The function will be run under the provided context
+            manager during its recomputation. This should only be specified if
+            ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -246,11 +260,17 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
+        if forward_context is not contextlib.nullcontext or \
+           recompute_context is not contextlib.nullcontext:
+            raise ValueError("Passing forward_context and recompute_context are only supported "
+                             "when use_reentrant=False.")
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         return _checkpoint_without_reentrant(
             function,
             preserve,
+            forward_context,
+            recompute_context,
             *args,
             **kwargs,
         )
@@ -335,7 +355,14 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
-def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
+def _checkpoint_without_reentrant(
+    function,
+    preserve_rng_state=True,
+    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
+    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    *args,
+    **kwargs
+):
     """Checkpointining without re-entrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
@@ -343,6 +370,10 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
+        forward_context: the function will be run under the provided context
+            manager during forward.
+        recompute_context: the function will be run under the provided context
+            manager during its recomputation.
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
@@ -366,7 +397,8 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
 
     def new_fn(*args, **kwargs):
         # This function will be called by checkpoint_impl
-        out = function(*args, **kwargs)
+        with forward_context:
+            out = function(*args, **kwargs)
         if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
             # Cuda was not initialized before running the forward, so we didn't
             # stash the CUDA state.
@@ -389,7 +421,8 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                     set_device_states(fwd_gpu_devices, fwd_gpu_states)
 
             with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-                 torch.cpu.amp.autocast(**cpu_autocast_kwargs):
+                 torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                 recompute_context:
                 function(*args, **kwargs)
 
     return _checkpoint_impl(new_fn, recompute_fn, *args, **kwargs)

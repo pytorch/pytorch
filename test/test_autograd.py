@@ -5605,6 +5605,33 @@ for shape in [(1,), ()]:
         out = checkpoint(foo, x, y, z, use_reentrant=False)
         out.sum().backward()
 
+    def test_checkpoint_custom_context(self):
+        x = torch.tensor(1., requires_grad=True)
+        class VerboseTorchDispatchMode(TorchDispatchMode):
+            def __init__(self):
+                self.operators = []
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                self.operators.append(func.__name__)
+                return func(*args, **kwargs)
+
+        verbose_mode = VerboseTorchDispatchMode()
+        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, forward_context=verbose_mode)
+        self.assertEqual(verbose_mode.operators, ['sin.default'])
+
+        verbose_mode.operators = []
+        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, recompute_context=verbose_mode)
+        out.backward()
+        self.assertEqual(verbose_mode.operators, ['detach.default', 'detach.default', 'sin.default'])
+
+        with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
+            out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, forward_context=verbose_mode)
+
+        with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
+            out = checkpoint(lambda x: x.sin(), x, use_reentrant=True, recompute_context=verbose_mode)
+
     def test_access_saved_tensor_twice_without_recomputation_works(self):
 
         def foo(a):
