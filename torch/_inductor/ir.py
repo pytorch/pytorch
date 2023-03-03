@@ -4340,10 +4340,20 @@ class AllGatherIntoTensor(CollectiveKernel):
             f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
         )
 
+        # At this point, output_name points to a fresh buffer
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"
+            f" group={output_name}_pg)"
+        )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
 
 class ReduceScatterTensor(CollectiveKernel):
-    def __init__(self, layout, inputs, constant_args):
-        super().__init__(None, layout, inputs, constant_args)
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+        super().__init__(layout, inputs, constant_args)
+        self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
 
     @classmethod
     def create(
@@ -4366,8 +4376,9 @@ class ReduceScatterTensor(CollectiveKernel):
         return ReduceScatterTensor(
             layout=new_layout,
             inputs=[x],
-            constant_args=[scatter_dim, tag, ranks, group_size],
+            constant_args=[tag, ranks, group_size],
             reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
         )
 
     def codegen_collective(self, wrapper, output_name, input_names):
