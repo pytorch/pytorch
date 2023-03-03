@@ -74,6 +74,8 @@ class RemovableHandle:
             if len(state) < 3
             else weakref.ref(OrderedDict() if state[2] is None else state[2])
         )
+        # TODO can we actually restore module_ref after unpickling? Do we care?
+        self.module_ref = None
 
     def __enter__(self) -> "RemovableHandle":
         return self
