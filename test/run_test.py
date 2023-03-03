@@ -1055,6 +1055,19 @@ def parse_args():
             "Use 'all' to execute all doctests or specify a specific "
             "doctest to run")
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+
     return parser.parse_args()
 
 
@@ -1297,6 +1310,11 @@ def main():
         selected_tests = get_reordered_tests(selected_tests)
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
+
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
 
     failure_messages = []
 
