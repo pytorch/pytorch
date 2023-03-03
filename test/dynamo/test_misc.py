@@ -4444,6 +4444,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             # TODO should also pass the code object back into dynamo again, but
             # dynamo is not enabled for Python 3.11 yet.
 
+    def test_ordered_dict_alias_reconstruct(self):
+        od = collections.OrderedDict
+
+        def fn():
+            d1 = dict()
+            d1["a"] = 1
+            d2 = od(d1)
+            d2["b"] = 2
+            torch._dynamo.graph_break()
+            if isinstance(d2, od):
+                return d2["a"] + d2["b"]
+            else:
+                return 0
+
+        dis.dis(fn)
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
