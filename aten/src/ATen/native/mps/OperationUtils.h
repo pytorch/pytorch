@@ -245,9 +245,10 @@ struct MPSGraphCache
 // Common math operations
 MPSGraphTensor* log1p(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
 
-#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                                   \
-  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                               \
-     TORCH_WARN_ONCE("MPS: no support for int64 for ", op_name, ", casting to int32. Support has been added in macOS 13.3");    \
+#define MPS_CHECK_INT64_OP_SUPPORTED(input_tensor, mac_os_13_3_plus, op_name)                                           \
+  if (!mac_os_13_3_plus && input_tensor.scalar_type() == kLong) {                                                       \
+     TORCH_WARN_ONCE("MPS: no support for int64 for ", op_name,                                                         \
+     ", downcasting to a smaller data type (int32/float32). Native support for int64 has been added in macOS 13.3.");   \
   }
 
 } // namespace mps
