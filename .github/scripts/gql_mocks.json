@@ -28079,5 +28079,2352 @@
         }
       }
     }
+  },
+  "query_sha=5b184e34a1b44cf9343216f538130dc787a8b220a7a687dfa4cfbc050008d691 name=pytorch number=95045 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": ".github/workflows/_mac-test-mps.yml"
+              },
+              {
+                "path": ".github/workflows/mac-mps.yml"
+              },
+              {
+                "path": ".github/workflows/trunk.yml"
+              },
+              {
+                "path": "aten/src/ATen/native/mps/operations/ReduceOps.mm"
+              },
+              {
+                "path": "test/test_mps.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=5b184e34a1b44cf9343216f538130dc787a8b220a7a687dfa4cfbc050008d691 name=pytorch number=94939 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_value_ranges.py"
+              },
+              {
+                "path": "third_party/ideep"
+              },
+              {
+                "path": "torch/utils/_sympy/value_ranges.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=73b33a76356fba10082dfe2068a786b3427fb1114c5a69b815791ec7fc3f4bbc name=pytorch number=94939 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "title": "Add exhaustive testing to ValueRanges, fix bugs",
+          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* #95063\n* #94985\n* #94944\n* __->__ #94939\n* #94906\n\r\nSince I didn't want to deal with nondeterministic tests, I went the exhaustive testing route for a fixed list of constants to look at. The tests generate random ranges, propagate the range through the function, and then pick elements in the range and check that the result on the operation is in the resulting range. This caught bugs in log, sqrt and pow.\r\n\r\nMy resolution for pow was a little special, because I had trouble figuring out the correct semantics under all inputs domains. Instead, I picked two input domains (pow on two point ranges, and pow where exponent is known) and only implemented those. Everything else we give up. I think this is unlikely to affect perf.\r\n\r\nSigned-off-by: Edward Z. Yang <ezyang@meta.com>\n\ncc @gujinghui @PenghuiCheng @XiaobingSuper @jianyuh @jgong5 @mingfeima @sanchitintel @ashokei @jingxu10 @min-jean-cho @yanbing-j @Guobing-Chen @Xia-Weiwen",
+          "labels": {
+            "nodes": [
+              {
+                "name": "module: mkldnn"
+              },
+              {
+                "name": "Merged"
+              },
+              {
+                "name": "ciflow/trunk"
+              },
+              {
+                "name": "topic: bug fixes"
+              },
+              {
+                "name": "release notes: inductor"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          },
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_value_ranges.py"
+              },
+              {
+                "path": "third_party/ideep"
+              },
+              {
+                "path": "torch/utils/_sympy/value_ranges.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=73b33a76356fba10082dfe2068a786b3427fb1114c5a69b815791ec7fc3f4bbc name=pytorch number=95045 owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        },
+        "pullRequest": {
+          "title": "[MPS][BE] Introduce xfail",
+          "body": "Add `mps_ops_modifier` function that adds `unittest.expectedFailure` decorators to the operators that supposed to fail on MPS.\r\n\r\nThis allows one to know whether or not operation will fail, rather than skip it. \r\nFor example:\r\n```\r\n% python test_mps.py -v -k test_output_match_dot\r\ntest_output_match_dot_cpu_float32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int16 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int64 (__main__.TestConsistencyCPU) ... expected failure\r\ntest_output_match_dot_cpu_uint8 (__main__.TestConsistencyCPU) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 5 tests in 0.175s\r\n\r\nOK (expected failures=1)\r\n```\r\n\r\nMoved a few functions from blocklist to xfail, and find out that some of the functions in the list actually work, for example `torch.long`.\r\n\r\nAlso, allow `None` to be used in `ALLOWLIST`  instead of specifying all types explicitly (which aligns with `DecorateInfo` semantic)\r\n\r\nEventually, we should get rid of `ALLOWLIST` (i.e. all ops are allowed), keep small `BLOCKLIST` and move the rest to `XFAILLIST`\r\n\r\nAdd step to print HW/SW info before running MPS tests.\r\n\r\nFix type promotion in `trace_mps_out`\r\n\r\nIntroduce `MACOS_12_X_XFAILLIST` and skip almost every function for `torch.uint8`,  although some of those doesn't make much sense and feels like a regression from PyTorch-1.13\r\n\r\nRe-enabled MPS testing on MacOS 12, as runners seems to be available again",
+          "labels": {
+            "nodes": [
+              {
+                "name": "Merged"
+              },
+              {
+                "name": "topic: bug fixes"
+              },
+              {
+                "name": "release notes: mps"
+              },
+              {
+                "name": "ciflow/mps"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NA",
+              "hasNextPage": false
+            }
+          },
+          "files": {
+            "nodes": [
+              {
+                "path": ".github/workflows/_mac-test-mps.yml"
+              },
+              {
+                "path": ".github/workflows/mac-mps.yml"
+              },
+              {
+                "path": ".github/workflows/trunk.yml"
+              },
+              {
+                "path": "aten/src/ATen/native/mps/operations/ReduceOps.mm"
+              },
+              {
+                "path": "test/test_mps.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "query_sha=41327b4a6ac68efcb80ddbf3f4155a15906baac6c9c304aa4674e7b60f0c046f name=pytorch number=94939 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "ezyang"
+          },
+          "title": "Add exhaustive testing to ValueRanges, fix bugs",
+          "body": "Stack from [ghstack](https://github.com/ezyang/ghstack) (oldest at bottom):\n* #95063\n* #94985\n* #94944\n* __->__ #94939\n* #94906\n\r\nSince I didn't want to deal with nondeterministic tests, I went the exhaustive testing route for a fixed list of constants to look at. The tests generate random ranges, propagate the range through the function, and then pick elements in the range and check that the result on the operation is in the resulting range. This caught bugs in log, sqrt and pow.\r\n\r\nMy resolution for pow was a little special, because I had trouble figuring out the correct semantics under all inputs domains. Instead, I picked two input domains (pow on two point ranges, and pow where exponent is known) and only implemented those. Everything else we give up. I think this is unlikely to affect perf.\r\n\r\nSigned-off-by: Edward Z. Yang <ezyang@meta.com>\n\ncc @gujinghui @PenghuiCheng @XiaobingSuper @jianyuh @jgong5 @mingfeima @sanchitintel @ashokei @jingxu10 @min-jean-cho @yanbing-j @Guobing-Chen @Xia-Weiwen",
+          "headRefName": "gh/ezyang/1819/head",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "gh/ezyang/1819/base",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@meta.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "4f653eceab2e78e874d70d2671685820b86ca106"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@meta.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "2b1d2ad7ec56e07a5ea15c801a21243e997dab98"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@meta.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "e546e5fc9e4e1f675e3ef4869d7fb0cc3a7b73bf"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "ezyang"
+                    },
+                    "email": "ezyang@meta.com",
+                    "name": "Edward Z. Yang"
+                  },
+                  "oid": "bf8f3d7786822926452fc53debd261911415fdcb"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NA",
+              "hasNextPage": false
+            },
+            "totalCount": 4
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Meta Internal-Only Changes Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://opensource.facebook.com/"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAqd5TRw=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHG-4="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHCs="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHEM="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHFs="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHGs="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHIA="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "CircleCI Checks",
+                            "databaseId": 18001
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHHMg="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Labeler"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4197726497"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "triage",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4197726497/jobs/7280427464"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAqd5Tuw=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHH2M="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "TorchBench CI (pytorch-linux-py3.8-cu116)"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4197726771"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "run-torchbench",
+                                "conclusion": "NEUTRAL",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4197726771/jobs/7280428149"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAqd5Uqo=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SKIPPED"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHIeQ="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Check Labels"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4197726781"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Check labels",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4197726781/jobs/7280428103"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAqd5UnA=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAApGHIgM="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "status": {
+                    "contexts": [
+                      {
+                        "context": "EasyCLA",
+                        "state": "SUCCESS",
+                        "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2"
+                      }
+                    ]
+                  },
+                  "pushedDate": "2023-02-16T20:02:44Z",
+                  "oid": "bf8f3d7786822926452fc53debd261911415fdcb"
+                }
+              }
+            ]
+          },
+          "changedFiles": 3,
+          "files": {
+            "nodes": [
+              {
+                "path": "test/test_value_ranges.py"
+              },
+              {
+                "path": "third_party/ideep"
+              },
+              {
+                "path": "torch/utils/_sympy/value_ranges.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "Mw",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "lezcano"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "eellison"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "ezyang"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "lezcano"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "nunoplopes"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMy0wMi0xNVQxNDozODo0NS0wODowMLkyMDIzLTAyLTE1VDE0OjM3OjI5LTA4OjAwzk2Djtw=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "Merge started\nYour change will be merged once all checks pass (ETA 0-4 Hours).\nLearn more about merging in the wiki.\nQuestions? Feedback? Please reach out to the PyTorch DevX TeamAdvanced Debugging\nCheck the merge workflow status\nhere",
+                "createdAt": "2023-02-16T14:09:51Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1433147125
+              },
+              {
+                "bodyText": "Merge failed\nReason: New commits were pushed while merging. Please rerun the merge command.\nDetails for Dev Infra team\nRaised by workflow job",
+                "createdAt": "2023-02-16T14:25:04Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1433167989
+              },
+              {
+                "bodyText": "Hi @ezyang , could you please double check the code change of third_party/ideep? I suppose the change is unnecessary, could you please reland this PR then? Thanks!",
+                "createdAt": "2023-02-28T02:28:49Z",
+                "author": {
+                  "login": "yanbing-j"
+                },
+                "authorAssociation": "COLLABORATOR",
+                "editor": null,
+                "databaseId": 1447473074
+              },
+              {
+                "bodyText": "It's not intentional. You won't be able to revert this PR, please submit a forward fix PR.",
+                "createdAt": "2023-02-28T03:05:40Z",
+                "author": {
+                  "login": "ezyang"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1447501258
+              },
+              {
+                "bodyText": "Please review the forward fix PR #95688. Thanks!",
+                "createdAt": "2023-02-28T05:18:43Z",
+                "author": {
+                  "login": "yanbing-j"
+                },
+                "authorAssociation": "COLLABORATOR",
+                "editor": null,
+                "databaseId": 1447593945
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOVWwW9Q==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "module: mkldnn"
+                }
+              },
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "ciflow/trunk"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: bug fixes"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: inductor"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "query_sha=5dc32efeb8306f03744f6804ef4b500882f2759f7ac17fdc9f123669bfe4805a name=pytorch owner=pytorch": {
+    "data": {
+      "repository": {
+        "submodules": {
+          "nodes": [
+            {
+              "path": "third_party/pybind11"
+            },
+            {
+              "path": "third_party/cub"
+            },
+            {
+              "path": "third_party/eigen"
+            },
+            {
+              "path": "third_party/googletest"
+            },
+            {
+              "path": "third_party/benchmark"
+            },
+            {
+              "path": "third_party/protobuf"
+            },
+            {
+              "path": "third_party/ios-cmake"
+            },
+            {
+              "path": "third_party/NNPACK"
+            },
+            {
+              "path": "third_party/gloo"
+            },
+            {
+              "path": "third_party/pthreadpool"
+            },
+            {
+              "path": "third_party/FXdiv"
+            },
+            {
+              "path": "third_party/FP16"
+            },
+            {
+              "path": "third_party/psimd"
+            },
+            {
+              "path": "third_party/zstd"
+            },
+            {
+              "path": "third_party/cpuinfo"
+            },
+            {
+              "path": "third_party/python-enum"
+            },
+            {
+              "path": "third_party/python-peachpy"
+            },
+            {
+              "path": "third_party/python-six"
+            },
+            {
+              "path": "third_party/onnx"
+            },
+            {
+              "path": "third_party/onnx-tensorrt"
+            },
+            {
+              "path": "third_party/sleef"
+            },
+            {
+              "path": "third_party/ideep"
+            },
+            {
+              "path": "third_party/nccl/nccl"
+            },
+            {
+              "path": "third_party/gemmlowp/gemmlowp"
+            },
+            {
+              "path": "third_party/QNNPACK"
+            },
+            {
+              "path": "third_party/neon2sse"
+            },
+            {
+              "path": "third_party/fbgemm"
+            },
+            {
+              "path": "third_party/foxi"
+            },
+            {
+              "path": "third_party/tbb"
+            },
+            {
+              "path": "android/libs/fbjni"
+            },
+            {
+              "path": "third_party/XNNPACK"
+            },
+            {
+              "path": "third_party/fmt"
+            },
+            {
+              "path": "third_party/tensorpipe"
+            },
+            {
+              "path": "third_party/cudnn_frontend"
+            },
+            {
+              "path": "third_party/kineto"
+            },
+            {
+              "path": "third_party/pocketfft"
+            },
+            {
+              "path": "third_party/ittapi"
+            },
+            {
+              "path": "third_party/flatbuffers"
+            },
+            {
+              "path": "third_party/nlohmann"
+            },
+            {
+              "path": "third_party/VulkanMemoryAllocator"
+            },
+            {
+              "path": "third_party/cutlass"
+            }
+          ],
+          "pageInfo": {
+            "endCursor": "NDE",
+            "hasNextPage": false
+          }
+        }
+      }
+    }
+  },
+  "query_sha=41327b4a6ac68efcb80ddbf3f4155a15906baac6c9c304aa4674e7b60f0c046f name=pytorch number=95045 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "malfet"
+          },
+          "title": "[MPS][BE] Introduce xfail",
+          "body": "Add `mps_ops_modifier` function that adds `unittest.expectedFailure` decorators to the operators that supposed to fail on MPS.\r\n\r\nThis allows one to know whether or not operation will fail, rather than skip it. \r\nFor example:\r\n```\r\n% python test_mps.py -v -k test_output_match_dot\r\ntest_output_match_dot_cpu_float32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int16 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int32 (__main__.TestConsistencyCPU) ... ok\r\ntest_output_match_dot_cpu_int64 (__main__.TestConsistencyCPU) ... expected failure\r\ntest_output_match_dot_cpu_uint8 (__main__.TestConsistencyCPU) ... ok\r\n\r\n----------------------------------------------------------------------\r\nRan 5 tests in 0.175s\r\n\r\nOK (expected failures=1)\r\n```\r\n\r\nMoved a few functions from blocklist to xfail, and find out that some of the functions in the list actually work, for example `torch.long`.\r\n\r\nAlso, allow `None` to be used in `ALLOWLIST`  instead of specifying all types explicitly (which aligns with `DecorateInfo` semantic)\r\n\r\nEventually, we should get rid of `ALLOWLIST` (i.e. all ops are allowed), keep small `BLOCKLIST` and move the rest to `XFAILLIST`\r\n\r\nAdd step to print HW/SW info before running MPS tests.\r\n\r\nFix type promotion in `trace_mps_out`\r\n\r\nIntroduce `MACOS_12_X_XFAILLIST` and skip almost every function for `torch.uint8`,  although some of those doesn't make much sense and feels like a regression from PyTorch-1.13\r\n\r\nRe-enabled MPS testing on MacOS 12, as runners seems to be available again",
+          "headRefName": "malfet/MPS-introduce-xfail",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@meta.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "dac90485e7815577405b6d45c57f6b0813207b91"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nshulga@meta.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "1edd22b2a89b4177b623f0f8f35bdfcd4a78e894"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "c5f2c3e9067fb1af719be1a3b284ac6a29ef6694"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "9a1e54b2eb42f06b693827850df64ed0cb9403b4"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "f316686a56576994b0cb29b43f51d3f9d3b824fc"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "006afa21c488431f318382859bbcdf038dd82648"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "3856e65f3eb173106600b2ee15a77f73a44911e8"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "974b450518531f5b4f22edec1cb32b9218507d5d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "064b6a71a77a0e3cacbc8e63fce9a7ab4f0d8c23"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "41ea83c2511154427fa72d68bea238be6b7bfb91"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "74616a86a402007dfc999fde73a8be77aa35ca7d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "a98d78e1ac910b876fe08eed8f1f9c2dd1706c06"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "92b45e878b924be1d5ea861341bfb99bb443d124"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "bc347a92cb9d7feaba1e53b3639e1b576ba1624d"
+                }
+              },
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "malfet"
+                    },
+                    "email": "nikita.shulga@gmail.com",
+                    "name": "Nikita Shulga"
+                  },
+                  "oid": "fa62f3aae22c04f1a9f97a2d2a6d591645e05e92"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MTU",
+              "hasNextPage": false
+            },
+            "totalCount": 15
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Meta Internal-Only Changes Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://opensource.facebook.com/"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAArUR3AI=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O-wM="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O-zc="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O-14="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O-5c="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O-74="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O_A0="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "CircleCI Checks",
+                            "databaseId": 18001
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1O_EM="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Labeler"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4283698579"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "triage",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4283698579/jobs/7459625158"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAArUR3ss=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1PAyc="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "TorchBench CI (pytorch-linux-py3.8-cu116)"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4283698793"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "run-torchbench",
+                                "conclusion": "NEUTRAL",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4283698793/jobs/7459625623"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAArUR4Sw=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SKIPPED"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1PBdg="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Check Labels"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/4283698801"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Check labels",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/4283698801/jobs/7459625590"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAArUR4QY=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAp1PBeo="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "status": {
+                    "contexts": [
+                      {
+                        "context": "EasyCLA",
+                        "state": "SUCCESS",
+                        "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2"
+                      }
+                    ]
+                  },
+                  "pushedDate": "2023-02-27T14:56:44Z",
+                  "oid": "fa62f3aae22c04f1a9f97a2d2a6d591645e05e92"
+                }
+              }
+            ]
+          },
+          "changedFiles": 5,
+          "files": {
+            "nodes": [
+              {
+                "path": ".github/workflows/_mac-test-mps.yml"
+              },
+              {
+                "path": ".github/workflows/mac-mps.yml"
+              },
+              {
+                "path": ".github/workflows/trunk.yml"
+              },
+              {
+                "path": "aten/src/ATen/native/mps/operations/ReduceOps.mm"
+              },
+              {
+                "path": "test/test_mps.py"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "NQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "albanD"
+                },
+                "state": "APPROVED"
+              },
+              {
+                "author": {
+                  "login": "kulinseth"
+                },
+                "state": "COMMENTED"
+              },
+              {
+                "author": {
+                  "login": "kulinseth"
+                },
+                "state": "CHANGES_REQUESTED"
+              },
+              {
+                "author": {
+                  "login": "malfet"
+                },
+                "state": "COMMENTED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMy0wMi0xN1QwODowNjo0Ny0wODowMLkyMDIzLTAyLTE3VDA4OjAzOjA2LTA4OjAwzk21H1s=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "@pytorchbot merge -f \"MPS tests are green\"",
+                "createdAt": "2023-02-27T14:53:19Z",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1446473367
+              },
+              {
+                "bodyText": "@pytorchbot merge -f \"MPS tests are green\"",
+                "createdAt": "2023-02-27T14:57:10Z",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1446480559
+              },
+              {
+                "bodyText": "Cancelled previous land due to spurious libkineto update, not waiting for the full tests rerun now",
+                "createdAt": "2023-02-27T14:57:42Z",
+                "author": {
+                  "login": "malfet"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1446481548
+              },
+              {
+                "bodyText": "Merge started\nYour change will be merged immediately since you used the force (-f) flag, bypassing any CI checks (ETA: 1-5 minutes).\nLearn more about merging in the wiki.\nQuestions? Feedback? Please reach out to the PyTorch DevX TeamAdvanced Debugging\nCheck the merge workflow status\nhere",
+                "createdAt": "2023-02-27T15:00:55Z",
+                "author": {
+                  "login": "pytorchmergebot"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1446487760
+              },
+              {
+                "bodyText": "@malfet I was working on removing the ALLOWLIST altogether as part of this change and categorize all the remaining ops in this PR. That's why I left the comment and was hoping to add those changes to this PR or in a separate PR instead of this one. But with the release/2.0 work and we need to go through internal testing it was taking time. I will rebase my changes and create a separate PR.",
+                "createdAt": "2023-02-27T15:33:55Z",
+                "author": {
+                  "login": "kulinseth"
+                },
+                "authorAssociation": "COLLABORATOR",
+                "editor": null,
+                "databaseId": 1446549668
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOVjdulw==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "Merged"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: bug fixes"
+                }
+              },
+              {
+                "node": {
+                  "name": "release notes: mps"
+                }
+              },
+              {
+                "node": {
+                  "name": "ciflow/mps"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "query_sha=41327b4a6ac68efcb80ddbf3f4155a15906baac6c9c304aa4674e7b60f0c046f name=pytorch number=91051 owner=pytorch": {
+    "data": {
+      "repository": {
+        "pullRequest": {
+          "closed": true,
+          "isCrossRepository": false,
+          "author": {
+            "login": "facebook-github-bot"
+          },
+          "title": "Automated submodule update: kineto",
+          "body": "username: bcoutinho@meta.com\r\nThis is an automated pull request to update the first-party submodule for [pytorch/kineto](https://github.com/pytorch/kineto).\r\n\r\nNew submodule commit: https://github.com/pytorch/kineto/commit/8bcc98e51a4d80a0a35fa6209c6edb5412622373\r\n\r\nTest Plan: Ensure that CI jobs succeed on GitHub before landing.\r\n",
+          "headRefName": "update_submodule_kineto",
+          "headRepository": {
+            "nameWithOwner": "pytorch/pytorch"
+          },
+          "baseRefName": "master",
+          "baseRepository": {
+            "nameWithOwner": "pytorch/pytorch",
+            "isPrivate": false,
+            "defaultBranchRef": {
+              "name": "master"
+            }
+          },
+          "mergeCommit": null,
+          "commits_with_authors": {
+            "nodes": [
+              {
+                "commit": {
+                  "author": {
+                    "user": {
+                      "login": "facebook-github-bot"
+                    },
+                    "email": "facebook-github-bot@users.noreply.github.com",
+                    "name": "Facebook Community Bot"
+                  },
+                  "oid": "7f822f882cf3162f92e38015416f267612e0a9d3"
+                }
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            },
+            "totalCount": 1
+          },
+          "commits": {
+            "nodes": [
+              {
+                "commit": {
+                  "checkSuites": {
+                    "edges": [
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Facebook GitHub Tools",
+                            "databaseId": 12274
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Meta Internal-Only Changes Check",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://opensource.facebook.com/"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAnBcc4o=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2k4="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Netlify",
+                            "databaseId": 13473
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2m0="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Azure Pipelines",
+                            "databaseId": 9426
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2oU="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "CircleCI Checks",
+                            "databaseId": 18001
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2p4="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Dependabot",
+                            "databaseId": 29110
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2rE="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "Codecov",
+                            "databaseId": 254
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2sw="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "PyTorch Bot",
+                            "databaseId": 40112
+                          },
+                          "workflowRun": null,
+                          "checkRuns": {
+                            "nodes": [],
+                            "pageInfo": {
+                              "endCursor": null,
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": null
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv2uo="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Labeler"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3848371582"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "triage",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371582/jobs/6556067619"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAm-vN5g=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv4AI="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Check Labels"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3848371675"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "Check labels",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371675/jobs/6556067802"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAm-vOJI=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv4O8="
+                      },
+                      {
+                        "node": {
+                          "app": {
+                            "name": "GitHub Actions",
+                            "databaseId": 15368
+                          },
+                          "workflowRun": {
+                            "workflow": {
+                              "name": "Lint"
+                            },
+                            "url": "https://github.com/pytorch/pytorch/actions/runs/3848371690"
+                          },
+                          "checkRuns": {
+                            "nodes": [
+                              {
+                                "name": "workflow-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556068018"
+                              },
+                              {
+                                "name": "Test tools",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556068186"
+                              },
+                              {
+                                "name": "toc",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556068682"
+                              },
+                              {
+                                "name": "lintrunner",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556068869"
+                              },
+                              {
+                                "name": "Test collect_env (with_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556068995"
+                              },
+                              {
+                                "name": "Test collect_env (without_torch)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556069124"
+                              },
+                              {
+                                "name": "Test collect_env (older_python_version)",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556069232"
+                              },
+                              {
+                                "name": "quick-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556069352"
+                              },
+                              {
+                                "name": "pr-sanity-checks",
+                                "conclusion": "SUCCESS",
+                                "detailsUrl": "https://github.com/pytorch/pytorch/actions/runs/3848371690/jobs/6556069470"
+                              }
+                            ],
+                            "pageInfo": {
+                              "endCursor": "Y3Vyc29yOnYyOpHPAAAAAm-vQes=",
+                              "hasNextPage": false
+                            }
+                          },
+                          "conclusion": "SUCCESS"
+                        },
+                        "cursor": "Y3Vyc29yOnYyOpHPAAAAAmAv4P0="
+                      }
+                    ],
+                    "pageInfo": {
+                      "hasNextPage": true
+                    }
+                  },
+                  "status": {
+                    "contexts": [
+                      {
+                        "context": "EasyCLA",
+                        "state": "SUCCESS",
+                        "targetUrl": "https://easycla.lfx.linuxfoundation.org/#/?version=2"
+                      }
+                    ]
+                  },
+                  "pushedDate": "2023-01-05T16:09:52Z",
+                  "oid": "7f822f882cf3162f92e38015416f267612e0a9d3"
+                }
+              }
+            ]
+          },
+          "changedFiles": 1,
+          "files": {
+            "nodes": [
+              {
+                "path": "third_party/kineto"
+              }
+            ],
+            "pageInfo": {
+              "endCursor": "MQ",
+              "hasNextPage": false
+            }
+          },
+          "reviews": {
+            "nodes": [
+              {
+                "author": {
+                  "login": "malfet"
+                },
+                "state": "APPROVED"
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpO5MjAyMi0xMi0yOVQwOToxNDo1Ny0wODowMLkyMDIyLTEyLTI5VDA5OjE0OjU3LTA4OjAwzkl4zUA=",
+              "hasPreviousPage": false
+            }
+          },
+          "comments": {
+            "nodes": [
+              {
+                "bodyText": "I'll trigger it now",
+                "createdAt": "2023-01-04T22:33:08Z",
+                "author": {
+                  "login": "bigfootjon"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1371505645
+              },
+              {
+                "bodyText": "done",
+                "createdAt": "2023-01-04T22:36:01Z",
+                "author": {
+                  "login": "bigfootjon"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1371507633
+              },
+              {
+                "bodyText": "The build failures are related to the dynolog dep. @briancoutinho can you take a look?",
+                "createdAt": "2023-01-04T23:30:13Z",
+                "author": {
+                  "login": "robieta"
+                },
+                "authorAssociation": "NONE",
+                "editor": null,
+                "databaseId": 1371543995
+              },
+              {
+                "bodyText": "Hi, I'll do this manually so i can debug with ssh :)",
+                "createdAt": "2023-01-06T03:50:03Z",
+                "author": {
+                  "login": "briancoutinho"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1373108420
+              },
+              {
+                "bodyText": "FYI; The bot will automatically recreate this PR the next time there\u2019s a commit to Kineto. Feel free to close it when it does",
+                "createdAt": "2023-01-06T04:02:41Z",
+                "author": {
+                  "login": "bigfootjon"
+                },
+                "authorAssociation": "MEMBER",
+                "editor": null,
+                "databaseId": 1373114533
+              }
+            ],
+            "pageInfo": {
+              "startCursor": "Y3Vyc29yOnYyOpHOUb-D7Q==",
+              "hasPreviousPage": true
+            }
+          },
+          "labels": {
+            "edges": [
+              {
+                "node": {
+                  "name": "triaged"
+                }
+              },
+              {
+                "node": {
+                  "name": "open source"
+                }
+              },
+              {
+                "node": {
+                  "name": "with-ssh"
+                }
+              },
+              {
+                "node": {
+                  "name": "topic: not user facing"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
   }
 }

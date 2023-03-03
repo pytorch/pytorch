@@ -2840,7 +2840,7 @@ class TestMPS(TestCaseMPS):
             helper(torch.int64)
         except Exception as e:
             e_string = str(e)
-            self.assertEqual(e_string, "MPS does not support cumsum op with int64 input")
+            self.assertEqual(e_string, "MPS does not support cumsum op with int64 input. Support has been added in macOS 13.3")
 
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
@@ -3851,6 +3851,15 @@ class TestNLLLoss(TestCaseMPS):
         helper(2, 8, 4, 4, "min", torch.int32)
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
+
+    @unittest.skipIf(product_version < 13.3, "Long data type supported from macOS 13.3 and above")
+    def test_reduction_sum_max_long_val(self):
+        x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.sum(x_mps)
+        res_cpu = torch.sum(x_cpu)
+        self.assertEqual(res_mps, res_cpu)
 
     # Test forward max
     # Note - don't test grad now
@@ -9550,7 +9559,7 @@ class TestConsistency(TestCaseMPS):
         'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
-        'cumsum': ['f16', 'f32', 'int16', 'int32'],
+        'cumsum': ['i8', 'b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diag': ['f32', 'i32'],
         'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -10181,7 +10190,7 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
-                if any(s in str(e).lower() for s in ["float16", "div truc rounding"]):
+                if any(s in str(e).lower() for s in ["int64", "float16", "div truc rounding"]):
                     self.skipTest(f"Expected Runtime Error: {str(e)}")
 
                 if not generate_new_truth:
