@@ -1414,7 +1414,7 @@ def compile(model: Optional[Callable] = None, *,
         - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
         - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
         - `trace.enabled` which is the most useful debugging flag to turn on
-        - `trace.graph_diagram` which will show you a picture of your graph before and after fusion
+        - `trace.graph_diagram` which will show you a picture of your graph after fusion
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
