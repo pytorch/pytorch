@@ -8,7 +8,6 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.distributed_c10d import (
     _get_default_group,
-    all_gather,
     all_to_all,
     Backend,
     broadcast,
@@ -22,11 +21,20 @@ from torch.distributed.distributed_c10d import (
     new_group,
     ProcessGroup,
     reduce_scatter,
+<<<<<<< HEAD
+=======
+    ProcessGroup,
+>>>>>>> Switch DeviceMesh all_gather and reduce_scatter to funcol.
     ReduceOp,
     scatter,
     Work,
 )
 
+<<<<<<< HEAD
+=======
+import torch.distributed._functional_collectives as funcol
+
+>>>>>>> Switch DeviceMesh all_gather and reduce_scatter to funcol.
 # only import numpy typing when type checking
 if TYPE_CHECKING:
     try:
@@ -50,6 +58,18 @@ def set_global_device_mesh(mesh: Optional["DeviceMesh"]) -> None:
     global _global_device_mesh
     _global_device_mesh = mesh
 
+
+# We want a type for "can be passed to torch.as_tensor()";
+# this is a recursive sequence type, which isn't fully supported
+# yet in python. This construct simulates that up to depth 7.
+T = TypeVar("T")
+_L = Union[T, Sequence[T]]
+NDIntList = _L[_L[_L[_L[_L[_L[_L[int]]]]]]]
+
+MeshExprT = Union[
+    torch.Tensor,
+    NDIntList,
+]
 
 class DeviceMesh(object):
     """
@@ -350,11 +370,10 @@ class DeviceMesh(object):
 
     def all_gather(
         self,
-        tensor_list: List[torch.Tensor],
         tensor: torch.Tensor,
         mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
+        gather_dim: int = 0,
+    ) -> torch.Tensor:
         """
         all_gather the tensor on each rank to the tensor_list on a
         device mesh dimension.
@@ -365,12 +384,15 @@ class DeviceMesh(object):
             mesh_dim (int, optional): indicate which mesh dimension we want
                 to scatter on, we by default choose the first rank on the
                 mesh dimension as source of truth.
+            gather_dim (int, optional): Dimension to concatenate the resulting tensor.
+            gather_size (torch.Size, optional): Desired shape of the gathered tensor.
 
+            This suppport up to 1 elem of padding on gather_dim.
         Returns:
-            A :class:`Work` object
+            A :class:`torch.Tensor` object
         """
         dim_group = self._dim_groups[mesh_dim]
-        return all_gather(tensor_list, tensor, group=dim_group, async_op=async_op)
+        return funcol.all_gather_tensor(tensor, gather_dim=gather_dim, group=dim_group)
 
     def all_reduce(
         self,
@@ -406,19 +428,17 @@ class DeviceMesh(object):
 
     def reduce_scatter(
         self,
-        output: torch.Tensor,
-        input_list: List[torch.Tensor],
+        input: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
-        async_op: bool = False,
-    ) -> Optional[Work]:
+        scatter_dim: int = 0,
+    ) -> torch.Tensor:
         """
-        reduce the input_list on each rank on a device mesh dimension, and scatter
+        reduce the input on each rank on a device mesh dimension, and scatter
         the results to the output tensor on each rank.
 
         Args:
-            output (torch.Tensor): tensor to receive the scattered result.
-            input_list (List[torch.Tensor]): tensor list to be reduced and scattered
+            input (torch.Tensor): tensor to be reduced and scattered
                 and scattered on each rank.
             op (:class:`torch.distributed.distributed_c10d.ReduceOp, optional):
                 the reduction op of reduce_scatter (i.e. ReduceOp.SUM)
@@ -426,13 +446,12 @@ class DeviceMesh(object):
                 to scatter on.
 
         Returns:
-            A :class:`Work` object
+            A :class:`torch.Tensor` object
         """
-        if self._backend == "nccl":
+        op_name: str = op.name  # type: ignore[attr-defined]
+        if self._backend == "nccl" or self._backend == "threaded":
             dim_group = self._dim_groups[mesh_dim]
-            fut = reduce_scatter(
-                output, input_list, op=op, group=dim_group, async_op=async_op
-            )
+            scatter_tensor = funcol.reduce_scatter_tensor(input, reduceOp=op_name, scatter_dim=scatter_dim, group=dim_group)
 
         elif self._backend == "gloo":
             # it's gloo, which does not have reduce_scatter
@@ -440,43 +459,20 @@ class DeviceMesh(object):
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate()
-            # TODO: what should happen if rank is not in the mesh?
-            # see issue https://github.com/pytorch/tau/pull/492
-            assert (
-                my_coordinate is not None
-            ), "Rank if not part of mesh"  # TODO: figure out behavior here
-            fut = None
-            flattened_list = []
-            offset_list = []
-
-            offset = 0
-            for input in input_list:
-                offset_list.append(offset)
-                offset += input.numel()
-                flattened_list.append(input.flatten())
-
-            # all reduce since gloo does not support reduce_scatter
-            flat_tensor = torch.cat(flattened_list).clone(
-                memory_format=torch.contiguous_format
-            )
             dim_group = self._dim_groups[mesh_dim]
-            fut = c10d.all_reduce(
-                flat_tensor, op=op, group=dim_group, async_op=async_op
-            )
-
-            # scatter the tensor
-            output_offset = offset_list[my_coordinate[mesh_dim]]
-            output.copy_(
-                flat_tensor[output_offset : output_offset + output.numel()].view(
-                    output.shape
-                )
-            )
+            flat_tensor = funcol.all_reduce(input, reduceOp=op_name, group=dim_group)
+            chunks = flat_tensor.chunk(get_world_size(dim_group))
+            scatter_tensor = chunks[get_rank(dim_group)]
         else:
             raise RuntimeError(
                 f"backend {self._backend} does not support reduce_scatter!"
             )
-        return fut
+
+        # if needs_padding:
+        #     if pad_idx != 0 and my_coordinate[mesh_dim] >= pad_idx:
+        #         scatter_tensor = shard._unpad_tensor(scatter_tensor)
+
+        return scatter_tensor
 
     # TODO: test uneven split on GLOO and NCCL
     def all_to_all(
