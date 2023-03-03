@@ -549,134 +549,133 @@ class SymNode:
         return self.guard_bool("", 0)
 
 
-if True:  # TODO: unindent
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class Pow(sympy.Function):
-        @classmethod
-        def eval(cls, base, exp):
-            if exp.is_zero:
-                return sympy.Integer(1)
-            elif base.is_zero and exp < 0:
-                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
-            else:
-                return base ** exp
+# Overloaded to be compatible with regular Python.
+# https://github.com/pytorch/pytorch/issues/90900
+class Pow(sympy.Function):
+    @classmethod
+    def eval(cls, base, exp):
+        if exp.is_zero:
+            return sympy.Integer(1)
+        elif base.is_zero and exp < 0:
+            raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
+        else:
+            return base ** exp
 
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class TrueDiv(sympy.Function):
-        @classmethod
-        def eval(cls, base, divisor):
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
-            else:
-                return base / divisor
+# Overloaded to be compatible with regular Python.
+# https://github.com/pytorch/pytorch/issues/90900
+class TrueDiv(sympy.Function):
+    @classmethod
+    def eval(cls, base, divisor):
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+        else:
+            return base / divisor
 
-    class FloorDiv(sympy.Function):
-        """
-        We maintain this so that:
-        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-        """
-        nargs = (2,)
-        precedence = 50  # precedence of mul  # noqa: F811
+class FloorDiv(sympy.Function):
+    """
+    We maintain this so that:
+    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
+    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+    """
+    nargs = (2,)
+    precedence = 50  # precedence of mul  # noqa: F811
 
-        # Default return type for SymPy assumptions.
-        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-        is_real = True
+    # Default return type for SymPy assumptions.
+    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+    is_real = True
 
-        @property
-        def base(self):
-            return self.args[0]
+    @property
+    def base(self):
+        return self.args[0]
 
-        @property
-        def divisor(self):
-            return self.args[1]
+    @property
+    def divisor(self):
+        return self.args[1]
 
-        def _sympystr(self, printer):
-            base = printer.parenthesize(self.base, self.precedence)
-            divisor = printer.parenthesize(self.divisor, self.precedence)
-            return f"{base}//{divisor}"
+    def _sympystr(self, printer):
+        base = printer.parenthesize(self.base, self.precedence)
+        divisor = printer.parenthesize(self.divisor, self.precedence)
+        return f"{base}//{divisor}"
 
-        # SymPy assumptions based on argument types.
-        def _eval_is_real(self):
-            return fuzzy_or([self.base.is_real, self.divisor.is_real])
+    # SymPy assumptions based on argument types.
+    def _eval_is_real(self):
+        return fuzzy_or([self.base.is_real, self.divisor.is_real])
 
-        def _eval_is_integer(self):
-            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+    def _eval_is_integer(self):
+        return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
 
-        # Automatic evaluation.
-        # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
-        @classmethod
-        def eval(cls, base, divisor):
-            def check_supported_type(x):
-                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
-                    raise TypeError(
-                        f"unsupported operand type(s) for //: "
-                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                        f", expected integer or real")
+    # Automatic evaluation.
+    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
+    @classmethod
+    def eval(cls, base, divisor):
+        def check_supported_type(x):
+            if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                raise TypeError(
+                    f"unsupported operand type(s) for //: "
+                    f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                    f", expected integer or real")
 
-            check_supported_type(base)
-            check_supported_type(divisor)
+        check_supported_type(base)
+        check_supported_type(divisor)
 
-            # We don't provide the same error message as in Python because SymPy
-            # makes it difficult to check the types.
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
+        # We don't provide the same error message as in Python because SymPy
+        # makes it difficult to check the types.
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
 
-            if base.is_zero:
-                return sympy.S.Zero
-            if base.is_integer and divisor == 1:
-                return base
-            if base.is_real and divisor == 1:
-                return sympy.floor(base)
-            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-                return base // divisor
-            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
-                return sympy.floor(base / divisor)
-            if isinstance(base, FloorDiv):
-                return FloorDiv(base.args[0], base.args[1] * divisor)
+        if base.is_zero:
+            return sympy.S.Zero
+        if base.is_integer and divisor == 1:
+            return base
+        if base.is_real and divisor == 1:
+            return sympy.floor(base)
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            return base // divisor
+        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+            return sympy.floor(base / divisor)
+        if isinstance(base, FloorDiv):
+            return FloorDiv(base.args[0], base.args[1] * divisor)
 
-            if isinstance(base, sympy.Add):
-                for a in base.args:
-                    gcd = sympy.gcd(a, divisor)
-                    if gcd == divisor:
-                        return FloorDiv(base - a, divisor) + a / gcd
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return FloorDiv(base - a, divisor) + a / gcd
 
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return FloorDiv(
-                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-                )
+        gcd = sympy.gcd(base, divisor)
+        if gcd != 1:
+            return FloorDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
-    # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
-    # Because we do not have the ability to guard on the stride permutation
-    # at the moment, it is hard to make further inferences when this is true,
-    # as although we know the tensor is contiguous in *some* layout, we don't
-    # know which one (however, you could, for example, make the inference that
-    # reshaping this to a 1D tensor can be guard-free.)
-    class IsNonOverlappingAndDenseIndicator(sympy.Function):
-        is_integer = True
+# TODO: As an indicator, this != 0 implies == 1 (and vice versa).
+# Because we do not have the ability to guard on the stride permutation
+# at the moment, it is hard to make further inferences when this is true,
+# as although we know the tensor is contiguous in *some* layout, we don't
+# know which one (however, you could, for example, make the inference that
+# reshaping this to a 1D tensor can be guard-free.)
+class IsNonOverlappingAndDenseIndicator(sympy.Function):
+    is_integer = True
 
-        @classmethod
-        def eval(cls, *args):
-            assert len(args) % 2 == 0
-            dim = len(args) // 2
-            # TODO: it is possible to make progress evaluating this guard
-            # even if not all of the inputs are known.  For example, a 2D
-            # tensor with non-0/1 sizes but strides (0, 1) is definitely
-            # false, because we know its numel > 1 but it's broadcasted
-            # in dim 0.
-            if all(isinstance(a, sympy.Integer) for a in args):
-                size_args = args[0:dim]
-                stride_args = args[dim:]
-                return eval_is_non_overlapping_and_dense(
-                    [int(a) for a in size_args],
-                    [int(a) for a in stride_args]
-                )
-            return None
+    @classmethod
+    def eval(cls, *args):
+        assert len(args) % 2 == 0
+        dim = len(args) // 2
+        # TODO: it is possible to make progress evaluating this guard
+        # even if not all of the inputs are known.  For example, a 2D
+        # tensor with non-0/1 sizes but strides (0, 1) is definitely
+        # false, because we know its numel > 1 but it's broadcasted
+        # in dim 0.
+        if all(isinstance(a, sympy.Integer) for a in args):
+            size_args = args[0:dim]
+            stride_args = args[dim:]
+            return eval_is_non_overlapping_and_dense(
+                [int(a) for a in size_args],
+                [int(a) for a in stride_args]
+            )
+        return None
 
-    IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
+IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 @lru_cache(256)
 def safe_expand(r):
@@ -1153,26 +1152,25 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-if True:  # TODO: unindent
-    class ShapeGuardPrinter(StrPrinter):
-        def __init__(
-            self,
-            symbol_to_source,
-            source_ref,
-            var_to_sources,
-        ):
-            super().__init__()
-            self.symbol_to_source = symbol_to_source
-            self.source_ref = source_ref
-            self.var_to_sources = var_to_sources
+class ShapeGuardPrinter(StrPrinter):
+    def __init__(
+        self,
+        symbol_to_source,
+        source_ref,
+        var_to_sources,
+    ):
+        super().__init__()
+        self.symbol_to_source = symbol_to_source
+        self.source_ref = source_ref
+        self.var_to_sources = var_to_sources
 
-        def _print_Symbol(self, expr) -> str:
-            assert isinstance(expr, sympy.Symbol), str(type(expr))
-            assert expr in self.symbol_to_source, (
-                f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
-                f"not in {self.symbol_to_source}"
-            )
-            return self.source_ref(self.symbol_to_source[expr][0])
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, sympy.Symbol), str(type(expr))
+        assert expr in self.symbol_to_source, (
+            f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
+            f"not in {self.symbol_to_source}"
+        )
+        return self.source_ref(self.symbol_to_source[expr][0])
 
 
 TLS = threading.local()
