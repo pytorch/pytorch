@@ -776,7 +776,7 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
 }
 
-ProcessGroupNCCL::~ProcessGroupNCCL() {
+void ProcessGroupNCCL::abort() {
   terminateProcessGroup_.store(true);
 
   watchdogCV_.notify_one();
@@ -802,6 +802,10 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
       }
     }
   }
+}
+
+ProcessGroupNCCL::~ProcessGroupNCCL() {
+  abort();
 }
 
 void ProcessGroupNCCL::abortTimedOutCollectives(

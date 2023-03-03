@@ -1944,6 +1944,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_abort",
+              &::c10d::ProcessGroupNCCL::abort,
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
