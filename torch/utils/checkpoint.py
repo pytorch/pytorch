@@ -1,14 +1,144 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Iterable, List, Tuple, Generator
+from typing import Any, Callable, Iterable, List, Tuple, Generator, Union
 import contextlib
+from torch.utils._python_dispatch import TorchDispatchMode
+from torch.utils._pytree import tree_map
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states",
+    "set_device_states", "list_operators", "get_selective_checkpoint_modes"
 ]
+
+def list_operators(function, *args, **kwargs):
+    """
+    Utility to return the list of operators used inside ``function``
+
+    Example::
+
+        >>> list_operators(lambda x: x.clone().sin(), torch.tensor(1.))
+        [<OpOverload(op='aten.clone', overload='default')>, <OpOverload(op='aten.sin', overload='default')>]
+    """
+    class VerboseTorchDispatchMode(TorchDispatchMode):
+        def __init__(self):
+            self.operators = []
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if kwargs is None:
+                kwargs = {}
+            self.operators.append(func)
+            return func(*args, **kwargs)
+
+    verbose_mode = VerboseTorchDispatchMode()
+    with verbose_mode:
+        function(*args, **kwargs)
+    return verbose_mode.operators
+
+def get_selective_checkpoint_contexts(policy: Union[List, Callable] = None):
+    """
+    Utility to enable checkpointing to selectively decide what to store and
+    recompute based on a provided policy. This function will return
+    two contexts that should be passed to ``checkpoint`` as ``forward_context``
+    and ``recompute_context`` respectively.
+
+    There are two ways to specify ``policy``:
+
+    ``policy`` can be a list of ops if you simply wish to specify particular
+    operators that you would like ``checkpoint`` to store instead of recompute
+    e.g. compute-intensive operations like ``torch.ops.aten.mm.default``.
+
+    ``policy`` can also be a function of form (op, *args, **kwargs) -> bool,
+    which allows one to conditionally save depending on the particular inputs
+    passed to the function.
+
+    The op should be in the format `torch.ops.***`. You can use the
+    ``torch.utils.checkpoint.list_operators`` utility to check
+    which operators can be used with the policy list or function.
+
+    Args:
+        policy(Union[List[Op], Callable]): policy for deciding what to
+            store (instead of recompute).
+
+    Returns:
+        Two contexts that can be passed to checkpoint as ``forward_context``
+        and ``recompute_context`` respectively.
+
+    Example::
+
+        >>> # xdoctest: +SKIP("stub")
+        >>> list_operators(lambda x: x.clone().sin(), torch.tensor(1.))
+        [<OpOverload(op='aten.clone', overload='default')>, <OpOverload(op='aten.sin', overload='default')>]
+        >>> allow_list = [torch.ops.aten.clone]
+        >>>
+        >>> caching_mode, cached_mode = get_selective_checkpoint_modes(policy_fn=allow_list)
+        >>> out = checkpoint(fn, use_reentrant=False, forward_context=caching_mode, \
+        ...                  recompute_context=cached_mode, *args, **kwargs)
+        >>>
+        >>> def _relu_policy(func, *args, **kwargs):
+        ...     return func == torch.ops.aten.relu.default
+        >>> caching_mode, cached_mode = get_selective_checkpoint_modes(policy_fn=_relu_policy)
+        >>> out = checkpoint(fn, use_reentrant=False, forward_context=caching_mode, \
+        ...                  recompute_context=cached_mode, *args, **kwargs)
+    """
+    class CachingTorchDispatchMode(TorchDispatchMode):
+        def __init__(self, policy_fn, storage):
+            self.policy_fn = policy_fn
+            self.storage = storage
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if kwargs is None:
+                kwargs = {}
+            if self.policy_fn(func, *args, **kwargs):
+                out = func(*args, **kwargs)
+                out_detached = tree_map(_detach, out)
+                self.storage.append(out_detached)
+                return out
+            return func(*args, **kwargs)
+
+    class CachedTorchDispatchMode(TorchDispatchMode):
+        def __init__(self, policy_fn, storage):
+            self.policy_fn = policy_fn
+            self.storage = storage
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            if kwargs is None:
+                kwargs = {}
+            if self.policy_fn(func, *args, **kwargs):
+                out = self.storage.pop(0)
+                return out
+            return func(*args, **kwargs)
+
+    def _detach(x):
+        if isinstance(x, torch.Tensor):
+            return x.detach()
+        return x
+
+    def _get_default_policy(allow_list=None):
+        _default_allow_list = [
+            torch.ops.aten.addmm.default,
+            torch.ops.aten.mm.default,
+        ]
+        if allow_list is None:
+            allow_list = _default_allow_list
+
+        def _default_policy(func, *args, **kwargs):
+            return func in allow_list
+
+        return _default_policy
+
+    if policy_fn is None:
+        policy_fn = _get_default_policy()
+    elif isinstance(policy_fn, list):
+        policy_fn = _get_default_policy(policy_fn)
+    else:
+        assert callable(policy_fn), "policy_fn should be None, list or a callable"
+
+    temp_storage = []
+    caching_mode = CachingTorchDispatchMode(policy_fn, temp_storage)
+    cached_mode = CachedTorchDispatchMode(policy_fn, temp_storage)
+    return caching_mode, cached_mode
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
@@ -253,6 +383,13 @@ def checkpoint(
 
     Returns:
         Output of running :attr:`function` on :attr:`*args`
+
+    Example::
+
+        >>> # xdoctest: +SKIP("stub")
+        >>> caching_mode, cached_mode = get_selective_checkpoint_contexts()
+        >>> out = checkpoint(fn, use_reentrant=False, forward_context=caching_mode, \
+        ...                  recompute_context=cached_mode, *args, **kwargs)
     """
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
