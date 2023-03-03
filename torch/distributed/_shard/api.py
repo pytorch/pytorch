@@ -126,7 +126,7 @@ _CURRENT_PROCESS_GROUP = None
 @contextmanager
 def load_with_process_group(process_group):
     """
-    Context manager to set the process group with which to load a ShardedTensor/ReplicatedTensor.
+    Context manager to set the process group with which to load a ShardedTensor.
     """
     global _CURRENT_PROCESS_GROUP
     if _CURRENT_PROCESS_GROUP is not None:
