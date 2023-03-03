@@ -1074,6 +1074,7 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
+aten::reduce_scatter_tensor
 aten::reflection_pad1d
 aten::reflection_pad1d.out
 aten::reflection_pad1d_backward
