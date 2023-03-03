@@ -1,4 +1,4 @@
-from .data_parallel import DataParallel as DataParallel, data_parallel as data_parallel
+from .data_parallel import data_parallel as data_parallel, DataParallel as DataParallel
 from .distributed import DistributedDataParallel as DistributedDataParallel
 from .parallel_apply import parallel_apply as parallel_apply
 from .replicate import replicate as replicate
