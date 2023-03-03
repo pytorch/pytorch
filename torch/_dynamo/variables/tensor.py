@@ -626,9 +626,11 @@ class NumpyTensorVariable(TensorVariable):
     """
     Represents a numpy.ndarray. Use this for Tensor.numpy() call.
     """
-    def var_getattr(self, tx, name):
-        import pdb; pdb.set_trace()
 
+    def var_getattr(self, tx, name):
+        if name == "sum":
+            super().var_getattr(tx, name)
+        unimplemented(f"numpy_ndarray.{name}")
 
     def call_isinstance(self, tensor_type):
         return False
@@ -640,7 +642,24 @@ class NumpyTensorVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"numpy_ndarray.{name}()")
+        if name == "sum":
+            from .builder import wrap_fx_proxy_cls
+
+            if kwargs or len(args) > 1:
+                unimplemented(f"numpy_ndarray.sum() with args and/or kwargs")
+            options = VariableTracker.propagate(self, args, kwargs.values())
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyTensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    name,
+                    *proxy_args_kwargs([self] + list(args), kwargs),
+                ),
+                **options,
+            )
+        else:
+            unimplemented(f"numpy_ndarray.{name}")
 
 
 class UnspecializedPythonVariable(TensorVariable):
