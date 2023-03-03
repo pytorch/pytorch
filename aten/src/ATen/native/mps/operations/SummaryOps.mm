@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/Histogram.h>
 #include <ATen/native/Resize.h>
 
 namespace at::native {
@@ -11,69 +12,89 @@ static const char* METAL_SUMMARY = R"SUMMARY_METAL(
 #include <metal_stdlib>
 using namespace metal;
 
-#define REGISTER_CROSS_FUNC(DTYPE)                              \
-static inline DTYPE ## 3 cross(DTYPE ## 3 x, DTYPE ## 3 y) {    \
-  DTYPE ## 3 out;                                               \
-  out.x = x.y * y.z - x.z * y.y;                                \
-  out.y = x.z * y.x - x.x * y.z;                                \
-  out.z = x.x * y.y - x.y * y.x;                                \
-  return out;                                                   \
+template<typename T>
+kernel int upper_bound(int64_t * first, int64_t * last, T val){
+  int64_t half;
+  int64_t * middle;
+  int64_t len = last - first;
+
+  // Till low is less than high
+  while (len > 0) {
+    half = len >> 1;
+    middle = start + half;
+
+    if (val >= *middle) {
+      len = half;
+    } else {
+      first = middle;
+      ++first;
+      len = len - half - 1;
+    }
+  }
+  return first;
 }
 
-// Metal only supports half and float for native cross implementation.
-// For all the the other data types, implement cross manually.
-REGISTER_CROSS_FUNC(int);
-REGISTER_CROSS_FUNC(long);
-REGISTER_CROSS_FUNC(short);
-REGISTER_CROSS_FUNC(char);
-REGISTER_CROSS_FUNC(uchar);
-REGISTER_CROSS_FUNC(bool);
-
-template<typename T, typename U>
-kernel void cross(constant void     * input_        [[buffer(0)]],
-                  constant void     * other_        [[buffer(1)]],
-                  device   void     * out_          [[buffer(2)]],
-                  constant uint3    * offsets       [[buffer(3)]],
-                  constant int64_t  & outStride     [[buffer(4)]],
-                  constant int64_t  & inputStride   [[buffer(5)]],
-                  constant int64_t  & otherStride   [[buffer(6)]],
+template<typename T>
+kernel void histogramdd(constant void     * input_        [[buffer(0)]],
+                  device   void     * local_out_        [[buffer(1)]],
+                  constant uint3    * offsets       [[buffer(2)]],
+                  constant size_t  num_dims         [[buffer(3)]],
+                  constant int64_t  & bin_seq         [[buffer(4)]],
+                  constant int64_t  & num_bin_edges   [[buffer(5)]],
+                  constant int64_t  & leftmost_edge   [[buffer(6)]],
+                  constant int64_t  & rightmost_edge  [[buffer(7)]],
                   uint tid [[thread_position_in_grid]]) {
-  device   T* out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
+  device   T* local_out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  //constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
 
-  const U x = {input[0 * inputStride], input[1 * inputStride], input[2 * inputStride]};
-  const U y = {other[0 * otherStride], other[1 * otherStride], other[2 * otherStride]};
-  const U res = cross(x, y);
+  bool skip_element = false;
+  int64_t hist_index = 0
+  for (size_t dim = 0; dim < num_dims; dim++) {
+    const auto element = input[dim];
+    if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) {
+        skip_element = true;
+        break;
+    }
+    int64_t pos = upper_bound(bin_seq[dim], bin_seq[dim] + num_bin_edges[dim], element) - bin_seq[dim] - 1;
 
-  out[0 * outStride] = res.x;
-  out[1 * outStride] = res.y;
-  out[2 * outStride] = res.z;
+    if (pos == (num_bin_edges[dim] - 1)) {
+      pos -= 1;
+    }
+    hist_index += pos;
+  }
+  if (!skip_element) {
+    // In the unweighted case, the default weight is 1
+    //input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
+
+    local_out[hist_index] += 1;
+  }
 }
 
-#define REGISTER_CROSS_OP(DTYPE)                       \
+#define REGISTER_HISTOGRAMDD_OP(DTYPE)                       \
 template                                               \
-[[host_name("cross_" #DTYPE)]]                         \
-kernel void cross<DTYPE, DTYPE ## 3>(                  \
+[[host_name("histogramdd_" #DTYPE)]]                         \
+kernel void histogramdd<DTYPE>(                  \
   constant void     * input_        [[buffer(0)]],     \
-  constant void     * other_        [[buffer(1)]],     \
-  device   void     * out_          [[buffer(2)]],     \
-  constant uint3    * offsets       [[buffer(3)]],     \
-  constant int64_t  & outStride     [[buffer(4)]],     \
-  constant int64_t  & inputStride   [[buffer(5)]],     \
-  constant int64_t  & otherStride   [[buffer(6)]],     \
+  device   void     * local_out_          [[buffer(1)]],     \
+  constant uint2    * offsets       [[buffer(2)]],
+  constant size_t  num_dims         [[buffer(3)]], \
+  constant int64_t  & bin_seq         [[buffer(4)]], \
+  constant int64_t  & num_bin_edges   [[buffer(5)]], \
+  constant int64_t  & leftmost_edge   [[buffer(6)]], \
+  constant int64_t  & rightmost_edge  [[buffer(7)]], \
   uint tid [[thread_position_in_grid]]);
 
-REGISTER_CROSS_OP(float);
-REGISTER_CROSS_OP(half);
-REGISTER_CROSS_OP(int);
-REGISTER_CROSS_OP(long);
-REGISTER_CROSS_OP(short);
-REGISTER_CROSS_OP(char);
-REGISTER_CROSS_OP(uchar);
-REGISTER_CROSS_OP(bool);
+REGISTER_HISTOGRAMDD_OP(float);
+//REGISTER_HISTOGRAMDD_OP(half);
+//REGISTER_HISTOGRAMDD_OP(int);
+//REGISTER_HISTOGRAMDD_OP(long);
+//REGISTER_HISTOGRAMDD_OP(short);
+//REGISTER_HISTOGRAMDD_OP(char);
+//REGISTER_HISTOGRAMDD_OP(uchar);
+//REGISTER_HISTOGRAMDD_OP(bool);
 
-)CROSS_METAL";
+)SUMMARY_METAL";
 
 static id<MTLLibrary> compileSummaryOpLibrary(id<MTLDevice> device) {
   static id<MTLLibrary> summaryLibrary = nil;
@@ -91,8 +112,7 @@ static id<MTLLibrary> compileSummaryOpLibrary(id<MTLDevice> device) {
   return summaryLibrary;
 }
 
-static id<MTLComputePipelineState> crossPipelineState(id<MTLDevice> device, ScalarType scalar_type) {
-  std::string kernel = "cross_" + scalarToMetalTypeString(scalar_type);
+static id<MTLComputePipelineState> summaryPipelineState(id<MTLDevice> device, const std::string& kernel) {
   static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
   id<MTLComputePipelineState> pso = psoCache[kernel];
   if (pso) {
@@ -110,13 +130,15 @@ static id<MTLComputePipelineState> crossPipelineState(id<MTLDevice> device, Scal
   return pso;
 }
 
-void histogramdd_impl(
+void histogramdd_kernel_impl(
     Tensor& hist_output,
     const TensorList& bin_edges,
     const Tensor& input,
     const c10::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
+
+  using input_t = float;
 
   const int64_t N = input.size(0);
   if (weight.has_value()) {
@@ -127,7 +149,7 @@ void histogramdd_impl(
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
       TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
-      TORCH_INTERNAL_ASSERT(hist.size(dim) + 1 == bin_edges[dim].numel());
+      TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
   }
 
   if (D == 0) {
@@ -135,32 +157,44 @@ void histogramdd_impl(
       return;
   }
 
-  auto iter = TensorIteratorConfig()
-      .add_output(out)
-      .add_input(input)
-      .add_input(other)
-      .resize_outputs(false)
-      .declare_static_shape(out.sizes(), /*squash_dims=*/dim)
-      .build();
+  std::vector<input_t*> bin_seq(D);
+  std::vector<int64_t> num_bin_edges(D);
+  std::vector<input_t> leftmost_edge(D);
+  std::vector<input_t> rightmost_edge(D);
+
+  for (const auto dim : c10::irange(D)) {
+      bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
+      num_bin_edges[dim] = bin_edges[dim].numel();
+      leftmost_edge[dim] = bin_seq[dim][0];
+      rightmost_edge[dim] = bin_seq[dim][num_bin_edges[dim] - 1];
+  }
+
+  const uint32_t numThreads = input.numel();
+  const auto hist_sizes = hist_output.sizes();
+
+  DimVector thread_hist_sizes(hist_sizes.size() + 1); // [n_threads, output_sizes..]
+  thread_hist_sizes[0] = numThreads;
+  std::copy(hist_sizes.begin(), hist_sizes.end(),
+              thread_hist_sizes.begin() + 1);
+  Tensor thread_histograms = at::zeros(thread_hist_sizes, hist_output.dtype());
 
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
-  id<MTLBuffer> otherBuffer  = getMTLBufferStorage(other);
-  id<MTLBuffer> outputBuffer = getMTLBufferStorage(out);
+  id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
-  const int64_t out_dim_stride =  out.stride(dim);
-  const int64_t input_dim_stride = input.stride(dim);
-  const int64_t other_dim_stride = other.stride(dim);
-  const uint32_t nDim = iter.ndim();
-  constexpr uint32_t nOffsets = 3;
-  const uint32_t numThreads = iter.numel();
+  const uint32_t nDim = input.sizes().size();
+  //const int64_t out_dim_stride =  out.stride(dim);
+  //const int64_t input_dim_stride = input.stride(nDim);
+  //const int64_t other_dim_stride = other.stride(dim);
+  constexpr uint32_t nOffsets = 1;
+  
   dispatch_sync(mpsStream->queue(), ^(){
     @autoreleasepool {
       NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
       MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      const IntArrayRef& iterShape = iter.shape();
+      const IntArrayRef& iterShape = input.sizes();
       std::vector<uint32_t> iterShapeData(iterShape.size());
       std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
 
@@ -170,15 +204,15 @@ void histogramdd_impl(
       }
 
       for (const auto i: c10::irange(nDim)) {
-        for (const auto offset: c10::irange(nOffsets)) {
-            strides[i][offset] = iter.strides(offset)[i];
-        }
+        //for (const auto offset: c10::irange(nOffsets)) {
+        strides[i][0] = input.stride(i);
+        //}
       }
 
       id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
                                                                                                 error: &error] autorelease];
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(simd_uint3)
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(uint)
                                                              options: 0] autorelease];
       TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
@@ -196,17 +230,19 @@ void histogramdd_impl(
       [computeEncoder dispatchThreads: gridSize
                 threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
 
-      id<MTLComputePipelineState> crossPSO = crossPipelineState(device, out.scalar_type());
-      [computeEncoder setComputePipelineState:crossPSO];
+      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
+      id<MTLComputePipelineState> summaryPSO = summaryPipelineState(device, kernel);
+      [computeEncoder setComputePipelineState:summaryPSO];
       [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:otherBuffer  offset:other.storage_offset() * other.element_size() atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:out.storage_offset() * out.element_size() atIndex:2];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
-      [computeEncoder setBytes:&out_dim_stride  length:sizeof(int64_t)  atIndex:4];
-      [computeEncoder setBytes:&input_dim_stride length:sizeof(int64_t) atIndex:5];
-      [computeEncoder setBytes:&other_dim_stride length:sizeof(int64_t) atIndex:6];
+      [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:1];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:2];
+      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:3];
+      [computeEncoder setBytes:&bin_seq  length:sizeof(input_t) * D  atIndex:4];
+      [computeEncoder setBytes:&num_bin_edges length:sizeof(int64_t) * D atIndex:5];
+      [computeEncoder setBytes:&leftmost_edge length:sizeof(input_t) * D atIndex:6];
+      [computeEncoder setBytes:&rightmost_edge length:sizeof(input_t) * D atIndex:7];
 
-      NSUInteger tgSize = crossPSO.maxTotalThreadsPerThreadgroup;
+      NSUInteger tgSize = summaryPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
           tgSize = numThreads;
       }
@@ -219,6 +255,7 @@ void histogramdd_impl(
       mpsStream->commit(true);
     }
   });
+  at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
 }
 
 void bincount_histc_mps_impl(
@@ -337,7 +374,6 @@ Tensor _bincount_histc_mps(
 
   if (nbins_opt && min_opt && max_opt) {  // histc
     nbins = nbins_opt.value();
-    at::li
     
     if (min_opt.value().toSymInt() != 0 || max_opt.value().toSymInt() != 0){
       auto indices = at::masked_select(self, at::where(at::logical_and(self > min_opt.value(), self < max_opt.value()), 1, 0));
@@ -403,6 +439,59 @@ Tensor _bincount_histc_mps(
 }
 } // namespace mps
 
+static void histogramdd_kernel(
+  const Tensor& self,
+  const c10::optional<Tensor>& weight,
+  bool density,
+  Tensor& hist,
+  const TensorList& bin_edges)
+{
+  hist.fill_(0);
+
+  const int64_t N = self.size(-1);
+  const int64_t M = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
+          (int64_t)1, std::multiplies<int64_t>());
+
+  const Tensor reshaped_input = self.reshape({M, N});
+
+  const auto reshaped_weight = weight.has_value()
+          ? c10::optional<Tensor>(weight.value().reshape({M}))
+          : c10::optional<Tensor>();
+
+  std::vector<Tensor> bin_edges_contig(bin_edges.size());
+  for (const auto dim : c10::irange(bin_edges_contig.size())) {
+      bin_edges_contig[dim] = bin_edges[dim].contiguous();
+  }
+
+  mps::histogramdd_kernel_impl(
+    hist,
+    bin_edges_contig,
+    reshaped_input,
+    reshaped_weight
+  );
+
+  /* Divides each bin's value by the total count/weight in all bins,
+    * and by the bin's volume.
+    */
+  if (density) {
+      const auto hist_sum = hist.sum().item();
+      hist.div_(hist_sum);
+
+        /* For each dimension, divides each bin's value
+        * by the bin's length in that dimension.
+        */
+      for (const auto dim : c10::irange(N)) {
+          const auto bin_lengths = bin_edges[dim].diff();
+
+          // Used to reshape bin_lengths to align with the corresponding dimension of hist.
+          std::vector<int64_t> shape(N, 1);
+          shape[dim] = bin_lengths.numel();
+
+          hist.div_(bin_lengths.reshape(shape));
+      }
+  }
+}
+
 Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
   return mps::_bincount_histc_mps(
     self,
@@ -442,5 +531,7 @@ Tensor& _histc_out_mps(const Tensor& self, int64_t bins, const Scalar& min, cons
   );
   return result;
 }
+
+REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
 
 } // namespace at::native
