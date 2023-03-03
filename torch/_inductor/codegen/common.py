@@ -57,14 +57,9 @@ class ExprPrinter(Printer):
         if exp > 0:
             return "*".join([self.paren(base)] * exp)
         elif exp < 0:
-            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
         else:  # exp == 0
             return "1"
-
-    def _print_Rational(self, expr):
-        if expr.q == 1:
-            return f"{expr.p}"
-        return f"{expr.p}.0/{expr.q}.0"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))
