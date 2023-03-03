@@ -259,6 +259,9 @@ class CUDAGraphNode(object):
         self.expected_dead_indices_before_graph: List[Tuple[int, int]] = []
         self.expected_dead_indices_after_graph: List[Tuple[int, int]] = []
 
+        # all live indices after graph recording
+        self.live_indices_after_graph : List[Tuple[int, int]] = []
+
         if self.parent is not None:
             previous_liveness = self.parent.recorded_liveness_after_graph
             curr_liveness = self.get_liveness(self.path_weakrefs)
@@ -409,10 +412,10 @@ class CUDAGraphNode(object):
             self.device, self.cuda_graphs_pool
         )
 
-        self.live_indices_after_graph = []
         for i in range(len(self.path_weakrefs)):
             for j in range(len(self.path_weakrefs[i])):
-                self.live_indices_after_graph.append((i, j))
+                if is_live(self.path_weakrefs[i][j]):
+                    self.live_indices_after_graph.append((i, j))
 
     def add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
