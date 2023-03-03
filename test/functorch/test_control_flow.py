@@ -622,7 +622,7 @@ class TestControlFlowTraced(TestCase):
 
         gm = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
-        
+
         gm = make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(*example_inputs)
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
