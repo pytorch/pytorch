@@ -16,6 +16,7 @@ import platform
 import textwrap
 import ctypes
 import inspect
+import builtins
 if sys.version_info < (3,):
     raise Exception("Python 2 has reached end-of-life and is no longer supported by PyTorch.")
 
@@ -246,7 +247,7 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        return builtins.bool(self != 0)
 
     def __int__(self):
         return self.node.int_()
