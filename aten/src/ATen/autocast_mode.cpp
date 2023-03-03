@@ -367,6 +367,14 @@ Therefore, for the moment, this is all copy pasted in from VariableTypeEverythin
   m.impl(TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD), \
     &WrapFunction<CastPolicy::POLICY, DeviceType::CPU, decltype(ATEN_FN2(OP, OVERLOAD)), decltype(ATEN_FN2(OP, OVERLOAD)), &ATEN_FN2(OP, OVERLOAD)>::type::call);
 
+// KERNEL_XLA registration for AutocastXLA
+#define KERNEL_XLA(OP, POLICY) \
+  m.impl(TORCH_SELECTIVE_NAME("aten::" #OP), \
+    &WrapFunction<CastPolicy::POLICY, DeviceType::XLA, decltype(ATEN_FN(OP)), decltype(ATEN_FN(OP)), &ATEN_FN(OP)>::type::call);
+#define KERNEL_XLA2(OP, OVERLOAD, POLICY) \
+  m.impl(TORCH_SELECTIVE_NAME("aten::" #OP "." #OVERLOAD), \
+    &WrapFunction<CastPolicy::POLICY, DeviceType::XLA, decltype(ATEN_FN2(OP, OVERLOAD)), decltype(ATEN_FN2(OP, OVERLOAD)), &ATEN_FN2(OP, OVERLOAD)>::type::call);
+
 /*****************************************
 Explicit registration for out-of-place ops
 *****************************************/
@@ -502,6 +510,18 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
 }
+
+
+TORCH_LIBRARY_IMPL(_, AutocastXLA, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+
+TORCH_LIBRARY_IMPL(aten, AutocastXLA, m) {
+  // lower_precision_fp cast policy
+  KERNEL_XLA(matmul, lower_precision_fp)
+}
+
 
 TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
