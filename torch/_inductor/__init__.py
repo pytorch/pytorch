@@ -25,3 +25,24 @@ def compile(
     from .compile_fx import compile_fx
 
     return compile_fx(gm, example_inputs, config_patches=options)
+
+
+def aot_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
+
+    Args:
+        gm: The FX graph to compile.
+        example_inputs:  List of tensor inputs.
+        options:  Optional dict of config options.  See `torch._inductor.config`.
+
+    Returns:
+        Path to the generated shared library
+    """
+    from .compile_fx import compile_fx
+
+    return compile_fx(gm, example_inputs, config_patches=options, aot_mode=True)()
