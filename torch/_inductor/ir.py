@@ -4351,6 +4351,7 @@ class AllGatherIntoTensor(ExternKernel):
         )
         wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
+
 class ReduceScatterTensor(ExternKernel):
     def __init__(
         self,
@@ -4391,7 +4392,7 @@ class ReduceScatterTensor(ExternKernel):
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
         )
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
