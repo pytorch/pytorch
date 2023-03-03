@@ -47,7 +47,11 @@ from github_utils import (
     gh_post_commit_comment,
     gh_post_pr_comment,
 )
-from label_utils import gh_add_labels
+from label_utils import (
+    LABEL_ERR_MSG,
+    gh_add_labels,
+    has_required_labels,
+)
 from trymerge_explainer import (
     TryMergeExplainer,
     get_revert_message,
@@ -1627,6 +1631,9 @@ def merge(pr_num: int, repo: GitRepo,
     # jobs. If there's missing approval, a RuntimeError will be raised
     # here to stop the merge process right away
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+
+    if not has_required_labels(pr):
+        raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
 
     if land_checks and not dry_run:
         land_check_commit = pr.create_land_time_check_branch(
