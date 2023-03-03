@@ -365,12 +365,6 @@ class TestForeach(TestCase):
                 "disable_fastpath"
             )
             self.assertEqual(
-                ref(inputs), wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size)
-            )
-            self._inplace_unary_test(
-                inplace_op, inplace_ref, [sample.input], is_fastpath and not disable_fastpath, zero_size=zero_size
-            )
-            self.assertEqual(
                 ref(inputs),
                 wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, zero_size=zero_size),
             )
