@@ -1159,6 +1159,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         example_forward_input = torch.rand(10,10)
         with pytest.raises(AttributeError):
             c_model_traced = torch.jit.trace(compile_model, example_forward_input)
+        with pytest.raises(AttributeError):
             c_model_scripted = torch.jit.script(compile_model, example_forward_input)
 
     def test_module_patch(self):
