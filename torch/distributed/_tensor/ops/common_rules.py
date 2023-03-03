@@ -182,10 +182,14 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        mesh = input_spec.mesh
+                        assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
-                        local_shape = compute_local_shape(global_shape, mesh, input_spec.placements)
-                        cost += prod(local_shape) * mesh.size(mesh_dim)
+                        local_shape = compute_local_shape(
+                            global_shape,
+                            input_spec.mesh,
+                            input_spec.placements
+                        )
+                        cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:
