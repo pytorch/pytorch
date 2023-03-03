@@ -24,7 +24,7 @@
 #include <ATen/ops/where.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
@@ -97,4 +97,4 @@ REGISTER_CUDA_DISPATCH(aminmax_stub, &aminmax_kernel_impl);
 
 REGISTER_CUDA_DISPATCH(norm_stub, &norm_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

@@ -46,6 +46,7 @@
 #include <torch/csrc/Dtype.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/Export.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/MemoryFormat.h>
@@ -339,13 +340,12 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  TORCH_CHECK_VALUE(
-      N >= max_args,
-      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
-      max_args,
-      " (got ",
-      N,
-      ")");
+  if (N < max_args) {
+    throw ValueError(
+        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
+        (int)max_args,
+        N);
+  }
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -474,8 +474,9 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   THPObjectPtr arg = six::maybeAsTuple(args[i]);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg.get()) : PyList_GET_SIZE(arg.get());
-  TORCH_CHECK_TYPE(
-      size == N, "expected tuple of ", N, " elements but got ", size);
+  if (size != N) {
+    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
+  }
   for (const auto idx : c10::irange(size)) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg.get(), idx)
                           : PyList_GET_ITEM(arg.get(), idx);
@@ -505,16 +506,12 @@ inline void throw_intlist_exception(
     size_t i,
     PyObject* obj,
     size_t idx) {
-  TORCH_CHECK_TYPE(
-      false,
-      args->signature.name,
-      "(): argument '",
-      args->signature.params[i].name,
-      "' must be ",
-      args->signature.params[i].type_name(),
-      ", but found element of type ",
+  throw TypeError(
+      "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+      args->signature.name.c_str(),
+      args->signature.params[i].name.c_str(),
+      args->signature.params[i].type_name().c_str(),
       Py_TYPE(obj)->tp_name,
-      " at pos ",
       idx + 1);
 }
 
@@ -669,16 +666,12 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
     try {
       res[idx] = THPUtils_unpackDouble(obj);
     } catch (const std::exception& e) {
-      TORCH_CHECK_TYPE(
-          false,
-          signature.name,
-          "(): argument '",
-          signature.params[i].name,
-          "' must be ",
-          signature.params[i].type_name(),
-          ", but found element of type ",
+      throw TypeError(
+          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
           Py_TYPE(obj)->tp_name,
-          " at pos ",
           idx + 1);
     }
   }
@@ -901,6 +894,10 @@ inline int64_t PythonArgs::toInt64(int i) {
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
   }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return py::cast<c10::SymInt>(py::handle(args[i]))
+        .guard_int(__FILE__, __LINE__);
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
@@ -952,6 +949,10 @@ inline c10::optional<double> PythonArgs::toDoubleOptional(int i) {
 inline double PythonArgs::toDouble(int i) {
   if (!args[i])
     return signature.params[i].default_double;
+  if (torch::is_symfloat(py::handle(args[i]))) {
+    return py::cast<c10::SymFloat>(py::handle(args[i]))
+        .guard_float(__FILE__, __LINE__);
+  }
   return THPUtils_unpackDouble(args[i]);
 }
 
@@ -1027,12 +1028,14 @@ inline c10::Stream PythonArgs::stream(int i) {
   if (!args[i])
     return c10::Stream(
         c10::Stream::Default::DEFAULT, c10::Device(DeviceType::CPU, -1));
-  TORCH_CHECK_TYPE(
-      THPStream_Check(args[i]),
-      "expected Stream object. Got '",
-      Py_TYPE(args[i])->tp_name,
-      "'");
-  return c10::Stream::unpack(((THPStream*)args[i])->cdata);
+  if (!THPStream_Check(args[i])) {
+    throw TypeError(
+        "expected Stream object. Got '%s'", Py_TYPE(args[i])->tp_name);
+  }
+  return c10::Stream::unpack3(
+      ((THPStream*)args[i])->stream_id,
+      ((THPStream*)args[i])->device_index,
+      static_cast<DeviceType>(((THPStream*)args[i])->device_type));
 }
 
 inline PyObject* PythonArgs::pyobject(int i) {
@@ -1125,7 +1128,7 @@ auto handle_torch_function(
 // PythonArgParser to get overloaded_args.
 enum class TorchFunctionName { TorchFunction, TorchDispatch };
 
-auto TORCH_API handle_torch_function_no_python_arg_parser(
+auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
     at::ArrayRef<py::handle> overloaded_args,
     PyObject* args,
     PyObject* kwargs,

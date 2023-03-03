@@ -8,8 +8,7 @@
 #include <ATen/native/cpu/utils.h>
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -449,5 +448,4 @@ void unfolded2d_copy_kernel(
 REGISTER_DISPATCH(unfolded2d_copy_stub, &unfolded2d_copy_kernel);
 REGISTER_DISPATCH(unfolded2d_acc_stub, &unfolded2d_acc_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

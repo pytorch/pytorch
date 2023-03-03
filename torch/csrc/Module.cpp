@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <unordered_map>
 
+#include <ATen/ThreadLocalPythonObjects.h>
 #include <torch/csrc/DataLoader.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -59,6 +60,7 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/lazy/python/init.h>
 #include <torch/csrc/monitor/python_init.h>
+#include <torch/csrc/mps/Module.h>
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
@@ -84,10 +86,6 @@
 #include <torch/csrc/distributed/rpc/rpc.h>
 #include <torch/csrc/distributed/rpc/testing/testing.h>
 #endif
-#endif
-
-#if defined(USE_MPS)
-#include <ATen/mps/MPSDevice.h>
 #endif
 
 #if defined(USE_VALGRIND)
@@ -831,6 +829,27 @@ PyObject* THPModule_isEnabledXNNPACK(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setCheckSparseTensorInvariants(
+    PyObject* _unused,
+    PyObject* arg) {
+  THPUtils_assert(
+      PyBool_Check(arg),
+      "set_check_sparse_tensor_invariants expects a bool, "
+      "but got %s",
+      THPUtils_typename(arg));
+  at::globalContext().setCheckSparseTensorInvariants(arg == Py_True);
+  Py_RETURN_NONE;
+}
+
+PyObject* THPModule_checkSparseTensorInvariants(
+    PyObject* _unused,
+    PyObject* noargs) {
+  if (at::globalContext().checkSparseTensorInvariants())
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_willEngineExecuteNode(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   bool isTHPFunction = THPFunction_Check(arg);
@@ -1122,6 +1141,14 @@ static PyMethodDef TorchMethods[] = {
     {"_set_qengine", THPModule_setQEngine, METH_O, nullptr},
     {"_supported_qengines", THPModule_supportedQEngines, METH_NOARGS, nullptr},
     {"_is_xnnpack_enabled", THPModule_isEnabledXNNPACK, METH_NOARGS, nullptr},
+    {"_set_check_sparse_tensor_invariants",
+     THPModule_setCheckSparseTensorInvariants,
+     METH_O,
+     nullptr},
+    {"_check_sparse_tensor_invariants",
+     THPModule_checkSparseTensorInvariants,
+     METH_NOARGS,
+     nullptr},
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
      METH_O,
@@ -1217,11 +1244,7 @@ class WeakTensorRef {
   }
 };
 
-extern "C"
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-        TORCH_API PyObject* initModule();
+extern "C" C10_EXPORT PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
@@ -1241,6 +1264,7 @@ PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
   THPUtils_addPyMethodDefs(methods, torch::multiprocessing::python_functions());
+  THPUtils_addPyMethodDefs(methods, torch::mps::python_functions());
 #ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
@@ -1532,6 +1556,23 @@ Call this whenever a new thread is created in order to propagate values from
     return at::globalContext().linalgPreferredBackend();
   });
 
+  py_module.def("_stash_obj_in_tls", [](std::string key, py::handle arg) {
+    at::impl::ThreadLocalPythonObjects::get_state().set(
+        key,
+        std::make_shared<c10::SafePyObject>(arg.ptr(), getPyInterpreter()));
+  });
+
+  py_module.def("_get_obj_in_tls", [](std::string key) -> py::handle {
+    auto safe_pyobject =
+        at::impl::ThreadLocalPythonObjects::get_state().get(key);
+    auto obj = safe_pyobject->ptr(getPyInterpreter());
+    return py::handle(obj);
+  });
+
+  py_module.def("_is_key_in_tls", [](std::string key) -> bool {
+    return at::impl::ThreadLocalPythonObjects::get_state().contains(key);
+  });
+
 #ifdef USE_CUDA
   PyObject* has_cuda = Py_True;
 #else
@@ -1546,15 +1587,6 @@ Call this whenever a new thread is created in order to propagate values from
 
   ASSERT_TRUE(set_module_attr("has_cuda", has_cuda));
   ASSERT_TRUE(set_module_attr("has_mps", has_mps));
-  py_module.def("_is_mps_available", []() { return at::hasMPS(); });
-  py_module.def("_is_mps_on_macos_13_or_newer", []() {
-#ifdef USE_MPS
-    return at::mps::is_macos_13_or_newer();
-#else
-    return false;
-#endif
-  });
-
   ASSERT_TRUE(
       set_module_attr("has_mkldnn", at::hasMKLDNN() ? Py_True : Py_False));
 
@@ -1640,6 +1672,10 @@ Call this whenever a new thread is created in order to propagate values from
   ASSERT_TRUE(set_module_attr(
       "default_generator",
       (PyObject*)THPDefaultCPUGenerator,
+      /* incref= */ false));
+  ASSERT_TRUE(set_module_attr(
+      "DisableTorchFunctionSubclass",
+      (PyObject*)THPModule_DisableTorchFunctionSubclassType(),
       /* incref= */ false));
   ASSERT_TRUE(set_module_attr(
       "DisableTorchFunction",

@@ -126,8 +126,9 @@ struct LoopView {
         trip_count->toInt() !=
             std::numeric_limits<int64_t>::max() || // it is a constant but not
                                                    // the default one
-        currentTripCount()->uses().size() >
-            0; // it is actually being used in the body.
+        !currentTripCount()
+             ->uses()
+             .empty(); // it is actually being used in the body.
 
     if (condition_is_always_true) {
       // if the trip count was not specified this was a user-written while True:

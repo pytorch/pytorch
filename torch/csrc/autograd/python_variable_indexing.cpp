@@ -86,6 +86,13 @@ static inline int64_t count_specified_dimensions(PyObject* index) {
   return count;
 }
 
+[[noreturn]] static inline void invalid_index(PyObject* obj) {
+  throw IndexError(
+      "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
+      "Variables are valid indices (got %s)",
+      Py_TYPE(obj)->tp_name);
+}
+
 static inline Variable sequenceToVariable(
     c10::TensorOptions options,
     PyObject* seq) {
@@ -110,12 +117,10 @@ inline Variable valueToTensor(
   } else if (PyComplex_Check(value)) {
     scalar = Scalar(THPUtils_unpackComplexDouble(value));
   } else {
-    TORCH_CHECK_TYPE(
-        false,
-        "can't assign a ",
+    throw TypeError(
+        "can't assign a %s to a %s",
         Py_TYPE(value)->tp_name,
-        " to a ",
-        torch::utils::options_to_string(options));
+        torch::utils::options_to_string(options).c_str());
   }
   // lift_fresh is supposed to be used in situations where you are guaranteed to
   // get a plain Tensor which is not true for cpu device but not for non cpu
@@ -125,16 +130,6 @@ inline Variable valueToTensor(
         at::indexing::scalarToTensor(scalar, options, device));
   } else {
     return at::indexing::scalarToTensor(scalar, options, device);
-  }
-}
-
-static inline void checkUnpackSlice(
-    PyObject* index,
-    Py_ssize_t* start_ptr,
-    Py_ssize_t* stop_ptr,
-    Py_ssize_t* step_ptr) {
-  if (PySlice_Unpack(index, start_ptr, stop_ptr, step_ptr) != 0) {
-    throw python_error();
   }
 }
 
@@ -209,14 +204,12 @@ static inline Variable applySlicing(
             }
             return at::indexing::TensorIndex(THPUtils_unpackLong(obj));
           } else if (PySlice_Check(obj)) {
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            Py_ssize_t start, stop, step;
-            checkUnpackSlice(obj, &start, &stop, &step);
+            auto val = __PySlice_Unpack(obj);
             if (is_tracing) {
               recordSliceTrace(obj);
             }
             return at::indexing::TensorIndex(
-                at::indexing::Slice(start, stop, step));
+                at::indexing::Slice(val.start, val.stop, val.step));
           } else if (obj == Py_Ellipsis) {
             return at::indexing::TensorIndex(at::indexing::Ellipsis);
           } else if (obj == Py_None) {
@@ -241,12 +234,7 @@ static inline Variable applySlicing(
             auto idx = THPObjectPtr(PyNumber_Index(obj));
             if (!idx) {
               PyErr_Clear();
-              TORCH_CHECK_INDEX(
-                  false,
-                  "only integers, slices (`:`), ellipsis (`...`), None and long or byte "
-                  "Variables are valid indices (got ",
-                  Py_TYPE(obj)->tp_name,
-                  ")");
+              invalid_index(obj);
             }
             if (is_tracing && THPVariable_Check(idx)) {
               recordSelectTrace(THPVariable_Unpack(idx));
@@ -360,15 +348,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     return THPVariable_Wrap(at::indexing::get_item(
         self_, {at::indexing::TensorIndex(THPUtils_unpackLong(index))}));
   } else if (PySlice_Check(index)) {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
-    checkUnpackSlice(index, &start, &stop, &step);
+    auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }
     return THPVariable_Wrap(at::indexing::get_item(
         self_,
-        {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))}));
+        {at::indexing::TensorIndex(
+            at::indexing::Slice(val.start, val.stop, val.step))}));
   } else if (index == Py_False || index == Py_True) {
     return THPVariable_Wrap(([&]() {
       pybind11::gil_scoped_release no_gil;
@@ -430,8 +417,9 @@ void dispatch_set_item(
 // indexing is needed, it calls C++ `at::indexing::dispatch_index_put_`.
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      py_value != nullptr, "Tensor does not support deleting items");
+  if (py_value == nullptr) {
+    throw TypeError("Tensor does not support deleting items");
+  }
   if ((!THPVariable_CheckExact(self) && check_has_torch_function(self)) ||
       (!THPVariable_CheckExact(py_value) &&
        check_has_torch_function(py_value))) {
@@ -441,11 +429,11 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   const auto& self_ = THPVariable_Unpack(self);
-  TORCH_CHECK_TYPE(
-      self_.layout() != kSparse && self_.layout() != kSparseCsr &&
-          self_.layout() != kSparseCsc && self_.layout() != kSparseBsr &&
-          self_.layout() != kSparseBsc,
-      "Cannot assign to a sparse tensor");
+  if (self_.layout() == kSparse || self_.layout() == kSparseCsr ||
+      self_.layout() == kSparseCsc || self_.layout() == kSparseBsr ||
+      self_.layout() == kSparseBsc) {
+    throw TypeError("Cannot assign to a sparse tensor");
+  }
   OptionalDeviceGuard device_guard(device_of(self_));
   at::Device self_device = self_.device();
   Variable value;
@@ -489,8 +477,7 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    Py_ssize_t start, stop, step;
-    checkUnpackSlice(index, &start, &stop, &step);
+    auto val = __PySlice_Unpack(index);
     if (is_tracing) {
       recordSliceTrace(index);
     }
@@ -498,7 +485,8 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
     // indexing functions from Python ]
     dispatch_set_item(
         self_,
-        {at::indexing::TensorIndex(at::indexing::Slice(start, stop, step))},
+        {at::indexing::TensorIndex(
+            at::indexing::Slice(val.start, val.stop, val.step))},
         value,
         /*disable_slice_optimization=*/is_tracing);
     return 0;

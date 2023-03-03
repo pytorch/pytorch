@@ -13,7 +13,7 @@ torch.func, previously known as "functorch", is
    may change under user feedback and we don't have full coverage over PyTorch operations.
 
    If you have suggestions on the API or use-cases you'd like to be covered, please
-   open an github issue or reach out. We'd love to hear about how you're using the library.
+   open an GitHub issue or reach out. We'd love to hear about how you're using the library.
 
 What are composable function transforms?
 ----------------------------------------
@@ -52,3 +52,4 @@ Read More
    func.whirlwind_tour
    func.api
    func.ux_limitations
+   func.migrating

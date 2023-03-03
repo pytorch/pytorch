@@ -3,8 +3,7 @@
 #include <torch/csrc/jit/serialization/callstack_debug_info_serialization.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 namespace {
 const int64_t kInvalidSourceRangeTag = -1;
@@ -116,7 +115,7 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
   std::vector<at::Tensor> table;
   c10::IValue ivalue = c10::ivalue::Tuple::create(std::move(ivalues));
   auto result = jit::pickle(ivalue, &table);
-  TORCH_CHECK(table.size() == 0, "Expected 0 tensors to be written");
+  TORCH_CHECK(table.empty(), "Expected 0 tensors to be written");
   return result;
 }
 
@@ -248,5 +247,4 @@ ska::flat_hash_map<int64_t, DebugInfoTuple> CallStackDebugInfoUnpickler::
   return callstack_ptrs;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

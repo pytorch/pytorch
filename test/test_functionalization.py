@@ -178,7 +178,7 @@ class TestFunctionalization(TestCase):
             from torch._functorch.aot_autograd import setup_stacktrace_preservation_hooks
             import torch.fx.traceback as fx_traceback
             setup_stacktrace_preservation_hooks([loss.grad_fn])
-            with fx_traceback.override_stack_trace():
+            with fx_traceback.preserve_node_meta():
                 loss.backward()
             return x.grad
 
@@ -582,6 +582,21 @@ def forward(self, arg0_1):
     copy_ = torch.ops.aten.copy_.default(arg0_1, diagonal_scatter);  arg0_1 = None
     return diagonal_scatter
     """)
+
+    def test_channels_last_contiguous(self):
+        def f(x):
+            return x.contiguous(memory_format=torch.channels_last)
+            tmp = torch.ones(2)
+            y = x.diagonal()
+            y.add_(tmp)
+            return x
+        x = torch.randn(4, 8, 8, 3).permute(0, 3, 1, 2)
+        self.assert_functionalization(f, x)
+        logs = self.get_logs(f, x).strip()
+        # There should be no clone in the graph
+        self.assertExpectedInline(logs, """\
+def forward(self, arg0_1):
+    return arg0_1""")
 
     def test_split(self):
         def f(x):
@@ -1189,6 +1204,14 @@ def forward(self, arg0_1):
     return as_strided_3
     """)
 
+    def test_resize_same_size_diff_rank(self):
+        def f(x):
+            y = x.clone()
+            y.resize_(25, 5)
+            return y
+
+        self.assert_functionalization(f, torch.ones(5, 5, 5))
+
     def test_resize_larger_valid(self):
         def f(x):
             y = x + 1
@@ -1427,7 +1450,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_batch_norm(self):
         def f(x, running_mean, running_var):
             with enable_python_dispatcher():
-                return torch.batch_norm(x, None, None, running_mean, running_var, False, 0.1, 1e-5, False)
+                return torch.batch_norm(x, None, None, running_mean, running_var, True, 0.1, 1e-5, False)
 
         self.assert_functionalization(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
         logs = self.get_logs(f, torch.randn(20, 100, 35, 45), torch.zeros(100), torch.ones(100))
@@ -1437,7 +1460,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]
@@ -1457,7 +1480,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
 def forward(self, arg0_1, arg1_1, arg2_1):
     empty = torch.ops.aten.empty.memory_format([0], dtype = torch.uint8, layout = torch.strided, device = device(type='cpu'))
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, False, 0.1, 1e-05);  arg0_1 = None
+    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(arg0_1, None, None, arg1_1, arg2_1, True, 0.1, 1e-05);  arg0_1 = None
     getitem = _native_batch_norm_legit_functional[0]
     getitem_1 = _native_batch_norm_legit_functional[1]
     getitem_2 = _native_batch_norm_legit_functional[2]

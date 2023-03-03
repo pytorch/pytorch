@@ -1,59 +1,43 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates
-
-from typing import Dict, Optional, Sequence, Tuple, Union
+from typing import Optional, Sequence
 
 import torch
-
-import torch.distributed._tensor.api as dtensor
-from torch.distributed._tensor.placement_types import DTensorSpec
-
-ArgKwargsType = Union[Tuple[object, ...], Dict[str, object]]
-# ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
-# be the same set of possiblities.
-OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+from torch.distributed._tensor.device_mesh import DeviceMesh
+from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
 
 
-def unwrap_local_tensor(e: "dtensor.DTensor") -> torch.Tensor:
-    return e._local_tensor if isinstance(e, dtensor.DTensor) else e
+def compute_local_tensor_size(
+    size: torch.Size, device_mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Optional[torch.Size]:
+    """
+    Args:
+        size(torch.Size): define the shape of the whole Dtensor.
+        device_mesh: :class:`DeviceMesh` type, contains the mesh info of ranks
+        placement: a sequence of :class:`Placement` type: Shard, Replicate
 
-
-def unwrap_schema(e: object) -> object:
-    return e._spec if isinstance(e, dtensor.DTensor) else e
-
-
-def wrap(res: object, spec: OutputSpecType) -> object:
-    if isinstance(res, torch.Tensor):
-        assert spec is not None and isinstance(
-            spec, DTensorSpec
-        ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-        return dtensor.DTensor(
-            res,
-            spec.mesh,
-            spec.placements,
-            size=spec.shape,
-            requires_grad=res.requires_grad,
-        )
-    elif isinstance(res, list):
-        assert spec is not None and isinstance(
-            spec, list
-        ), f"output spec does not match with output! Expected list, got {spec}."
-        return list(
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            for e, s in zip(res, spec)
-        )
-    elif isinstance(res, tuple):
-        assert spec is not None and isinstance(
-            spec, tuple
-        ), f"output spec does not match with output! Expected tuple, got {spec}"
-
-        # NOTE: local results might return Optional Tensor from ATen op, so we need to
-        # handle that case and make sure we don't wrap None with DTensor.
-        # (i.e. native_layer_norm.backward)
-        return tuple(
-            dtensor.DTensor(e, s.mesh, s.placements, size=s.shape)
-            if e is not None and s is not None else None
-            for e, s in zip(res, spec)
-        )
+    Returns:
+        A :class:`torch.Size` for the local tensor on the device_mesh
+    """
+    if device_mesh.get_coordinate() is None:
+        return None
     else:
-        # if the res contains only non tensor values, we simply return it without rewrapping
-        return res
+        local_size = list(size)
+        rank_coordinates = device_mesh.get_coordinate()
+        if rank_coordinates is None:
+            return None
+        for idx, placement in enumerate(placements):
+            if isinstance(placement, Replicate):
+                continue
+            elif isinstance(placement, Shard):
+                curr_coordinate = rank_coordinates[idx]
+                shard_dim = placement.dim
+                len_before_shard = local_size[shard_dim]
+                num_chucks = device_mesh.size(idx)
+
+                len_after_shard, _ = placement._local_shard_size_on_dim(
+                    len_before_shard, num_chucks, curr_coordinate
+                )
+                local_size[shard_dim] = len_after_shard
+            else:
+                raise RuntimeError(f"placement type {type(placement)} not supported!")
+
+        return torch.Size(local_size)

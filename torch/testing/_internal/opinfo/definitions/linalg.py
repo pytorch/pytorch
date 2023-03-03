@@ -13,7 +13,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
     _get_torch_cuda_version,
-    CUDA11OrLater,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -39,7 +38,6 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
@@ -1203,9 +1201,7 @@ op_db: List[OpInfo] = [
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1538,9 +1534,7 @@ op_db: List[OpInfo] = [
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,

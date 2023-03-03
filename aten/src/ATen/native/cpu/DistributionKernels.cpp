@@ -23,7 +23,7 @@
 #include <cpuinfo.h>
 #endif
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 static void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
@@ -103,12 +103,14 @@ static void exponential_kernel_default(TensorIteratorBase& iter, double lambda, 
   templates::cpu::exponential_kernel(iter, lambda, generator);
 }
 
-#if !AT_MKL_ENABLED()
+#if (!AT_MKL_ENABLED() || defined(FBCODE_CAFFE2))
 void exponential_kernel(TensorIteratorBase& iter, double lambda, c10::optional<Generator> gen) {
   exponential_kernel_default(iter, lambda, gen);
 }
 #else
 void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<Generator> gen) {
+  TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
+
   Tensor self = iter.tensor(0);
   if (lambda > 0 && !std::isinf(lambda) && !std::isnan(lambda)) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
@@ -124,7 +126,7 @@ void exponential_kernel(TensorIteratorBase &iter, double lambda, c10::optional<G
     int64_t n = self.numel();
     bool contig = self.is_contiguous();
 
-    AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "exponential_cpu", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, self.scalar_type(), "exponential_cpu", [&] {
       at::Tensor tmp_tensor;
       constexpr bool is_df = std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value;
       if (is_df && contig) {
@@ -237,5 +239,4 @@ REGISTER_DISPATCH(random_from_to_stub, &random_from_to_kernel);
 REGISTER_DISPATCH(random_full_64_bits_range_stub, &random_full_64_bits_range_kernel);
 REGISTER_DISPATCH(random_stub, &random_kernel);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -18,6 +18,7 @@
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
+#include <ATen/quantized/Quantizer.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1150,7 +1151,7 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<false>(input, output_scale, output_zero_point);
+  return apply_impl<false>(input, c10::nullopt, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
@@ -1158,13 +1159,34 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_relu(
     const at::Tensor& input,
     double output_scale,
     int64_t output_zero_point) {
-  return apply_impl<true>(input, output_scale, output_zero_point);
+  return apply_impl<true>(input, c10::nullopt, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_add(
+    const at::Tensor& input,
+    const at::Tensor& accum,
+    double output_scale,
+    int64_t output_zero_point) {
+  TORCH_CHECK(kSpatialDim == 2, " Currently, only conv2d with add is supported.");
+  return apply_impl<false>(input, accum, output_scale, output_zero_point);
+}
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_add_relu(
+    const at::Tensor& input,
+    const at::Tensor& accum,
+    double output_scale,
+    int64_t output_zero_point) {
+  TORCH_CHECK(kSpatialDim == 2, " Currently, only conv2d add relu is supported.");
+  return apply_impl<true>(input, accum, output_scale, output_zero_point);
 }
 
 template <int kSpatialDim>
 template <bool kReluFused>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     const at::Tensor& act,
+    const c10::optional<at::Tensor>& accum,
     double output_scale,
     int64_t output_zero_point) {
   std::string func_name = "quantized::conv";
@@ -1172,6 +1194,18 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     func_name += "_transpose";
   }
   func_name += std::to_string(kSpatialDim) + "d";
+
+  // has_accum: extra input besides the conv to do conv add fusion.
+  bool has_accum = accum.has_value() ? true : false;
+  auto& ctx = at::globalContext();
+  if (has_accum) {
+    func_name += "_add";
+    TORCH_CHECK(
+      !transpose(),
+      "Didn't support transposed conv for conv with add ",
+      c10::toString(ctx.qEngine()));
+  }
+
   if (kReluFused) {
     func_name += "_relu";
   }
@@ -1237,8 +1271,20 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   if (output.numel() == 0) {
     return output;
   }
-  ideep::tensor dst({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
-                    output.data_ptr());
+  ideep::tensor dst;
+  at::Tensor accum_contig;
+  if (has_accum) {
+    auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
+        kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
+    accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
+    TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
+    // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
+    dst.init(dst_desc, accum_contig.data_ptr());
+  } else {
+    dst = ideep::tensor({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
+                      output.data_ptr());
+  }
+
   // Parameters
   const ideep::dims& strides = stride().vec();
   const ideep::dims& dilates = dilation().vec();
@@ -1249,13 +1295,27 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
   // Scales of ONEDNN and PyTorch are reciprocal
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0/input_scale);
   const ideep::scale_t& weights_scales = weights.get_scale();
-  int64_t scale_size = weights_scales.size();
   double inv_output_scale = 1.0/output_scale;
   const ideep::zero_point_t src_zero_points = ideep::zero_point_t(1, input_zp);
   const ideep::zero_point_t dst_zero_points = ideep::zero_point_t(1, output_zero_point);
-  ideep::attr_t op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+
+  ideep::attr_t op_attr;
+  float sum_scale = has_accum ? accum.value().q_scale() : 1.0;
+  int32_t sum_zero_point = has_accum ? accum.value().q_zero_point() : 0;
+  if (has_accum) {
+    // Just tells we have these post op, the actual value such as scale and zero point will be setted later.
+    op_attr = kReluFused ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
+    const ideep::scale_t accum_scale = ideep::scale_t(1, 1.0/sum_scale);
+    const ideep::zero_point_t accum_zero_points = ideep::zero_point_t(1, sum_zero_point);
+    // Set the dst scale and zero point with the value of accum.
+    // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
+    dst.set_scale(accum_scale);
+    dst.set_zero_point(accum_zero_points);
+  } else {
+    op_attr = kReluFused ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+  }
   // Since src zero point is unknown, set runtime value here
-  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), {DNNL_RUNTIME_S32_VAL});
+  op_attr.set_zero_points(DNNL_ARG_SRC, ideep::utils::tensor_zp_mask(1), src_zero_points);
 
   // Bias might be modified outside (e.g. by quantization bias correction).
   // If so, update the prepacked bias as well.
@@ -1268,35 +1328,32 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     // Primitive cache is initialized when called for the first time
     // and won't be updated afterwards.
     PrimitiveCacheKey cache_key = std::make_tuple(
-        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
+        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
         DeconvParams params;
         ideep::convolution_transpose_forward::prepare(
             params, src, weights, b, dst_dims, dst,
             strides, padding_l, padding_r, dilates, groups(),
-            src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+            src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
             src_zero_points, dst_zero_points, op_attr,
             dnnl::algorithm::deconvolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_deconv_cache() = DeconvPrimitiveCache(
-            cache_key, params.pd, b, params.bias_attr, params.input_zero_point);
-        onednn_utils::try_reorder(
-            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+        get_deconv_cache() = DeconvPrimitiveCache(cache_key, params, b);
+        auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
+        weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     if (get_deconv_cache().hit(cache_key)) {
-      Deconv& primitive = get_deconv_cache().get_primitive();
-      DeconvDesc& pd = get_deconv_cache().get_primitive_desc();
-      auto& src_zp_tensor = get_deconv_cache().get_src_zp_tensor();
+      DeconvParams& params = get_deconv_cache().get_params();
       auto& expected_bias = get_deconv_cache().get_bias();
-      ideep::convolution_transpose_forward::compute(
-          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
+      ideep::convolution_transpose_forward::compute<false, false>(
+          params, src, weights, expected_bias, dst);
     } else {
-      ideep::convolution_transpose_forward::compute_v2(
+      ideep::convolution_transpose_forward::compute(
           src, weights, b, dst_dims, dst,
           strides, padding_l, padding_r, dilates,
           groups(), src_scales, weights_scales,
-          ideep::scale_t(scale_size, inv_output_scale),
+          ideep::scale_t(1, inv_output_scale),
           src_zero_points, dst_zero_points, op_attr,
           dnnl::algorithm::deconvolution_direct,
           dnnl::prop_kind::forward_inference,
@@ -1304,47 +1361,46 @@ at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_impl(
     }
   } else {  // not transposed
     PrimitiveCacheKey cache_key = std::make_tuple(
-        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads);
+        input_scale, input_zp, src_dims, output_scale, output_zero_point, num_threads, sum_scale, sum_zero_point);
     c10::call_once(*cache_initialized_flag, [&](){
-        src.set_zero_point(src_zero_points);
-        dst.set_zero_point(dst_zero_points);
         ConvParams params;
         ideep::convolution_forward::prepare(
             params, src, weights, b, dst_dims, dst,
             strides, dilates, padding_l, padding_r, groups(),
-            src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
+            src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
+            src_zero_points, dst_zero_points,
             op_attr, dnnl::algorithm::convolution_direct,
             dnnl::prop_kind::forward_inference,
             ideep::u8s8, ideep::engine::cpu_engine());
-        get_conv_cache() = ConvPrimitiveCache(cache_key, params.pd, b, params.bias_attr);
-        onednn_utils::try_reorder(
-            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
+        get_conv_cache() = ConvPrimitiveCache(cache_key, params, b);
+        auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups());
+        weights = weights.reorder_if_differ_in(expected_weight_desc);
     });
     // If hit, use cached data. If miss, fall back to normal path.
     if (get_conv_cache().hit(cache_key)) {
-      ConvDesc& pd = get_conv_cache().get_primitive_desc();
-      Conv& primitive = get_conv_cache().get_primitive();
-      auto& src_zp_tensor = get_conv_cache().get_src_zp_tensor();
+      auto& params = get_conv_cache().get_params();
       auto& expected_bias = get_conv_cache().get_bias();
-      ideep::convolution_forward::compute(
-          pd, primitive, src, weights, expected_bias, dst, src_zp_tensor, groups());
+      ideep::convolution_forward::compute<false, false>(params, src, weights, expected_bias, dst);
     } else {
-      src.set_zero_point(src_zero_points);
-      dst.set_zero_point(dst_zero_points);
-      ConvParams params;
-      ideep::convolution_forward::prepare(
-          params, src, weights, b, dst_dims, dst,
+      ideep::convolution_forward::compute(
+          src, weights, b, dst_dims, dst,
           strides, dilates, padding_l, padding_r, groups(),
-          src_scales, weights_scales, ideep::scale_t(scale_size, inv_output_scale),
-          op_attr, dnnl::algorithm::convolution_direct,
+          src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
+          src_zero_points, dst_zero_points, op_attr,
+          dnnl::algorithm::convolution_direct,
           dnnl::prop_kind::forward_inference,
           ideep::u8s8, ideep::engine::cpu_engine());
-      onednn_utils::try_reorder(
-            weights, (ideep::tensor::desc)params.pd.weights_desc(), weights_scales);
-      ideep::convolution_forward::compute(params, src, weights, b, dst);
     }
   }
-  return output;
+  if (has_accum) {
+    // When fused with sum, the accum tensor share the data ptr as dst tensor as the output.
+    // Reset output's scale and zero point into accum_contig.
+    set_quantizer_(accum_contig, at::make_per_tensor_affine_quantizer(
+        output_scale, output_zero_point, accum_contig.scalar_type()));
+    return accum_contig;
+  } else {
+    return output;
+  }
 }
 
 template at::Tensor PackedConvWeightsOnednn<2>::apply(
@@ -1418,6 +1474,34 @@ class QConvInt8 final {
   }
 };
 
+template <int kSpatialDim, bool kReluFused>
+class QConvAddInt8 final {
+ public:
+  static Tensor run(
+      Tensor act,
+      Tensor accum,
+      const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& packed_weight,
+      double output_scale,
+      int64_t output_zero_point) {
+    auto& ctx = at::globalContext();
+#if AT_MKLDNN_ENABLED()
+    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+      if (kReluFused) {
+        return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add_relu(
+          act, accum, output_scale, output_zero_point);
+      } else {
+        return dynamic_cast<PackedConvWeightsOnednn<kSpatialDim>*>(packed_weight.get())->apply_add(
+          act, accum, output_scale, output_zero_point);
+      }
+    }
+#endif
+    TORCH_CHECK(
+    false,
+    "Didn't find engine for operation quantized::conv2d_add.",
+    toString(ctx.qEngine()));
+  }
+};
+
 template <bool kReluFused>
 class QConv1dInt8 final {
  public:
@@ -1473,6 +1557,8 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv1d_relu"),     QConv1dInt8<true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d.new"),      QConvInt8<2, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_relu.new"), QConvInt8<2, true>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_add"),      QConvAddInt8<2, false>::run);
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv2d_add_relu"), QConvAddInt8<2, true>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d.new"),      QConvInt8<3, false>::run);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv3d_relu.new"), QConvInt8<3, true>::run);
   // for backward compatibility

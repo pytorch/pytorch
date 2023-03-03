@@ -16,6 +16,8 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <utility>
+
 namespace at {
 namespace functorch {
 
@@ -144,38 +146,50 @@ std::vector<Tensor> tensor_split_indices_batching_rule(const Tensor& self, IntAr
   return result;
 }
 
-Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
+Tensor& squeeze_dims__batching_rule(Tensor& self, IntArrayRef dims) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return self.squeeze_(dim);
+    return self.squeeze_(dims);
   }
   auto* batched = maybeGetBatchedImpl(self);
   const auto bdim = batched->bdim();
   auto logical_dim = self.dim();
 
-  // If logically a scalar tensor, then Tensor.squeeze_(dim) is a no-op
   if (logical_dim == 0) {
+    TORCH_CHECK(
+        dims.empty() || (dims.size() == 1 && dims[0] == 0),
+        "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return self;
   }
 
-  dim = maybe_wrap_dim(dim, logical_dim);
-  if (dim >= bdim) {
-    dim = dim + 1;
-    batched->value().squeeze_(dim);
-    batched->refreshTensorMetadata();
-    return self;
+  // Adjust any dimensions higher than the batch dimension
+  DimVector adjusted_dims(dims.begin(), dims.end());
+  int64_t updated_batch_idx = bdim;
+  for (auto &d : adjusted_dims) {
+    auto actual_dim = c10::maybe_wrap_dim(d, logical_dim);
+    if (actual_dim < bdim) {
+      d = actual_dim;
+      if (batched->value().sym_size(actual_dim) == 1) {
+        // A column before batch dimension will be dropped so adjust accordingly.
+        --updated_batch_idx;
+      }
+    } else {
+      // Since dimension to be squeezed is after the batch dimension adjust by one to account
+      // for the original batch dimension. In this case batch dimension won't move.
+      d = actual_dim + 1;
+    }
   }
 
-  // Tensor.squeeze_(0) is a no-op if dim 0 has a size other than 1
-  if (batched->value().size(dim) != 1) {
-    return self;
+  batched->value().squeeze_(adjusted_dims);
+  if (updated_batch_idx != bdim) {
+    batched->unsafe_set_bdim(updated_batch_idx);
   }
-
-  // dim < bdim, so we need to adjust bdim
-  batched->value().squeeze_(dim);
-  batched->unsafe_set_bdim(bdim - 1);
   batched->refreshTensorMetadata();
   return self;
+}
+
+Tensor& squeeze_dim__batching_rule(Tensor& self, int64_t dim) {
+  return squeeze_dims__batching_rule(self, {dim});
 }
 
 Tensor& squeeze__batching_rule(Tensor& self) {
@@ -464,7 +478,7 @@ Tensor as_strided_batching_rule(
     optional<c10::SymInt> storage_offset) {
   if (!participatesInCurrentLevel(tensor)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
-    return at::as_strided_symint(tensor, sizes, strides, storage_offset);
+    return at::as_strided_symint(tensor, sizes, strides, std::move(storage_offset));
   }
   auto physical_view = MultiBatchVmapTransform::logicalToPhysical(tensor);
   auto num_batch_dims = physical_view.numBatchDims();
@@ -499,7 +513,7 @@ Tensor as_strided_batching_rule(
   // and creates a tensor y such that each y[i] references the same memory
   // locations as zi. See NOTE: [When will the as_strided batching rule fail?]
   auto result = physical_view.tensor().as_strided_symint(
-      physical_sizes, physical_strides, storage_offset);
+      physical_sizes, physical_strides, std::move(storage_offset));
   return physical_view.getPhysicalToLogicalMap().apply(result);
 }
 
@@ -687,7 +701,7 @@ Tensor block_diag_batching_rule(TensorList tensors) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // Implementing this as a dummy for loop for now, since I'm not sure how to do it any better.
   // I'm probably not accounting for potentially multiple batched dimensions?
   auto bdim = physical_tensors[0].size(0);
@@ -715,7 +729,7 @@ Tensor stack_batching_rule(TensorList tensors, int64_t dim) {
   auto physical_tensors = fmap(
       physical_views, [](const VmapPhysicalView& view) -> Tensor { return view.tensor(); });
   TORCH_INTERNAL_ASSERT(
-      tensors.size() > 0, "The dispatcher should not have dispatched here otherwise.");
+      !tensors.empty(), "The dispatcher should not have dispatched here otherwise.");
   // NB: stack wraps the dimensionality to (logical dim + 1), so we have to
   // manually handle that here.
   auto dim_physical =
@@ -816,6 +830,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c needs special inplace rules
   m.impl("squeeze_", squeeze__batching_rule);
   m.impl("squeeze_.dim", squeeze_dim__batching_rule);
+  m.impl("squeeze_.dims", squeeze_dims__batching_rule);
   m.impl("unsqueeze_", unsqueeze__batching_rule);
   m.impl("transpose_", transpose__batching_rule);
 

@@ -19,7 +19,7 @@
 
 #include <c10/macros/Macros.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -362,4 +362,4 @@ REGISTER_DISPATCH(pdist_backward_stub, &pdist_backward_kernel_impl);
 REGISTER_DISPATCH(cdist_stub, &cdist_kernel_impl);
 REGISTER_DISPATCH(cdist_backward_stub, &cdist_backward_kernel_impl);
 
-}} // at::native
+} // at::native

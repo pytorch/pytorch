@@ -24,7 +24,7 @@ class PackedSequenceTest(TestCase):
     }
 
     def __init__(self, *args, **kwargs):
-        super(PackedSequenceTest, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.batch_size = 5
         self.max_length = 6
 

@@ -57,9 +57,6 @@ class MutationExportTests(torch._dynamo.test_case.TestCase):
     def test_module_attribute_mutation_violation_positive_4(self):
         # Mutating attribute with an inline function
         class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def add(self, a, b):
                 return a + b
 

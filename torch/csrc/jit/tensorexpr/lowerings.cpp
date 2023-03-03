@@ -6,9 +6,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/mkldnn/Common.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 FunctionSchemaMap<NNCLoweringFunction>& getNNCLoweringRegistry() {
   static FunctionSchemaMap<NNCLoweringFunction> lowering_registry_;
@@ -1734,7 +1732,7 @@ int nnc_lowerings_lazy_registration() {
             [&](const std::vector<VarHandle>& axes) {
               int64_t dim = c10::get<int64_t>(inputs[1]);
               if (dim < 0) {
-                if (axes.size() == 0) {
+                if (axes.empty()) {
                   throw malformed_input("axes are zero handling unsqueeze");
                 }
                 dim += axes.size();
@@ -2000,6 +1998,4 @@ NNCLoweringFunction getStandardLoweringFor(const std::string& schema_str) {
   return nullptr;
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

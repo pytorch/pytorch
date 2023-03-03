@@ -33,7 +33,7 @@ if BACKEND == "gloo" or BACKEND == "nccl" or BACKEND == "ucc":
         def setUp(self):
             super().setUp()
             self._spawn_processes()
-            torch.backends.cudnn.flags(allow_tf32=False).__enter__()
+            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
 
 
 if __name__ == "__main__":

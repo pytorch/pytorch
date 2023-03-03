@@ -27,7 +27,7 @@ class THManagedMapAllocator : private THManagedMapAllocatorInit,
 
   void close() override;
 
-  ~THManagedMapAllocator() {
+  ~THManagedMapAllocator() override {
     close();
   }
 

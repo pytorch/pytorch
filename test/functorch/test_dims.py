@@ -195,6 +195,14 @@ class TestMin(TestCase):
 
         embeddings[indices[i], f] += values[i, f]
 
+    def test_adapt(self):
+        def f():
+            ci, co = dims()
+        # python 3.11 adapts bytecode after a number of iterations
+        # check that we still match names correctly
+        for i in range(10):
+            f()
+
     @skipIf(not TEST_CUDA, "no CUDA")
     def test_attn_cuda(self):
         # size from the BERT paper, 90% pretraining of sequence length 128
@@ -623,7 +631,6 @@ class TestMinFunctorchOnly(TestMin):
 
 for n in skip_functorch_only:
     setattr(TestMinFunctorchOnly, n, skip("skip_functorch_only")(lambda self: None))
-
 
 if __name__ == '__main__':
     run_tests()

@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import enum
 import typing
-from typing import Dict, Optional, Union
-
-from typing_extensions import Literal
+from typing import Dict, Literal, Optional, Union
 
 import torch
 from torch._C import _onnx as _C_onnx

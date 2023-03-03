@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import (
     is_slow_gradcheck_env,
 )
 import torch.distributed as dist
-from torch.multiprocessing import get_context
+from torch.multiprocessing import current_process, get_context
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -48,6 +48,26 @@ except ImportError:
     print(
         "Unable to import test_selections from tools/testing. Running without test selection stats..."
     )
+
+
+# Note [ROCm parallel CI testing]
+# https://github.com/pytorch/pytorch/pull/85770 added file-granularity parallel testing.
+# In .ci/pytorch/test.sh, TEST_CONFIG == "default", CUDA and HIP_VISIBLE_DEVICES is set to 0.
+# This results in multiple test files sharing the same GPU.
+# This should be a supported use case for ROCm, but it exposed issues in the kernel driver resulting in hangs.
+# See https://github.com/pytorch/pytorch/issues/90940.
+#
+# Further, ROCm self-hosted runners have up to 4 GPUs.
+# Device visibility was set to 0 to match CUDA test behavior, but this was wasting available GPU resources.
+# Assigning each Pool worker their own dedicated GPU avoids the ROCm oversubscription issues.
+# This should also result in better overall wall clock time since all GPUs can be utilized.
+def maybe_set_hip_visible_devies():
+    # Special handling of ROCm GHA runners for parallel (file granularity) tests.
+    if torch.version.hip:
+        p = current_process()
+        if p.name != 'MainProcess':
+            # this is a Process from a parallel Pool, not the MainProcess
+            os.environ['HIP_VISIBLE_DEVICES'] = str(p._identity[0] % NUM_PROCS)
 
 
 def strtobool(s):
@@ -118,7 +138,6 @@ TESTS = discover_tests(
         "distributed/launcher/bin/test_script_is_torchelastic_launched",
         "distributed/launcher/bin/test_script_local_rank",
         "distributed/test_c10d_spawn",
-        "distributed/_tensor/test_dtensor_ops",
         'distributions/test_transforms',
         'distributions/test_utils',
     ],
@@ -174,7 +193,7 @@ USE_PYTEST_LIST = [
     "distributed/elastic/events/lib_test",
     "distributed/elastic/agent/server/test/api_test",
     "test_deploy",
-    "distributed/test_c10d_error_logger.py"
+    "distributed/test_c10d_error_logger"
 ]
 
 WINDOWS_BLOCKLIST = [
@@ -226,7 +245,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -253,7 +271,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -299,6 +316,9 @@ CI_SERIAL_LIST = [
     'test_modules',  # failed test due to mismatched elements
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
+    'test_dataloader',  # frequently hangs for ROCm
+    'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    '_nvfuser/test_torchscript',  # OOM on test_issue_1785
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -409,18 +429,11 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, allow_pytest, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
         executable = [sys.executable, "-bb"]
-    if options.pytest:
-        if allow_pytest:
-            executable += ["-m", "pytest"]
-        else:
-            print_to_stderr(
-                "Pytest cannot be used for this test. Falling back to unittest."
-            )
     return executable
 
 
@@ -432,6 +445,7 @@ def run_test(
     extra_unittest_args=None,
     env=None,
 ) -> int:
+    maybe_set_hip_visible_devies()
     unittest_args = options.additional_unittest_args.copy()
     if options.verbose:
         unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
@@ -445,8 +459,9 @@ def run_test(
 
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
+        unittest_args.extend(get_pytest_args(options))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_CI:
+    if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
             ci_args.append("--rerun-disabled-tests")
@@ -454,9 +469,7 @@ def run_test(
         unittest_args.extend(ci_args)
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args
-    )
+    executable = get_executable_command(options)
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -464,7 +477,8 @@ def run_test(
 
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
     log_fd, log_path = tempfile.mkstemp(dir=REPO_ROOT / "test" / "test-reports",
-                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")))
+                                        prefix="{}_".format(test_module.replace("\\", "-").replace("/", "-")),
+                                        suffix=".log")
     os.close(log_fd)
     command = (launcher_cmd or []) + executable + argv
     print_to_stderr("Executing {} ... [{}]".format(command, datetime.now()))
@@ -688,7 +702,7 @@ def run_doctests(test_module, test_directory, options):
     if enabled['qengine'] == 'auto':
         try:
             # Is there a better check if quantization is enabled?
-            import torch.nn.quantized as nnq  # NOQA
+            import torch.ao.nn.quantized as nnq  # NOQA
             torch.backends.quantized.engine = 'qnnpack'
             torch.backends.quantized.engine = 'fbgemm'
         except (ImportError, RuntimeError):
@@ -772,7 +786,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def run_test_ops(test_module, test_directory, options):
+def get_pytest_args(options):
     if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -785,23 +799,16 @@ def run_test_ops(test_module, test_directory, options):
         # failure
         rerun_options = ["-x", "--reruns=2"]
 
-    default_unittest_args = [
+    pytest_args = [
         "--use-pytest",
         "-vv",
         "-rfEX"
     ]
-    default_unittest_args.extend(rerun_options)
+    pytest_args.extend(rerun_options)
+    return pytest_args
 
-    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
-        extra_unittest_args = default_unittest_args.copy()
-        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
-        # it's also on periodic so we don't care about TTS as much
-        return run_test(
-            test_module,
-            test_directory,
-            copy.deepcopy(options),
-            extra_unittest_args=extra_unittest_args,
-        )
+def run_test_ops(test_module, test_directory, options):
+    default_unittest_args = get_pytest_args(options)
 
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
@@ -872,7 +879,34 @@ CUSTOM_HANDLERS = {
     "test_ops_fwd_gradients": run_test_ops,
     "test_ops_jit": run_test_ops,
     "functorch/test_ops": run_test_ops,
+    # not a test_ops file, but takes 2 hrs on some architectures and
+    # run_test_ops is good at parallelizing things
+    "test_decomp": run_test_ops,
 }
+
+
+PYTEST_BLOCKLIST = [
+    "test_package",
+    "test_nccl",
+    "inductor/test_torchinductor",
+    "test_cuda",
+    "test_quantization",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_cuda_trace",
+    "test_fx",
+    "test_jiterator",
+    "test_mps",
+    "test_cuda_trace",
+    "profiler/test_profiler",
+    "test_jit",
+    "test_jit_legacy",
+    "dynamo/test_repros",  # skip_if_pytest
+    "dynamo/test_optimizers",  # skip_if_pytest
+    "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
+    "dynamo/test_unspec",  # imports repros
+] + list(CUSTOM_HANDLERS.keys())
 
 
 def parse_test_module(test):
@@ -881,7 +915,7 @@ def parse_test_module(test):
 
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
-        super(TestChoices, self).__init__(args[0])
+        super().__init__(args[0])
 
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
@@ -1046,6 +1080,19 @@ def parse_args():
             "Use 'all' to execute all doctests or specify a specific "
             "doctest to run")
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+
     return parser.parse_args()
 
 
@@ -1105,7 +1152,8 @@ def must_serial(file: str) -> bool:
         "distributed" in file or
         file in CUSTOM_HANDLERS or
         file in RUN_PARALLEL_BLOCKLIST or
-        file in CI_SERIAL_LIST
+        file in CI_SERIAL_LIST or
+        file in JIT_EXECUTOR_TESTS
     )
 
 
@@ -1180,17 +1228,6 @@ def get_selected_tests(options):
             WINDOWS_BLOCKLIST.append("jit")
             WINDOWS_BLOCKLIST.append("jit_fuser")
 
-        # This is exception that's caused by this issue https://github.com/pytorch/pytorch/issues/69460
-        # This below code should be removed once this issue is solved
-        if (
-            torch.version.cuda is not None and
-            LooseVersion(torch.version.cuda) >= "11.5" and
-            LooseVersion(torch.version.cuda) <= "11.6"
-        ):
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_ninja")
-            WINDOWS_BLOCKLIST.append("test_cpp_extensions_aot_no_ninja")
-
         selected_tests = exclude_tests(WINDOWS_BLOCKLIST, selected_tests, "on Windows")
 
     elif TEST_WITH_ROCM:
@@ -1256,6 +1293,8 @@ def get_selected_tests(options):
 
 
 def run_test_module(test: str, test_directory: str, options) -> Optional[str]:
+    maybe_set_hip_visible_devies()
+
     test_module = parse_test_module(test)
 
     # Printing the date here can help diagnose which tests are slow
@@ -1297,6 +1336,11 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
     failure_messages = []
 
     # parallel = in parallel with other files
@@ -1306,7 +1350,8 @@ def main():
     print_to_stderr("parallel (file granularity) tests:\n {}".format("\n ".join(selected_tests_parallel)))
     print_to_stderr("serial (file granularity) tests:\n {}".format("\n ".join(selected_tests_serial)))
 
-    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=1)
+    # See Note [ROCm parallel CI testing]
+    pool = get_context("spawn").Pool(NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1)
     os.makedirs(REPO_ROOT / "test" / "test-reports", exist_ok=True)
 
     def success_callback(err_message):
@@ -1322,7 +1367,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1340,7 +1385,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:

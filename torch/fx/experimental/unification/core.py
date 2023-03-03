@@ -30,7 +30,7 @@ _reify
 
 @dispatch(dict, dict)  # type: ignore[no-redef]
 def _reify(d, s):
-    return dict((k, reify(v, s)) for k, v in d.items())
+    return {k: reify(v, s) for k, v in d.items()}
 _reify
 
 @dispatch(object, dict)  # type: ignore[no-redef]

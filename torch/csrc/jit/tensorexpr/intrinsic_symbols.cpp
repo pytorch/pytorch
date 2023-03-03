@@ -127,9 +127,7 @@ __m256d Sleef_fmodd4(__m256d, __m256d);
 #endif // __cplusplus
 #endif // !defined(_MSC_VER) && defined(__x86_64__)
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
   static SymbolAddress symbolAddresses[] = {
@@ -285,7 +283,5 @@ c10::ArrayRef<SymbolAddress> getIntrinsicSymbols() {
   return c10::ArrayRef<SymbolAddress>(symbolAddresses);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 #endif // TORCH_ENABLE_LLVM

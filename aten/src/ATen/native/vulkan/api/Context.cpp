@@ -1,6 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/ops/Copy.h>
-#include <ATen/vulkan/Context.h>
 
 #include <sstream>
 
@@ -25,7 +23,7 @@ Context::Context(size_t adapter_i, const ContextConfig& config)
 #endif /* USE_VULKAN_GPU_DIAGNOSTICS */
       // Command buffer submission
       cmd_mutex_{},
-      cmd_(VK_NULL_HANDLE),
+      cmd_(VK_NULL_HANDLE, 0u),
       submit_count_{0u},
       // Memory Management
       buffer_clearlist_mutex_{},
@@ -42,7 +40,7 @@ Context::~Context() {
 
 DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
-    const ShaderSource& shader_descriptor,
+    const ShaderInfo& shader_descriptor,
     const utils::uvec3& local_workgroup_size) {
   const VkDescriptorSetLayout shader_layout =
       shader_layout_cache().retrieve(shader_descriptor.kernel_layout);
@@ -72,10 +70,13 @@ void Context::submit_compute_epilogue(
   command_buffer.dispatch(global_workgroup_size);
 }
 
-void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
+void Context::submit_cmd_to_gpu(
+    const VkFence fence_handle,
+    const bool final_use) {
   if (cmd_) {
     cmd_.end();
-    adapter_p_->submit_cmd(queue_, cmd_.get_submit_handle(), fence_handle);
+    adapter_p_->submit_cmd(
+        queue_, cmd_.get_submit_handle(final_use), fence_handle);
 
     submit_count_ = 0u;
   }
@@ -206,21 +207,6 @@ UniformParamsBuffer& UniformParamsBuffer::operator=(
 
   return *this;
 }
-
-//
-// VulkanImpl
-//
-
-struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
-  bool is_vulkan_available() const override {
-    return available();
-  }
-
-  Tensor& vulkan_copy_(Tensor& self, const Tensor& src) const override {
-    return vulkan::ops::copy_(self, src);
-  }
-};
-static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
 
 } // namespace api
 } // namespace vulkan

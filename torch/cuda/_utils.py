@@ -20,6 +20,8 @@ def _get_device_index(device: Any, optional: bool = False,
     If :attr:`device` is ``None``, this will return the current default CUDA
     device if :attr:`optional` is ``True``.
     """
+    if isinstance(device, int):
+        return device
     if isinstance(device, str):
         device = torch.device(device)
     if isinstance(device, torch.device):

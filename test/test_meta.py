@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
     ops,
     instantiate_device_type_tests,
     onlyCUDA,
+    onlyCPU,
     OpDTypes,
 )
 from torch.testing._internal.common_methods_invocations import op_db
@@ -309,6 +310,7 @@ CHECK_STRIDES_SKIPS = {
     aten.heaviside.default,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
+    aten.logaddexp.default,
     aten.logical_and.default,
     aten.logical_or.default,
     aten.logical_xor.default,
@@ -607,13 +609,13 @@ meta_function_expected_failures = {
     torch.Tensor.item : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.bincount : {i32, i64, u8, i16, i8},
     torch.frexp : {f64, f16, bf16, f32},
-    torch.functional.unique : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
-    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, bf16, b8, i8, f32},
+    torch.functional.unique : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
+    torch.functional.unique_consecutive : {f64, i32, i64, u8, i16, f16, bf16, b8, i8, f32},
     torch.histc : {f64, bf16, f32},
     torch.histogram : {f64, f32},
     torch.histogramdd : {f64, f32},
     torch.kthvalue : {f64, i32, i64, u8, i16, bf16, i8, f32},
-    torch.logcumsumexp : {f64, bf16, f32},
+    torch.logcumsumexp : {f64, bf16, f32, c64, c128},
     torch.median : {f64, i32, i64, u8, i16, bf16, i8, f32},
     torch.mode : {f64, i32, i64, f16, u8, i16, bf16, b8, i8, f32},
     torch.multinomial : {f64, bf16, f32},
@@ -629,9 +631,8 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot : {i64},
     torch.nn.functional.pdist : {f64, f32},
     torch.polar : {f64, f32},
-    torch.segment_reduce : {f64, f16, bf16, f32},
+    torch._segment_reduce : {f64, f16, bf16, f32},
     torch.searchsorted : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
-    torch.symeig : {f64, f32, c128, c64},
     torch.cholesky : {f64, f32, c128, c64},
     torch.cholesky_inverse : {f64, f32, c128, c64},
     torch.cholesky_solve : {f64, f32, c128, c64},
@@ -658,29 +659,10 @@ sys.exit()
 meta_function_skips = {
     torch.Tensor.__rmatmul__ : {bf16, c128, f64, f32, f16, c64},
     torch.Tensor.matmul : {f64, f32, c128, c64},
-    torch.fft.fft2 : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.fft : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.fftn : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.ifft2 : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16, c32},
-    torch.fft.ifft : {c128, c64, c32, f16},
-    torch.fft.ifftn : {i8, i64, u8, c128, b8, f64, i16, f32, i32, c64, c32, f16},
-    torch.fft.hfft: {f16},
-    torch.fft.hfftn: {f16},
-    torch.fft.hfft2: {f16},
-    torch.fft.ihfft: {f16},
-    torch.fft.ihfft2 : {i8, i64, u8, f64, b8, f32, i32, i16, f16, c32, f16},
-    torch.fft.ihfftn : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.irfft2 : {f16},
-    torch.fft.irfft : {f16},
-    torch.fft.irfftn : {f16},
-    torch.fft.rfft2 : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.rfft : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
-    torch.fft.rfftn : {i8, i64, u8, f64, b8, f32, i32, i16, c32, f16},
     torch.functional.atleast_2d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.atleast_3d : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cartesian_prod : {bf16, i8, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.einsum : {bf16, c128, f64, f32, f16, c64},
-    torch.functional.stft : {c128, f32, c64, f64},
     torch.functional.tensordot : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.inner : {bf16, i8, i64, u8, c128, f64, i16, f32, i32, c64},
     torch.linalg.lu_solve : {c128, c64},
@@ -704,7 +686,7 @@ meta_function_skips = {
     torch.diff : {b8},
     torch.equal : {bf16, i8, c32, i64, u8, c128, b8, f64, i16, i32, f32, f16, c64},
     torch.functional.cdist : {f64, f32},
-    torch.nanmean : {bf16, f64, f32, f16},
+    torch.nanmean : {bf16, f64, f32, f16, c32, c64, c128},
     torch.nn.functional.cross_entropy : {bf16, f64, f32},
     torch.nn.functional.interpolate : {bf16, f64, f32, u8},
     torch.nn.functional.nll_loss : {bf16, f64, f32},
@@ -716,7 +698,6 @@ meta_function_skips = {
     # This fails for arguments dispatched to grid_sampler_3d, but succeeds
     # for grid_sampler_2d, so we can't just xfail it
     torch.nn.functional.grid_sample : {f64, f32},
-    torch.bucketize : {f64, i32, i64, f16, u8, i16, bf16, i8, f32},
     torch.Tensor.addbmm_: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -841,8 +822,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
-    aten._fft_c2c.out : {f16, c64, i8, f64, c128, i32, i64, f32, c32, b8, i16, u8},
-    aten._fft_r2c.out : {f16, i8, f64, i32, i64, f32, b8, i16, u8},
     aten.cholesky.default : {c64, c128, f64, f32},
     aten.cholesky.out : {c64, c128, f64, f32},
     aten.cholesky_inverse.default : {c64, c128, f64, f32},
@@ -866,7 +845,6 @@ meta_dispatch_expected_failures = {
     aten.ormqr.default : {c64, c128, f64, f32},
     aten.ormqr.out : {c64, c128, f64, f32},
     aten.polar.out : {f32, f64},
-    aten.symeig.default : {c64, c128, f64, f32},
     aten.take.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.take.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.tensordot.out : {c64, i8, f64, c128, i64, bf16, f32, i32, i16, u8},
@@ -879,7 +857,7 @@ meta_dispatch_expected_failures = {
     aten._histogramdd_from_bin_tensors.default : {f32, f64},
     aten._local_scalar_dense.default : {c32, c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten._pdist_forward.default : {f32, f64},
-    aten._unique2.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
+    aten._unique2.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.bincount.default : {i64, i8, i32, i16, u8},
     aten.equal.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.frexp.Tensor : {bf16, f32, f16, f64},
@@ -889,8 +867,8 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct : {f32, f64},
     aten.histogram.bins_tensor : {f32, f64},
     aten.kthvalue.default : {i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.logcumsumexp.default : {bf16, f32, f64},
-    aten.logcumsumexp.out : {bf16, f32, f64},
+    aten.logcumsumexp.default : {bf16, f32, f64, c64, c128},
+    aten.logcumsumexp.out : {bf16, f32, f64, c64, c128},
     aten.max_pool3d_with_indices.default : {f32, f64},
     aten.max_unpool2d.default : {f32, f64},
     aten.max_unpool3d.default : {f32, f64},
@@ -907,8 +885,8 @@ meta_dispatch_expected_failures = {
     aten.searchsorted.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.searchsorted.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.segment_reduce.default : {bf16, f32, f16, f64},
-    aten.unique_consecutive.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
-    aten.unique_dim.default : {i8, f64, i64, bf16, f32, i32, b8, i16, u8},
+    aten.unique_consecutive.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
+    aten.unique_dim.default : {i8, f64, i64, f16, bf16, f32, i32, b8, i16, u8},
     aten.upsample_nearest3d.vec : {bf16, f32, f64, u8},
 }
 
@@ -924,8 +902,6 @@ meta_dispatch_skips = {
     aten.linalg_pinv.atol_rtol_tensor: {f32, f64},
     aten.linalg_pinv.atol_rtol_tensor_out: {f32, f64},
     aten.empty.memory_format: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
-    aten.bucketize.Tensor : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
-    aten.bucketize.Tensor_out : {f16, i8, f64, i64, bf16, f32, i32, i16, u8},
     aten.addbmm_.default: {bf16, c128, c64, f32, f64, i16, i32, i64, i8, u8},
 }
 
@@ -991,7 +967,7 @@ meta_dispatch_device_expected_failures['cuda'] = {
 }
 
 meta_dispatch_device_skips['cpu'] = {
-    aten._embedding_bag_forward_only.default: {f16, f32, f64},
+    aten._embedding_bag_forward_only.default: {bf16, f16, f32, f64},
     aten.native_batch_norm.default: {f32, f64},
     aten._native_batch_norm_legit.default: {f32, f64},
     aten._native_batch_norm_legit.no_stats: {f32, f64},
@@ -1058,8 +1034,7 @@ def get_strided_args(args):
             strided_arg_variants = [arg]
         strided_args.append(strided_arg_variants)
 
-    for result in itertools.product(*strided_args):
-        yield result
+    yield from itertools.product(*strided_args)
 
 class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
     test_case: TestCase
@@ -1245,6 +1220,34 @@ class TestMeta(TestCase):
     def test_empty_quantized(self):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
+
+    def test_nan_to_num(self):
+        t = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14], device='meta')
+        r = t.nan_to_num()
+        self.assertEqual(r.device.type, 'meta')
+
+    @onlyCPU
+    def test_meta_autograd_no_error(self):
+        lib = torch.library.Library("meta_test", "DEF")
+        impl_cpu = torch.library.Library("meta_test", "IMPL", "CPU")
+        impl_meta = torch.library.Library("meta_test", "IMPL", "Meta")
+
+        def foo_impl(x):
+            return x + 1
+
+        lib.define("foo(Tensor a) -> Tensor")
+        impl_meta.impl("foo", foo_impl)
+        impl_cpu.impl("foo", foo_impl)
+
+        a = torch.ones(2, device='meta')
+        # The point of the test is that this should not error:
+        # We have a fallthrough kernel registered to the AutogradMeta
+        # key for custom ops, so it's fine that `foo()` doesn't have
+        # an autograd kernel.
+        b = torch.ops.meta_test.foo.default(a)
+        del impl_meta
+        del impl_cpu
+        del lib
 
     def test_huber_loss_backward(self):
         inps = [torch.rand(2**52, device='meta') for _ in range(3)]

@@ -300,9 +300,8 @@ class TestMkldnn(TestCase):
     def test_conv3d_bf16(self):
         self._test_conv_bf16_base(dim=3)
 
-    def _test_conv2d_nhwc_base(self, weight_memory_format, dtype):
-        conv_module = torch.nn.Conv2d
-        input_shapes = (224, 224)
+    def _test_conv2d_nhwc_base(self, conv_module, weight_memory_format, dtype):
+        input_shapes = (55, 55)
         options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
         for train, bias, dilation, groups in options:
             N = torch.randint(3, 10, (1,)).item()
@@ -310,8 +309,13 @@ class TestMkldnn(TestCase):
             C = torch.randint(1, 3, (1,)).item() * groups
             x_shape = (N, C) + input_shapes
             x = torch.randn(x_shape, dtype=dtype)
-            # conv1: mkldnn conv2d in contiguous memory format (nchw)
-            # conv2: mkldnn conv2d in channels last memory format (nhwc)
+
+            # TODO: remove this when group depthwise is supported:
+            if conv_module is torch.nn.ConvTranspose2d and groups > 1 and C == groups:
+                continue
+
+            # conv1: mkldnn conv in contiguous memory format (nchw)
+            # conv2: mkldnn conv in channels last memory format (nhwc)
             conv1 = conv_module(in_channels=C,
                                 out_channels=M,
                                 kernel_size=3,
@@ -342,15 +346,85 @@ class TestMkldnn(TestCase):
                 self.assertEqual(x1.grad, x2.grad)
 
     def test_conv2d_nhwc(self):
-        self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.float32)
-        self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.float32)
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_conv2d_nhwc_bf16(self):
         # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
         if has_bf16_support():
-            self._test_conv2d_nhwc_base(torch.contiguous_format, dtype=torch.bfloat16)
-            self._test_conv2d_nhwc_base(torch.channels_last, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.Conv2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def test_conv_transpose2d_nhwc(self):
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.float32)
+        self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.float32)
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_conv_transpose2d_nhwc_bf16(self):
+        # when has_bf16_support() returns false, bf16 CPU conv will fall back to thnn impl
+        if has_bf16_support():
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.contiguous_format, dtype=torch.bfloat16)
+            self._test_conv2d_nhwc_base(torch.nn.ConvTranspose2d, torch.channels_last, dtype=torch.bfloat16)
+
+    def _test_conv_transpose_base(self, dim):
+        conv_module = {
+            1: torch.nn.ConvTranspose1d,
+            2: torch.nn.ConvTranspose2d,
+            3: torch.nn.ConvTranspose3d
+        }
+        input_shapes = {1: (55,), 2: (28, 28), 3: (14, 14, 14)}
+        options = itertools.product([True, False], [True, False], [1, 2], [1, 4])
+        for train, bias, dilation, groups in options:
+            N = torch.randint(3, 10, (1,)).item()
+            M = torch.randint(1, 3, (1,)).item() * groups
+            C = torch.randint(1, 3, (1,)).item() * groups
+            x_shape = (N, C) + input_shapes[dim]
+            data = torch.randn(x_shape, dtype=torch.float32)
+            # conv: mkldnn tranpose conv fp32
+            # conv_ref: thnn transpose conv fp32
+            conv = conv_module[dim](in_channels=C,
+                                    out_channels=M,
+                                    kernel_size=3,
+                                    stride=1,
+                                    padding=1,
+                                    dilation=dilation,
+                                    bias=bias,
+                                    groups=groups).to(dtype=torch.float32)
+            x = data.clone()
+            x_ref = x.clone()
+            if train:
+                x.requires_grad_()
+                x_ref.requires_grad_()
+
+            conv_ref = copy.deepcopy(conv)
+            with torch.backends.mkldnn.flags(enabled=False):
+                y_ref = conv_ref(x_ref)
+                if train:
+                    y_ref.sum().backward()
+
+            y = conv(x)
+            if train:
+                y.sum().backward()
+
+            self.assertEqual(y, y_ref)
+            if train:
+                self.assertEqual(x.grad, x_ref.grad)
+                self.assertEqual(conv.weight.grad,
+                                 conv_ref.weight.grad,
+                                 atol=1e-3,
+                                 rtol=1e-3)
+                if bias:
+                    self.assertEqual(conv.bias.grad, conv_ref.bias.grad)
+
+    def test_conv_transpose1d(self):
+        self._test_conv_transpose_base(dim=1)
+
+    def test_conv_transpose2d(self):
+        self._test_conv_transpose_base(dim=2)
+
+    def test_conv_transpose3d(self):
+        self._test_conv_transpose_base(dim=3)
 
     def test_conv2d_legacy_jit_model(self):
         """
@@ -1256,6 +1330,106 @@ class TestMkldnn(TestCase):
     def test_resnext50_32x4d(self):
         model = torchvision.models.resnet.resnext50_32x4d(pretrained=False)
         self._test_imagenet_model(model)
+
+    def _lstm_params_list(self):
+        params_dict = {
+            "input_size": [1, 5],
+            "hidden_size": [5, 16],
+            "num_layers": [1, 3],
+            "bidirectional": [False, True],
+            "bias": [False, True],
+            "batch_first": [False, True],
+            "dropout": [0, 0.4, 0.7, 1],
+            "batch_size": [1, 2],
+            "seq_len": [1, 3],
+            "training": [False, True]
+        }
+
+        params_list = []
+        for _, value in params_dict.items():
+            params_list.append(value)
+        return params_list
+
+    def _cast_dtype(self, input, bf16):
+        if bf16:
+            input = input.to(torch.bfloat16)
+        return input
+
+    @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
+    def test_lstm(self):
+        seed = 2023
+        torch.manual_seed(seed)
+
+        params_list = self._lstm_params_list()
+        for dtype in types:
+            bf16 = True if dtype == torch.bfloat16 and has_bf16_support() else False
+            rtol = 1.3e-6
+            atol = 1e-5
+            if bf16:
+                rtol = 0.02
+                atol = 0.02
+            for input_size, hidden_size, num_layers, bidirectional, bias, batch_first, dropout, batch_size, seq_len, training \
+                    in itertools.product(*params_list):
+                num_directions = 2 if bidirectional else 1
+                if batch_first:
+                    input = torch.randn(batch_size, seq_len, input_size, dtype=torch.float32)
+                else:
+                    input = torch.randn(seq_len, batch_size, input_size, dtype=torch.float32)
+                h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+                c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
+
+                model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
+                                      bias=bias, dropout=dropout, batch_first=batch_first).float()
+                model.train() if training else model.eval()
+                input1 = input.clone().requires_grad_(training)
+                input2 = input.clone().requires_grad_(training)
+
+                h1 = h.clone().requires_grad_(training)
+                h2 = h.clone().requires_grad_(training)
+                c1 = c.clone().requires_grad_(training)
+                c2 = c.clone().requires_grad_(training)
+
+                model1 = copy.deepcopy(model)
+                model2 = copy.deepcopy(model)
+                with torch.cpu.amp.autocast(enabled=bf16, dtype=torch.bfloat16):
+                    with torch.backends.mkldnn.flags(enabled=False):
+                        torch.manual_seed(seed)
+                        output1, (hn1, cn1) = self._cast_dtype(model1, bf16)(self._cast_dtype(input1, bf16),
+                                                                             (self._cast_dtype(h1, bf16),
+                                                                             self._cast_dtype(c1, bf16)))
+
+                    torch.manual_seed(seed)
+                    output2, (hn2, cn2) = model2(input2, (h2, c2))
+                    self.assertEqual(output1, output2, rtol=rtol, atol=atol)
+                    self.assertEqual(hn1, hn2, rtol=rtol, atol=atol)
+                    self.assertEqual(cn1, cn2, rtol=rtol, atol=atol)
+
+                    if training:
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            output1.sum().backward(retain_graph=True)
+
+                        torch.manual_seed(seed)
+                        output2.sum().backward(retain_graph=True)
+
+                        self.assertEqual(input1.grad, input2.grad, rtol=rtol, atol=atol)
+                        for name, para in model1.named_parameters():
+                            self.assertEqual(para, self._cast_dtype(getattr(model2, name), bf16))
+                            self.assertEqual(para.grad, self._cast_dtype(getattr(model2, name).grad, bf16), rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            hn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        hn2.sum().backward(retain_graph=True)
+                        self.assertEqual(h1.grad, h2.grad, rtol=rtol, atol=atol)
+
+                        with torch.backends.mkldnn.flags(enabled=False):
+                            torch.manual_seed(seed)
+                            cn1.sum().backward(retain_graph=True)
+                        torch.manual_seed(seed)
+                        cn2.sum().backward(retain_graph=True)
+                        self.assertEqual(c1.grad, c2.grad, rtol=rtol, atol=atol)
 
 
 if __name__ == '__main__':

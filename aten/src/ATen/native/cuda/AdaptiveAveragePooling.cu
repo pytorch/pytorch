@@ -36,8 +36,7 @@
 #define CUDA_MAX_THREADS 1024 // this is safe, in reality 256 is our limit
 #define BLOCK_STRIDE 2 // increasing block_stride to lower # of blocks launched
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -800,8 +799,7 @@ namespace {
     return gradInput;
   }
 
-} // at::native
-} // at
+} // namespace at::native
 
 #undef BLOCK_STRIDE
 #undef CUDA_MAX_THREADS

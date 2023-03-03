@@ -166,7 +166,7 @@ void initLazyBindings(PyObject* module) {
     std::vector<LazyTensorPtr> xtensors;
     xtensors.reserve(tensors.size());
     for (auto& tensor : tensors) {
-      xtensors.push_back(TryGetLtcTensor(tensor));
+      xtensors.emplace_back(TryGetLtcTensor(tensor));
     }
     auto hash = LazyGraphExecutor::Get()->GetGraphHash(xtensors);
     std::string bin((const char*)&hash, sizeof(hash));

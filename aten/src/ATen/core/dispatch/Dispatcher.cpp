@@ -169,7 +169,6 @@ OperatorHandle Dispatcher::findOrRegisterName_(const OperatorName& op_name) {
 // Windows build doesn't produce the destructor symbol in PyTorch libs
 // causing a linker failure in downstream projects.
 // x-ref https://github.com/pytorch/pytorch/issues/70032
-// NOLINTNEXTLINE(performance-trivially-destructible)
 OperatorHandle::~OperatorHandle() = default;
 
 RegistrationHandleRAII Dispatcher::registerLibrary(std::string ns, std::string debug) {
@@ -261,7 +260,6 @@ RegistrationHandleRAII Dispatcher::registerImpl(
     *this,
     dispatch_key,
     std::move(kernel),
-    // NOLINTNEXTLINE(performance-move-const-arg)
     std::move(cpp_signature),
     std::move(inferred_function_schema),
     std::move(debug)
@@ -331,7 +329,7 @@ RegistrationHandleRAII Dispatcher::registerFallback(DispatchKey dispatchKey, Ker
     backendFallbackKernels_[idx].debug, ", new registration ", debug
   );
   // NB: inferred function schema is always nullptr for fallbacks, as fallbacks
-  // cannot be unobxed
+  // cannot be unboxed
   backendFallbackKernels_[idx] = impl::AnnotatedKernel(std::move(kernel), nullptr, std::move(debug));
 
   for (auto& op : operators_) {
@@ -405,7 +403,7 @@ std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::option
 int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
@@ -418,7 +416,7 @@ void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction
 
 void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
-  // the forward range with the coresponding Autograd's node
+  // the forward range with the corresponding Autograd's node
   guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 

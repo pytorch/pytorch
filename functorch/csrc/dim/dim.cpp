@@ -21,6 +21,11 @@
 #include "arena.h"
 #include "python_variable_simple.h"
 
+#if IS_PYTHON_3_11_PLUS
+#define Py_BUILD_CORE
+#include "internal/pycore_opcode.h"
+#undef Py_BUILD_CORE
+#endif
 
 // C++ API functions for objects to
 // * construct the object, returning a ref-counted handle
@@ -161,7 +166,7 @@ struct Dim : public py::base<Dim> {
         return batchtensor_;
     }
 private:
-    int64_t size_;
+    int64_t size_{-1};
     at::Tensor range_;
     at::Tensor batchtensor_;
 };
@@ -218,10 +223,10 @@ std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
 
 static int Dim_init(py::hdl<Dim> self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"name", "size", nullptr};
+    static constexpr const char* kwlist[] = {"name", "size", nullptr};
     py::handle name;
     py::handle size = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist, &name, &size)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", const_cast<char **>(kwlist), &name, &size)) {
         return -1;
     }
     self->init(py::object::borrow(name), (size.ptr() && !py::is_none(size)) ? py::to_int(size) : -1);
@@ -556,10 +561,10 @@ PyTypeObject DimList::Type = {
 
 static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"len_or_dims", "name", nullptr};
+    static constexpr const char* kwlist[] = {"len_or_dims", "name", nullptr};
     py::handle len_or_dims = nullptr;
     PyObject* name = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", kwlist, &len_or_dims, &name)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", const_cast<char**>(kwlist), &len_or_dims, &name)) {
         return -1;
     }
     self->init(py::object::borrow(name ? name : Py_None));
@@ -1080,8 +1085,8 @@ inline int64_t _Tensor_ndim(py::handle h) {
 inline py::handle handle_from_tensor(Arena& A, TensorRef t) {
     // fast case: tensor is live in python
     c10::optional<PyObject*> mb_obj =
-        t->unsafeGetTensorImpl()->check_pyobj(getPyInterpreter());
-    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->owns_pyobj()) {
+        t->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(getPyInterpreter());
+    if (mb_obj.has_value() && !t->unsafeGetTensorImpl()->pyobj_slot()->owns_pyobj()) {
         return *mb_obj;
     }
     return A.autorelease(py::object::checked_steal(THPVariable_Wrap(*t)));
@@ -1433,33 +1438,6 @@ bool relevant_op(_Py_CODEUNIT c) {
     }
 }
 
-py::object getname(PyCodeObject* code, _Py_CODEUNIT c) {
-    PyObject* names = NULL;
-    switch(_Py_OPCODE(c)) {
-        case STORE_NAME:
-        case STORE_GLOBAL:
-          names = code->co_names;
-          break;
-        case STORE_FAST:
-#if PY_VERSION_HEX < 0x030b0000
-          names = code->co_varnames;
-#else
-          names = PyCode_GetVarnames(code);
-#endif
-          break;
-        case STORE_DEREF:
-#if PY_VERSION_HEX < 0x030b0000
-          names = code->co_cellvars;
-#else
-          names = PyCode_GetCellvars(code);
-#endif
-          break;
-        default:
-            return py::object();
-    }
-    return py::object::steal(PySequence_GetItem(names, _Py_OPARG(c)));
-}
-
 py::object create_dim(py::object name, py::handle size) {
     auto d = Dim::create(std::move(name));
     if (!py::is_none(size)) {
@@ -1487,9 +1465,55 @@ py::object create_dimlist(py::object name, py::handle size) {
 
 
 // Python wrappers that make new reflection primitives available for older runtimes
-#if PY_VERSION_HEX < 0x030b0000
+#if !(IS_PYTHON_3_11_PLUS)
 #define _PyCode_CODE(CO) ((_Py_CODEUNIT*)PyBytes_AS_STRING((CO)->co_code))
 #endif
+
+struct PyInstDecoder {
+    PyInstDecoder(PyCodeObject* code_object, int lasti)
+    : code_object_(code_object), code_(_PyCode_CODE(code_object)), offset_(lasti / sizeof(_Py_CODEUNIT))  {}
+    // On Windows, _PyOpcode_Caches and _PyOpcode_Deopt are private symbols
+    // See https://github.com/pytorch/pytorch/issues/93854
+    void next() {
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+        offset_ += _PyOpcode_Caches[opcode()];
+    #endif
+        offset_ += 1;
+    }
+    int opcode() {
+        auto r = _Py_OPCODE(code_[offset_]);
+    #if IS_PYTHON_3_11_PLUS && !defined(_WIN32)
+        r = _PyOpcode_Deopt[r];
+    #endif
+        return r;
+    }
+    int oparg() {
+        return _Py_OPARG(code_[offset_]);
+    }
+
+    py::object name() {
+        py::object names;
+        switch(opcode()) {
+            case STORE_NAME:
+            case STORE_GLOBAL:
+                names = py::object::borrow(code_object_->co_names);
+                break;
+            case STORE_FAST:
+                names = py::object::steal(PyCode_GetVarnames(code_object_));
+                break;
+            case STORE_DEREF:
+                names = py::object::steal(PyCode_GetCellvars(code_object_));
+                break;
+            default:
+                return py::object();
+        }
+        return py::object::steal(PySequence_GetItem(names.ptr(), oparg()));
+    }
+private:
+    PyCodeObject* code_object_;
+    _Py_CODEUNIT* code_;
+    int offset_;
+};
 
 template<py::object (*create_object)(py::object, py::handle)>
 static PyObject* _dims(PyObject *self,
@@ -1518,15 +1542,22 @@ static PyObject* _dims(PyObject *self,
     PyThreadState* state = PyThreadState_GET();
     auto f = py::obj<PyFrameObject>::steal(PyThreadState_GetFrame(state));
     auto c = py::obj<PyCodeObject>::steal(PyFrame_GetCode(f.ptr()));
-    auto code = _PyCode_CODE(c.ptr());
-    int first = PyFrame_GetLasti(f.ptr()) /  2 + 1;
-    auto unpack = code[first];
-    int names_start = first;
-    if (relevant_op(unpack)) {
+    auto lasti = PyFrame_GetLasti(f.ptr());
+    auto decoder = PyInstDecoder(c.ptr(), lasti);
+    #if IS_PYTHON_3_11_PLUS
+    // When py3.11 adapts bytecode lasti points to the precall
+    // rather than the call instruction after it
+    if (decoder.opcode() == PRECALL) {
+        decoder.next();
+    }
+    #endif
+    decoder.next();
+
+    if (relevant_op(decoder.opcode())) {
         found_ndims = 1;
-    } else if (_Py_OPCODE(unpack) == UNPACK_SEQUENCE) {
-        found_ndims = _Py_OPARG(unpack);
-        names_start++;
+    } else if (decoder.opcode() == UNPACK_SEQUENCE) {
+        found_ndims = decoder.oparg();
+        decoder.next();
     }
 
     if (specified_ndims == -1) {
@@ -1542,11 +1573,13 @@ static PyObject* _dims(PyObject *self,
     auto genobject = [&](int i) -> py::object {
         py::object name;
         if (i < found_ndims) {
-            name = getname(c.ptr(), code[names_start + i]);
+            name = decoder.name();
         }
         if (!name.ptr()) {
             name = py::unicode_from_format("d%d", i);
             found_ndims = 0; // once we fail at finding a name, we can find any more
+        } else {
+            decoder.next();
         }
         return create_object(std::move(name), sizes != -1 ? py::sequence_view(py_sizes)[i] : py::handle(Py_None));
     };
@@ -2843,7 +2876,7 @@ struct WrappedOperator : public py::base<WrappedOperator> {
         name = orig.attr("__name__");
         doc = orig.attr("__doc__");
         dim_name = std::move(dim_name_);
-        if (!py::is_none(doc) && dim_name.size() > 0) {
+        if (!py::is_none(doc) && !dim_name.empty()) {
             doc = py::unicode_from_format("%S\nArgument '%s' can be either an integer or a torchdim.Dim object.\n", doc.ptr(), dim_name.c_str());
         }
         method_def.ml_name = py::is_none(name) ? "" : PyUnicode_AsUTF8(name.ptr());

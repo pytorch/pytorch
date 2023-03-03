@@ -31,7 +31,13 @@ from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction
 
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
-    op_info, device, dtype, requires_grad, with_dtype=False, **kwargs
+    op_info,
+    device,
+    dtype,
+    requires_grad,
+    with_dtype=False,
+    use_zero_dimensions=True,
+    **kwargs,
 ):
     make_arg = partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -42,6 +48,7 @@ def sample_inputs_softmax_variant(
         ((S, S), (1,)),
         ((S, S), (-1,)),
         ((S, M, S), (2,)),
+        *([((S, 0, 0), (-1,))] if use_zero_dimensions else []),
     ]
     kwargs = dict(dtype=torch.float64) if with_dtype else None
 
@@ -405,7 +412,7 @@ def sample_inputs_masked_normalize(op_info, device, dtype, requires_grad, **kwar
     """Sample inputs for masked normalize."""
     for ord in [2.0, 1, float("inf"), float("-inf"), 0]:
         for sample_input in sample_inputs_softmax_variant(
-            op_info, device, dtype, requires_grad, **kwargs
+            op_info, device, dtype, requires_grad, use_zero_dimensions=False, **kwargs
         ):
             yield SampleInput(
                 sample_input.input.clone().requires_grad_(requires_grad),
@@ -875,7 +882,9 @@ op_db: List[OpInfo] = [
                 unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit"
             ),
         ),
-        sample_inputs_func=sample_inputs_masked_softmax,
+        sample_inputs_func=partial(
+            sample_inputs_masked_softmax, use_zero_dimensions=False
+        ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
     ),
     ReductionOpInfo(
@@ -1167,6 +1176,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "masked.logaddexp",
         dtypes=floating_types_and(torch.bfloat16),
+        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,

@@ -431,7 +431,7 @@ c10::optional<TypePtr> unifyTypeList(
     std::ostream& why_not,
     bool default_to_union,
     TypePtr type_hint) {
-  if (elements.size() == 0) {
+  if (elements.empty()) {
     why_not << "Cannot get unified type from empty list";
     return c10::nullopt;
   }
@@ -532,6 +532,19 @@ MatchTypeReturn matchTypeVariables(
     } else {
       std::stringstream ss;
       ss << "Cannot match a future to " << actual->repr_str();
+      return ss.str();
+    }
+  } else if (auto lt_formal = formal->castRaw<AwaitType>()) {
+    if (auto lt_actual = actual->castRaw<AwaitType>()) {
+      auto innerMatch = matchTypeVariables(
+          lt_formal->getElementType(), lt_actual->getElementType(), type_env);
+      if (!innerMatch.success()) {
+        return innerMatch;
+      }
+      return MatchTypeReturn::Success();
+    } else {
+      std::stringstream ss;
+      ss << "Cannot match an await to " << actual->repr_str();
       return ss.str();
     }
   } else if (auto lt_formal = formal->castRaw<RRefType>()) {
@@ -879,7 +892,7 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
     ss << name()->qualifiedName();
   } else {
     ss << "Tuple[";
-    if (elements().size() == 0) {
+    if (elements().empty()) {
       // `typing.Tuple` special-cases the annotation syntax for empty tuple
       // with `typing.Tuple[()]`. See
       // https://docs.python.org/3/library/typing.html#typing.Tuple

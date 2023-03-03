@@ -52,7 +52,7 @@ class TORCH_API SizeNode : public TsNode, public DimensionNode {
   bool isSymbolic() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
-  virtual torch::lazy::TSOpVector Lower(
+  torch::lazy::TSOpVector Lower(
       std::shared_ptr<torch::jit::GraphFunction> function,
       TSLoweringContext* loctx) const override;
 };

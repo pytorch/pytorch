@@ -488,8 +488,7 @@ Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, value.type());
   }
-  BackendDataPtr data =
-      getBackend()->MakeComputationDataFromScalar(value, device);
+  auto data = GetDeviceData(value, value.type(), device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return MakeDeviceData(std::move(data));
@@ -1035,13 +1034,12 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 }
 
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
-  static const std::string invalid_device(
-      "Unknown0"); /* Temp solution to idetify unassigned devices */
-  if (coll->device.toString().compare(invalid_device) == 0 ||
-      coll->unlocker.size() > 0) {
-    return;
-  }
   if (coll) {
+    static const std::string invalid_device(
+        "Unknown0"); /* Temp solution to idetify unassigned devices */
+    if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
+      return;
+    }
     VLOG(4) << "Waiting on device barrier for device " << coll->device
             << " ...";
     {

@@ -17,6 +17,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 #include <c10/util/variant.h>
@@ -198,7 +199,7 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   //   - We cannot reduce over an empty dimension
   if (self.numel() == 0 && (ord < 0. || ord == INFINITY)) {
     // dim=None or dim=() reduces the whole tensor
-    TORCH_CHECK(opt_dim.has_value() && opt_dim->size() != 0,
+    TORCH_CHECK(opt_dim.has_value() && !opt_dim->empty(),
       "linalg.vector_norm cannot compute the ", scalar_ord, " norm on an empty ",
       "tensor because the operation does not have an identity");
     for (auto dim_num : dim) {
@@ -735,6 +736,11 @@ Tensor& matrix_rank_impl(
 
   Tensor tol = at::max(atol.unsqueeze(-1), rtol.unsqueeze(-1) * max_S);
 
+  if (isTensorSubclassLike(input)) {
+     result = at::sum(S > tol, /*dim=*/-1);
+     return result;
+  }
+
   result = at::sum_out(result, S > tol, /*dim=*/-1);
   return result;
 }
@@ -1078,7 +1084,7 @@ Tensor chain_matmul(TensorList matrices) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     return matrices[0].clone();
@@ -1096,7 +1102,7 @@ Tensor& chain_matmul_out(TensorList matrices, Tensor& result) {
   checkAllSameDim(matrices, 2);
 
   TORCH_CHECK(
-      matrices.size() > 0, "chain_matmul(): Expected one or more matrices");
+      !matrices.empty(), "chain_matmul(): Expected one or more matrices");
 
   if (matrices.size() == 1) {
     at::native::resize_output(result, matrices[0].sizes());
@@ -1792,13 +1798,6 @@ Tensor& vdot_out(const Tensor& self, const Tensor& other, Tensor& result) {
 }
 
 bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
-  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
-  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
-  // having to copy the tensor
-  if (tensor1.dim() == 2) {
-    return false;
-  }
-
   // We check that we can fold the larger tensor into a matrix and dispatch to mm or mv rather than
   // to bmm. We want to make sure we can do so without incurring in any extra copy
   const auto tensor1_larger = tensor1.dim() >= tensor2.dim();
@@ -1814,6 +1813,27 @@ bool should_fold(const Tensor& tensor1, const Tensor& tensor2) {
 
   // Just fold for dim_t1 >= 3 and (dim_t2 == 1 || dim_t2 == 2)
   if (!(dim_t1 >= 3 && dim_t2 <= 2)) {
+    return false;
+  }
+
+  // In this case we *do* incur in an extra copy to avoid creating an unnecessary large tensor in the backward
+  // Suppose we don't fold here. Let t1.shape = [b, m, n] t2.shape = [n, k] like in a transformer
+  // t2 will be expanded to a tensor of shape [b, n, k] and then we do t1.bmm(t2_expanded)
+  // The issue appears in the backward.
+  // The output gradient g of this operation would have shape [b, m, k]
+  // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
+  // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
+  // of shape [b, n, k] unnacessarily, which may cause a large memory footprint, and in the
+  // worst case, an OOM
+  bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
+  if (t2_requires_grad) {
+    return true;
+  }
+
+  // Don't fold in this case, as we would have to call mm on the transposed tensor, the result
+  // would be contiguous, and then we would need to transpose it and call contiguous on it, thus
+  // having to copy the tensor
+  if (tensor1.dim() == 2) {
     return false;
   }
 
@@ -1862,7 +1882,9 @@ Tensor _matmul_impl(
               "both arguments to matmul need to be at least 1D, but they are ",
               dim_tensor1, "D and ", dim_tensor2, "D");
 
+
   const bool has_out = out.defined();
+
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
     return has_out ? at::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
@@ -1875,8 +1897,9 @@ Tensor _matmul_impl(
   } else if (should_fold(tensor1, tensor2)) {
     // dim_tensor1 >=3 && (dim_tensor2 == 1 || dim_tensor2 == 2) ||
     // dim_tensor2 >=3 && (dim_tensor1 == 1 || dim_tensor1 == 2)
-    // and we can fold the larger tensor t1 into a matrix as t1.view(-1, t1.size(-1)) without copying
-    // and if dim_tensor2 > dim_tensor1, then dim_tensor1 == 1
+    // and at least one of the following two conditions hold
+    // - the small tensor requires grad (see should_fold for the why)
+    // - we can fold the larger tensor t1 into a matrix as t1.view(-1, t1.size(-1)) without copying
 
     // optimization: use mm instead of bmm by folding the batch of the larger tensor
     // into its leading matrix dimension
@@ -1902,12 +1925,17 @@ Tensor _matmul_impl(
     if (t2_is_matrix) {
       output_shape.push_back(t2->sizes()[1]);
     }
-    const auto t1_folded = t1->view({folded_dim1, sizes_1.back()});
+    // This will almost always be a view.
+    // It may not be a view if t2->requires_grad(). See should_fold for an explanation
+    const auto t1_folded = t1->reshape({folded_dim1, sizes_1.back()});
     if (!has_out) {
       if (t2_is_matrix) {
-        // should_fold gives this invariant. See the discussion there for the why
-        TORCH_INTERNAL_ASSERT(!transpose);
-        return at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        const auto output = at::_unsafe_view(t1_folded.mm(*t2), output_shape);
+        // This copies if we perform a 2D @ 3D and the first tensor requires_grad
+        // See should_fold for why.
+        // If mm_out were differentiable, we could use it here, and pass a result with the
+        // correct strides to avoid this unnecessary copy.
+        return transpose ? output.mT().contiguous() : output;
       } else {
         return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
       }
@@ -1940,7 +1968,20 @@ Tensor _matmul_impl(
     auto batch_tensor1 = tensor1.sizes().slice(0, std::max<int64_t>(dim_tensor1 - 2, 0LL));
     const int64_t m2 = dim_tensor2 > 1 ? tensor2.sizes().cend()[-2] : tensor2.sizes().front();
     const int64_t p = dim_tensor2 > 1 ? tensor2.sizes().back() : 1LL;
-    auto batch_tensor2 = tensor2.sizes().slice(0, std::max<int64_t>(dim_tensor2 - 2, 0LL));
+    const IntArrayRef batch_tensor2(tensor2.sizes().data(),
+                                    std::max<int64_t>(dim_tensor2 - 2, 0LL));
+
+    // Same optimization for the gradients as that in should_fold
+    // If we're going to broadcast we force it to go through the should_fold branch
+    if (dim_tensor1 == 3 && dim_tensor2 == 3 && batch_tensor1[0] != batch_tensor2[0]) {
+      if (batch_tensor1[0] == 1 && (tensor1.requires_grad() || isTensorSubclassLike(tensor1))) {
+        return _matmul_impl(out, tensor1.squeeze(0), tensor2);
+      }
+      if (batch_tensor2[0] == 1 && (tensor2.requires_grad() || isTensorSubclassLike(tensor2))) {
+        return _matmul_impl(out, tensor1, tensor2.squeeze(0));
+      }
+    }
+
     auto output_shape = infer_size_dimvector(batch_tensor1, batch_tensor2);
     const int64_t expand_batch_product = c10::multiply_integers(output_shape);
 
@@ -2797,94 +2838,84 @@ Tensor& linalg_norm_out(const Tensor& X, c10::string_view ord, OptionalIntArrayR
 
 ////////////////////////////////////////////////////////////////////////////////
 //                              Frobenius Norm                                //
-//             Just used in torch..norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  Tensor result;
-  if (dim.size() == 1 || dim.size() == 0) {
-    result = at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()) {
-      result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      result = at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
   }
-  TORCH_INTERNAL_ASSERT(result.scalar_type() == toRealValueType(self.scalar_type()));
-  TORCH_INTERNAL_ASSERT(result.layout() == c10::Layout::Strided);
-  return result;
+  // This frobenius norm is just wrong, but well
+  TORCH_CHECK(dim.size() <= 2,
+              "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
+  // Dispatch to at::norm as it is implemented for Sparse and MPS backends
+  // TODO Make the backends implement vector_norm and matrix_norm
+  return at::norm(self, 2., dim, keepdim);
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  auto result_ = at::native::frobenius_norm(self, dim, keepdim);
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm.
-  //    However, norm_out and sqrt_out do not support automatic differentiation.
-  //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
-  at::native::resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::frobenius_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.vector_norm(A, 2., dim, keepdim)` instead"
+    );
+  }
+  TORCH_CHECK(dim.size() <= 2,
+              "Expected at most 2 dimensions, but got ", dim.size(), " dimensions instead.");
+  return at::norm_out(result, self, 2., dim, keepdim);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 //                                Nuclear Norm                                //
-//              Just used in torch.norm. It should not be removed.            //
 ////////////////////////////////////////////////////////////////////////////////
 
 Tensor nuclear_norm(const Tensor& self, bool keepdim) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::native::nuclear_norm(self, IntArrayRef({0, 1}), keepdim);
+  return at::native::nuclear_norm(self, IntArrayRef({-2, -1}), keepdim);
 }
 
 Tensor &nuclear_norm_out(const Tensor& self, bool keepdim, Tensor& result) {
-  TORCH_CHECK(
-      self.dim() == 2,
-      "Expected a tensor with 2 dimensions, but got a tensor with ",
-      self.dim(), " dimension", self.dim()==1 ? "" : "s", " instead.");
-  return at::native::nuclear_norm_out(self, IntArrayRef({0, 1}), keepdim, result);
-}
-
-namespace {
-Tensor nuclear_norm_impl(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(dim.size() == 2, "nuclear norm requires a 'dim' argument of size 2");
-  auto dim_ = dim.vec();
-  maybe_wrap_dims(dim_, self.dim());
-
-  auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], self.dim());
-  Tensor p = self.permute(permutation);
-  Tensor result_ = at::sum(at::linalg_svdvals(p), -1, keepdim);
-  if (keepdim) {
-    result_.unsqueeze_(-1);
-    auto permutation_reverse = create_reverse_permutation(std::move(permutation));
-    result_ = result_.permute(permutation_reverse);
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
   }
-  return result_;
+  return at::linalg_matrix_norm_out(result, self, "nuc", IntArrayRef({-2, -1}), keepdim);
 }
-} // anonymous namespace
 
 Tensor nuclear_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  return nuclear_norm_impl(self, dim, keepdim).to(toRealValueType(self.scalar_type()));
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
+  return at::linalg_matrix_norm(self, "nuc", dim, keepdim);
 }
 
 Tensor& nuclear_norm_out(const Tensor& self, IntArrayRef dim, bool keepdim, Tensor& result) {
-  auto result_ = nuclear_norm_impl(self, dim, keepdim);
-  at::native::resize_output(result, result_.sizes());
-  result.copy_(result_);
-  return result;
+  auto device = self.device();
+  if (self.layout() == Layout::Strided && (device == kCPU || device == kCUDA || device == kMeta)) {
+    TORCH_WARN_ONCE(
+      "at::nuclear_norm is deprecated and it is just left for JIT compatibility. ",
+      "It will be removed in a future PyTorch release. Please use ",
+      "`linalg.matrix_norm(A, 'nuc', dim, keepdim)` instead"
+    );
+  }
+  return at::linalg_matrix_norm_out(result, self, "nuc", dim, keepdim);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

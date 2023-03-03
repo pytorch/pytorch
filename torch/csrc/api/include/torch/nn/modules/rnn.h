@@ -22,7 +22,6 @@ namespace nn {
 namespace detail {
 /// Base class for all RNN implementations (intended for code sharing).
 template <typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNImplBase(const RNNOptionsBase& options_);
@@ -103,7 +102,6 @@ class TORCH_API RNNImplBase : public torch::nn::Cloneable<Derived> {
 /// RNN model(RNNOptions(128,
 /// 64).num_layers(3).dropout(0.2).nonlinearity(torch::kTanh));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   RNNImpl(int64_t input_size, int64_t hidden_size)
@@ -153,7 +151,6 @@ TORCH_MODULE(RNN);
 /// LSTM model(LSTMOptions(2,
 /// 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   LSTMImpl(int64_t input_size, int64_t hidden_size)
@@ -219,7 +216,6 @@ TORCH_MODULE(LSTM);
 /// GRU model(GRUOptions(2,
 /// 4).num_layers(3).batch_first(false).bidirectional(true));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   GRUImpl(int64_t input_size, int64_t hidden_size)
@@ -261,7 +257,6 @@ TORCH_MODULE(GRU);
 namespace detail {
 /// Base class for all RNNCell implementations (intended for code sharing).
 template <typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
  public:
   explicit RNNCellImplBase(const RNNCellOptionsBase& options_);
@@ -306,7 +301,6 @@ class TORCH_API RNNCellImplBase : public torch::nn::Cloneable<Derived> {
 /// RNNCell model(RNNCellOptions(20,
 /// 10).bias(false).nonlinearity(torch::kReLU));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API RNNCellImpl : public detail::RNNCellImplBase<RNNCellImpl> {
  public:
   RNNCellImpl(int64_t input_size, int64_t hidden_size)
@@ -346,7 +340,6 @@ TORCH_MODULE(RNNCell);
 /// ```
 /// LSTMCell model(LSTMCellOptions(20, 10).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API LSTMCellImpl : public detail::RNNCellImplBase<LSTMCellImpl> {
  public:
   LSTMCellImpl(int64_t input_size, int64_t hidden_size)
@@ -386,7 +379,6 @@ TORCH_MODULE(LSTMCell);
 /// ```
 /// GRUCell model(GRUCellOptions(20, 10).bias(false));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API GRUCellImpl : public detail::RNNCellImplBase<GRUCellImpl> {
  public:
   GRUCellImpl(int64_t input_size, int64_t hidden_size)

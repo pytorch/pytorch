@@ -25,24 +25,18 @@
  *
  ******************************************************************************/
 
-#pragma once
+#include <ATen/cuda/CUDAContext.h>
 
-#include <cutlass/cutlass.h>
-
-#include <cutlass/gemm/gemm.h>
-
-#include <cutlass/layout/layout.h>
-#include <cutlass/numeric_types.h>
-#include <cutlass/transform/threadblock/predicated_tile_iterator.h>
+#include <cuda_fp16.h>
 
 #include <ATen/native/transformers/cuda/flash_attn/gemm.h>
 #include <ATen/native/transformers/cuda/flash_attn/gmem_tile.h>
-#include <ATen/native/transformers/cuda/flash_attn/summary_stats.h>
-#include <ATen/native/transformers/cuda/flash_attn/mma_core_sm75.h>
+
+#pragma once
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<int S, int D, int STEP, int WARPS_M, int WARPS_N, uint32_t FLAGS = 0x08u, typename elem_type=cutlass::half_t>
+template<int S, int D, int STEP, int WARPS_M, int WARPS_N, uint32_t FLAGS = 0x08u, typename elem_type_=__half>
 struct FMHA_kernel_traits {
 
     // The CTA description for the 1st GEMM.
@@ -57,98 +51,71 @@ struct FMHA_kernel_traits {
     // Do we keep V in registers.
     static constexpr bool V_IN_REGS = (FLAGS & 0x100u) == 0u;
 
+    // The global memory tile to load Q.
+    using Gmem_tile_q = fmha::Gmem_tile_qkv<Cta_tile_p, fmha::BITS_PER_ELEMENT_A, STEP, D>;
+
+    // The shared memory tile to swizzle Q.
+    // using Smem_tile_q = fmha::Smem_tile_a<Cta_tile_p, fmha::Row, Gmem_tile_q::BYTES_PER_LDG, 1>;
+    using Smem_tile_q = fmha::Smem_tile_a<Cta_tile_p, fmha::Row, Gmem_tile_q::BYTES_PER_LDG, 2>;
+
+    // The global memory tile to load K.
+    using Gmem_tile_k = fmha::Gmem_tile_qkv<Cta_tile_p, fmha::BITS_PER_ELEMENT_B, S, D>;
+    // The shared memory tile to swizzle K.
+    using Smem_tile_k = fmha::Smem_tile_b<Cta_tile_p, fmha::Col>;
+
+    // The global memory tile to load V.
+    using Gmem_tile_v = fmha::Gmem_tile_qkv<Cta_tile_o, fmha::BITS_PER_ELEMENT_B, S, D>;
+    // The shared memory tile to swizzle V.
+    using Smem_tile_v = fmha::Smem_tile_v<Cta_tile_o>;
+
+    // The global memory tile to store O.
+    using Gmem_tile_o = fmha::Gmem_tile_o<Cta_tile_o>;
+    // The shared memory tile for O.
+    using Smem_tile_o = fmha::Smem_tile_o<Cta_tile_o>;;
+
     // The global memory tile to load/store S.
     using Gmem_tile_s = fmha::Gmem_tile_mma_s<Cta_tile_p>;
 
+    // The shared memory tile to transpose S.
+    using Smem_tile_st = fmha::Smem_tile_mma_transposed<Cta_tile_p>;
+
+    using Gmem_tile_do = fmha::Gmem_tile_qkv<Cta_tile_p, fmha::BITS_PER_ELEMENT_A, STEP, D>;
+
+    // // The global memory tile to store the accumulated dK and dV
+    // // Hack: we set BYTES_PER_LDGS=32 to emulate the access pattern of dK and dV
+    // // where there are 16 bits per lements and 16 bytes per load. In reality we won't
+    // // be issue any load or store of size 32 bytes.
+    // using Gmem_tile_dkv_accum = fmha::Gmem_tile_qkv<Cta_tile_o, 32, S, D, 32>;
+
     // The global memory tile to store the softmax sum.
     using Gmem_softmax_sum = fmha::Gmem_summary_stats<Cta_tile_p>;
+
+    // The shared memory tile to store dp sum.
+    using Smem_dp_sum = fmha::Smem_tile_dp_sum<Gmem_tile_q, 2>;
+
+    using elem_type = elem_type_;
+
+    // Make sure the number of threads match.
+    static_assert((int)Gmem_tile_o::THREADS_PER_ROW == (int)Smem_tile_o::THREADS_PER_ROW, "");
 
     // The number of threads.
     static constexpr int THREADS = Cta_tile_p::THREADS_PER_CTA;
     // Make sure the number of threads matches both CTAs.
     static_assert(THREADS == Cta_tile_o::THREADS_PER_CTA, "");
 
-#if defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
-    using MmaInstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
-#elif defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 750
-    using MmaInstructionShape = cutlass::gemm::GemmShape<16, 8, 8>;
-#else
-    // using MmaInstructionShape = cutlass::gemm::GemmShape<8, 8, 4>;
-    using MmaInstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;
-    // TD [2022-06-02] We don't support Volta (SM70) yet.
-#endif
-
-#if defined(__CUDA_ARCH__) &&  __CUDA_ARCH__ >= 800
-    using Element = elem_type;
-#else
-    using Element = cutlass::half_t;
-#endif
-    using ElementAccum = float;
-
-    static_assert(WARPS_M == 1, "");
-    using ThreadblockShapeQK = cutlass::gemm::GemmShape<STEP, S, D>;
-    using WarpCountQK = cutlass::gemm::GemmShape<WARPS_M, WARPS_N, 1>;
-    using WarpShapeQK = cutlass::gemm::GemmShape<
-       ThreadblockShapeQK::kM,
-       ThreadblockShapeQK::kN / WarpCountQK::kN, ThreadblockShapeQK::kK>;
-    using LayoutQ = cutlass::layout::RowMajor;
-    using LayoutK = cutlass::layout::ColumnMajor;
-    using LayoutP = cutlass::layout::RowMajor;
-    using MmaCoreQK = typename fmha::FMHAMmaCore<
-        ThreadblockShapeQK, WarpShapeQK, MmaInstructionShape, Element, LayoutQ,
-        Element, LayoutK, ElementAccum, LayoutP,
-        cutlass::arch::OpClassTensorOp>;
-
-    using ThreadblockShapePV = cutlass::gemm::GemmShape<STEP, D, S>;
-    using WarpCountPV = cutlass::gemm::GemmShape<WARPS_M, 1, WARPS_N>;
-    using WarpShapePV = cutlass::gemm::GemmShape<ThreadblockShapePV::kM, ThreadblockShapePV::kN, ThreadblockShapePV::kK / WarpCountPV::kK>;
-    using LayoutV = cutlass::layout::RowMajor;
-    using LayoutO = cutlass::layout::RowMajor;
-    using MmaCorePV = typename fmha::FMHAMmaCore<
-        ThreadblockShapePV, WarpShapePV, MmaInstructionShape, Element, LayoutP,
-        Element, LayoutV, ElementAccum, LayoutO,
-        cutlass::arch::OpClassTensorOp>;
-
-    // The global memory tile to load Q.
-    // Copy from mma_piplined_testbed.h
-    using GmemIteratorQ = cutlass::transform::threadblock::PredicatedTileIterator<
-      cutlass::MatrixShape<ThreadblockShapeQK::kM, ThreadblockShapeQK::kK>,
-      Element,
-      LayoutQ,
-      0,
-      typename MmaCoreQK::IteratorThreadMapA
-    >;
-
-    // The global memory tile to load K.
-    using GmemIteratorK = cutlass::transform::threadblock::PredicatedTileIterator<
-      cutlass::MatrixShape<ThreadblockShapeQK::kK, ThreadblockShapeQK::kN>,
-      Element,
-      LayoutK,
-      1,
-      typename MmaCoreQK::IteratorThreadMapB
-    >;
-
-    // The global memory tile to load V.
-    using GmemIteratorV = cutlass::transform::threadblock::PredicatedTileIterator<
-      cutlass::MatrixShape<ThreadblockShapePV::kK, ThreadblockShapePV::kN>,
-      Element,
-      LayoutV,
-      0,
-      typename MmaCorePV::IteratorThreadMapB
-    >;
-
-    // The shared memory tile to store softmax lse.
-    using Smem_softmax_lse = fmha::Smem_tile_softmax_lse<ThreadblockShapeQK::kM, MmaInstructionShape::kM, WarpCountQK::kM>;
-
     // The amount of shared memory needed to load Q and K.
-    static constexpr size_t BYTES_PER_SMEM_Q = ThreadblockShapeQK::kM * ThreadblockShapeQK::kK * sizeof(Element);
-    static constexpr size_t BYTES_PER_SMEM_K = ThreadblockShapeQK::kN * ThreadblockShapeQK::kK * sizeof(Element);
-    static constexpr size_t BYTES_PER_SMEM_V = ThreadblockShapePV::kN * ThreadblockShapePV::kK * sizeof(Element);
-    static_assert(BYTES_PER_SMEM_K == BYTES_PER_SMEM_V, "");
-    static constexpr size_t BYTES_PER_SMEM_QK = BYTES_PER_SMEM_Q + BYTES_PER_SMEM_K;
+    static constexpr int BYTES_PER_SMEM_QK = Smem_tile_q::BYTES_PER_TILE + Smem_tile_k::BYTES_PER_TILE;
     // The extra amount of shared memory needed to load V.
-    static constexpr size_t BYTES_PER_SMEM_V_EXTRA = SHARE_SMEM_FOR_K_AND_V ? 0u : BYTES_PER_SMEM_V;
+    static constexpr int BYTES_PER_SMEM_V = SHARE_SMEM_FOR_K_AND_V ? 0u : Smem_tile_v::BYTES_PER_TILE;
     // The amount of shared memory needed for Q, K and V..
-    static constexpr size_t BYTES_PER_SMEM_QKV = BYTES_PER_SMEM_QK + BYTES_PER_SMEM_V_EXTRA;
+    static constexpr int BYTES_PER_SMEM_QKV = BYTES_PER_SMEM_QK + BYTES_PER_SMEM_V;
+    // The amount of shared memory needed to load Q and store O.
+    static constexpr int BYTES_PER_SMEM_QO = Smem_tile_q::BYTES_PER_TILE + Smem_tile_o::BYTES_PER_TILE;
 
+    // The amount of shared memory needed for Q, K, V and O.
+    static constexpr int BYTES_PER_SMEM = fmha::MaxConstexpr(BYTES_PER_SMEM_QKV, BYTES_PER_SMEM_QO);
+    // Make sure we have enough shared memory.
+    static_assert(Smem_tile_q::BYTES_PER_TILE + Smem_tile_o::BYTES_PER_TILE <= BYTES_PER_SMEM, "");
 };
+
+////////////////////////////////////////////////////////////////////////////////////////////////////

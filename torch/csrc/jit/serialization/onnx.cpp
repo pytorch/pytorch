@@ -4,8 +4,8 @@
 
 #include <sstream>
 #include <string>
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 
 namespace {
 namespace onnx_torch = ::torch::onnx;
@@ -239,5 +239,4 @@ std::string prettyPrint(const ::ONNX_NAMESPACE::ModelProto& model) {
   return ss.str();
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

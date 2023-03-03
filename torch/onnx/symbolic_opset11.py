@@ -1,4 +1,5 @@
 """This file exports ONNX ops for opset 11."""
+from __future__ import annotations
 
 import functools
 import sys
@@ -281,6 +282,17 @@ def index_put(
             rank = symbolic_helper._get_tensor_rank(values)
             if rank is not None and rank == 0:
                 return opset9.masked_fill(g, self, bool_inp, values)
+            mask_rank = symbolic_helper._get_tensor_rank(bool_inp)
+            self_rank = symbolic_helper._get_tensor_rank(self)
+            if (
+                mask_rank is not None
+                and self_rank is not None
+                and self_rank > mask_rank
+            ):
+                # Unsqueeze 'bool_inp' to be broadcastable to shape of 'self'.
+                bool_inp = symbolic_helper._unsqueeze_helper(
+                    g, bool_inp, list(range(mask_rank, self_rank))
+                )
             return masked_scatter(g, self, bool_inp, values)
         broadcast_index_shape = g.op("Shape", index)
         index = symbolic_helper._unsqueeze_helper(g, index, [-1])
@@ -532,6 +544,7 @@ def Delete(g: jit_utils.GraphContext, tensor_list, dim):
 
 
 @_onnx_symbolic("aten::cat")
+@symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
     if symbolic_helper._is_packed_list(tensor_list):
@@ -872,7 +885,26 @@ def arange(g: jit_utils.GraphContext, *args):
         dtype = symbolic_helper._maybe_get_const(dtype, "i")
         return dtype
 
-    if len(args) == 2 or len(args) == 5:
+    if len(args) == 2 and all(map(lambda val: isinstance(val, int), args)):
+        # aten::arange(Scalar start, Scalar end)
+        dtype = torch.int64
+        # Start index.
+        start = g.op(
+            "Constant",
+            value_t=torch.tensor(args[0], dtype=dtype),
+        )
+        # End (exclusive) index.
+        end = g.op(
+            "Constant",
+            value_t=torch.tensor(args[1], dtype=dtype),
+        )
+        # Step size from start to end indexes.
+        delta_default = g.op(
+            "Constant",
+            value_t=torch.tensor(1, dtype=dtype),
+        )
+        return g.op("Range", start, end, delta_default)
+    elif len(args) == 2 or len(args) == 5:
         if len(args) == 2:
             # aten::arange(Scalar end, Tensor out)
             dtype = None

@@ -149,12 +149,10 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  TORCH_CHECK_TYPE(
-      Py_TYPE(untyped_storage_obj) ==
-          reinterpret_cast<PyTypeObject*>(THPStorageClass),
-      "not a storage '",
-      Py_TYPE(obj)->tp_name,
-      "'");
+  if (Py_TYPE(untyped_storage_obj) !=
+      reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
+    throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
+  }
 
   c10::StorageImpl* impl = static_cast<c10::StorageImpl*>(
       ((THPVoidStorage*)untyped_storage_obj)->cdata);

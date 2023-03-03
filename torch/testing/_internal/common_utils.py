@@ -65,7 +65,6 @@ import torch.backends.xnnpack
 import torch.cuda
 from torch import Tensor
 from torch._C import ScriptDict, ScriptList  # type: ignore[attr-defined]
-from torch._six import string_classes
 from torch._utils_internal import get_writable_path
 from torch.nn import (
     ModuleDict,
@@ -81,14 +80,12 @@ from torch.onnx import (
 from torch.testing import make_tensor
 from torch.testing._comparison import (
     BooleanPair,
-    ErrorMeta,
     NonePair,
     NumberPair,
     Pair,
     TensorLikePair,
-    UnsupportedInputs,
 )
-from torch.testing._comparison import assert_equal as assert_equal
+from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 import torch.utils._pytree as pytree
 
@@ -127,8 +124,20 @@ if os.getenv("DISABLED_TESTS_FILE", ""):
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
+check_names = ['orin', 'concord', 'galen', 'xavier', 'nano', 'jetson', 'tegra']
+IS_JETSON = any(name in platform.platform() for name in check_names)
 
-class _TestParametrizer(object):
+def gcIfJetson(fn):
+    # Irregular Jetson host/device memory setup requires cleanup to avoid tests being killed
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if IS_JETSON:
+            gc.collect()
+            torch.cuda.empty_cache()
+        fn(*args, **kwargs)
+    return wrapper
+
+class _TestParametrizer:
     """
     Decorator class for parametrizing a test function, yielding a set of new tests spawned
     from the original generic test, each specialized for a specific set of test inputs. For
@@ -158,11 +167,12 @@ class _TestParametrizer(object):
                 if the tests are not part of a device-specific set
 
         Returns:
-            Generator object returning 3-tuples of:
+            Generator object returning 4-tuples of:
                 test (fn): Parametrized test function; must support a device arg and args for any params
                 test_name (str): Parametrized suffix for the test (e.g. opname_int64); will be appended to
                     the base name of the test
                 param_kwargs (dict): Param kwargs to pass to the test (e.g. {'op': 'add', 'dtype': torch.int64})
+                decorator_fn (callable): Callable[[Dict], List] for list of decorators to apply given param_kwargs
         """
         raise NotImplementedError
 
@@ -196,10 +206,9 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
     def composite_fn(test, generic_cls, device_cls,
                      old_parametrize_fn=old_parametrize_fn,
                      new_parametrize_fn=new_parametrize_fn):
-        old_tests = [(test, test_name, param_kwargs) for (test, test_name, param_kwargs) in
-                     old_parametrize_fn(test, generic_cls, device_cls)]
-        for (old_test, old_test_name, old_param_kwargs) in old_tests:
-            for (new_test, new_test_name, new_param_kwargs) in \
+        old_tests = list(old_parametrize_fn(test, generic_cls, device_cls))
+        for (old_test, old_test_name, old_param_kwargs, old_dec_fn) in old_tests:
+            for (new_test, new_test_name, new_param_kwargs, new_dec_fn) in \
                     new_parametrize_fn(old_test, generic_cls, device_cls):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
@@ -211,7 +220,11 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
                                                    old_test_name)
-                yield (new_test, merged_test_name, full_param_kwargs)
+
+                def merged_decorator_fn(param_kwargs, old_dec_fn=old_dec_fn, new_dec_fn=new_dec_fn):
+                    return list(old_dec_fn(param_kwargs)) + list(new_dec_fn(param_kwargs))
+
+                yield (new_test, merged_test_name, full_param_kwargs, merged_decorator_fn)
 
     return composite_fn
 
@@ -250,14 +263,19 @@ def instantiate_parametrized_tests(generic_cls):
             assert not hasattr(generic_cls, name), "Redefinition of test {0}".format(name)
             setattr(generic_cls, name, instantiated_test)
 
-        for (test, test_suffix, param_kwargs) in class_attr.parametrize_fn(
+        for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
+
+            # Apply decorators based on full param kwargs.
+            for decorator in decorator_fn(param_kwargs):
+                test = decorator(test)
+
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
     return generic_cls
 
 
-class subtest(object):
+class subtest:
     """
     Explicit subtest case for use with test parametrization.
     Allows for explicit naming of individual subtest cases as well as applying
@@ -329,7 +347,7 @@ class parametrize(_TestParametrizer):
         name_fn (Callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',') if s != '']
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -362,7 +380,7 @@ class parametrize(_TestParametrizer):
         if len(self.arg_names) == 0:
             # No additional parameters needed for the test.
             test_name = ''
-            yield (test, test_name, {})
+            yield (test, test_name, {}, lambda _: [])
         else:
             # Each "values" item is expected to be either:
             # * A tuple of values with one for each arg. For a single arg, a single item is expected.
@@ -370,19 +388,18 @@ class parametrize(_TestParametrizer):
             values = check_exhausted_iterator = object()
             for values in self.arg_values:
                 maybe_name = None
+
+                decorators = []
                 if isinstance(values, subtest):
                     sub = values
                     values = sub.arg_values
                     maybe_name = sub.name
 
-                    # Apply decorators.
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in sub.decorators:
-                        test_wrapper = decorator(test_wrapper)
-
+                    decorators = sub.decorators
                     gen_test = test_wrapper
                 else:
                     gen_test = test
@@ -398,10 +415,11 @@ class parametrize(_TestParametrizer):
                 }
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
-                if '.' in test_name:
-                    raise RuntimeError('Test name cannot contain periods, but got: {}'.format(test_name))
 
-                yield (gen_test, test_name, param_kwargs)
+                def decorator_fn(_, decorators=decorators):
+                    return decorators
+
+                yield (gen_test, test_name, param_kwargs, decorator_fn)
 
             if values is check_exhausted_iterator:
                 raise ValueError('An empty arg_values was passed to @parametrize. '
@@ -494,9 +512,9 @@ parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--jit_executor', type=str)
+parser.add_argument('--jit-executor', '--jit_executor', type=str)
 parser.add_argument('--repeat', type=int, default=1)
-parser.add_argument('--test_bailouts', action='store_true')
+parser.add_argument('--test-bailouts', '--test_bailouts', action='store_true')
 parser.add_argument('--use-pytest', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
@@ -582,7 +600,7 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, torch._six.string_classes), "Command to shell should be a list or tuple of tokens"
+    assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
     return wait_for_process(p)
 
@@ -730,14 +748,16 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
+        pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
+            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
 
         import pytest
         os.environ["NO_COLOR"] = "1"
         os.environ["USING_PYTEST"] = "1"
-        exit_code = pytest.main(args=argv + [f'--junit-xml-reruns={test_report_path}'] if TEST_SAVE_XML else [])
+        exit_code = pytest.main(args=pytest_args)
         del os.environ["USING_PYTEST"]
         if TEST_SAVE_XML:
             sanitize_pytest_xml(test_report_path)
@@ -889,9 +909,6 @@ TEST_WITH_TSAN = os.getenv('PYTORCH_TEST_WITH_TSAN', '0') == '1'
 TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
 TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 
-# TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-# See #64427
-TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -1082,6 +1099,13 @@ def skipIfRocmVersionLessThan(version=None):
             return fn(self, *args, **kwargs)
         return wrap_fn
     return dec_fn
+
+# Temporary function to simplify adding support to 3.11
+def xfailIfPython311(fn):
+    if sys.version_info < (3, 11):
+        return fn
+    else:
+        return unittest.expectedFailure(fn)
 
 def skipIfNotMiopenSuggestNHWC(fn):
     @wraps(fn)
@@ -1447,7 +1471,9 @@ class CudaNonDefaultStream():
             self.beforeStreams.append(torch.cuda.current_stream(d))
             deviceStream = torch.cuda.Stream(device=d)
             self.beforeStreams[-1].synchronize()
-            torch._C._cuda_setStream(deviceStream._cdata)
+            torch._C._cuda_setStream(stream_id=deviceStream.stream_id,
+                                     device_index=deviceStream.device_index,
+                                     device_type=deviceStream.device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
     def __exit__(self, exec_type, exec_value, traceback):
@@ -1455,7 +1481,9 @@ class CudaNonDefaultStream():
         # CUDA devices.
         beforeDevice = torch.cuda.current_device()
         for d in range(torch.cuda.device_count()):
-            torch._C._cuda_setStream(self.beforeStreams[d]._cdata)
+            torch._C._cuda_setStream(stream_id=self.beforeStreams[d].stream_id,
+                                     device_index=self.beforeStreams[d].device_index,
+                                     device_type=self.beforeStreams[d].device_type)
         torch._C._cuda_setDevice(beforeDevice)
 
 class CudaMemoryLeakCheck():
@@ -1727,7 +1755,7 @@ def check_if_enable(test: unittest.TestCase):
 
 # `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
 # convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
-# `torch.testing._comparison.assert_equal`, used for example by the public testing function
+# `torch.testing._comparison.are_equal`, used for example by the public testing function
 # `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
 # between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
 # change the supported inputs, but the comparison logic is the same.
@@ -1750,7 +1778,7 @@ class RelaxedBooleanPair(BooleanPair):
             (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
             or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_bool(input, id=id) for input in (actual, expected)]
 
@@ -1762,11 +1790,11 @@ class RelaxedBooleanPair(BooleanPair):
         elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
             numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a boolean. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
 
             return bool(bool_like.item())
@@ -1807,7 +1835,7 @@ class RelaxedNumberPair(NumberPair):
                 (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
                 or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
         ):
-            raise UnsupportedInputs()
+            self._inputs_not_supported()
 
         return [self._to_number(input, id=id) for input in (actual, expected)]
 
@@ -1815,11 +1843,11 @@ class RelaxedNumberPair(NumberPair):
         if isinstance(number_like, (torch.Tensor, np.ndarray)):
             numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
             if numel > 1:
-                raise ErrorMeta(
+                self._fail(
                     ValueError,
                     f"Only single element tensor-likes can be compared against a number. "
                     f"Got {numel} elements instead.",
-                    id=id,
+                    id=id
                 )
             number = number_like.item()
             if isinstance(number, bool):
@@ -1847,32 +1875,6 @@ class TensorOrArrayPair(TensorLikePair):
         super().__init__(actual, expected, **other_parameters)
         self.rtol = max(self.rtol, rtol_override)
         self.atol = max(self.atol, atol_override)
-
-        # This is a slow and ugly hack to allow the comparison of hybrid sparse CSR tensors with strided ones. If
-        # `check_layout=False` (default), the tensors will be converted to strided by calling `.to_dense()` on them.
-        # However, this is not yet supported for hybrid sparse CSR and thus we need to do it manually for now.
-        # FIXME: Remove this as soon as `.to_dense` is supported for hybrid sparse CSR tensors
-        if not self.check_layout:
-            self.actual, self.expected = self._handle_hybrid_sparse_csr(self.actual, self.expected)
-
-    def _handle_hybrid_sparse_csr(self, actual, expected):
-        compressed_sparse_layouts = {torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc}
-        if not ((actual.layout in compressed_sparse_layouts) or (expected.layout in compressed_sparse_layouts)):
-            return actual, expected
-
-        def to_dense(tensor):
-            if tensor.layout not in compressed_sparse_layouts:
-                return tensor
-
-            def partial_to_dense(tensor):
-                if tensor.layout not in compressed_sparse_layouts or tensor.values().ndim == 1:
-                    return tensor.to_dense()
-                lst = [partial_to_dense(torch.select_copy(tensor, 0, i)) for i in range(len(tensor))]
-                return torch.stack(lst) if lst else tensor.to_dense()
-
-            return partial_to_dense(tensor)
-
-        return [to_dense(input) for input in [actual, expected]]
 
     def _process_inputs(self, actual, expected, *, id, allow_subclasses):
         self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
@@ -1909,7 +1911,7 @@ class UnittestPair(Pair):
     """Fallback ABC pair that handles non-numeric inputs.
 
     To avoid recreating the mismatch messages of :meth:`unittest.TestCase.assertEqual`, this pair simply wraps it in
-    order to use it with the :class:`Pair` "framework" from :func:`assert_equal`.
+    order to use it with the :class:`Pair` "framework" from :func:`are_equal`.
 
     Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
     """
@@ -1929,11 +1931,11 @@ class UnittestPair(Pair):
             msg = str(error)
 
         type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
-        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+        self._fail(AssertionError, f"{type_name.title()} comparison failed: {msg}")
 
 
 class StringPair(UnittestPair):
-    CLS = string_classes
+    CLS = str
     TYPE_NAME = "string"
 
 
@@ -2140,18 +2142,15 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
-        if TEST_WITH_TORCHDYNAMO:
+        super_run = super().run
+        # TODO remove version check once dynamo supports 3.11
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
@@ -2232,6 +2231,29 @@ class TestCase(expecttest.TestCase):
     def setUp(self):
         check_if_enable(self)
         set_rng_seed(SEED)
+
+        # Save global check sparse tensor invariants state that can be
+        # restored from tearDown:
+        self._check_invariants = torch.sparse.check_sparse_tensor_invariants.is_enabled()
+
+        # Enable invariant checks for all sparse tensors constructions
+        # including the unsafe ones. If this is not desired for some
+        # test case, use check_invariants=False optional argument to
+        # sparse tensor constructors or
+        # @torch.sparse.check_sparse_tensor_invariants(False)
+        # decorator to disable the invariant checks.
+        torch.sparse.check_sparse_tensor_invariants.enable()
+
+    def tearDown(self):
+        # There exists test cases that override TestCase.setUp
+        # definition, so we cannot assume that _check_invariants
+        # attribute is defined in general.
+        if hasattr(self, '_check_invariants'):
+            # Restore the global check sparse tensor invariants state
+            if self._check_invariants:
+                torch.sparse.check_sparse_tensor_invariants.enable()
+            else:
+                torch.sparse.check_sparse_tensor_invariants.disable()
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,
@@ -2347,15 +2369,7 @@ class TestCase(expecttest.TestCase):
             q, r = divmod(nnz - n * n_cols - m * (n_rows - n),
                           (n_cols - m) * (n_cols - m + 1) // 2)
             p = 1 + q * (n_cols - m + 1)
-            if sys.version_info >= (3, 8):
-                k = math.isqrt(2 * r)
-            else:
-                # math.isqrt(x) is available starting from Python 3.8.
-                # Here we use int(math.sqrt(x)) as an approximation
-                # that appers to give exaxt result for all x values
-                # less than 2**35, at least, the upper limit of x is
-                # TBD.
-                k = int(math.sqrt(2 * r))
+            k = math.isqrt(2 * r)
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2
@@ -2907,7 +2921,7 @@ class TestCase(expecttest.TestCase):
             x = to_list(x)
             y = to_list(y)
         # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here.
-        # Otherwise, the pair origination of `assert_equal` will fail, because the sequence is recognized as container
+        # Otherwise, the pair origination of `are_equal` will fail, because the sequence is recognized as container
         # that should be checked elementwise while the tensor is not.
         elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
             y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
@@ -2921,7 +2935,7 @@ class TestCase(expecttest.TestCase):
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
 
-        assert_equal(
+        error_metas = not_close_error_metas(
             x,
             y,
             pair_types=(
@@ -2954,11 +2968,16 @@ class TestCase(expecttest.TestCase):
             check_layout=exact_layout,
             check_stride=exact_stride,
             check_is_coalesced=exact_is_coalesced,
-            # This emulates unittest.TestCase's behavior if a custom message passed and
-            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
-            # is True (default)
-            msg=(lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg,
         )
+
+        if error_metas:
+            # TODO: compose all metas into one AssertionError
+            raise error_metas[0].to_error(
+                # This emulates unittest.TestCase's behavior if a custom message passed and
+                # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+                # is True (default)
+                (lambda generated_msg: f"{generated_msg}\n{msg}") if isinstance(msg, str) and self.longMessage else msg
+            )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
@@ -3602,8 +3621,8 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     torch = kwargs.get('torch', globals()['torch'])
     dtype = kwargs.get('dtype', torch.double)
     device = kwargs.get('device', 'cpu')
-    data = dict([((i, i), float(i + 1) / matrix_size)
-                 for i in range(matrix_size)])
+    data = {(i, i): float(i + 1) / matrix_size
+            for i in range(matrix_size)}
 
 
     def multiply(data, N, i, j, cs, sn, left=True):
@@ -3878,7 +3897,7 @@ def find_library_location(lib_name: str) -> Path:
     torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
 
-def sandcastle_skip(reason):
+def skip_but_pass_in_sandcastle(reason):
     """
     Similar to unittest.skip, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
@@ -3982,7 +4001,7 @@ def xfail_inherited_tests(tests):
     return deco
 
 
-def sandcastle_skip_if(condition, reason):
+def skip_but_pass_in_sandcastle_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
@@ -4114,9 +4133,10 @@ def outs_and_grads(fn, graph_inps, inps):
     for out in pytree.tree_flatten(outs)[0]:
         if isinstance(out, torch.Tensor) and out.requires_grad:
             out.sum().backward(retain_graph=True)
-    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0]]
+    grads = [inp.grad for inp in pytree.tree_flatten(inps)[0] if isinstance(inp, torch.Tensor)]
     for inp in pytree.tree_flatten(inps)[0]:
-        inp.grad = None
+        if isinstance(inp, torch.Tensor):
+            inp.grad = None
     return outs, grads
 
 def compare_equal_outs_and_grads(test, m1, m2, inps):

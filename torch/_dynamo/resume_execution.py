@@ -2,10 +2,12 @@ import copy
 import dataclasses
 import sys
 import types
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
+    create_call_function,
     create_instruction,
+    create_jump_absolute,
     Instruction,
     transform_code_object,
 )
@@ -28,16 +30,22 @@ CO_ASYNC_GENERATOR = 0x0200
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
     stack_index: int = None
+    target_values: Optional[Tuple] = None
 
     def __call__(self, code_options, cleanup):
+        load_args = []
+        if self.target_values:
+            load_args = [
+                create_instruction(
+                    "LOAD_CONST",
+                    PyCodegen.get_const_index(code_options, val),
+                    val,
+                )
+                for val in self.target_values
+            ]
         if sys.version_info < (3, 9):
             with_cleanup_start = create_instruction("WITH_CLEANUP_START")
-            if sys.version_info < (3, 8):
-                begin_finally = create_instruction(
-                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
-                )
-            else:
-                begin_finally = create_instruction("BEGIN_FINALLY")
+            begin_finally = create_instruction("BEGIN_FINALLY")
             cleanup[:] = [
                 create_instruction("POP_BLOCK"),
                 begin_finally,
@@ -47,12 +55,12 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_cleanup_start),
                 create_instruction("POP_TOP"),
             ]
-        else:
-
+        elif sys.version_info < (3, 11):
             with_except_start = create_instruction("WITH_EXCEPT_START")
             pop_top_after_with_except_start = create_instruction("POP_TOP")
 
@@ -82,8 +90,54 @@ class ReenterWith:
             ] + cleanup
 
             return [
-                create_instruction("CALL_FUNCTION", 0),
+                *load_args,
+                create_instruction("CALL_FUNCTION", len(load_args)),
                 create_instruction("SETUP_WITH", target=with_except_start),
+                create_instruction("POP_TOP"),
+            ]
+
+        else:
+            pop_top_after_with_except_start = create_instruction("POP_TOP")
+            cleanup_complete_jump_target = create_instruction("NOP")
+
+            def create_load_none():
+                return create_instruction(
+                    "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+                )
+
+            cleanup[:] = (
+                [
+                    create_load_none(),
+                    create_load_none(),
+                    create_load_none(),
+                ]
+                + create_call_function(2, False)
+                + [
+                    create_instruction("POP_TOP"),
+                    create_instruction(
+                        "JUMP_FORWARD", target=cleanup_complete_jump_target
+                    ),
+                    create_instruction("PUSH_EXC_INFO"),
+                    create_instruction("WITH_EXCEPT_START"),
+                    create_instruction(
+                        "POP_JUMP_FORWARD_IF_TRUE",
+                        target=pop_top_after_with_except_start,
+                    ),
+                    create_instruction("RERAISE", 2),
+                    create_instruction("COPY", 3),
+                    create_instruction("POP_EXCEPT"),
+                    create_instruction("RERAISE", 1),
+                    pop_top_after_with_except_start,
+                    create_instruction("POP_EXCEPT"),
+                    create_instruction("POP_TOP"),
+                    create_instruction("POP_TOP"),
+                    cleanup_complete_jump_target,
+                ]
+                + cleanup
+            )
+
+            return create_call_function(0, False) + [
+                create_instruction("BEFORE_WITH"),
                 create_instruction("POP_TOP"),
             ]
 
@@ -116,6 +170,7 @@ class ContinueExecutionCache:
         nstack: int,
         argnames: List[str],
         setup_fns: List[ReenterWith],
+        null_idxes: List[int],
     ):
         assert offset is not None
         assert not (
@@ -125,7 +180,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, nstack, argnames, setup_fns
+                code, lineno, offset, nstack, argnames, setup_fns, null_idxes
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -139,6 +194,10 @@ class ContinueExecutionCache:
                 code_options["co_freevars"] or []
             )
             code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            if sys.version_info >= (3, 11):
+                code_options[
+                    "co_qualname"
+                ] = f"<graph break in {code_options['co_qualname']}>"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -151,6 +210,7 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
+            # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
             prefix = []
@@ -162,7 +222,12 @@ class ContinueExecutionCache:
                     prefix.extend(hooks.pop(i)(code_options, cleanup))
             assert not hooks
 
-            prefix.append(create_instruction("JUMP_ABSOLUTE", target=target))
+            if sys.version_info >= (3, 11):
+                for idx in null_idxes:
+                    prefix.append(create_instruction("PUSH_NULL"))
+                    prefix.extend(create_rot_n(idx))
+
+            prefix.append(create_jump_absolute(target))
 
             # because the line number table monotonically increases from co_firstlineno
             # remove starts_line for any instructions before the graph break instruction

@@ -650,7 +650,6 @@ Tensor class reference
     Tensor.svd
     Tensor.swapaxes
     Tensor.swapdims
-    Tensor.symeig
     Tensor.t
     Tensor.t_
     Tensor.tensor_split

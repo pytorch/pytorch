@@ -207,7 +207,7 @@ void propagate_names_for_reduction(const Tensor& result, const Tensor& src, IntA
     return;
   }
   // This actually means "full reduction"
-  if (reduced_dims.size() == 0) {
+  if (reduced_dims.empty()) {
     return;
   }
   propagate_names_except(result, src, reduced_dims);
@@ -241,6 +241,20 @@ std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor) {
   return outnames;
 }
 
+std::vector<Dimname> compute_squeeze_outnames(const Tensor& tensor, std::bitset<dim_bitset_size> dims) {
+  if (!tensor.has_names()) {
+    return {};
+  }
+  std::vector<Dimname> outnames;
+  auto tensor_names = tensor.names();
+  for (const auto d : c10::irange(tensor.dim())) {
+    if (!dims.test(d) || tensor.sym_sizes()[d] != 1) {
+      outnames.push_back(tensor_names[d]);
+    }
+  }
+  return outnames;
+}
+
 std::vector<Dimname> compute_diagonal_outnames(
     const Tensor& tensor,
     int64_t dim1,
@@ -263,7 +277,7 @@ std::vector<Dimname> compute_diagonal_outnames(
 static void check_feature_names_are_distinct(
     DimnameList self_names,
     DimnameList other_names,
-    DimnameList outnames) {
+    const DimnameList& outnames) {
   if (self_names.size() < 2 || other_names.size() < 2) {
     // There are less than 2 feature dims in outnames so there is nothing to check
     return;
@@ -289,7 +303,7 @@ static int64_t num_batch_dims(DimnameList names) {
 static std::vector<Dimname> compute_matmul_outnames(
     DimnameList self_names,
     DimnameList other_names) {
-  TORCH_CHECK(self_names.size() >= 1 && other_names.size() >= 1,
+  TORCH_CHECK(!self_names.empty() && !other_names.empty(),
       "both arguments to matmul need to be at least 1D, but they are ",
       self_names.size(), "D and ", other_names.size(), "D");
 
@@ -321,10 +335,9 @@ static std::vector<Dimname> compute_matmul_outnames(
   if (other_names.size() >= 2) {
     working_names.append(TensorName(other_names, -1));
   }
-  const auto result = working_names.toDimnameVec();
+  auto result = working_names.toDimnameVec();
 
   check_feature_names_are_distinct(self_names, other_names, result);
-  // NOLINTNEXTLINE(performance-no-automatic-move)
   return result;
 }
 
@@ -417,7 +430,7 @@ std::vector<Dimname> compute_cat_outnames(const MaterializedITensorListRef& tens
   std::vector<Dimname> result;
   for (const Tensor& tensor : tensors) {
     const auto tensor_names = tensor.names();
-    TORCH_CHECK(tensor_names.size() > 0, "zero-dimensional tensor cannot be concatenated");
+    TORCH_CHECK(!tensor_names.empty(), "zero-dimensional tensor cannot be concatenated");
     TORCH_CHECK(result.empty() || tensor_names.size() == result.size(),
         "Tensors must have same number of dimensions: got ", result.size(),
         " and ", tensor_names.size());

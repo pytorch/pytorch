@@ -35,10 +35,8 @@ static void stateful_conv1d(benchmark::State& state) {
 
   std::vector<std::vector<torch::jit::IValue>> inputs;
   for (const auto i : c10::irange(10)) {
-    std::vector<torch::jit::IValue> input;
-    // NOLINTNEXTLINE(modernize-use-emplace)
-    input.push_back(torch::rand({batch_size, input_channels, width}));
-    inputs.push_back(input);
+    inputs.emplace_back(
+        {torch::jit::IValue(torch::rand({batch_size, input_channels, width}))});
   }
 
   auto m_cloned = m.clone();

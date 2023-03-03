@@ -26,8 +26,8 @@ struct StashTorchDispatchModeGuard {
 struct StashTorchDispatchStackGuard {
  public:
   StashTorchDispatchStackGuard() {
-    const auto old = c10::impl::TorchDispatchModeTLS::get_state();
-    c10::impl::TorchDispatchModeTLS::set_state(saved_state_);
+    auto old = c10::impl::TorchDispatchModeTLS::get_state();
+    c10::impl::TorchDispatchModeTLS::set_state(std::move(saved_state_));
     saved_state_ = std::move(old);
   }
 

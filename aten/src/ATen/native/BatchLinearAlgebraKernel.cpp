@@ -16,7 +16,6 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #endif
-
 namespace at { namespace native {
 
 namespace {
@@ -915,12 +914,28 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
   auto n = input.size(-1);
   auto leading_dimension = std::max<int64_t>(1, m);
 
-  for (const auto i : c10::irange(batch_size)) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
-    int* infos_working_ptr = &infos_data[i];
-    lapackLu<scalar_t>(m, n, input_working_ptr, leading_dimension, pivots_working_ptr, infos_working_ptr);
-  }
+  const auto loop = [&](int64_t start, int64_t end) {
+    for (const auto i : c10::irange(start, end)) {
+      scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+      int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+      int* infos_working_ptr = &infos_data[i];
+      lapackLu<scalar_t>(
+          m,
+          n,
+          input_working_ptr,
+          leading_dimension,
+          pivots_working_ptr,
+          infos_working_ptr);
+    }
+  };
+  // avoid overflow
+  float matrix_rank = float(std::min(m, n));
+  // A heuristic tested on a 32 core/socket ICX system
+  // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
+  int64_t chunk_size_per_thread = int64_t(
+      std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
+  int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
+  at::parallel_for(0, batch_size, grain_size, loop);
 #endif
 }
 

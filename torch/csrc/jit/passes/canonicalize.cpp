@@ -143,7 +143,7 @@ bool isBeforeOrAfter(const Use& a, const Use& b, bool checking_before) {
 }
 
 c10::optional<const Use> firstOrLastUse(Value* v, bool find_first) {
-  if (v->uses().size() == 0) {
+  if (v->uses().empty()) {
     return c10::nullopt;
   }
   Use extreme_use = v->uses()[0];

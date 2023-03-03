@@ -22,7 +22,7 @@ class MyModule(torch.nn.Module):
         return self.lin2(F.relu(self.lin1(t1)))
 
 # dummy class to showcase custom optimizer registration with functional wrapper
-class MyDummyFnOptimizer(object):
+class MyDummyFnOptimizer:
     def __init__(
         self,
         params: List[Tensor],

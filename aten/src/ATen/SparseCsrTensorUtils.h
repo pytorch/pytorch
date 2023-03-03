@@ -5,6 +5,14 @@
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Operators.h>
+#else
+#include <ATen/ops/resize_as_sparse_native.h>
+#endif
+
 #define AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(LAYOUT, NAME, ...) \
   [&] {                                                              \
     const auto& the_layout = LAYOUT;                                 \
@@ -16,7 +24,7 @@
         return __VA_ARGS__();                                        \
       default:                                                       \
         AT_ERROR(                                                    \
-            #NAME,                                                   \
+            NAME,                                                    \
             " expected sparse compressed tensor layout but got ",    \
             the_layout);                                             \
     }                                                                \
@@ -35,7 +43,7 @@
         return (COLUMN_DIM_ACTION)();                             \
       default:                                                    \
         AT_ERROR(                                                 \
-            #NAME,                                                \
+            NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
     }                                                             \
@@ -54,7 +62,7 @@
         return (BLOCK_ACTION)();                                  \
       default:                                                    \
         AT_ERROR(                                                 \
-            #NAME,                                                \
+            NAME,                                                 \
             " expected sparse compressed tensor layout but got ", \
             the_layout);                                          \
     }                                                             \
@@ -70,7 +78,7 @@
         return (ROW_DIM_ACTION)();                                    \
       default:                                                        \
         AT_ERROR(                                                     \
-            #NAME,                                                    \
+            NAME,                                                     \
             " expected sparse row compressed tensor layout but got ", \
             the_layout);                                              \
     }                                                                 \
@@ -86,7 +94,7 @@
         return (COL_DIM_ACTION)();                                       \
       default:                                                           \
         AT_ERROR(                                                        \
-            #NAME,                                                       \
+            NAME,                                                        \
             " expected sparse column compressed tensor layout but got ", \
             the_layout);                                                 \
     }                                                                    \
@@ -101,7 +109,7 @@
         return (ACTION)();                                                    \
       default:                                                                \
         AT_ERROR(                                                             \
-            #NAME,                                                            \
+            NAME,                                                             \
             " expected sparse compressed (non-block) tensor layout but got ", \
             the_layout);                                                      \
     }                                                                         \
@@ -116,7 +124,7 @@
         return (ACTION)();                                                \
       default:                                                            \
         AT_ERROR(                                                         \
-            #NAME,                                                        \
+            NAME,                                                         \
             " expected sparse compressed block tensor layout but got ",   \
             the_layout);                                                  \
     }                                                                     \
@@ -306,6 +314,57 @@ inline at::OptionalArray<at::SymInt> getSymIntBlockSize(Tensor const& self) {
   } else {
     return {};
   }
+}
+
+template <typename binary_op_t, typename binary_op_out_t>
+inline bool only_sparse_compressed_binary_op_trivial_cases(
+    const Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha,
+    Tensor& out,
+    const binary_op_t& binary_op,
+    const binary_op_out_t& binary_op_out) {
+  // Only sparse compressed! Just like the name says :)
+  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(self));
+  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(other));
+  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(out));
+
+  // Bypass BLAS if there are matches in (self, other, out)
+  if (self.is_same(out) && self.is_same(other)) {
+    binary_op_out(self.values(), other.values(), alpha);
+    return true;
+  }
+  if (self.is_same(other)) {
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) =
+        at::sparse_csr::getCompressedPlainIndices(self);
+    static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
+        ->set_member_tensors(
+            compressed_indices,
+            plain_indices,
+            binary_op(self.values(), other.values(), alpha),
+            self.sizes());
+    return true;
+  }
+  return false;
+}
+
+inline bool only_sparse_compressed_add_trivial_cases(
+    const Tensor& self,
+    const Tensor& other,
+    const Scalar& alpha,
+    Tensor& out) {
+  return only_sparse_compressed_binary_op_trivial_cases(
+      self,
+      other,
+      alpha,
+      out,
+      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
+        return v1.add(v2, alpha);
+      },
+      [](const Tensor& v1, const Tensor& v2, const Scalar& alpha) {
+        return v1.add_(v2, alpha);
+      });
 }
 
 } // namespace sparse_csr

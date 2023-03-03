@@ -6,7 +6,7 @@ namespace detail {
 
 template <class ArrayRefType>
 inline void check_size_nonnegative(ArrayRefType size) {
-  for (auto x : size) {
+  for (const auto& x : size) {
     TORCH_CHECK(
         x >= 0,
         "Trying to create tensor with negative dimension ",

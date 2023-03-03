@@ -28,6 +28,7 @@
 #include <memory>
 #include <numeric>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 /*
@@ -316,7 +317,7 @@ struct SymbolicShapeOpAnalyzer {
 
   // We handle non-constant values in the shape propagation step
   void substituteConstantInputs() {
-    if (shape_compute_graph_->inputs().size() == 0) {
+    if (shape_compute_graph_->inputs().empty()) {
       return;
     }
 
@@ -800,7 +801,7 @@ c10::SymbolicShape combine_bounds(
       merged_shapes.push_back(c10::ShapeSymbol::newSymbol());
     }
   }
-  return c10::SymbolicShape(merged_shapes);
+  return c10::SymbolicShape(std::move(merged_shapes));
 }
 
 struct SymbolicShapeGraphAnalyzer {
@@ -910,9 +911,9 @@ struct SymbolicShapeGraphAnalyzer {
 
     updateGraphWithSymbolicShapeEqualities(discovered_sym_shape_equalities);
     return ShapeComputeGraphMapping(
-        stitched_shape_compute_graph,
+        std::move(stitched_shape_compute_graph),
         enclosing_graph_value_to_shape_graph_input_,
-        graph_output_to_symbolic_shape_dim);
+        std::move(graph_output_to_symbolic_shape_dim));
   }
 
   void updateGraphWithSymbolicShapeEqualities(

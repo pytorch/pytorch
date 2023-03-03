@@ -1,73 +1,14 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable
+from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable,
+                        _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["RMSprop", "rmsprop"]
 
 
 class RMSprop(Optimizer):
-    r"""Implements RMSprop algorithm.
-
-    .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
-                \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
-            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
-            &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
-                \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
-            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
-            &\hspace{5mm}v_t           \leftarrow   \alpha v_{t-1} + (1 - \alpha) g^2_t
-                \hspace{8mm}                                                                     \\
-            &\hspace{5mm} \tilde{v_t} \leftarrow v_t                                             \\
-            &\hspace{5mm}if \: centered                                                          \\
-            &\hspace{10mm} g^{ave}_t \leftarrow g^{ave}_{t-1} \alpha + (1-\alpha) g_t            \\
-            &\hspace{10mm} \tilde{v_t} \leftarrow \tilde{v_t} -  \big(g^{ave}_{t} \big)^2        \\
-            &\hspace{5mm}if \: \mu > 0                                                           \\
-            &\hspace{10mm} \textbf{b}_t\leftarrow \mu \textbf{b}_{t-1} +
-                g_t/ \big(\sqrt{\tilde{v_t}} +  \epsilon \big)                                   \\
-            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \textbf{b}_t                \\
-            &\hspace{5mm} else                                                                   \\
-            &\hspace{10mm}\theta_t      \leftarrow   \theta_{t-1} -
-                \gamma  g_t/ \big(\sqrt{\tilde{v_t}} + \epsilon \big)  \hspace{3mm}              \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
-
-    For further details regarding the algorithm we refer to
-    `lecture notes <https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_ by G. Hinton.
-    and centered version `Generating Sequences
-    With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
-    The implementation here takes the square root of the gradient average before
-    adding epsilon (note that TensorFlow interchanges these two operations). The effective
-    learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
-    is the scheduled learning rate and :math:`v` is the weighted moving average
-    of the squared gradient.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-2)
-        momentum (float, optional): momentum factor (default: 0)
-        alpha (float, optional): smoothing constant (default: 0.99)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        centered (bool, optional) : if ``True``, compute the centered RMSProp,
-            the gradient is normalized by an estimation of its variance
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-
-    """
-
     def __init__(
         self,
         params,
@@ -103,7 +44,7 @@ class RMSprop(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(RMSprop, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -194,6 +135,67 @@ class RMSprop(Optimizer):
         return loss
 
 
+RMSprop.__doc__ = r"""Implements RMSprop algorithm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \alpha \text{ (alpha)},\: \gamma \text{ (lr)},
+                \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
+            &\hspace{13mm}   \lambda \text{ (weight decay)},\: \mu \text{ (momentum)},\: centered\\
+            &\textbf{initialize} : v_0 \leftarrow 0 \text{ (square average)}, \:
+                \textbf{b}_0 \leftarrow 0 \text{ (buffer)}, \: g^{ave}_0 \leftarrow 0     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}if \: \lambda \neq 0                                                    \\
+            &\hspace{10mm} g_t \leftarrow g_t + \lambda  \theta_{t-1}                            \\
+            &\hspace{5mm}v_t           \leftarrow   \alpha v_{t-1} + (1 - \alpha) g^2_t
+                \hspace{8mm}                                                                     \\
+            &\hspace{5mm} \tilde{v_t} \leftarrow v_t                                             \\
+            &\hspace{5mm}if \: centered                                                          \\
+            &\hspace{10mm} g^{ave}_t \leftarrow g^{ave}_{t-1} \alpha + (1-\alpha) g_t            \\
+            &\hspace{10mm} \tilde{v_t} \leftarrow \tilde{v_t} -  \big(g^{ave}_{t} \big)^2        \\
+            &\hspace{5mm}if \: \mu > 0                                                           \\
+            &\hspace{10mm} \textbf{b}_t\leftarrow \mu \textbf{b}_{t-1} +
+                g_t/ \big(\sqrt{\tilde{v_t}} +  \epsilon \big)                                   \\
+            &\hspace{10mm} \theta_t \leftarrow \theta_{t-1} - \gamma \textbf{b}_t                \\
+            &\hspace{5mm} else                                                                   \\
+            &\hspace{10mm}\theta_t      \leftarrow   \theta_{t-1} -
+                \gamma  g_t/ \big(\sqrt{\tilde{v_t}} + \epsilon \big)  \hspace{3mm}              \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to
+    `lecture notes <https://www.cs.toronto.edu/~tijmen/csc321/slides/lecture_slides_lec6.pdf>`_ by G. Hinton.
+    and centered version `Generating Sequences
+    With Recurrent Neural Networks <https://arxiv.org/pdf/1308.0850v5.pdf>`_.
+    The implementation here takes the square root of the gradient average before
+    adding epsilon (note that TensorFlow interchanges these two operations). The effective
+    learning rate is thus :math:`\gamma/(\sqrt{v} + \epsilon)` where :math:`\gamma`
+    is the scheduled learning rate and :math:`v` is the weighted moving average
+    of the squared gradient.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-2)
+        momentum (float, optional): momentum factor (default: 0)
+        alpha (float, optional): smoothing constant (default: 0.99)
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        centered (bool, optional) : if ``True``, compute the centered RMSProp,
+            the gradient is normalized by an estimation of its variance
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
+        {foreach}
+        {maximize}
+        {differentiable}
+
+    """.format(foreach=_foreach_doc, maximize=_maximize_doc, differentiable=_differentiable_doc)
+
+
 def rmsprop(
     params: List[Tensor],
     grads: List[Tensor],
@@ -202,7 +204,7 @@ def rmsprop(
     momentum_buffer_list: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     maximize: bool = False,
     differentiable: bool = False,
     *,
@@ -218,8 +220,7 @@ def rmsprop(
     """
 
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
-        foreach = False
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -325,39 +326,42 @@ def _multi_tensor_rmsprop(
 
     assert not differentiable, "_foreach ops don't support autograd"
 
-    if maximize:
-        grads = torch._foreach_neg(grads)
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, square_avgs, grad_avgs, momentum_buffer_list])
+    for (grouped_params, grouped_grads, grouped_square_avgs, grouped_grad_avgs,
+         grouped_momentum_buffer_list) in grouped_tensors.values():
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)
 
-    if weight_decay != 0:
-        torch._foreach_add_(grads, params, alpha=weight_decay)
+        if weight_decay != 0:
+            grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
 
-    def _view_complex_as_real(tensor_list):
-        return [
-            torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
-        ]
+        def _view_complex_as_real(tensor_list):
+            return [
+                torch.view_as_real(t) if torch.is_complex(t) else t for t in tensor_list
+            ]
 
-    grads = _view_complex_as_real(grads)
-    params = _view_complex_as_real(params)
-    square_avgs = _view_complex_as_real(square_avgs)
+        grouped_grads = _view_complex_as_real(grouped_grads)
+        grouped_params = _view_complex_as_real(grouped_params)
+        grouped_square_avgs = _view_complex_as_real(grouped_square_avgs)
 
-    torch._foreach_mul_(square_avgs, alpha)
-    torch._foreach_addcmul_(square_avgs, grads, grads, value=1 - alpha)
+        torch._foreach_mul_(grouped_square_avgs, alpha)
+        torch._foreach_addcmul_(grouped_square_avgs, grouped_grads, grouped_grads, value=1 - alpha)
 
-    if centered:
-        grad_avgs = _view_complex_as_real(grad_avgs)
-        torch._foreach_mul_(grad_avgs, alpha)
-        torch._foreach_add_(grad_avgs, grads, alpha=1 - alpha)
-        avg = torch._foreach_addcmul(square_avgs, grad_avgs, grad_avgs, value=-1)
-        torch._foreach_sqrt_(avg)
-        torch._foreach_add_(avg, eps)
-    else:
-        avg = torch._foreach_sqrt(square_avgs)
-        torch._foreach_add_(avg, eps)
+        if centered:
+            grouped_grad_avgs = _view_complex_as_real(grouped_grad_avgs)
+            torch._foreach_mul_(grouped_grad_avgs, alpha)
+            torch._foreach_add_(grouped_grad_avgs, grouped_grads, alpha=1 - alpha)
+            avg = torch._foreach_addcmul(grouped_square_avgs, grouped_grad_avgs, grouped_grad_avgs, value=-1)
+            torch._foreach_sqrt_(avg)
+            torch._foreach_add_(avg, eps)
+        else:
+            avg = torch._foreach_sqrt(grouped_square_avgs)
+            torch._foreach_add_(avg, eps)
 
-    if momentum > 0:
-        momentum_buffer_list = _view_complex_as_real(momentum_buffer_list)
-        torch._foreach_mul_(momentum_buffer_list, momentum)
-        torch._foreach_addcdiv_(momentum_buffer_list, grads, avg)
-        torch._foreach_add_(params, momentum_buffer_list, alpha=-lr)
-    else:
-        torch._foreach_addcdiv_(params, grads, avg, value=-lr)
+        if momentum > 0:
+            grouped_momentum_buffer_list = _view_complex_as_real(grouped_momentum_buffer_list)
+            torch._foreach_mul_(grouped_momentum_buffer_list, momentum)
+            torch._foreach_addcdiv_(grouped_momentum_buffer_list, grouped_grads, avg)
+            torch._foreach_add_(grouped_params, grouped_momentum_buffer_list, alpha=-lr)
+        else:
+            torch._foreach_addcdiv_(grouped_params, grouped_grads, avg, value=-lr)

@@ -32,6 +32,7 @@ set_bool(AT_BLAS_F2C BLAS_F2C)
 set_bool(AT_BLAS_USE_CBLAS_DOT BLAS_USE_CBLAS_DOT)
 set_bool(AT_MAGMA_ENABLED USE_MAGMA)
 set_bool(CAFFE2_STATIC_LINK_CUDA_INT CAFFE2_STATIC_LINK_CUDA)
+set_bool(AT_CUDNN_ENABLED CAFFE2_USE_CUDNN)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
@@ -83,7 +84,7 @@ file(GLOB native_cpp "native/*.cpp")
 file(GLOB native_mkl_cpp "native/mkl/*.cpp")
 file(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 file(GLOB vulkan_cpp "vulkan/*.cpp")
-file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/ops/*.cpp")
+file(GLOB native_vulkan_cpp "native/vulkan/*.cpp" "native/vulkan/api/*.cpp" "native/vulkan/impl/*.cpp" "native/vulkan/ops/*.cpp")
 
 # Metal
 file(GLOB metal_h "metal/*.h")
@@ -172,6 +173,7 @@ if(USE_FLASH_ATTENTION)
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_cu})
   list(APPEND native_transformers_cuda_cu ${mem_eff_attention_cuda_kernels_cu})
   list(APPEND native_transformers_cuda_cpp ${mem_eff_attention_cuda_cpp})
+  list(APPEND MEM_EFF_ATTENTION_CUDA_SOURCES ${native_transformers_cuda_cu} ${mem_eff_attention_cuda_cu} ${mem_eff_attention_cuda_kernels_cu})
 endif()
 
 # XNNPACK
@@ -437,25 +439,26 @@ if(USE_CUDA AND NOT USE_ROCM)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
-      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcufft_static_nocallback.a
-      )
+      CUDA::cusparse_static
+      CUDA::curand_static
+      CUDA::cufft_static_nocallback
+    )
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
-       ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
-       )
+       CUDA::cusolver_static
+       ${CUDAToolkit_LIBRARY_DIR}/liblapack_static.a     # needed for libcusolver_static
+     )
    endif()
   else()
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}
-      ${CUDA_cusparse_LIBRARY}
-      ${CUDA_curand_LIBRARY}
-      )
+      CUDA::cusparse
+      CUDA::curand
+      CUDA::cufft
+    )
    if(NOT BUILD_LAZY_CUDA_LINALG)
      list(APPEND ATen_CUDA_DEPENDENCY_LIBS
-       ${CUDA_cusolver_LIBRARY}
+       CUDA::cusolver
      )
    endif()
   endif()
@@ -464,8 +467,10 @@ if(USE_CUDA AND NOT USE_ROCM)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
   endif()
   if($ENV{ATEN_STATIC_CUDA})
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
-    list(APPEND ATen_CUDA_DEPENDENCY_LIBS "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcudart_static.a")
+    list(APPEND ATen_CUDA_DEPENDENCY_LIBS
+      CUDA::culibos
+      CUDA::cudart_static
+    )
   endif($ENV{ATEN_STATIC_CUDA})
 endif()
 
@@ -621,3 +626,4 @@ set(ATen_VULKAN_INCLUDE ${ATen_VULKAN_INCLUDE} PARENT_SCOPE)
 set(ATen_CPU_DEPENDENCY_LIBS ${ATen_CPU_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_CUDA_DEPENDENCY_LIBS ${ATen_CUDA_DEPENDENCY_LIBS} PARENT_SCOPE)
 set(ATen_HIP_DEPENDENCY_LIBS ${ATen_HIP_DEPENDENCY_LIBS} PARENT_SCOPE)
+set(MEM_EFF_ATTENTION_CUDA_SOURCES ${MEM_EFF_ATTENTION_CUDA_SOURCES} PARENT_SCOPE)

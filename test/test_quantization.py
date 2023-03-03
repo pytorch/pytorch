@@ -75,6 +75,7 @@ try:
     from quantization.fx.test_quantize_fx import TestQuantizeFxModels  # noqa: F401
     from quantization.fx.test_subgraph_rewriter import TestSubgraphRewriter  # noqa: F401
 # Quantization for PyTorch 2.0 Export path
+    from quantization.fx.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
     from quantization.fx.test_quantize_pt2e import TestQuantizePT2EModels  # noqa: F401
 except ImportError:
     # In FBCode we separate FX out into a separate target for the sake of dev

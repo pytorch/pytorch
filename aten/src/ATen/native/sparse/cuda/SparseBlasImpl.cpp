@@ -42,7 +42,7 @@ c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
 
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if defined(USE_ROCM)
   // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
   return prepare_column_major_matrix_for_cusparse(tensor);
 #else
@@ -612,7 +612,7 @@ void spmm(
 
   // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
   // silently returning incorrect results
-#if defined(CUDA_VERSION) && CUDA_VERSION < 11000
+#if defined(USE_ROCM)
   auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
       mat1.crow_indices().to(kInt),
       mat1.col_indices().to(kInt),
@@ -689,13 +689,7 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if (!defined(USE_ROCM)) && (defined(CUDA_VERSION) && CUDA_VERSION < 11000)
-  TORCH_CHECK(
-      false,
-      "Calling addmm with sparse GPU tensors requires compiling ",
-      "PyTorch with CUDA 11+. ",
-      "Please use PyTorch built with newer CUDA version.");
-#elif defined(USE_ROCM) && ROCM_VERSION < 50200
+#if defined(USE_ROCM) && ROCM_VERSION < 50200
   TORCH_CHECK(
       false,
       "Calling addmm with sparse GPU tensors requires compiling ",

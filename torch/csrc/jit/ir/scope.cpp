@@ -3,8 +3,7 @@
 #include <ATen/core/class_type.h>
 #include <ATen/core/function.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 // util functions
 namespace utils {
 
@@ -36,14 +35,10 @@ ScopePtr Scope::intrusive_from_this() {
   return c10::intrusive_ptr<Scope>::reclaim(this);
 }
 
-Scope::Scope() {
-  name_ = Symbol::scope("");
-}
+Scope::Scope() : name_(Symbol::scope("")) {}
 
-Scope::Scope(ScopePtr parent, Symbol name) {
-  name_ = name;
-  parent_ = std::move(parent);
-}
+Scope::Scope(ScopePtr parent, Symbol name)
+    : parent_(std::move(parent)), name_(name) {}
 
 ScopePtr Scope::push(Symbol name) {
   return c10::make_intrusive<Scope>(intrusive_from_this(), name);
@@ -201,5 +196,4 @@ ModuleInstanceInfo::ModuleInstanceInfo(
     std::string instance_name)
     : module_type_(std::move(module_type)),
       instance_name_(std::move(instance_name)) {}
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

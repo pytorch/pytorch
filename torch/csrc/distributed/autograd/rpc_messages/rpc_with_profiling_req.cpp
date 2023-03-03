@@ -20,9 +20,9 @@ RpcWithProfilingReq::RpcWithProfilingReq(
     rpc::ProfilingId profilingKeyId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
+      tensors_(wrappedMessage_->tensors()),
       profilerConfig_(profilerConfig),
       profilingKeyId_(profilingKeyId) {
-  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_REQ,
       c10::str(
@@ -141,7 +141,6 @@ std::unique_ptr<RpcWithProfilingReq> RpcWithProfilingReq::fromMessage(
       std::move(wrappedRpc),
       wrappedMsgType,
       std::move(wrappedMessage->tensors()),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(cfg),
       profilerId);
 }

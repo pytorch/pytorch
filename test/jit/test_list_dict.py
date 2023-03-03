@@ -226,7 +226,7 @@ class TestList(JitTestCase):
         self.checkScript(foo2, ())
 
         def foo3():
-            return list(list("abc"))
+            return list(list("abc"))  # noqa: C414
 
         self.checkScript(foo3, ())
         FileCheck().check_count("aten::list", 2, exactly=True).run(torch.jit.script(foo3).graph)
@@ -421,6 +421,7 @@ class TestList(JitTestCase):
 
         self.checkScript(func2, ())
 
+    @skipIfTorchDynamo("TorchDynamo fails to raise on this checkScriptRaisesRegex, because we trace it properly now")
     def test_list_ops(self):
         def test_equality():
             a = [1, 2, 3]
@@ -1515,7 +1516,7 @@ class TestDict(JitTestCase):
             li.append(3)
             return li
 
-        self.assertTrue(set(specialized_list()) == set([1, 2, 3]))
+        self.assertTrue(set(specialized_list()) == {1, 2, 3})
 
     @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_values(self):
@@ -1975,7 +1976,7 @@ class TestNamedTuple(JitTestCase):
 
         class MyModule(types.ModuleType):
             def __init__(self):
-                super(MyModule, self).__init__('MyModule')
+                super().__init__('MyModule')
 
             def __getattr__(self, attr):
                 return TheType
@@ -2563,7 +2564,7 @@ class TestScriptList(JitTestCase):
         """
         Test extend.
         """
-        class Iterable(object):
+        class Iterable:
             def __init__(self, limit: int):
                 self.limit = limit
                 self.value = 0

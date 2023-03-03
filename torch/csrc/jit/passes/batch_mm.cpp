@@ -14,6 +14,7 @@
 #include <ATen/ATen.h>
 #include <algorithm>
 #include <unordered_map>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -119,7 +120,7 @@ RegisterOperators mm_tree_reduction_reg({Operator(
       }
       drop(stack, num_inputs);
 
-      AT_ASSERT(inputs.size() > 0);
+      AT_ASSERT(!inputs.empty());
       AT_ASSERT(inputs.size() % 2 == 0);
       size_t side_num_elems = inputs.size() / 2;
       auto lhs_inputs = at::TensorList(inputs).slice(0, side_num_elems);
@@ -371,7 +372,7 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
     Value* value,
     AliasDb& alias_db) {
   const auto postprocess = [&](std::vector<Node*> mms) {
-    if (mms.size() == 0) {
+    if (mms.empty()) {
       return mms;
     }
     std::sort(mms.begin(), mms.end(), [](Node* n, Node* m) {
@@ -408,7 +409,8 @@ std::pair<std::vector<Node*>, std::vector<Node*>> gatherIndependentMMUses(
       }
     }
   }
-  return std::make_pair(postprocess(lhses), postprocess(rhses));
+  return std::make_pair(
+      postprocess(std::move(lhses)), postprocess(std::move(rhses)));
 }
 
 void BatchMMSide(Block* block, AliasDb& alias_db) {

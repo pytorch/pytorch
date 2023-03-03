@@ -11,7 +11,13 @@ import sympy
 import torch
 import torch.fx
 from torch._decomp import get_decompositions
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch._dynamo.utils import dynamo_timed
+from torch.fx.experimental.symbolic_shapes import (
+    magic_methods,
+    method_to_operator,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
@@ -25,13 +31,19 @@ from .exc import (
 )
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
+    FALLBACK_ALLOW_LIST,
     layout_constraints,
     lowerings,
     make_fallback,
     needs_realized_inputs,
 )
 from .sizevars import CppSizeVarAllocator, SizeVarAllocator
-from .utils import dynamo_utils, gather_origins, get_dtype_size, sympy_product
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_dtype_size,
+    sympy_product,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -53,6 +65,11 @@ def supported_dtype_of_cpp_wrapper(dtype):
     return dtype in supported_dtype
 
 
+def is_magic_method(op):
+    magic_ops = {method_to_operator(m) for m in magic_methods}
+    return op in magic_ops
+
+
 class GraphLowering(torch.fx.Interpreter):
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
@@ -61,15 +78,26 @@ class GraphLowering(torch.fx.Interpreter):
         have the same size they get assigned the same symbolic variable.
         """
         if self.reuse_shape_env:
-            size = ex.size()
-            stride = ex.stride()
+            return convert_shape_to_inductor(ex.size()), convert_shape_to_inductor(
+                ex.stride()
+            )
         else:
-            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+            from torch._dynamo.source import ConstantSource
 
-        size = [i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in size]
-        stride = [
-            i.get_pyobj().expr if isinstance(i, torch.SymInt) else i for i in stride
-        ]
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(
+                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
+
+        size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
+        stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
         return size, stride
 
     def static_sizes_strides(self, ex: torch.Tensor):
@@ -86,13 +114,9 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
-        fake_mode=None,
     ):
         super().__init__(gm)
-        if fake_mode is None:
-            self.fake_mode = torch._subclasses.FakeTensorMode()
-        else:
-            self.fake_mode = fake_mode
+        self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -120,6 +144,24 @@ class GraphLowering(torch.fx.Interpreter):
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
         self.graph_id = graph_id
+        self.scheduler = None
+        self._warned_fallback = {"aten.convolution_backward"}
+
+    def warn_fallback(self, name):
+        if name not in self._warned_fallback:
+            self._warned_fallback.add(name)
+            log.info(f"Using FallbackKernel: {name}")
+
+    @property
+    def fake_mode(self):
+        return V.fake_mode
+
+    def get_buffer(self, buffer_name: str):
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name]
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name]
+        return None
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -165,7 +207,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.randomness_offset = offset + numel
         return offset
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def run(self, *args):
         return super().run(*args)
 
@@ -175,10 +217,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_buffer_for_cpp_wrapper(self, buffer: ir.ComputedBuffer):
         if isinstance(buffer, ir.ExternKernel):
-            if not isinstance(
-                buffer,
-                (ir.MatrixMultiply, ir.BatchMatrixMultiply, ir.MatrixMultiplyAdd),
-            ):
+            if not getattr(buffer, "cpp_kernel", False):
                 self.disable_cpp_wrapper("ExternKernel")
 
     def register_buffer(self, buffer: ir.ComputedBuffer):
@@ -248,8 +287,21 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
-        if config.static_weight_shapes and (
-            len(self.graph_inputs) < self.num_static_inputs or not config.dynamic_shapes
+        if isinstance(example, SymTypes):
+            expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
+        # todo(chilli): We can remove the last check once we turn buffers into
+        # static shape tensors. That's a hack to workaround Inductor believing
+        # the buffer should be static but us passing in a fake tensor with
+        # symbolic shapes.
+        if (
+            config.static_weight_shapes
+            and (
+                len(self.graph_inputs) < self.num_static_inputs
+                or not dynamo_config.dynamic_shapes
+            )
+            and not example._has_symbolic_sizes_strides
         ):
             # the first N inputs are weights
             sizes, strides = self.static_sizes_strides(example)
@@ -272,14 +324,21 @@ class GraphLowering(torch.fx.Interpreter):
             if target is operator.getitem and isinstance(args[0], (list, tuple)):
                 return super().call_function(target, args, kwargs)
 
+            if hasattr(target, "_inductor_lowering_function"):
+                # passthrough lowerings from .pattern_matcher
+                return target(*args, **kwargs)
+
             if target not in lowerings:
-                if config.implicit_fallbacks:
+                base_name = target.name().split(".")[0]
+                if base_name in FALLBACK_ALLOW_LIST:
+                    make_fallback(target)
+                elif config.implicit_fallbacks:
                     error = (
                         MissingOperatorWithDecomp
                         if get_decompositions([target])
                         else MissingOperatorWithoutDecomp
                     )
-                    log.warning(
+                    log.info(
                         "Creating implicit fallback for:\n%s",
                         error.operator_str(target, args, kwargs),
                     )
@@ -296,7 +355,9 @@ class GraphLowering(torch.fx.Interpreter):
                 out = lowerings[target](*args, **kwargs)
                 return out
             except Exception as e:
-                raise LoweringException(e, target, args, kwargs) from e
+                raise LoweringException(e, target, args, kwargs).with_traceback(
+                    e.__traceback__
+                ) from None
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -337,6 +398,9 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
+            assert isinstance(value, (TensorBox, sympy.Expr))
+            if not isinstance(value, TensorBox):
+                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
@@ -365,15 +429,29 @@ class GraphLowering(torch.fx.Interpreter):
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif is_magic_method(n.target):
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             else:
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
-            # so that user-land view() will not throw because inductor
+            # 1. user-land view() will not throw because inductor
             # output different strides than eager
             # long term the solution is to make view() always succeed
             # with infallible strides.
-            if any(user.op == "output" for user in n.users):
+            # 2: as_strided ops, we need make sure its input has same size/stride with
+            # eager model to align with eager behavior.
+            as_strided_ops = [
+                torch.ops.aten.as_strided.default,
+                torch.ops.aten.as_strided_.default,
+                torch.ops.aten.as_strided_scatter.default,
+            ]
+            if any(
+                user.op == "output" or user.target in as_strided_ops for user in n.users
+            ) and isinstance(n.meta["val"], torch.Tensor):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
                 # requiring a stride order for a non-dense output wouldn't
@@ -404,6 +482,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten._int_mm.default,
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
@@ -471,6 +550,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
+        assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
         return self.wrapper_code.generate()
@@ -483,17 +563,17 @@ class GraphLowering(torch.fx.Interpreter):
         def get_read_write_buffers_sizes(node):
             if isinstance(node, NopKernelSchedulerNode):
                 return 0
-            reads = set(dep.name for dep in node.read_writes.reads)
-            writes = set(dep.name for dep in node.read_writes.writes)
+            reads = {dep.name for dep in node.read_writes.reads}
+            writes = {dep.name for dep in node.read_writes.writes}
 
             def is_materialized(buf):
-                buf_uses = set(
-                    [user.node for user in scheduler.name_to_node[buf].users]
-                )
+                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                writes = set([dep for dep in writes if is_materialized(dep)])
+                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+                writes = writes - removed_buffers
+                reads = reads - removed_buffers
             node_bytes = 0
             for buf in reads | writes:
                 if buf in self.name_to_buffer:
@@ -516,7 +596,7 @@ class GraphLowering(torch.fx.Interpreter):
             total_bytes += num_bytes
         return total_bytes, node_counts
 
-    @dynamo_utils.dynamo_timed
+    @dynamo_timed
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
@@ -528,8 +608,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        if dynamo_config.output_code:
-            log.info("Output code: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod

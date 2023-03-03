@@ -8,10 +8,9 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
-            const char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
+            CONSTEXPR_EXCEPT_WIN_CUDA char laguerre_polynomial_l_name[] = "laguerre_polynomial_l_forward";
 
             void laguerre_polynomial_l_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -29,5 +28,4 @@ namespace at {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(laguerre_polynomial_l_stub, &laguerre_polynomial_l_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native

@@ -1,15 +1,17 @@
 import collections
 import contextlib
 import functools
+import itertools
+import logging
 import math
 import operator
 import os
+import shutil
 import tempfile
 import textwrap
 import time
-from importlib import import_module
 from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from unittest import mock
 
 import sympy
@@ -20,15 +22,17 @@ from torch.fx.immutable_collections import immutable_dict, immutable_list
 from . import config
 from .cuda_properties import get_device_capability
 
+log = logging.getLogger(__name__)
+
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-# We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
-dynamo_config = import_module(f"{config.dynamo_import}.config")
-dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
-dynamo_logging = import_module(f"{config.dynamo_import}.logging")
-dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
-dynamo_testing = import_module(f"{config.dynamo_import}.testing")
-dynamo_utils = import_module(f"{config.dynamo_import}.utils")
+
+try:
+    from triton.testing import do_bench
+except ImportError:
+
+    def do_bench(*args, **kwargs):
+        raise NotImplementedError("requires Triton")
 
 
 @functools.lru_cache(None)
@@ -75,6 +79,49 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
+
+
+def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+    """
+    Gets the shape and stride of a tensor. For non-symbolic tensors, this is
+    trivial. But for symbolic tensors, we need to map from SymIntNode into
+    sympy.Expr.
+    """
+    return [
+        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
+    ]
+
+
+def convert_shape_to_symint(
+    lst: List[Union[int, sympy.Expr]]
+) -> List[Union[int, torch.SymInt]]:
+    """
+    Takes a list of shapes from Inductor and converts them into symints (or just
+    ints if all shapes are static).
+    """
+    from .virtualized import V
+
+    return [
+        i
+        if isinstance(i, int)
+        else int(i)
+        if isinstance(i, sympy.Integer)
+        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        for i in lst
+    ]
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -226,14 +273,17 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, IndexingDiv, ModularIndexing
+    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
 
 def sympy_symbol(name):
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
@@ -257,14 +307,12 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
@@ -306,7 +354,9 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
-    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+    getter = seq.__getitem__
+    a_r = range(len(seq))
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 @functools.lru_cache(8)
@@ -321,11 +371,9 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvalue(self, max_lines=None):
         buf = StringIO()
-        for line in self._lines:
+        for lineno, line in enumerate(self._lines):
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
@@ -333,6 +381,13 @@ class IndentedBuffer:
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
+            if max_lines and lineno == max_lines - 1 and len(line) > max_lines:
+                buf.write(
+                    f"{self.prefix()}... ({len(self._lines) - max_lines} lines hidden, "
+                    f"TORCHINDUCTOR_DEBUG_MAX_LINES={len(self._lines)} for all)\n"
+                )
+                break
+
         return buf.getvalue()
 
     def getrawvalue(self):
@@ -432,3 +487,89 @@ class DeferredLineBase:
 
     def __len__(self):
         return len(self.line)
+
+
+@functools.lru_cache(None)
+def is_big_gpu(index):
+    cores = torch.cuda.get_device_properties(index).multi_processor_count
+    if cores < 80:  # V100
+        log.warning("not enough cuda cores to use max_autotune mode")
+        return False
+    return True
+
+
+def use_triton_template(layout):
+    return (
+        (config.max_autotune or config.search_autotune_cache)
+        and layout.device.type == "cuda"
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and is_big_gpu(layout.device.index or 0)
+    )
+
+
+class DebugDirManager:
+    counter = itertools.count(0)
+
+    def __init__(self):
+        self.id = next(DebugDirManager.counter)
+        self.prev_debug_name = None
+
+    def __enter__(self):
+        self.prev_debug_name = torch._dynamo.config.debug_dir_root
+        self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+        torch._dynamo.config.debug_dir_root = self.new_name
+
+    def __exit__(self, *args):
+        shutil.rmtree(self.new_name)
+        torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+def run_and_get_code(fn, *args, **kwargs):
+    from .graph import GraphLowering
+
+    compile_to_module = GraphLowering.compile_to_module
+    source_codes = []
+
+    def patched_compile_to_module(self):
+        mod = compile_to_module(self)
+        with open(mod.__file__, "r") as f:
+            source_codes.append(f.read())
+        return mod
+
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ):
+        torch._dynamo.reset()
+        fn(*args, **kwargs)
+    return source_codes
+
+
+def run_and_get_triton_code(fn, *args, **kwargs):
+    source_codes = run_and_get_code(fn, *args, **kwargs)
+    assert (
+        len(source_codes) == 1
+    ), f"expected exactly one code output got {len(source_codes)}"
+    return source_codes[0]
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )

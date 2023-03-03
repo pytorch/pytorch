@@ -30,7 +30,7 @@ Tensor adaptive_avg_pool2d(
           output_size[Layout::Activation4D::batch],
           output_size[Layout::Activation4D::channels],
       },
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const uvec3 v_output_size = v_output.extents();
@@ -91,7 +91,7 @@ Tensor pool2d(
     const IntArrayRef padding_arg,
     const IntArrayRef dilation_arg,
     const bool ceil_mode,
-    const api::ShaderSource& shader_descriptor) {
+    const api::ShaderInfo& shader_descriptor) {
   if (stride_arg.empty()) {
     stride_arg = kernel_arg;
   }
@@ -159,7 +159,7 @@ Tensor pool2d(
           output_height,
           output_width,
       },
-      v_self.options(),
+      self_arg.scalar_type(),
   };
 
   const struct Block final {

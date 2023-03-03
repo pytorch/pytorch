@@ -38,8 +38,12 @@ fi
 EXTRA_CONDA_FLAGS=""
 NUMPY_PIN=""
 PROTOBUF_PACKAGE="defaults::protobuf"
+if [[ "\$python_nodot" = *311* ]]; then
+  # Numpy is yet not avaiable on default conda channel
+  EXTRA_CONDA_FLAGS="-c=malfet"
+fi
+
 if [[ "\$python_nodot" = *310* ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.21.2"
@@ -47,7 +51,6 @@ if [[ "\$python_nodot" = *310* ]]; then
 fi
 
 if [[ "\$python_nodot" = *39*  ]]; then
-  EXTRA_CONDA_FLAGS="-c=conda-forge"
   # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
   # we set a lower boundary here just to be safe
   NUMPY_PIN=">=1.20"
@@ -76,30 +79,27 @@ if [[ "$PACKAGE_TYPE" == conda ]]; then
     set +u
     retry conda install \${EXTRA_CONDA_FLAGS} -yq \
       "numpy\${NUMPY_PIN}" \
-      future \
       mkl>=2018 \
       ninja \
-      dataclasses \
       typing-extensions \
-      ${PROTOBUF_PACKAGE} \
-      six
+      ${PROTOBUF_PACKAGE}
     if [[ "$DESIRED_CUDA" == 'cpu' ]]; then
       retry conda install -c pytorch -y cpuonly
     else
 
       cu_ver="${DESIRED_CUDA:2:2}.${DESIRED_CUDA:4}"
-      CUDA_PACKAGE="cudatoolkit"
-      if [[ "$DESIRED_CUDA" == "cu116" || "$DESIRED_CUDA" == "cu117" || "$DESIRED_CUDA" == "cu118" ]]; then
-        CUDA_PACKAGE="cuda"
+      CUDA_PACKAGE="pytorch-cuda"
+      PYTORCH_CHANNEL="pytorch"
+      if [[ "\${TORCH_CONDA_BUILD_FOLDER}" == "pytorch-nightly" ]]; then
+              PYTORCH_CHANNEL="pytorch-nightly"
       fi
-
-      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c pytorch "\${CUDA_PACKAGE}=\${cu_ver}"
+      retry conda install \${EXTRA_CONDA_FLAGS} -yq -c nvidia -c "\${PYTORCH_CHANNEL}" "pytorch-cuda=\${cu_ver}"
     fi
     conda install \${EXTRA_CONDA_FLAGS} -y "\$pkg" --offline
   )
 elif [[ "$PACKAGE_TYPE" != libtorch ]]; then
   pip install "\$pkg" --extra-index-url "https://download.pytorch.org/whl/nightly/${DESIRED_CUDA}"
-  retry pip install -q future numpy protobuf typing-extensions six
+  retry pip install -q numpy protobuf typing-extensions
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"

@@ -107,7 +107,7 @@ def broadcast_shapes(*shapes):
             if isinstance(shape, int):
                 if max_len < 1:
                     max_len = 1
-            elif isinstance(shape, tuple) or isinstance(shape, list):
+            elif isinstance(shape, (tuple, list)):
                 s = len(shape)
                 if max_len < s:
                     max_len = s
@@ -115,7 +115,7 @@ def broadcast_shapes(*shapes):
         for shape in shapes:
             if isinstance(shape, int):
                 shape = (shape,)
-            if isinstance(shape, tuple) or isinstance(shape, list):
+            if isinstance(shape, (tuple, list)):
                 for i in range(-1, -1 - len(shape), -1):
                     if shape[i] < 0:
                         raise RuntimeError("Trying to create tensor with negative dimension ({}): ({})"
@@ -612,11 +612,11 @@ def stft(input: Tensor, n_fft: int, hop_length: Optional[int] = None,
             a real tensor with an extra last dimension for the real and
             imaginary components.
 
-            .. versionchanged:: 1.14.0
+            .. versionchanged:: 2.0
                ``return_complex`` is now a required argument for real inputs,
                as the default is being transitioned to ``True``.
 
-            .. deprecated:: 1.14.0
+            .. deprecated:: 2.0
                ``return_complex=False`` is deprecated, instead use ``return_complex=True``
                Note that calling :func:`torch.view_as_real` on the output will
                recover the deprecated output format.
@@ -682,7 +682,7 @@ Args:
         output. That is a complex tensor of shape (``channel``, ``fft_size``, ``n_frame``),
         where the ``channel`` dimension is optional.
 
-        .. versionchanged:: 1.14.0
+        .. versionchanged:: 2.0
             Real datatype inputs are no longer supported. Input must now have a
             complex datatype, as returned by ``stft(..., return_complex=True)``.
     n_fft (int): Size of Fourier transform
@@ -1093,6 +1093,8 @@ def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
     if isinstance(dims, int):
         if dims < 0:
             raise RuntimeError(f"tensordot expects dims >= 0, but got dims={dims}")
+        if dims > min(a.dim(), b.dim()):
+            raise RuntimeError(f"tensordot expects dims < ndim_a or ndim_b, but got dims={dims}")
         dims_a = list(range(-dims, 0))
         dims_b = list(range(dims))
 

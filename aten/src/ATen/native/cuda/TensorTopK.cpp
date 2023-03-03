@@ -17,8 +17,7 @@
 #include <ATen/ops/topk_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
 void topk_out_with_sort(
@@ -95,4 +94,4 @@ TORCH_IMPL_FUNC(topk_out_cuda)
   }
 }
 
-}} // namespace at::native
+} // namespace at::native

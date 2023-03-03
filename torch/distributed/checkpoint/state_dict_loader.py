@@ -29,20 +29,20 @@ def load_state_dict(
     instances, each rank only reads data for their local shards.
 
     .. warning::
-    All tensors in ``state_dict`` must be allocated on their
-    destination device *prior to* calling this function.
+        All tensors in ``state_dict`` must be allocated on their
+        destination device *prior to* calling this function.
 
-    All non-tensor data is loaded using `torch.load()` and modified in place
-    on state_dict.
+        All non-tensor data is loaded using `torch.load()` and modified in place
+        on state_dict.
 
     .. warning::
-    Users must call `load_state_dict` on the root module to ensure load
-    pos-processing and non-tensor data properly propagates.
+        Users must call `load_state_dict` on the root module to ensure load
+        pos-processing and non-tensor data properly propagates.
 
     .. note:
-    This function can be used for local inference and load a checkpoint
-    produced by ``save_state_dict`` without having a process group initialized
-    by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
+        This function can be used for local inference and load a checkpoint
+        produced by ``save_state_dict`` without having a process group initialized
+        by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
 
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
@@ -91,8 +91,8 @@ def load_state_dict(
     def local_step():
         assert planner is not None
         metadata = storage_reader.read_metadata()
-        planner.init(state_dict, metadata, distW.is_coordinator)
-        storage_reader.init(metadata, distW.is_coordinator)
+        planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
+        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)

@@ -246,13 +246,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
   if (log_target) {
     output = at::exp(target) * (target - input);
   } else {
-    if (input.is_mps() || target.is_mps()) {
-      // MPS fallback, as MPS does not currently implement xlogy.
-      // MPS will give the wrong results at `target[i] = 0`
-      output = target * (at::log(target) - input);
-    } else {
-      output = at::xlogy(target, target) - target * input;
-    }
+    output = at::xlogy(target, target) - target * input;
   }
   return apply_loss_reduction(output, reduction);
 }
@@ -292,7 +286,7 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
                 return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log(scalar_t(1) - input_val)), scalar_t(-100))
+                    * std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100))
                     - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
             }
         );
@@ -416,8 +410,8 @@ Tensor& soft_margin_loss_out(const Tensor& input,
     const Tensor& target,
     int64_t reduction,
     Tensor& output) {
-  // compute inplace variant of: output = at::log(1. + at::exp(-input * target));
-  at::neg_out(output, input).mul_(target).exp_().add_(1.).log_();
+  // compute inplace variant of: output = at::log1p(at::exp(-input * target));
+  at::neg_out(output, input).mul_(target).exp_().log1p_();
   if (reduction != Reduction::None) {
     auto tmp = apply_loss_reduction(output, reduction);
     output.resize_({});

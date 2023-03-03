@@ -1,12 +1,12 @@
-import queue
 import sys
 import threading
-import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from functools import partial, reduce
 
 import torch
 import torch.distributed as dist
+import weakref
 from torch._C._distributed_c10d import (
     _create_work_from_future,
     AllgatherOptions,
@@ -40,21 +40,39 @@ def ret_work(ret):
     fut.set_result(ret)
     return _create_work_from_future(fut)
 
+def binop_reduce(tensors, op):
+    res = op(torch.stack(tensors), dim=0)
+    if isinstance(res, torch.Tensor):
+        return res
+    # min/max return a namedtuple
+    return res.values
+
+def bitwise_reduce(tensors, op):
+    return reduce(op, tensors)
+
+_reduce_ops = {
+    ReduceOp.SUM: partial(binop_reduce, op=torch.sum),
+    ReduceOp.PRODUCT: partial(binop_reduce, op=torch.prod),
+    ReduceOp.MIN: partial(binop_reduce, op=torch.min),
+    ReduceOp.MAX: partial(binop_reduce, op=torch.max),
+    ReduceOp.BAND: partial(bitwise_reduce, op=torch.bitwise_and),
+    ReduceOp.BOR: partial(bitwise_reduce, op=torch.bitwise_or),
+    ReduceOp.BXOR: partial(bitwise_reduce, op=torch.bitwise_xor),
+}
 
 class AllReduce:
     def __init__(self, op):
-        if op != ReduceOp.SUM:
+        if op.op not in _reduce_ops:
             raise NotImplementedError(
-                "AllReduce only supports SUM on threaded pg for now."
+                f"AllReduce op {op.op} not supported on multithreaded pg for now."
             )
-        self.op = op
+        self.op = op.op
 
     def work(self, data):
-        # data: List[List[Tensor]]
-        res = data[0][0]
-        for src_rank in range(1, len(data)):
-            in_tensor_list = data[src_rank]
-            res.add_(in_tensor_list[0])  # Hardcoded
+        tensors = []
+        for src_rank in range(0, len(data)):
+            tensors.append(data[src_rank][0])
+        res = _reduce_ops[self.op](tensors)
         with torch.no_grad():
             for src_rank in range(len(data)):
                 data[src_rank][0].copy_(res)
@@ -183,7 +201,7 @@ class ProcessLocalGroup(dist.ProcessGroup):
     _ready = False
 
     _coll_lock = threading.Lock()
-    _cur_coll = None
+    _cur_coll_on_pgs = {}
 
     _terminate = threading.Event()
 
@@ -194,32 +212,32 @@ class ProcessLocalGroup(dist.ProcessGroup):
                 cls._pg_list.append(None)
             cls._pg_list[pg._rank] = pg
             cls._count += 1
-            if cls._count == pg._world:
+            if cls._count == pg._world_size:
                 cls._ready = True
 
     @classmethod
-    def _start_coll(cls, world_size, collective):
+    def _start_coll(cls, collective, pg):
         with cls._coll_lock:
             if not cls._ready:
                 raise Exception(
-                    f"world not ready, only {cls._count} PG's registered but world has {world_size} ranks"
+                    f"world not ready, only {cls._count} PG's registered but world has {pg.size()} ranks"
                 )
-            if cls._cur_coll is None:
-                cls._cur_coll = Collective(world_size, collective, cls)
-            return cls._cur_coll
+            # pg_name is unique, we use that to record the mapping between pg and collective
+            if pg.pg_name not in cls._cur_coll_on_pgs:
+                cls._cur_coll_on_pgs[pg.pg_name] = Collective(pg.size(), collective, cls)
+            return cls._cur_coll_on_pgs[pg.pg_name]
 
     @classmethod
-    def _end_coll(cls, collective):
+    def _end_coll(cls, collective, pg):
         # This is racily called by all ranks, so only one will work
         with cls._coll_lock:
-            if cls._cur_coll == collective:
-                cls._cur_coll = None
+            if pg.pg_name in cls._cur_coll_on_pgs and cls._cur_coll_on_pgs[pg.pg_name] == collective:
+                cls._cur_coll_on_pgs.pop(pg.pg_name)
 
     @classmethod
     def exception_handle(cls, exc):
         cls._terminate.set()
-        coll = cls._cur_coll
-        if coll:
+        for coll in cls._cur_coll_on_pgs.values():
             with coll._start_cond:
                 coll._start_cond.notify()
             with coll._done_cond:
@@ -227,53 +245,65 @@ class ProcessLocalGroup(dist.ProcessGroup):
 
     @classmethod
     def reset(cls):
-        cls._cur_coll = None
-        cls._terminate.clear()
+        with cls._coll_lock:
+            cls._cur_coll_on_pgs = {}
+            cls._terminate.clear()
 
     def allreduce(self, tensor_list, opts=AllreduceOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, AllReduce(opts.reduceOp))
+        coll = ProcessLocalGroup._start_coll(AllReduce(opts.reduceOp), self)
         res = coll.join(self._rank, tensor_list)
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def allgather(self, output_tensors, input_tensor, opts=AllgatherOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, AllGather())
+        coll = ProcessLocalGroup._start_coll(AllGather(), self)
         res = coll.join(self._rank, (output_tensors, input_tensor))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def broadcast(self, tensor_list, opts=BroadcastOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, Broadcast(opts.rootRank))
+        coll = ProcessLocalGroup._start_coll(Broadcast(opts.rootRank), self)
         res = coll.join(self._rank, tensor_list)
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def scatter(self, output_tensors, input_tensors, opts=ScatterOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, Scatter(opts.rootRank))
+        coll = ProcessLocalGroup._start_coll(Scatter(opts.rootRank), self)
         res = coll.join(self._rank, (output_tensors, input_tensors))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
     def reduce_scatter(self, output_tensor, scatter_list, opts=ReduceScatterOptions()):
-        coll = ProcessLocalGroup._start_coll(self._world, ReduceScatter(opts.reduceOp))
+        coll = ProcessLocalGroup._start_coll(ReduceScatter(opts.reduceOp), self)
         res = coll.join(self._rank, (output_tensor, scatter_list))
-        ProcessLocalGroup._end_coll(coll)
+        ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def __init__(self, rank, world):
-        super(ProcessLocalGroup, self).__init__(rank, world)
+    def __init__(self, rank, world_size):
+        super().__init__(rank, world_size)
         self._rank = rank
-        self._world = world
+        self._world_size = world_size
+        world = dist.distributed_c10d._world
+        if isinstance(world, ThreadLocalWorld):
+            world = world._get_world()
+        self._world = weakref.ref(world)
         ProcessLocalGroup._register(self)
 
     def size(self):
-        return self._world
+        return self._world_size
+
+    @property
+    def pg_name(self):
+        """
+        return the global registered name of the current pg in the world
+        """
+        return self._world().pg_names[self]
 
     def getBackendName(self):
-        return "local"
+        return "threaded"
 
     def __repr__(self):
-        return f"PLG w:{self._world} r:{self._rank}"
+        return f"ThreadedPG world_size:{self._world_size} rank:{self._rank}"
 
 
 def _create_threaded_pg(prefix_store, rank, world_size, timeout):
@@ -289,15 +319,17 @@ class WorldData:
     pg_map: Dict[dist.ProcessGroup, Tuple[str, Optional[Store]]]
     pg_names: Dict[dist.ProcessGroup, str]
     pg_group_ranks: Dict[dist.ProcessGroup, Dict[int, int]]
+    pg_backend_config: Dict[dist.ProcessGroup, str]
     group_count: int
-
+    tags_to_pg: Dict[str, List[dist.ProcessGroup]]
+    pg_to_tag: Dict[dist.ProcessGroup, str]
 
 class ThreadLocalWorld:
     _world = threading.local()
 
     def _get_world(self) -> WorldData:
         if not hasattr(ThreadLocalWorld._world, "world"):
-            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, 0)
+            ThreadLocalWorld._world.world = WorldData(None, {}, {}, {}, {}, 0, {}, {})
         return ThreadLocalWorld._world.world
 
     @property
@@ -321,12 +353,24 @@ class ThreadLocalWorld:
         return self._get_world().pg_group_ranks
 
     @property
+    def pg_backend_config(self):
+        return self._get_world().pg_backend_config
+
+    @property
     def group_count(self) -> int:
         return self._get_world().group_count
 
     @group_count.setter
     def group_count(self, value):
         self._get_world().group_count = value
+
+    @property
+    def tags_to_pg(self):
+        return self._get_world().tags_to_pg
+
+    @property
+    def pg_to_tag(self):
+        return self._get_world().pg_to_tag
 
 
 _old_pg_world = None
@@ -341,64 +385,3 @@ def _install_threaded_pg():
 
 def _uninstall_threaded_pg():
     dist.distributed_c10d._world = _old_pg_world
-
-
-def run_with_threaded_pg(world_size, timeout, callback):
-    """
-    Run ``callback`` with ``world_size`` threads using the in-proc process group
-    """
-    world = _install_threaded_pg()
-
-    def world_is_valid():
-        return world == dist.distributed_c10d._world
-
-    global_store = dist.HashStore()
-    exception_queue = queue.Queue()
-
-    def worker(rank):
-        if not world_is_valid():
-            raise TimeoutError("Invalid world")  # TODO: raise TimeoutError or RuntimeError?
-        dist.init_process_group(
-            backend="threaded", rank=rank, world_size=world_size, store=global_store
-        )
-        try:
-            callback()
-        # Exceptions are handled in MultiThreadedTestCase
-        except BaseException as ex:
-            exception_queue.put((rank, sys.exc_info()))
-            world.default_pg.exception_handle(ex)  # trigger _terminate event and awaken worker threads
-        finally:
-            if world_is_valid():
-                dist.destroy_process_group()
-
-    try:
-        threads = [
-            threading.Thread(target=worker, args=(rank,)) for rank in range(world_size)
-        ]
-        for thread in threads:
-            thread.start()
-
-        deadline = time.time() + timeout
-        for idx, thread in enumerate(threads):
-            thread.join(max(0, deadline - time.time()))
-            if thread.is_alive():
-                exception_queue.put(
-                    (
-                        idx,
-                        (
-                            TimeoutError,
-                            TimeoutError(
-                                f"Rank failed to join in under {timeout} seconds"
-                            ),
-                            None,
-                        ),
-                    )
-                )
-        ProcessLocalGroup.reset()
-        failed_ranks = []
-        while not exception_queue.empty():
-            failure = exception_queue.get()
-            failed_ranks.append(failure)
-        return failed_ranks
-    finally:
-        _uninstall_threaded_pg()

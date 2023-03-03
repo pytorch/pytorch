@@ -438,6 +438,10 @@ def FetchInt8BlobRealVal(name):
         np.float32) * int8_blob.scale
 
 
+def RemoveBlob(name) -> None:
+    ws = C.Workspace.current
+    _Workspace_remove_blob(ws, name)
+
 def _Workspace_fetch_int8_blob(ws, name):
     """Fetches an Int8 blob from the workspace. It shared backend implementation
     with FetchBlob but it is recommended when fetching Int8 Blobs
@@ -526,7 +530,7 @@ def GetNameScope():
     return scope.CurrentNameScope()
 
 
-class _BlobDict(object):
+class _BlobDict:
     """Provides python dict compatible way to do fetching and feeding"""
 
     def __getitem__(self, key):

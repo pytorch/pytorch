@@ -3,6 +3,7 @@
 Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
+from __future__ import annotations
 
 import builtins
 import functools
@@ -18,14 +19,7 @@ import torch.onnx
 from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
-from torch.onnx import (  # noqa: F401
-    _constants,
-    _deprecation,
-    _patch_torch,
-    _type_utils,
-    errors,
-    symbolic_helper,
-)
+from torch.onnx import _constants, _deprecation, _type_utils, errors, symbolic_helper
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 from torch.types import Number
@@ -54,6 +48,7 @@ __all__ = [
     "batch_norm",
     "bernoulli",
     "bitwise_not",
+    "bitwise_or",
     "bmm",
     "broadcast_tensors",
     "bucketize",
@@ -73,6 +68,7 @@ __all__ = [
     "conv1d",
     "conv2d",
     "conv3d",
+    "convert_element_type",
     "convolution",
     "cos",
     "cosine_similarity",
@@ -151,6 +147,7 @@ __all__ = [
     "lstm",
     "lt",
     "masked_fill",
+    "masked_fill_",
     "matmul",
     "max_pool1d_with_indices",
     "max_pool2d_with_indices",
@@ -163,6 +160,7 @@ __all__ = [
     "mish",
     "mm",
     "movedim",
+    "mse_loss",
     "mul",
     "multinomial",
     "mv",
@@ -282,6 +280,7 @@ __all__ = [
     "wrap_logical_op_with_negation",
     "zeros_like",
     "zeros",
+    "zero",
 ]
 
 
@@ -541,6 +540,7 @@ def cat(g: jit_utils.GraphContext, tensor_list, dim):
     assert all(
         [
             symbolic_helper._get_tensor_rank(nonempty_tensors[0]) is None
+            or symbolic_helper._get_tensor_rank(t) is None
             or symbolic_helper._get_tensor_rank(t)
             == symbolic_helper._get_tensor_rank(nonempty_tensors[0])
             for t in nonempty_tensors
@@ -1321,12 +1321,15 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
-            input_scalar_type = _type_utils.JitScalarType.from_value(input)
-            if input.isCompleteTensor() and input_scalar_type != dtype_0:
-                raise errors.SymbolicValueError(
-                    f"Inputs of {op_name} must have same dtype. Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
-                    input,
-                )
+
+            if input.isCompleteTensor():
+                input_scalar_type = _type_utils.JitScalarType.from_value(input)
+                if input_scalar_type != dtype_0:
+                    raise errors.SymbolicValueError(
+                        f"Inputs of {op_name} must have same dtype."
+                        f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
+                        input,
+                    )
         for i, input in enumerate(inputs):
             if input.isCompleteTensor() and not symbolic_helper._is_fp(input):
                 inputs[i] = g.op(
@@ -2081,6 +2084,24 @@ def bitwise_not(g: jit_utils.GraphContext, input):
             input,
         )
     return g.op("Not", input)
+
+
+@_onnx_symbolic("aten::bitwise_or")
+@_beartype.beartype
+def bitwise_or(g, self, other):
+    if not symbolic_helper._is_bool(self):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. self: ",
+            self,
+        )
+    if not symbolic_helper._is_bool(other):
+        raise errors.SymbolicValueError(
+            "ONNX export does NOT support exporting bitwise OR "
+            "for non-boolean input values. other: ",
+            other,
+        )
+    return g.op("Or", self, other)
 
 
 @_beartype.beartype
@@ -3385,9 +3406,9 @@ def _unsupported_dropout(name: str):
 
 
 @_onnx_symbolic("aten::norm")
-@symbolic_helper.parse_args("v", "t", "is", "i")
+@symbolic_helper.parse_args("v", "t", "is", "i", "v")
 @_beartype.beartype
-def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
+def norm(g: jit_utils.GraphContext, self, p, dim, keepdim, dtype=None):
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
     elif p == 2:
@@ -3396,7 +3417,11 @@ def norm(g: jit_utils.GraphContext, self, p, dim, keepdim):
         raise errors.SymbolicValueError(
             "ONNX export only p-norms with p of 1 or 2", self
         )
-    return f(g, self, dim=dim, keepdim=keepdim)
+    result = f(g, self, dim=dim, keepdim=keepdim)
+    if dtype is not None:
+        dtype = symbolic_helper._get_const(dtype, "i", "dtype")
+        result = g.op("Cast", result, to_i=_type_utils.JitScalarType(dtype).onnx_type())
+    return result
 
 
 @_onnx_symbolic("aten::conv_tbc")
@@ -3452,7 +3477,7 @@ def _unique2(g: jit_utils.GraphContext, input, sorted, return_inverse, return_co
 
 @_onnx_symbolic("aten::_cast_Byte")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3463,7 +3488,7 @@ def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Char")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3474,7 +3499,7 @@ def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Short")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3485,7 +3510,7 @@ def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Int")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3496,7 +3521,7 @@ def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Long")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3507,7 +3532,7 @@ def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Half")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3518,7 +3543,7 @@ def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Float")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3529,7 +3554,7 @@ def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Double")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3540,7 +3565,7 @@ def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
 
 @_onnx_symbolic("aten::_cast_Bool")
 @_deprecation.deprecated(
-    "1.14",
+    "2.0",
     "the future",
     "Avoid using this function and create a Cast node instead",
 )
@@ -3615,7 +3640,7 @@ def tensor(
         for t in symbolic_helper._unpack_list(data):
             shape_reference = g.op("Constant", value_t=torch.LongTensor([1]))
             t = symbolic_helper._reshape_helper(g, t, shape_reference)
-            t = g.op("Cast", t, to_i=dtype.onnx_type())
+            t = g.op("Cast", t, to_i=_type_utils.JitScalarType(dtype).onnx_type())
             input_list.append(t)
         return g.op("Concat", *input_list, axis_i=0)
     else:
@@ -3687,6 +3712,13 @@ def new_zeros(
     if dtype is None and self_dtype is not None:
         dtype = self_dtype
     return zeros(g, sizes, dtype, layout, device, pin_memory)
+
+
+@_onnx_symbolic("aten::zero")
+@_beartype.beartype
+def zero(g: jit_utils.GraphContext, self):
+    self_dtype = symbolic_helper._try_get_scalar_type(self)
+    return zeros_like(g, self, self_dtype)
 
 
 @_onnx_symbolic("aten::ones")
@@ -4086,6 +4118,13 @@ def topk(g: jit_utils.GraphContext, self, k, dim, largest, sorted, out=None):
         symbolic_helper._unimplemented("TopK", "Ascending TopK is not supported", self)
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
+
+
+@_onnx_symbolic("prim::convert_element_type")
+@_beartype.beartype
+def convert_element_type(g: jit_utils.GraphContext, self, *args):
+    dtype = symbolic_helper._get_const(args[0], "i", "dtype")
+    return g.op("Cast", self, to_i=_type_utils.JitScalarType(dtype).onnx_type())
 
 
 @_onnx_symbolic("aten::to")
@@ -5467,6 +5506,12 @@ def masked_fill(g: jit_utils.GraphContext, self, mask, value):
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
 
 
+@_onnx_symbolic("aten::masked_fill_")
+@_beartype.beartype
+def masked_fill_(g: jit_utils.GraphContext, self, mask, value):
+    return masked_fill(g, self, mask, value)
+
+
 @_onnx_symbolic("aten::index")
 @_beartype.beartype
 def index(g: jit_utils.GraphContext, self, index):
@@ -6018,6 +6063,27 @@ def dim(g: jit_utils.GraphContext, self):
     return g.op("Size", shape)
 
 
+@_onnx_symbolic("aten::__contains_")
+@_beartype.beartype
+def __contains_(g: jit_utils.GraphContext, self, element):
+    unpacked_list = symbolic_helper._unpack_list(self)
+    if all(
+        [symbolic_helper._is_constant(x) for x in unpacked_list]
+    ) and symbolic_helper._is_constant(element):
+        return g.op(
+            "Constant",
+            value_t=torch.tensor(
+                symbolic_helper._node_get(element.node(), "value")
+                in (symbolic_helper._node_get(x.node(), "value") for x in unpacked_list)
+            ),
+        )
+
+    raise errors.SymbolicValueError(
+        "Unsupported: ONNX export of __contains__ for non-constant list or element.",
+        self,
+    )
+
+
 @_onnx_symbolic("aten::__getitem_")
 @_beartype.beartype
 def __getitem_(g: jit_utils.GraphContext, self, i):
@@ -6078,6 +6144,23 @@ def kl_div(g: jit_utils.GraphContext, input, target, reduction, log_target):
     else:
         return symbolic_helper._onnx_unsupported(
             "kl_div with reduction other than none, mean, or sum.", input
+        )
+
+
+@_onnx_symbolic("aten::mse_loss")
+@symbolic_helper.parse_args("v", "v", "i")
+@_beartype.beartype
+def mse_loss(g: jit_utils.GraphContext, input, target, reduction):
+    output = mul(g, sub(g, input, target), sub(g, input, target))
+    if reduction == 0:
+        return output
+    elif reduction == 1:
+        return g.op("ReduceMean", output, keepdims_i=0)
+    elif reduction == 2:
+        return symbolic_helper._reducesum_helper(g, output, keepdims_i=0)
+    else:
+        return symbolic_helper._onnx_unsupported(
+            "mse_loss with reduction other than none, mean, or sum.", input
         )
 
 
@@ -6507,8 +6590,9 @@ def prim_data(g: jit_utils.GraphContext, self):
 
 @_onnx_symbolic("prim::layout")
 def prim_layout(g: jit_utils.GraphContext, self):
-    # Unused by ONNX.
-    return None
+    # Always return 'torch.strided'. Other layout types are not supported by JIT 'TensorType'.
+    # Layout class defined in 'c10/core/Layout.h'.
+    return g.op("Constant", value_t=torch.tensor(0))
 
 
 @_onnx_symbolic("prim::ListConstruct")
@@ -6756,6 +6840,12 @@ def prim_constant(g: jit_utils.GraphContext, *inputs, **attrs):
         return g.op(
             "Constant", value_t=torch.tensor(symbolic_helper._node_get(node, "value"))
         )
+    if node.output().type().isSubtypeOf(_C.ListType.ofStrings()):
+        str_constants = [
+            g.op("Constant", value_s=s)
+            for s in symbolic_helper._node_get(node, "value")
+        ]
+        return g.op("prim::ListConstruct", *str_constants)
 
     raise errors.SymbolicValueError(
         f"Unsupported prim::Constant kind: '{node.kindOf('value')}'. "

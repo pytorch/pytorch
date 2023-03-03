@@ -11,6 +11,7 @@ import torch
 from torch import nn
 
 from torch.distributed.pipeline.sync import Pipe
+from torch.testing._internal.common_utils import run_tests
 
 
 def test_inplace_on_requires_grad(setup_rpc):
@@ -71,3 +72,7 @@ def test_inplace_incorrect_grad(setup_rpc):
     # The gradient of 'foo' should be 2, but it is 3 actually because
     # bar.add_(1) was executed twice due to checkpointing.
     assert foo.grad.item() == 2.0
+
+
+if __name__ == "__main__":
+    run_tests()

@@ -18,7 +18,7 @@ inline int64_t ensure_nonempty_stride(const TensorBase &t, int64_t dim) {
 
 using IdxVec = std::vector<int64_t>;
 inline IdxVec ensure_nonempty_vec(IdxVec vec) {
-  if (vec.size() == 0) {
+  if (vec.empty()) {
     vec.push_back(1);
   }
   return vec;

@@ -3,7 +3,6 @@ import numpy as np
 from caffe2.python import workspace, memonger, core, model_helper, brew
 from caffe2.proto import caffe2_pb2
 import caffe2.python.hypothesis_test_util as hu
-from future.utils import viewvalues
 import hypothesis.strategies as st
 from hypothesis import given, settings
 import unittest
@@ -168,7 +167,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x/",
             share_activations=False,
         )
@@ -178,7 +177,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto_wacts = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x/",
             share_activations=True,
             dont_share_blobs=set([str(input_to_grad["name_x/fc1_w"])]),
@@ -244,7 +243,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["loss"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "",
             share_activations=True,
             dont_share_blobs=set(),
@@ -264,7 +263,7 @@ class MemongerTest(hu.HypothesisTestCase):
         device_crossers = device_blobs[caffe2_pb2.CPU].intersection(
             device_blobs[workspace.GpuDeviceType]
         )
-        self.assertEquals(device_crossers, set())
+        self.assertEqual(device_crossers, set())
 
     @given(input_dim=st.integers(min_value=4, max_value=4),
            output_dim=st.integers(min_value=4, max_value=4),
@@ -293,7 +292,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             m.net,
             ["name_x/loss1", "name_x/loss2"],
-            set(viewvalues(m.param_to_grad)),
+            set(m.param_to_grad.values()),
             "name_x",  # "name_x//shared_gradinp_0_shared" if using "name_x/"
             share_activations=True,
             dont_share_blobs=set(['name_x/fc6', 'name_x/fc5',
@@ -572,7 +571,7 @@ class MemongerTest(hu.HypothesisTestCase):
         optim_proto = memonger.share_grad_blobs(
             model.net,
             ["loss"],
-            set(viewvalues(model.param_to_grad)),
+            set(model.param_to_grad.values()),
             "",
             share_activations=True,
             dont_share_blobs=set(),

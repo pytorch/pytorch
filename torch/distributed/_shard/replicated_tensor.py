@@ -1,7 +1,11 @@
+import warnings
 import torch
 import torch.distributed as dist
 
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.overrides import get_default_nowrap_functions
 
@@ -12,6 +16,8 @@ _REPLICATED_WITH_NON_TENSOR_ALLOWLIST = [
     torch.Tensor.unsqueeze,
     torch.Tensor.__getitem__,
 ]
+
+warnings.warn(DEPRECATE_MSG)
 
 class ReplicatedTensor(torch.Tensor):
     """
@@ -57,7 +63,7 @@ class ReplicatedTensor(torch.Tensor):
             return result
 
     def __repr__(self):
-        return f"ReplicatedTensor({super(ReplicatedTensor, self).__repr__()})"
+        return f"ReplicatedTensor({super().__repr__()})"
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
@@ -109,7 +115,7 @@ class ReplicatedTensor(torch.Tensor):
         # We cann't do super().__torch_function__() as it implicitly convert the result
         # back to tensor subclasses, where in our case, we need to control the output type
         # base on the inter-op rules we defined.
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             rs = func(*args, **kwargs)
             if func in get_default_nowrap_functions():
                 return rs
@@ -157,7 +163,7 @@ class ReplicatedTensor(torch.Tensor):
         return True
 
     def __setstate__(self, state):
-        with torch._C.DisableTorchFunction():
+        with torch._C.DisableTorchFunctionSubclass():
             self.data = state
             self.requires_grad = state.requires_grad
             from torch.distributed._shard.api import _get_current_process_group

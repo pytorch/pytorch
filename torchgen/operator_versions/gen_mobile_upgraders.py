@@ -384,7 +384,7 @@ def main() -> None:
     for up in sorted_upgrader_list:
         print("after sort upgrader : ", next(iter(up)))
 
-    pytorch_dir = Path(__file__).resolve().parents[3]
+    pytorch_dir = Path(__file__).resolve().parents[2]
     upgrader_path = pytorch_dir / "torch" / "csrc" / "jit" / "mobile"
     write_cpp(str(upgrader_path), sorted_upgrader_list)
 

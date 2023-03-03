@@ -99,6 +99,7 @@ void SparseCsrTensorImpl::resize_(int64_t nnz, IntArrayRef size) {
   col_indices_.resize_(col_indices_values_size);
   values_.resize_(col_indices_values_size);
   sizes_and_strides_.set_sizes(size);
+  refresh_numel();
 }
 
 void SparseCsrTensorImpl::resize_and_clear_(int64_t sparse_dim, IntArrayRef size) {

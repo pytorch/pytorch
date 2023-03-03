@@ -68,8 +68,8 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
 struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   TensorMetadata(
       const RawTensorMetadata& r,
-      const std::vector<int64_t>& sizes,
-      const std::vector<int64_t>& strides);
+      std::vector<int64_t> sizes,
+      std::vector<int64_t> strides);
 
   TensorImplAddress impl() const {
     return weak_self_.get();
@@ -100,11 +100,11 @@ struct ExtraFields;
 struct Result;
 
 struct TorchOpBasicFields {
-  int64_t sequence_number_;
-  uint64_t forward_tid_;
-  at::RecordScope scope_;
-  bool is_async_;
-  int64_t debug_handle_;
+  int64_t sequence_number_{0};
+  uint64_t forward_tid_{0};
+  at::RecordScope scope_{};
+  bool is_async_{false};
+  int64_t debug_handle_{0};
   std::string name_;
 
   // Set in the exit callback.
@@ -180,8 +180,8 @@ struct RawAllocation {
   torch::profiler::impl::approx_time_t start_time_;
   void* ptr_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
@@ -205,8 +205,8 @@ template <>
 struct ExtraFields<EventType::OutOfMemory> {
   torch::profiler::impl::approx_time_t start_time_;
   int64_t alloc_size_;
-  int64_t total_allocated_;
-  int64_t total_reserved_;
+  size_t total_allocated_;
+  size_t total_reserved_;
   c10::DeviceType device_type_;
   c10::DeviceIndex device_index_;
 };
@@ -327,8 +327,8 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_us_;
-  uint64_t correlation_id_;
+  int64_t duration_us_{0};
+  uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
   std::weak_ptr<Result> linked_activity_{};

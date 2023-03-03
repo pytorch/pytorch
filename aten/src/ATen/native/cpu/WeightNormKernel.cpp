@@ -4,12 +4,13 @@
 #include <ATen/Dispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/cpu/WeightNormKernel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -402,7 +403,7 @@ void weight_norm_kernel(
       "fused kernels can only be applied for first or last dim");
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, v.scalar_type(),
       "weight_norm_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
+    using accscalar_t = at::opmath_type<scalar_t>;
     if (dim == 0) {
       int64_t M = v.size(0);
       int64_t N = v.numel() / M;
@@ -427,7 +428,7 @@ void weight_norm_backward_kernel(
       "fused kernels can only be applied for first or last dim");
   AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, saved_v.scalar_type(),
       "weight_norm_backward_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
+    using accscalar_t = at::opmath_type<scalar_t>;
     if (dim == 0) {
       int64_t M = saved_v.size(0);
       int64_t N = saved_v.numel() / M;
@@ -445,4 +446,4 @@ void weight_norm_backward_kernel(
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
 
-}} // at::native
+} // at::native

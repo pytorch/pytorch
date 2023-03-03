@@ -11,7 +11,7 @@
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -92,6 +92,11 @@ static void sort_kernel(
     bool stable) {
   dim = maybe_wrap_dim(dim, values.dim());
   _fill_indices(indices, dim);
+  if (self.stride(dim) == 0) {
+    // check if stride is zero
+    // https://github.com/pytorch/pytorch/issues/91420
+    return;
+  }
   _dim_apply(
     values, indices, dim,
     "sort_cpu", [&](
@@ -177,4 +182,4 @@ static void topk_kernel(
 REGISTER_DISPATCH(sort_stub, &sort_kernel);
 REGISTER_DISPATCH(topk_stub, &topk_kernel);
 
-}} //at::native
+} //at::native

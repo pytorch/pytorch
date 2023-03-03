@@ -44,7 +44,7 @@ bool torchVitalEnabled() {
   bool enabled = []() {
     auto e = getenv("TORCH_VITAL");
     if (e != nullptr) {
-      return strlen(e) > 0;
+      return e[0] != '\0';
     }
     return false;
   }();

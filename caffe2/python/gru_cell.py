@@ -19,7 +19,7 @@ class GRUCell(rnn_cell.RNNCell):
         linear_before_reset=False,
         **kwargs
     ):
-        super(GRUCell, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.forget_bias = float(forget_bias)

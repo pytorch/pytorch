@@ -10,7 +10,6 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from importlib import import_module
 from typing import Optional, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
@@ -19,6 +18,7 @@ import torch.utils._pytree as pytree
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
+from .backends.registry import CompilerFn, lookup_backend
 
 from .hooks import Hooks
 
@@ -40,7 +40,6 @@ else:
 from . import config, convert_frame, skipfiles, utils
 from .exc import ResetRequired
 from .mutation_guard import install_generation_tagging_init
-from .output_graph import CompilerFn
 from .types import DynamoCallback
 from .utils import compile_times
 
@@ -79,7 +78,26 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
+    def __call__(self, *args, **kwargs):
+        return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
+
     def forward(self, *args, **kwargs):
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -118,14 +136,17 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True):
+def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with patch("torch._dynamo.config.dynamic_shapes", True), patch(
-        "torch._functorch.config.use_dynamic_shapes", True
-    ):
-        yield
+    # If export, we should respect original specialize_int_float flag
+    if export:
+        with config.patch(dynamic_shapes=True):
+            yield
+    else:
+        with config.patch(dynamic_shapes=True, specialize_int_float=False):
+            yield
 
 
 class _TorchDynamoContext:
@@ -137,6 +158,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=False,
     ):
         super().__init__()
@@ -146,6 +168,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         patch_fn()
 
@@ -160,7 +183,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -206,7 +229,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -268,14 +291,29 @@ class _TorchDynamoContext:
 
 
 class OptimizeContext(_TorchDynamoContext):
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
+    @staticmethod
+    def _different_backend(old, new):
+        return not (old == new or old is None)
+
+    def __init__(
+        self,
+        callback,
+        backend_ctx_ctor,
+        first_ctx=False,
+        *,
+        export=False,
+        dynamic=False,
+    ):
         def on_enter():
             global most_recent_backend
-            if (
-                most_recent_backend is not None
-                and most_recent_backend is not compiler_fn
-            ):
-                raise ResetRequired()
+            if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
+                if config.raise_on_backend_change:
+                    raise ResetRequired()
+                else:
+                    warnings.warn(
+                        "changing options to `torch.compile()` may require "
+                        "calling `torch._dynamo.reset()` to take effect"
+                    )
             most_recent_backend = compiler_fn
             install_generation_tagging_init()
 
@@ -286,6 +324,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
         )
 
@@ -317,7 +356,7 @@ def catch_errors_wrapper(callback, hooks: Hooks):
             ddp_module = DistributedDataParallel._get_active_ddp_module()
             if ddp_module:
                 with compile_lock:
-                    from .optimizations.distributed import DDPOptimizer
+                    from torch._dynamo.backends.distributed import DDPOptimizer
 
                     ddp_optimizer = DDPOptimizer(
                         bucket_bytes_cap=ddp_module.bucket_bytes_cap,
@@ -337,12 +376,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
     )
 
@@ -350,8 +390,8 @@ def _optimize_catch_errors(
 def get_compiler_fn(compiler_fn):
     from .debug_utils import wrap_backend_debug
 
-    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
-        compiler_str = "inductor"
+    if hasattr(compiler_fn, "compiler_name"):
+        compiler_str = compiler_fn.compiler_name
     elif isinstance(compiler_fn, str):
         compiler_str = compiler_fn
     else:
@@ -360,32 +400,25 @@ def get_compiler_fn(compiler_fn):
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
-@functools.lru_cache(1)
-def lookup_backend(compiler_fn):
-    """Expand backend strings to functions"""
-    if compiler_fn == "inductor":
-        if torch.cuda.is_available():
-            if (
-                torch.backends.cuda.matmul.allow_tf32 is False
-                and torch.cuda.get_device_capability() >= (8, 0)
-            ):
-                warnings.warn(
-                    "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
-                    "Consider setting `torch.set_float32_matmul_precision('high')`"
-                )
-
-        compiler_fn = import_module(f"{config.inductor_import}.compile_fx").compile_fx
-    elif isinstance(compiler_fn, str):
-        from .optimizations import BACKENDS
-
-        compiler_fn = BACKENDS[compiler_fn]
-    return compiler_fn
-
-
 class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
     def __call__(self, fn):
         assert callable(fn)
         return fn
+
+
+def check_if_dynamo_supported():
+    if sys.platform == "win32":
+        raise RuntimeError("Windows not yet supported for torch.compile")
+    if sys.version_info >= (3, 11):
+        raise RuntimeError("Python 3.11+ not yet supported for torch.compile")
+
+
+def is_dynamo_supported():
+    try:
+        check_if_dynamo_supported()
+        return True
+    except Exception:
+        return False
 
 
 def optimize(
@@ -421,6 +454,7 @@ def optimize(
         def toy_example(a, b):
             ...
     """
+    check_if_dynamo_supported()
     # Note: The hooks object could be global instead of passed around, *however* that would make
     # for a confusing API usage and plumbing story wherein we nest multiple .optimize calls.
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
@@ -429,18 +463,6 @@ def optimize(
     hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
-        return _NullDecorator()
-    if sys.platform == "win32":
-        warnings.warn(
-            "Windows is not currently supported, "
-            + f"{config.dynamo_import}.optimize() will do nothing"
-        )
-        return _NullDecorator()
-    if sys.version_info >= (3, 11):
-        warnings.warn(
-            "Python 3.11+ not yet supported, "
-            f"{config.dynamo_import}.optimize() will do nothing"
-        )
         return _NullDecorator()
 
     backend = get_compiler_fn(backend)
@@ -543,6 +565,7 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
         assert (
@@ -608,8 +631,7 @@ def export(
 
         return result_capturing_wrapper
 
-    # TODO(voz): Handle kwargs properly?
-    flat_args, in_spec = pytree.tree_flatten(args)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
     with patch(f"{__name__}.most_recent_backend", None):
@@ -617,6 +639,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
         result_traced = opt_f(*args, **kwargs)
@@ -652,6 +675,8 @@ def export(
             arg = next(self.old_args_gen)
             if "val" in self.current_node.meta:
                 arg.node.meta["val"] = self.current_node.meta["val"]
+            if "tensor_dict" in self.current_node.meta:
+                arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
             return arg
 
         def output(self, target, args, kwargs):
@@ -662,18 +687,22 @@ def export(
 
         def run_node(self, n):
             self.current_node = n
-            return super().run_node(n)
+            r = super().run_node(n)
+            if "val" in self.current_node.meta:
+                r.node.meta["val"] = self.current_node.meta["val"]
+            return r
 
     if aten_graph:
         # Running graph with interpreter is needed for propagating the stack_trace
         def graph_with_interpreter(*args):
-            with torch.fx.traceback.override_stack_trace():
+            with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
         graph = make_fx(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
+            _allow_non_fake_inputs=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
@@ -681,9 +710,10 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
+    input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            [f"orig_arg_{i}" for i in range(len(args))],
+            input_strs,
             in_spec,
             out_spec_traced,
         )
@@ -712,6 +742,7 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
         convert_frame.convert_frame_assert(backend, export=export),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
     )
 

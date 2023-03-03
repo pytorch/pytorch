@@ -97,8 +97,8 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
         "num_worker_threads must be positive, got ",
         numWorkerThreads);
 
-    if (transports.has_value()) {
-      for (const std::string& transportName : transports.value()) {
+    if (this->transports.has_value()) {
+      for (const std::string& transportName : this->transports.value()) {
         TORCH_CHECK(
             TensorPipeTransportRegistry()->Has(transportName),
             "Unknown transport: ",
@@ -106,8 +106,8 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
       }
     }
 
-    if (channels.has_value()) {
-      for (const std::string& channelName : channels.value()) {
+    if (this->channels.has_value()) {
+      for (const std::string& channelName : this->channels.value()) {
         TORCH_CHECK(
             TensorPipeChannelRegistry()->Has(channelName),
             "Unknown channel: ",
@@ -446,8 +446,9 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
       }
     }
 
+    GroupMembershipLockGuard(const GroupMembershipLockGuard&) = delete;
+
    private:
-    GroupMembershipLockGuard(const GroupMembershipLockGuard&);
     std::mutex& ref_;
     bool isStaticGroup_;
   };

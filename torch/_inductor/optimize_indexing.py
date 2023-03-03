@@ -1,221 +1,23 @@
-import dataclasses
 import functools
-import itertools
 import logging
 import math
-import operator
 from typing import Dict, Iterable, Union
 
 import sympy
 
 import torch
-from .ir import IndexingDiv, InterpreterShim, LoopBody, ModularIndexing
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
+from .ir import FloorDiv, InterpreterShim, LoopBody, ModularIndexing
 from .utils import sympy_subs
 from .virtualized import V
 
 log = logging.getLogger(__name__)
 
 
-@dataclasses.dataclass(frozen=True)
-class ValueRanges(object):
-    lower: Union[sympy.Symbol, sympy.Number, int, float, bool]
-    upper: Union[sympy.Symbol, sympy.Number, int, float, bool]
-
-    @classmethod
-    def wrap(cls, arg):
-        if isinstance(arg, ValueRanges):
-            return arg
-        assert isinstance(arg, (int, float, bool))
-        return ValueRanges(arg, arg)
-
-    @classmethod
-    def unary_map(cls, x, fn):
-        """map lower and upper bound with fn"""
-        x = cls.wrap(x)
-        return ValueRanges(fn(x.lower), fn(x.upper))
-
-    @classmethod
-    def checked_unary_map(cls, x, fn):
-        """check the max and min of computed upper and lower bound for the output"""
-        out = cls.unary_map(x, fn)
-        return ValueRanges(min(out.lower, out.upper), max(out.lower, out.upper))
-
-    @classmethod
-    def binary_map(cls, x, y, fn):
-        """map upper and lower bounds accessing corresponding values of inputs"""
-        x, y = cls.wrap(x), cls.wrap(y)
-
-        return ValueRanges(
-            fn(x.lower, y.lower),
-            fn(x.upper, y.upper),
-        )
-
-    @classmethod
-    def binary_map_products(cls, a, b, fn):
-        """compute the product of all lower and upper bounds and take min and max"""
-        a, b = cls.wrap(a), cls.wrap(b)
-        products = [
-            fn(x, y)
-            for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper])
-        ]
-        return ValueRanges(min(products), max(products))
-
-
-class ValueRangeAnalysis(object):
-    def __init__(self):
-        boolean_operators = (
-            "eq",
-            "ne",
-            "lt",
-            "gt",
-            "le",
-            "ge",
-            "and_",
-            "or_",
-            "xor",
-            "logical_and",
-            "logical_or",
-            "logical_not",
-        )
-        for op in boolean_operators:
-            setattr(self, op, self.bool_handler)
-
-    @staticmethod
-    def bool_handler(*args, **kwargs):
-        # just assuming bools can have both values
-        return ValueRanges(
-            sympy.logic.boolalg.BooleanFalse, sympy.logic.boolalg.BooleanTrue
-        )
-
-    @staticmethod
-    def default_handler(*args, **kwargs):
-        # many ops are unlikely to show up in optimizable indexing compute,
-        # so we dont have full coverage
-        return ValueRanges(-math.inf, math.inf)
-
-    def load(self, name: str, index: sympy.Expr):
-        return ValueRanges(-math.inf, math.inf)
-
-    def store(self, name, index, value, mode=None):
-        return
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        return ValueRanges(-math.inf, math.inf)
-
-    def index_expr(self, index, dtype):
-        assert isinstance(index, ValueRanges)
-        return index
-
-    @staticmethod
-    def to_dtype(x, dtype: torch.dtype):
-        def is_bool(val):
-            return (
-                isinstance(val, bool) or hasattr(low, "is_Boolean") and low.is_Boolean
-            )
-
-        x = ValueRanges.wrap(x)
-        low, up = x.lower, x.upper
-        if is_bool(low):
-            assert is_bool(up)
-            if dtype.is_floating_point:
-                return ValueRanges(sympy.Float(0.0), sympy.Float(1.0))
-            else:
-                return ValueRanges(sympy.Integer(0), sympy.Integer(1))
-        return ValueRanges.wrap(x)
-
-    @staticmethod
-    def constant(value, dtype):
-        # using nan makes subsequent computation throw, and for the purposes of optimization
-        # returning -math.inf - math.inf is equivalent to giving up
-        if math.isnan(value):
-            return ValueRanges(-math.inf, math.inf)
-        if isinstance(value, int):
-            return ValueRanges(sympy.Integer(value), sympy.Integer(value))
-        else:
-            return ValueRanges(sympy.Float(value), sympy.Float(value))
-
-    @staticmethod
-    def reciprocal(x):
-        return ValueRanges.checked_unary_map(x, lambda y: 1 / y)
-
-    @staticmethod
-    def abs(x):
-        return ValueRanges.checked_unary_map(x, abs)
-
-    @staticmethod
-    def neg(x):
-        return ValueRanges.checked_unary_map(x, lambda x: -x)
-
-    @staticmethod
-    def truediv(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.truediv)
-
-    @staticmethod
-    def div(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.truediv)
-
-    @staticmethod
-    def add(a, b):
-        return ValueRanges.binary_map(a, b, operator.add)
-
-    @staticmethod
-    def mul(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.mul)
-
-    @staticmethod
-    def sub(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.sub)
-
-    @staticmethod
-    def exp(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.exponential.exp)
-
-    @staticmethod
-    def square(x):
-        return ValueRanges.checked_unary_map(x, lambda y: y * y)
-
-    @staticmethod
-    def log(x):
-        return ValueRanges.checked_unary_map(
-            x, lambda y: -math.inf if y <= 0 else sympy.log(y)
-        )
-
-    @staticmethod
-    def sqrt(x):
-        return ValueRanges.unary_map(x, sympy.sqrt)
-
-    @staticmethod
-    def pow(a, b):
-        return ValueRanges.binary_map_products(a, b, operator.pow)
-
-    @staticmethod
-    def minimum(a, b):
-        return ValueRanges.binary_map(a, b, min)
-
-    @staticmethod
-    def maximum(a, b):
-        return ValueRanges.binary_map(a, b, max)
-
-    @staticmethod
-    def where(a, b, c):
-        return ValueRanges(min(b.lower, c.lower), max(b.upper, c.upper))
-
-    @staticmethod
-    def floor(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.floor)
-
-    @staticmethod
-    def ceil(x):
-        return ValueRanges.unary_map(x, sympy.functions.elementary.integers.ceiling)
-
-    def __getattr__(self, name):
-        log.warning(f"unhandled ValueRange op {name}")
-        return self.default_handler
-
-
 def dominated_nodes(
     initial_queue: Union[torch.fx.Node, Iterable[torch.fx.Node]], skip_filter=None
 ):
+    """Returns the set of nodes whose values depend on those within initial_queue"""
     if isinstance(initial_queue, torch.fx.Node):
         initial_queue = [initial_queue]
 
@@ -261,7 +63,7 @@ def range_expressable_in_32_bits(range):
     )
 
 
-class OptimizeIndexing(object):
+class OptimizeIndexing:
     """
     Performs Value Range Analysis on LoopBody's fx graph to reduce precision of
     intermediaries from int64 to int32. This is an important optimization for indexing
@@ -458,7 +260,7 @@ class OptimizeIndexing(object):
                 return x / y
 
             return expr.replace(ModularIndexing, mod_indexing_rep).replace(
-                IndexingDiv, indexing_div_rep
+                FloorDiv, indexing_div_rep
             )
 
         symbols = expr.free_symbols

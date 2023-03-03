@@ -4,9 +4,7 @@
 #include <torch/csrc/jit/tensorexpr/ir.h>
 #include <cctype>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
   // Find if we have already encountered this variable.
@@ -18,7 +16,7 @@ const std::string& UniqueNameManager::get_unique_name(VarPtr v) {
   // First use the name_hint as a prefix to check if there is another name
   // with the same prefix.
   std::string name_hint = v->name_hint();
-  if (name_hint == "") {
+  if (name_hint.empty()) {
     name_hint = "v";
   } else if (std::isdigit(name_hint[0])) {
     name_hint = "v" + name_hint;
@@ -44,6 +42,4 @@ const std::string& UniqueNameManager::get_unique_name(const VarHandle& v) {
   return get_unique_name(v.node());
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

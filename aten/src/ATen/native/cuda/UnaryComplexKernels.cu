@@ -9,7 +9,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload angle because std::arg does not work with types other than c10::complex.
 template<typename scalar_t>
@@ -25,7 +25,7 @@ __host__ __device__ static inline c10::complex<T> angle_wrapper(c10::complex<T> 
   return c10::complex<T>{std::arg(v), 0};
 }
 
-const char angle_name[] = "angle_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char angle_name[] = "angle_kernel";
 void angle_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -60,7 +60,7 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 // NB: Ignores the negative bit on tensors
-const char conj_name[] = "conj_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char conj_name[] = "conj_kernel";
 void conj_kernel_cuda(TensorIteratorBase& iter) {
   auto conj_chalf = [&] {
     using scalar_t = c10::complex<at::Half>;
@@ -96,4 +96,4 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
 REGISTER_DISPATCH(angle_stub, &angle_kernel_cuda);
 REGISTER_DISPATCH(conj_physical_stub, &conj_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

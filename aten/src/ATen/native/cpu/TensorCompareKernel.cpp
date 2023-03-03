@@ -26,7 +26,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
@@ -376,7 +376,7 @@ static void clamp_max_scalar_kernel_impl(TensorIteratorBase& iter, Scalar max_) 
 }
 
 static void clamp_min_scalar_kernel_impl(TensorIteratorBase& iter, Scalar min_) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, iter.common_dtype(), "clamp_min_scalar_cpu", [&]() {
     const auto min = min_.to<scalar_t>();
     const Vectorized<scalar_t> min_vec(min);
     cpu_kernel_vec(iter,
@@ -404,4 +404,4 @@ REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
 
-}} // namespace at::native
+} // namespace at::native

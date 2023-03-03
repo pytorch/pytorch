@@ -47,6 +47,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.lazy";
     case at::Backend::XLA:
       return "torch.xla";
+    case at::Backend::Meta:
+      return "torch.meta";
     default:
       AT_ERROR("Unimplemented backend ", backend);
   }
@@ -103,7 +105,9 @@ at::TensorOptions options_from_string(const std::string& str) {
   }
 
   auto it = map->find(str);
-  TORCH_CHECK_VALUE(it != map->end(), "invalid type: '", str, "'");
+  if (it == map->end()) {
+    throw ValueError("invalid type: '%s'", str.c_str());
+  }
   return it->second->options();
 }
 

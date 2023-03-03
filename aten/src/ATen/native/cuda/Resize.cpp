@@ -11,8 +11,7 @@
 #include <ATen/ops/resize_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes) {
   TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
@@ -66,5 +65,4 @@ const Tensor& resize_cuda_(
   }
   return self;
 }
-} // namespace native
-} // namespace at
+} // namespace at::native

@@ -74,7 +74,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
   explicit OperatorBase(
       const c10::FunctionSchema& schema,
       std::vector<c10::IValue> inputs,
-      c10::List<at::Tensor> outputs);
+      std::vector<caffe2::Tensor> outputs);
 #endif
 
   virtual ~OperatorBase() noexcept;
@@ -250,15 +250,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    at::Tensor output = newstyle_outputs_[idx];
-    if (!output.defined() || caffe2::Tensor(output).GetDeviceType() != type) {
+    auto &output = output_tensors_[idx];
+    if (!output.defined() || output.GetDeviceType() != type) {
       // Fix tensor type
-      Tensor tensor = Tensor(type);
-      output = at::Tensor(std::move(tensor.getIntrusivePtr()));
+      output = Tensor(type);
     }
-    output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_[idx] = std::move(output);
-    return &output_tensors_[idx];
+    return &output;
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -280,9 +277,6 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     if (!isLegacyOperator()) {
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-      newstyle_outputs_[idx] = at::Tensor(tensor);
-
-      // also update the tensor in the hack
       output_tensors_[idx] = std::move(tensor);
 #else
       CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
@@ -310,16 +304,12 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    at::Tensor output = newstyle_outputs_[idx];
-    Tensor tensor = output.defined()
-        ? GetSizedTensorWithOptions(caffe2::Tensor(output), dims, options)
+    auto &output = output_tensors_[idx];
+    output = output.defined()
+        ? GetSizedTensorWithOptions(std::move(output), dims, options)
         : caffe2::empty(dims, options);
-    // assign it back in case it changed
-    output = at::Tensor(std::move(tensor.getIntrusivePtr()));
 
-    output_tensors_[idx] = caffe2::Tensor(output);
-    newstyle_outputs_[idx] = std::move(output);
-    return &output_tensors_[idx];
+    return &output;
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -434,7 +424,7 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     }
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-    return newstyle_outputs_.size();
+    return output_tensors_.size();
 #else
     CAFFE_THROW("Non-legacy operators are not legal in xplat/caffe2");
 #endif
@@ -599,8 +589,8 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
 
 #if defined(EXPOSE_C2_OPS) || \
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
-  c10::List<at::Tensor> move_newstyle_outputs() && {
-    return std::move(newstyle_outputs_);
+  std::vector<caffe2::Tensor> move_output_tensors() && {
+    return std::move(output_tensors_);
   }
 #endif
 
@@ -620,7 +610,6 @@ class TORCH_API OperatorBase : public Observable<OperatorBase> {
     !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE)
   std::unique_ptr<const c10::FunctionSchema> fn_schema_;
   vector<c10::IValue> newstyle_inputs_;
-  c10::List<at::Tensor> newstyle_outputs_;
 #endif
   // HACK
   // We preserve the fact that Output() returns Tensor*
@@ -819,7 +808,7 @@ class Operator : public OperatorBase {
   explicit Operator(
       const c10::FunctionSchema& fn_schema,
       std::vector<c10::IValue> inputs,
-      c10::List<at::Tensor> outputs,
+      std::vector<caffe2::Tensor> outputs,
       StreamId stream = 0)
       : OperatorBase(fn_schema, std::move(inputs), std::move(outputs)) {
     // In the constructor, we switch to the device so that the child class

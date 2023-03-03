@@ -34,7 +34,7 @@ DEFINE_DISPATCH(qcat_relu_nhwc_stub);
 namespace {
 
 bool is_cat_nhwc_fast_path(const MaterializedITensorListRef& qxs, int64_t dim) {
-  TORCH_CHECK(qxs.size() > 0);
+  TORCH_CHECK(!qxs.empty());
   bool is_fast_path = dim == 1;
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const at::Tensor& qx : qxs) {

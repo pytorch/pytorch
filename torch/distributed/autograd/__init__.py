@@ -26,7 +26,7 @@ if is_available():
     )
 
 
-class context(object):
+class context:
     '''
     Context object to wrap forward and backward passes when using
     distributed autograd. The ``context_id`` generated in the ``with``

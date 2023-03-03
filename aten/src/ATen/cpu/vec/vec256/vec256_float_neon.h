@@ -409,6 +409,12 @@ public:
       map(std::exp)
     );
   }
+  Vectorized<float> exp2() const {
+    return USE_SLEEF(
+        Vectorized<float>(Sleef_exp2f4_u10(values.val[0]), Sleef_exp2f4_u10(values.val[1])),
+        map(std::exp2)
+      );
+  }
   Vectorized<float> expm1() const {
     return USE_SLEEF(
       Vectorized<float>(Sleef_expm1f4_u10(values.val[0]), Sleef_expm1f4_u10(values.val[1])),

@@ -139,6 +139,7 @@ def subtest_name(test_name_mapping, *args):
         [test_name_mapping[str(s)] if s is not None else "none" for s in args]
     )
 
+
 def _broadcast_state_dict(rank, state_dict):
     # For non-FSDP roots, some parts of the model state on rank 0 may
     # not be on CPU, so we move everything to CPU to avoid issues like:
@@ -154,6 +155,7 @@ def _broadcast_state_dict(rank, state_dict):
     for param_name in state_dict.keys():
         state_dict[param_name] = state_dict[param_name].cuda()
     return state_dict
+
 
 def get_full_params(model: nn.Module, recurse: bool = True):
     """
@@ -198,21 +200,6 @@ class DummyProcessGroup:
 
         dist_wait.get_future = get_future
         return dist_wait
-
-
-class DeterministicModel(torch.nn.Module):
-    def __init__(self, wrap_fsdp, cpu_offload=CPUOffload(offload_params=False)):
-        super().__init__()
-        # keep everything deterministic for model initialization
-        torch.manual_seed(0)
-        self.inner: Union[torch.nn.Linear, FSDP] = torch.nn.Linear(2, 2).cuda()
-        if wrap_fsdp:
-            self.inner = FSDP(self.inner, cpu_offload=cpu_offload)
-        self.outer = torch.nn.Linear(2, 2).cuda()
-
-    def forward(self, x):
-        y = self.inner(x)
-        return self.outer(y)
 
 
 class TransformerWithSharedParams(FSDPTestModel):
@@ -332,10 +319,9 @@ class TransformerWithSharedParams(FSDPTestModel):
 
             if (
                 "sharding_strategy" in fsdp_kwargs
-                and fsdp_kwargs["sharding_strategy"] in {
-                    ShardingStrategy.HYBRID_SHARD,
-                    ShardingStrategy._HYBRID_SHARD_ZERO2
-                } and not isinstance(group, tuple)
+                and fsdp_kwargs["sharding_strategy"]
+                in {ShardingStrategy.HYBRID_SHARD, ShardingStrategy._HYBRID_SHARD_ZERO2}
+                and not isinstance(group, tuple)
             ):
                 fsdp_pg = None
             else:
@@ -729,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
-        super(FSDPTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     @property
@@ -1015,7 +1001,9 @@ class FSDPTest(MultiProcessTestCase):
                 self.assertEqual(param.device, cpu_device)
         context = (
             self.assertRaisesRegex(
-                AssertionError, "Expects the `FlatParameter` to be offloaded to CPU"
+                RuntimeError,
+                "An FSDP-managed module with parameter CPU offloading enabled "
+                "has parameters on cuda",
             )
             if expects_device_error
             else suppress()
