@@ -1029,12 +1029,6 @@ def main():
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
-    if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
-        if os.path.exists(triton_pin_file):
-            with open(triton_pin_file) as f:
-                triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
