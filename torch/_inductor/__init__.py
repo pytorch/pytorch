@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import torch.fx
 
-__all__ = ["compile", "list_mode_optimizations", "list_options"]
+__all__ = ["compile", "list_mode_options", "list_options"]
 
 
 def compile(
@@ -26,6 +26,7 @@ def compile(
 
     return compile_fx(gm, example_inputs, config_patches=options)
 
+
 def aot_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -47,7 +48,7 @@ def aot_compile(
     return compile_fx(gm, example_inputs, config_patches=options, aot_mode=True)()
 
 
-def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
+def list_mode_options(mode: str = None) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
 
@@ -56,10 +57,10 @@ def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
         If None, returns optimizations for all modes
 
     Example::
-        >>> torch._inductor.list_mode_optimizations()
+        >>> torch._inductor.list_mode_options()
     """
 
-    mode_optimizations = {
+    mode_options = {
         "default": {},
         "reduce-overhead": {
             "triton.cudagraphs": False,
@@ -71,7 +72,7 @@ def list_mode_optimizations(mode: str = None) -> Dict[str, Any]:
             "triton.cudagraphs": True,
         },
     }
-    return mode_optimizations[mode] if mode else mode_optimizations
+    return mode_options[mode] if mode else mode_options
 
 
 def list_options() -> Dict[str, Any]:
