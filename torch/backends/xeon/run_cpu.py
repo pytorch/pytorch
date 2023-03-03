@@ -286,7 +286,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
         numactl_available = False
         try:
             cmd = ["numactl", "-C", "0", "-m", "0", "hostname"]
-            r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL)
+            r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if r.returncode == 0:
                 numactl_available = True
         except:
