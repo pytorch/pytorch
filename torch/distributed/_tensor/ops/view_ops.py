@@ -595,7 +595,7 @@ def register_prop_rule_map(
     @register_prop_rule(aten_op_overload)
     def reshape_prop(op_schema: OpSchema) -> OutputSharding:
         rules = spec.dim_map(*op_schema.args_schema, **op_schema.kwargs_schema)
-        input_dtensor_spec = op_schema.args_schema[0]
+        input_dtensor_spec = cast(DTensorSpec, op_schema.args_schema[0])
         mesh = input_dtensor_spec.mesh
 
         assert isinstance(

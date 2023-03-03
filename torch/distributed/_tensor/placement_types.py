@@ -318,14 +318,16 @@ class DTensorSpec:
             return hash((self.mesh, tuple(self.placements)))
 
     def __eq__(self, __o: object) -> bool:
+        if not isinstance(__o, DTensorSpec):
+            return False
+
         same_shape = True
         if self.tensor_meta is not None:
             assert(__o.tensor_meta is not None)
             same_shape = self.tensor_meta.shape == __o.tensor_meta.shape
 
         return (
-            isinstance(__o, DTensorSpec)
-            and self.mesh == __o.mesh
+            self.mesh == __o.mesh
             and self.placements == __o.placements
             and same_shape
         )
