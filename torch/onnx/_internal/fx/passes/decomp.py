@@ -36,9 +36,9 @@ def decompose(
     decomposition_table: Dict[torch._ops.OpOverload, Callable],
     *args,
 ) -> torch.fx.GraphModule:
-
     # A trick adopted from `dynamo.export` in `eval_frame.py`.
     # Running graph with interpreter is needed for propagating the stack_trace.
+
     def graph_with_interpreter(*args):
         with fx_traceback.preserve_node_meta():
             return torch.fx.Interpreter(module).run(*args)
