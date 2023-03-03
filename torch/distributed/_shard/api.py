@@ -5,7 +5,6 @@ import torch.nn as nn
 from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    _PartialTensor
 )
 from .sharding_spec import (
     ShardingSpec,
@@ -166,7 +165,7 @@ def _reshard_output(
         A :class:`torch.nn.Module` object with reshard API hooked.
     """
     def hook_func(_module, _input, output):
-        if isinstance(output, (ShardedTensor, _PartialTensor)):
+        if isinstance(output, ShardedTensor):
             return output.reshard(resharding_spec)
         return output
     module.register_forward_hook(hook_func)
