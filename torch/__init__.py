@@ -1400,7 +1400,7 @@ def compile(model: Optional[Callable] = None, *,
        backend (str or Callable): backend to be used
         - "inductor" is the default backend, which is a good balance between performance and overhead
         - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
-        - Experimental or debug in-tree backends can be seen with `torch._dynamo.lost_backends(None)`
+        - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
         - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
         - "default" is the default mode, which is a good balance between performance and overhead
