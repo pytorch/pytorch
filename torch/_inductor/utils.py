@@ -77,7 +77,12 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
 
 
