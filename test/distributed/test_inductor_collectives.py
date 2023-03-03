@@ -112,6 +112,38 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
                 inductor_out = compiled_matmul_cat_col(*inputs)
                 assert same(eager_out, inductor_out, tol=0.001)
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_reduce_scatter_tensor_inductor(self):
+        def example(a, b, *, tag, ranks, group_size):
+            c = torch.matmul(a, b)
+            ag = torch.ops.aten.reduce_scatter_tensor(
+                c, "sum", 0, tag, ranks, group_size
+            )
+            ag = torch.ops.aten.wait_tensor(ag)
+            return (ag,)
+
+        def compile(func, example_inputs):
+            graph = make_fx(func)(*example_inputs)
+            return inductor_compile_fx(graph, example_inputs)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
+
+            # non-ideally, i seem to need to enable this at user level in order to construct a torchdispatch subclass
+            # inside py registered collective ops
+            with enable_python_dispatcher():
+                eager_out = example(*inputs)
+                compiled_fn = compile(example, inputs)
+                inductor_out = compiled_fn(*inputs)
+                assert same(eager_out, inductor_out, tol=0.001)
+
 
 @requires_nccl()
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):

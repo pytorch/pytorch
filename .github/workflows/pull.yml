@@ -294,12 +294,29 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
+  linux-bionic-cpu-py3_10-gcc7-bazel-test:
+    name: linux-bionic-cpu-py3.10-gcc7-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    with:
+      build-environment: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
+      docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      cuda-version: cpu
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+        ]}
+
   linux-bionic-cuda11_7-py3_10-gcc7-bazel-test:
     name: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
       build-environment: linux-bionic-cuda11.7-py3.10-gcc7-bazel-test
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
+      cuda-version: "11.7"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
 
   linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single:
     name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single

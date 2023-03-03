@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         description: Name of the base docker image to build with.
+      cuda-version:
+        required: true
+        type: string
+        description: What CUDA version to build with (i.e. "11.7"), "cpu" for none.
       sync-tag:
         required: false
         type: string
@@ -18,6 +22,12 @@ on:
         description: |
           If this is set, our linter will use this to make sure that every other
           job with the same `sync-tag` is identical.
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          An option JSON description of what test configs to run later on.
+          We provide all test configs at build time to be able to only do the necessary work.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
@@ -26,7 +36,10 @@ jobs:
   build-and-test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.4xlarge]
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -82,6 +95,7 @@ jobs:
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
@@ -91,6 +105,7 @@ jobs:
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e OUR_GITHUB_JOB_ID \
+            -e CUDA_VERSION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -118,6 +133,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
@@ -151,6 +167,7 @@ jobs:
             -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
+            -e CUDA_VERSION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \

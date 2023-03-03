@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -172,9 +175,6 @@ class triton:
 
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
-
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
