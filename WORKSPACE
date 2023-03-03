@@ -4,6 +4,18 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 load("//tools/rules:workspace.bzl", "new_patched_local_repository")
 
 http_archive(
+    name = "rules_cc",
+    strip_prefix = "rules_cc-40548a2974f1aea06215272d9c2b47a14a24e556",
+    patches = [
+        "//:tools/rules_cc/cuda_support.patch",
+    ],
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+        "https://github.com/bazelbuild/rules_cc/archive/40548a2974f1aea06215272d9c2b47a14a24e556.tar.gz",
+    ],
+)
+
+http_archive(
     name = "rules_cuda",
     strip_prefix = "runtime-b1c7cce21ba4661c17ac72421c6a0e2015e7bef3/third_party/rules_cuda",
     urls = ["https://github.com/tensorflow/runtime/archive/b1c7cce21ba4661c17ac72421c6a0e2015e7bef3.tar.gz"],
@@ -11,7 +23,7 @@ http_archive(
 
 load("@rules_cuda//cuda:dependencies.bzl", "rules_cuda_dependencies")
 
-rules_cuda_dependencies()
+rules_cuda_dependencies(with_rules_cc = False)
 
 load("@rules_cc//cc:repositories.bzl", "rules_cc_toolchains")
 
