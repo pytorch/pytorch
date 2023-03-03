@@ -364,6 +364,39 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
+    def new_fn(*args, **kwargs):
+        # This function will be called by checkpoint_impl
+        out = function(*args, **kwargs)
+        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
+            # Cuda was not initialized before running the forward, so we didn't
+            # stash the CUDA state.
+            raise RuntimeError(
+                "PyTorch's CUDA state was initialized in the forward pass "
+                "of a Checkpoint, which is not allowed. Please open an issue "
+                "if you need this feature.")
+        return out
+
+    def recompute_fn(*args, **kwargs):
+        # This will be called later during recomputation. This wrapping enables
+        # the necessary global state to be captured.
+        rng_devices = []
+        if preserve_rng_state and had_cuda_in_fwd:
+            rng_devices = fwd_gpu_devices
+        with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
+            if preserve_rng_state:
+                torch.set_rng_state(fwd_cpu_state)
+                if had_cuda_in_fwd:
+                    set_device_states(fwd_gpu_devices, fwd_gpu_states)
+
+            with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+                 torch.cpu.amp.autocast(**cpu_autocast_kwargs):
+                function(*args, **kwargs)
+
+    return _checkpoint_impl(new_fn, recompute_fn, *args, **kwargs)
+
+# NB: The helper function above wraps the original function in order to handle
+#     context managers. The actual checkpoint logic lives in this impl function.
+def _checkpoint_impl(new_fn, recompute_fn, *args, **kwargs):
     # Custom class to be able to take weak references
     class Holder():
         pass
@@ -381,7 +414,6 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         res = Holder()
         weak_holder_list.append(weakref.ref(res))
         return res
-
 
     def unpack(x):
         unpack_counter = 0
@@ -401,23 +433,9 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             def inner_unpack(packed):
                 raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
 
-            # Stash the surrounding rng state, and mimic the state that was
-            # present at this time during forward.  Restore the surrounding state
-            # when we're done.
-            rng_devices = []
-            if preserve_rng_state and had_cuda_in_fwd:
-                rng_devices = fwd_gpu_devices
-            with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
-                if preserve_rng_state:
-                    torch.set_rng_state(fwd_cpu_state)
-                    if had_cuda_in_fwd:
-                        set_device_states(fwd_gpu_devices, fwd_gpu_states)
-
-                with torch.enable_grad(), \
-                     torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-                     torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
-                     torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                    _unused = function(*args, **kwargs)
+            with torch.enable_grad(), \
+                 torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
+                recompute_fn(*args, **kwargs)
 
         if x not in storage:
             raise RuntimeError(
@@ -429,13 +447,6 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
         return storage[x]
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-        output = function(*args, **kwargs)
-        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
-            # Cuda was not initialized before running the forward, so we didn't
-            # stash the CUDA state.
-            raise RuntimeError(
-                "PyTorch's CUDA state was initialized in the forward pass "
-                "of a Checkpoint, which is not allowed. Please open an issue "
-                "if you need this feature.")
+        output = new_fn(*args, **kwargs)
 
     return output
