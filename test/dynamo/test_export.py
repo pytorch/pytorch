@@ -2009,6 +2009,23 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = exported(inp)
         self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
+    def test_export_pass_arg_by_name(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_lin = torch.nn.Linear(3, 4, bias=True)
+
+            def forward(self, x):
+                return self.my_lin(x)
+
+        mod, input_tensor = BasicModule(), torch.randn(2, 3)
+        gm, guard = torch._dynamo.export(mod, input_tensor, aten_graph=True)
+        print(gm.graph)
+        print(gm.code)
+        ref = mod(x=input_tensor)
+        res = gm(x=input_tensor)
+        self.assertTrue(torch._dynamo.utils.same(ref, res))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
