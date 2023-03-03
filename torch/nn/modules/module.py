@@ -98,9 +98,9 @@ _has_global_hooks: bool = False
 
 def _update_has_global_hooks():
     _has_global_hooks = (
-        _global_backward_pre_hooks 
+        _global_backward_pre_hooks
         or _global_backward_hooks
-        or _global_forward_hooks 
+        or _global_forward_hooks
         or _global_forward_pre_hooks
     )
 
@@ -487,6 +487,14 @@ class Module:
             super().__init__(*args, **kwargs)
 
     forward: Callable[..., Any] = _forward_unimplemented
+
+    def _update_has_hooks(self):
+        self._has_hooks = (
+            self._backward_hooks
+            or self._backward_pre_hooks
+            or self._forward_hooks
+            or self._forward_pre_hooks
+        )
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -1198,11 +1206,11 @@ class Module:
                 ``handle.remove()``
 
         """
-        self._has_hooks = True
-        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        handle = hooks.RemovableHandle(self._backward_pre_hooks, module=self)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def register_backward_hook(
@@ -1219,15 +1227,15 @@ class Module:
                 ``handle.remove()``
 
         """
-        self._has_hooks = True
         if self._is_full_backward_hook is True:
             raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
                                "single Module. Please use only one of them.")
 
         self._is_full_backward_hook = False
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = hooks.RemovableHandle(self._backward_hooks, module=self)
         self._backward_hooks[handle.id] = hook
+        self._update_has_hooks()
         return handle
 
     def register_full_backward_hook(
@@ -1278,17 +1286,17 @@ class Module:
                 ``handle.remove()``
 
         """
-        self._has_hooks = True
         if self._is_full_backward_hook is False:
             raise RuntimeError("Cannot use both regular backward hooks and full backward hooks on a "
                                "single Module. Please use only one of them.")
 
         self._is_full_backward_hook = True
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = hooks.RemovableHandle(self._backward_hooks, module=self)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def _get_backward_hooks(self):
@@ -1412,10 +1420,10 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        self._has_hooks = True
         handle = hooks.RemovableHandle(
             self._forward_pre_hooks,
-            extra_dict=self._forward_pre_hooks_with_kwargs
+            extra_dict=self._forward_pre_hooks_with_kwargs,
+            module=self
         )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
@@ -1423,6 +1431,7 @@ class Module:
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def register_forward_hook(
@@ -1474,10 +1483,10 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        self._has_hooks = True
         handle = hooks.RemovableHandle(
             self._forward_hooks,
-            extra_dict=self._forward_hooks_with_kwargs
+            extra_dict=self._forward_hooks_with_kwargs,
+            module=self
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
@@ -1485,6 +1494,7 @@ class Module:
 
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def _slow_forward(self, *input, **kwargs):
@@ -1510,7 +1520,9 @@ class Module:
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
-        # this function, and just call forward.
+        # this function, and just call forward.  It's slow for dynamo to guard on the state
+        # of all these hook dicts individually, so instead it can guard on 2 bools and we just
+        # have to promise to keep them up to date when hooks are added or removed via official means.
         if not self._has_hooks and not _has_global_hooks:
             return forward_call(*args, **kwargs)
         # Do not call functions when jit is used

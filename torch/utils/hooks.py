@@ -14,14 +14,21 @@ class RemovableHandle:
         hooks_dict (dict): A dictionary of hooks, indexed by hook ``id``.
         extra_dict (dict): An additional dictionary whose keys will be deleted
             when the same keys are removed from ``hooks_dict``.
+        module (nn.Module): If passed, the hook dict corresponds to that module,
+            otherwise it is a global hook dict.
     """
 
     id: int
     next_id: int = 0
 
-    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None) -> None:
+    def __init__(self, hooks_dict: Any, *, extra_dict: Any = None, module=None) -> None:
         self.hooks_dict_ref = weakref.ref(hooks_dict)
         self.id = RemovableHandle.next_id
+
+        # TODO: we don't pickle/unpickle this field, which means the 'update_has_hooks'
+        # functionality (which is an optimization) decays after pickling.  Can we fix this?
+
+        self.module = weakref.ref(module)
         RemovableHandle.next_id += 1
 
         self.extra_dict_ref = (
@@ -39,6 +46,10 @@ class RemovableHandle:
             extra_dict = self.extra_dict_ref()
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
+
+        if self.module:
+            self.module._update_has_hooks()
+        torch.nn.modules.module._update_has_global_hooks()
 
     def __getstate__(self):
         return (
