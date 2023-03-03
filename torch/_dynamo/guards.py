@@ -505,9 +505,11 @@ class GuardBuilder(GuardBuilderBase):
                 value, guard.source, is_tensor=True
             )
             if not static:
+                # TODO(voz): WE NEED TO REWRITE THIS TO HAVE PROPER RANGE GUARDS!!!!
+                # DO NOT LAND THIS PR WITHOUT THAT!!
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                        f"({tensor_name}._dynamo_dynamic_indices.keys().issubset({value._dynamo_dynamic_indices.keys()})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.

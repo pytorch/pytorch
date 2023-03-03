@@ -1,3 +1,7 @@
+from collections import defaultdict
+from typing import Optional
+
+from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
@@ -157,13 +161,24 @@ def mark_dynamic(t, index):
     before torch.compile.
 
     """
+    mark_dynamic_constrained(t, index, min=None, max=None)
+
+
+@forbid_in_graph
+def mark_dynamic_constrained(
+    t, index, *, min: Optional[int] = None, max: Optional[int] = None
+):
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
-            t._dynamo_dynamic_indices = set()
+            t._dynamo_dynamic_indices = defaultdict(MinMaxConstraint.NONE)
         # TODO(voz): Should we bounds check?
-        t._dynamo_dynamic_indices.add(index)
+        new_range = MinMaxConstraint(min=min, max=max)
+        curr_range = t._dynamo_dynamic_indices[index]
+        t._dynamo_dynamic_indices[index] = MinMaxConstraint.INTERSECT(
+            curr_range, new_range
+        )
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i)
+        mark_dynamic_constrained(t, i)

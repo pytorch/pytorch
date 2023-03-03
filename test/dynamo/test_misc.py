@@ -4494,6 +4494,46 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_raise_partial_constraint_range(self):
+        y = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 4:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        torch._dynamo.reset()
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_no_raise_partial_constraint_range(self):
+        y = torch.randn([5, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 4:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        torch._dynamo.reset()
+        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_raise_illegal_constraint_range(self):
+        y = torch.randn([5, 3, 3])
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        with self.assertRaisesRegex(
+            AssertionError, "Illegal intersection produced! 5 < 4"
+        ):
+            torch._dynamo.mark_dynamic_constrained(y, 0, min=2, max=4)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint_across_break(self):
         y = torch.randn([3, 3, 3])
 
