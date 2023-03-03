@@ -16,7 +16,7 @@ namespace at {
 struct TORCH_API QTensorImpl : public c10::TensorImpl {
  public:
   QTensorImpl(
-      Storage&& storage,
+      Storage storage,
       DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
       QuantizerPtr quantizer);
@@ -24,7 +24,7 @@ struct TORCH_API QTensorImpl : public c10::TensorImpl {
   // See Note [Enum ImplType]
   QTensorImpl(
       ImplType type,
-      Storage&& storage,
+      Storage storage,
       DispatchKeySet key_set,
       const caffe2::TypeMeta data_type,
       QuantizerPtr quantizer);

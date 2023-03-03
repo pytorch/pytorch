@@ -11,7 +11,7 @@ using hooks_list =
 
 struct CppFunctionTensorPreHook : public FunctionPreHook {
   CppFunctionTensorPreHook(
-      const std::shared_ptr<hooks_list>& hooks,
+      std::shared_ptr<hooks_list> hooks,
       int value_idx);
   variable_list operator()(const variable_list& values) override;
 
