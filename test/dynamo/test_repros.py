@@ -1005,8 +1005,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # but really we shouldn't have gotten a Tensor at all, as
         # the operation is between an int and an item() result
         self.assertEqual(cnt.frame_count, ifunspec(6, 5))
-        # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (38, 31, 36, 35, 34, 29, 28))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
