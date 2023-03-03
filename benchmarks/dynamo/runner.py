@@ -221,6 +221,17 @@ def parse_args():
         help="commit id for the tested pytorch",
     )
     parser.add_argument(
+        "--total-partitions",
+        type=int,
+        help="Total number of partitions, to be passed to the actual benchmark script",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        help="ID of partition, to be passed to the actual benchmark script",
+    )
+
+    parser.add_argument(
         "--update-dashboard",
         action="store_true",
         default=False,
@@ -248,7 +259,7 @@ def parse_args():
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
+        help="does all of --no-graphs, --no-update-archive, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -389,6 +400,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
 
                     if args.threads is not None:
                         cmd = f"{cmd} --threads {args.threads}"
+
+                    if args.total_partitions is not None:
+                        cmd = f"{cmd} --total-partitions {args.total_partitions}"
+
+                    if args.partition_id is not None:
+                        cmd = f"{cmd} --partition-id {args.partition_id}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])

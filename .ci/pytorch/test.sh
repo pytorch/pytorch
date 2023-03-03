@@ -244,7 +244,7 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
   assert_git_not_dirty
 }
 
@@ -329,6 +329,10 @@ test_inductor_benchmark_perf() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
+  PARTITION_FLAGS=""
+  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
+    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+  fi
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   # Check training with --amp
@@ -355,9 +359,11 @@ test_inductor_benchmark_perf() {
   else
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" --no-update-archive
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "$PARTITION_FLAGS" \
+      --no-graphs --no-update-lookup --no-gh-comment
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" --no-update-archive
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "$PARTITION_FLAGS" \
+      --no-graphs --no-update-lookup --no-gh-comment
   fi
 }
 
@@ -393,8 +399,12 @@ test_inductor_timm_shard() {
   test_inductor_benchmark "$device" timm_models "$1"
 }
 
-test_inductor_timm_perf() {
-  test_inductor_benchmark_perf timm_models
+test_inductor_timm_perf_shard() {
+  if [[ -z "$NUM_TEST_SHARDS" ]]; then
+    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
+    exit 1
+  fi
+  test_inductor_benchmark_perf timm_models "$1"
 }
 
 test_inductor_torchbench() {
@@ -772,13 +782,17 @@ test_bazel() {
 
   get_bazel
 
-   # Test //c10/... without Google flags and logging libraries. The
-   # :all_tests target in the subsequent Bazel invocation tests
-   # //c10/... with the Google libraries.
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-              --no//c10:use_gflags --no//c10:use_glog //c10/...
+  if [[ "$CUDA_VERSION" == "cpu" ]]; then
+    # Test //c10/... without Google flags and logging libraries. The
+    # :all_tests target in the subsequent Bazel invocation tests
+    # //c10/... with the Google libraries.
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+      --no//c10:use_gflags --no//c10:use_glog //c10/...
 
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  else
+    tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+  fi
 }
 
 test_benchmarks() {
@@ -920,15 +934,15 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   else
     test_inductor_huggingface cuda
   fi
-elif [[ "${TEST_CONFIG}" == *inductor_timm* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_timm
   id=$((SHARD_NUMBER-1))
-  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     install_matplotlib
     install_tabulate
-    test_inductor_timm_perf
-  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* ]]; then
+    test_inductor_timm_perf_shard $id
+  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
   else
     test_inductor_timm_shard cuda $id
