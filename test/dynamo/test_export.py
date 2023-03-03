@@ -2027,7 +2027,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(3, 128)
 
         gm, _ = torch._dynamo.export(
-            mod, inp, aten_graph=True, dynamic=True, tracing_mode="symbolic"
+            mod, inp, aten_graph=True, tracing_mode="symbolic"
         )
         count = 0
         for node in gm.graph.nodes:
