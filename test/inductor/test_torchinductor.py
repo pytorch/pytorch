@@ -6617,6 +6617,15 @@ if HAS_CPU:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
 
+        def test_invalid_index_of_empty_tensor(self):
+            def fn(a):
+                b = a[[0]]
+                return b
+
+            a = torch.tensor([])
+            with self.assertRaises(RuntimeError):
+                torch.compile(fn)(a)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
