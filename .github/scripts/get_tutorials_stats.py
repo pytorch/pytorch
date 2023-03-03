@@ -4,6 +4,8 @@ from typing import List, Optional, Tuple, Dict, Union
 import boto3  # type: ignore[import]
 from botocore.exceptions import ClientError  # type: ignore[import]
 from pprint import pprint
+import shlex
+from subprocess import check_output
 
 dynamodb = boto3.resource('dynamodb', region_name="us-east-1")
 
@@ -17,9 +19,6 @@ def run_command(cmd: str, cwd: Optional[str] = None) -> str:
     Returns:
         Output of the command.
     """
-    import shlex
-    from subprocess import check_output
-
     return check_output(shlex.split(cmd), cwd=cwd).decode("utf-8")
 
 
@@ -38,11 +37,11 @@ def get_history(cwd: Optional[str] = None) -> List[List[str]]:
 
     def parse_string(line: str) -> str:
         """
-        Parse a line into a list of strings.
+        Parse strings that missing deletions or insertions and add them where needed.
         Args:
             line: Line to parse
         Returns:
-            List of strings
+            A string with missing insertion or deletion info.
         """
         # Add missing deletions info
         if "deletion" not in line:
@@ -212,8 +211,10 @@ def main() -> None:
     table_name_filenames = "torchci-tutorial-filenames"
     table_history = dynamodb.Table(table_name_history)
     table_filenames = dynamodb.Table(table_name_filenames)
-    table_exists(table_name_history)
-    table_exists(table_name_filenames)
+    if not table_exists(table_name_history):
+        create_table(table_name_history)
+    if not table_exists(table_name_filenames)
+        create_table2(table_name_filenames)
     print("Uploading data to {table_name_history}")
     for i in get_history_log:
         table_history.put_item(Item={

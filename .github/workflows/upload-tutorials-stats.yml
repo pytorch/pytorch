@@ -4,6 +4,7 @@ name: Upload tutorials stat
 
 # Controls when the workflow will run
 on:
+  pull_request:
   schedule:
   # Run this once per day.
     - cron: "0 0 * * *"
@@ -12,6 +13,7 @@ on:
 
 jobs:
   get-tutorials-stats:
+    if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the tutorials repo
