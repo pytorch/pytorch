@@ -1406,7 +1406,7 @@ def compile(model: Optional[Callable] = None, *,
         - "default" is the default mode, which is a good balance between performance and overhead
         - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
         - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
-        - To see the exact configs that each mode sets you can call `torch._inductor.mode_optimizations()`
+        - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
         - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
         - `max_autotune` which will profile to pick the best matmul configuration
