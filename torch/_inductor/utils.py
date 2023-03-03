@@ -392,9 +392,9 @@ class IndentedBuffer:
                 continue
             assert isinstance(line, str)
             buf.write(line)
-            assert "\n" not in line
             buf.write("\n")
-            p += 1
+            # note: some 'line's contain '\n'
+            p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
     def getvalue(self):

@@ -10,15 +10,9 @@ from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
-from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product, LineContext
+from ..utils import cache_on_self, has_triton, LineContext, sympy_dot, sympy_product
 from ..virtualized import V
-from .common import (
-    CodeGen,
-    DeferredLine,
-    IndentedBuffer,
-    Kernel,
-    PythonPrinter,
-)
+from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
 pexpr = PythonPrinter().doprint
 

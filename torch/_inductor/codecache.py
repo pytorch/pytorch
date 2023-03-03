@@ -15,7 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import types
-from bisect import bisect_left
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
@@ -606,9 +606,7 @@ class PyCodeCache:
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
                 cls.linemaps[path] = linemap
-                from pprint import pprint
 
-                pprint(linemap)
         return cls.cache[key]
 
     @classmethod
@@ -616,20 +614,12 @@ class PyCodeCache:
         if path not in cls.linemaps:
             return None
         linemap = cls.linemaps[path]
-        p = bisect_left(linemap, lineno, key=lambda x: x[0])
+        p = bisect_right(linemap, lineno, key=lambda x: x[0])
         if p == 0:
             return None
         _, entry = linemap[p - 1]
         if not entry:
             return None
-
-        # inductor nodes are fusions, but we can only report one stack frame
-        # use the _last_ in the graph since its result will be one of
-        # the outputs of the fused group
-        nodes = list(entry)
-        g = nodes[0].graph
-        node_pos = {n: i for i, n in enumerate(g.nodes)}
-        _, last = sorted((node_pos[n], n) for n in nodes)[-1]
 
         def parse_stack_trace(stack_trace):
             # ideally fx stores stack traces as data rather than a string
@@ -638,7 +628,7 @@ class PyCodeCache:
             matches = re.findall(regex, stack_trace)
             return [{"filename": f, "line": int(l), "name": n} for f, l, n in matches]
 
-        return parse_stack_trace(last.stack_trace)
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:
