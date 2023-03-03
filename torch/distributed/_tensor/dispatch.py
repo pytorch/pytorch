@@ -24,9 +24,9 @@ _ENABLE_FALLBACK = False
 
 def wrap(res: object, spec: OutputSpecType) -> object:
     if isinstance(res, torch.Tensor):
-        assert spec is not None and isinstance(
-            spec, DTensorSpec
-        ), f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+        assert spec is not None and len(spec) == 1, \
+            f"output spec does not match with output! Expected DTensorSpec, got {spec}."
+        spec = cast(DTensorSpec, spec[0])
         assert spec.tensor_meta is not None
         return dtensor.DTensor(
             res,
@@ -38,9 +38,8 @@ def wrap(res: object, spec: OutputSpecType) -> object:
             stride=spec.tensor_meta.stride,
         )
     elif isinstance(res, (list, tuple)):
-        assert spec is not None and isinstance(
-            spec, (list, tuple)
-        ), f"output spec does not match with output! Expected list/tuple, got {spec}."
+        assert spec is not None and len(res) == len(spec), \
+            f"output spec does not match with output! Expected list/tuple, got {spec}."
         res_list = []
         for e, s in zip(res, spec):
             # NOTE: local results might return Optional Tensor from ATen op, so we need
@@ -139,7 +138,7 @@ def operator_dispatch(
     # unwrap the args/kwargs schema
     op_schema = sharding_propagator.prepare_op_schema(op_call, args, kwargs)
 
-    output_sharding = sharding_propagator.propagate_op_sharding(op_call, op_schema)
+    output_sharding = sharding_propagator.propagate(op_call, op_schema)
 
     # if the schema suggestion from sharding prop is not the same instance as the
     # input op_schema, it indicates a reshard, we need to redistribute the input
@@ -182,11 +181,6 @@ def operator_dispatch(
         return self
     elif suggested_input_schema.is_out_variant:
         # out variant could possibly have multiple out args (i.e. lu_unpack.out)
-        output_specs = (
-            (output_sharding.output_spec,)
-            if not isinstance(output_sharding.output_spec, tuple)
-            else output_sharding.output_spec
-        )
         out_dts = []
         spec_idx = 0
         for arg in suggested_input_schema.func_schema.arguments:
