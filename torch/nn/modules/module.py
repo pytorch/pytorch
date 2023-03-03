@@ -97,6 +97,7 @@ _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _has_global_hooks: bool = False
 
 def _update_has_global_hooks():
+    global _has_global_hooks
     _has_global_hooks = bool(
         _global_backward_pre_hooks
         or _global_backward_hooks
@@ -208,6 +209,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     """
     handle = hooks.RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
@@ -240,6 +242,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     """
     handle = hooks.RemovableHandle(_global_forward_hooks)
     _global_forward_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
