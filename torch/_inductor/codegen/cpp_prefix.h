@@ -5,7 +5,6 @@
 #include <limits>
 #include <omp.h>
 
-#include <ATen/ATen.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 #include <ATen/cpu/vec/functional.h>
