@@ -314,7 +314,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // TODO: To achieve better performance we can have a pipe pool per
   // client that can be configured using RpcBackendOptions.
   struct ClientPipe {
-    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(std::move(pipe)) {}
+    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe)
+        : pipe_(std::move(pipe)) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     mutable std::mutex mutex_;
     bool inError_{false};
