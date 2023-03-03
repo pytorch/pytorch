@@ -4993,6 +4993,8 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+
+    @skipIfRocm
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True,
