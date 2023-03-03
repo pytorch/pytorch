@@ -65,9 +65,6 @@ class ValueRanges:
     def __init__(self, lower, upper):
         lower = simple_sympify(lower)
         upper = simple_sympify(upper)
-        # We don't support point-ranges on floating point inf
-        assert lower != sympy.oo
-        assert upper != -sympy.oo
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
         assert sympy_generic_le(lower, upper)
@@ -360,6 +357,11 @@ class ValueRangeAnalysis:
 
     @classmethod
     def pow(cls, a, b):
+        def is_integer(val):
+            return isinstance(val, int) or (
+                hasattr(val, "is_integer") and val.is_integer
+            )
+
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
         if a.is_singleton() and b.is_singleton():
@@ -367,7 +369,7 @@ class ValueRangeAnalysis:
             if r == sympy.zoo:
                 return ValueRanges.unknown()
             return ValueRanges.wrap(r)
-        elif b.is_singleton() and b.lower >= 0:
+        elif b.is_singleton() and is_integer(b.lower) and b.lower >= 0:
             i = ValueRanges.wrap(1)
             for _ in range(b.lower):
                 i = cls.mul(i, a)

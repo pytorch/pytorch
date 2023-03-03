@@ -11,12 +11,9 @@ import functools
 from typing import Any, Dict, Union
 
 import sympy
-from sympy.logic.boolalg import BooleanAtom
+from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-
-
-SympyBoolean = sympy.logic.boolalg.Boolean
 
 
 # TODO: Dedupe this with SYMPY_INTERP

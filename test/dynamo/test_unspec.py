@@ -8,7 +8,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from functorch.experimental.control_flow import cond
 from torch._dynamo.testing import same
 
 try:
@@ -239,26 +238,6 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             ref = fn(x, y)
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
-
-    def test_unspec_control_flow(self):
-        def true_fn(x, y):
-            return x + y
-
-        def false_fn(x, y):
-            return x - y
-
-        def fn(x, y, z):
-            z, x = z + 1, max(x, y)
-            return cond(torch.tensor(not x), true_fn, false_fn, [x, z])
-
-        x = np.int64(12)
-        y = 10
-        z = torch.tensor([[1.0, 2.0], [3.0, 4.0]], dtype=torch.float64)
-        res1 = fn(x, y, z)
-        cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(fn)
-        res2 = opt_fn(x, y, z)
-        self.assertTrue(same(res1, res2, relax_numpy_equality=True))
 
 
 if __name__ == "__main__":

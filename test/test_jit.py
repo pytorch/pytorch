@@ -2066,7 +2066,7 @@ graph(%Ra, %Rb):
     def test_sparse_tensors(self):
         @torch.jit.ignore
         def get_sparse():
-            return torch.sparse.FloatTensor(2, 3)
+            return torch.sparse_coo_tensor((2, 3), dtype=torch.float32)
 
         @torch.jit.script
         def test_is_sparse(input):
@@ -9163,6 +9163,15 @@ dedent """
         b = torch.arange(840.).reshape(4, 5, 6, 7)
         dims = 2
         self.checkScript(tensordot_dims_int, (a, b, dims))
+
+        for dims in [-1, 5]:
+            try:
+                tensordot_dims_int(a, b, dims)
+            except RuntimeError as error:
+                if dims < 0:
+                    self.assertEqual(str(error), "tensordot expects dims >= 0, but got dims=" + str(dims))
+                if dims > min(a.dim(), b.dim()):
+                    self.assertEqual(str(error), "tensordot expects dims < ndim_a or ndim_b, but got dims=" + str(dims))
 
     def test_torch_functional_tensordot_tensor(self):
         def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
