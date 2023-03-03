@@ -323,15 +323,6 @@ class WrapperCodeGen(CodeGen):
                 """
             )
 
-            if config.triton.convolution != "aten":
-                self.header.splice(
-                    """
-                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
-                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torch._inductor.triton_ops.autotune import conv_heuristics
-                    """
-                )
-
     def add_meta_once(self, meta):
         meta = repr(meta)
         if meta not in self._metas:
@@ -609,8 +600,9 @@ class WrapperCodeGen(CodeGen):
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
-    def define_kernel(self, name: str, kernel: str):
-        self.header.splice(f"\n\n{name} = {kernel}")
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
+        self.header.splice(f"\n\n{kernel_path_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return
