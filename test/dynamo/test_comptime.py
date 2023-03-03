@@ -241,6 +241,7 @@ y = TensorVariable()
             def _(ctx):
                 y = ctx.get_local("y")
                 SELF.assertEqual(y.as_fake().size(0), 2)
+                SELF.assertEqual(y.size(0), 2)
                 # Trigger a graph write (TODO: this is not so
                 # useful right now as there's no way to make use
                 # of the output proxy; maybe it's useful for inserting
