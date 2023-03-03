@@ -79,23 +79,31 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
     m.graph.eliminate_dead_code()
     m.recompile()
 
-def _rearrange_weight_observer_for_addmm(
+# TODO: remove hack when we have better support for pattern matching
+# move around the observer for addmm
+def _rearrange_weight_observer_for_decomposed_linear(
     model: GraphModule,
 ) -> None:
     """
+    Linear is decomposed to `t - addmm` (w/ bias) or `t - mm` (w/o bias)
     before:
          weight - t - observer \
-          input - observer - addmm
+           input - observer - addmm/mm
     after:
          weight - observer - t \
-           input - observer - addmm
+           input - observer - addmm/mm
     """
+    aten = torch.ops.aten
+    op_to_weight_obs_index = {
+        aten.addmm.default : 2,
+        aten.mm.default : 1,
+    }
     named_modules = dict(model.named_modules(remove_duplicate=False))
     for node in model.graph.nodes:
-        if node.target != torch.ops.aten.addmm.default:
+        if node.target not in (aten.addmm.default, aten.mm.default):
             continue
-        addmm = node
-        maybe_weight_obs = addmm.args[2]
+        root_node = node
+        maybe_weight_obs = root_node.args[op_to_weight_obs_index[root_node.target]]
         if not _is_activation_post_process_node(maybe_weight_obs, named_modules):
             continue
         transpose_node = maybe_weight_obs.args[0]
@@ -114,7 +122,8 @@ def _rearrange_weight_observer_for_addmm(
                 tuple(args),
                 transpose_node.kwargs
             )
-        addmm.replace_input_with(maybe_weight_obs, new_transpose_node)
+        root_node.replace_input_with(maybe_weight_obs, new_transpose_node)
 
     model.graph.eliminate_dead_code()
     model.graph.lint()
+    model.recompile()
