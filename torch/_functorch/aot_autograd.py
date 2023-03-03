@@ -1272,7 +1272,15 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
-    dynamic_shapes: bool
+    # If None, defer to config
+    _dynamic_shapes: Optional[bool] = None
+
+    @property
+    def dynamic_shapes(self):
+        if self._dynamic_shapes is None:
+            return config.use_dynamic_shapes
+        else:
+            return self._dynamic_shapes
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -2323,7 +2331,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                                 aot_config.bw_compiler, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
-                                aot_config.dynamic_shapes
+                                aot_config._dynamic_shapes
                             )
                         )
                     else:
@@ -2456,7 +2464,7 @@ def create_aot_dispatcher_function(
             shape_env = fake_mode.shape_env
             break
     else:
-        shape_env = ShapeEnv() if config.use_dynamic_shapes or aot_config.dynamic_shapes else None
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = (
             FakeTensorMode(shape_env=shape_env)
             if config.use_fake_tensor
@@ -2622,7 +2630,6 @@ def aot_function(
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=config.dynamic_shapes,
     )
     cached_res = None
 
@@ -2826,7 +2833,7 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=dynamic_shapes
+        _dynamic_shapes=dynamic_shapes
     )
 
     compiled_fn = create_aot_dispatcher_function(
