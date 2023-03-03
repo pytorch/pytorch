@@ -4,7 +4,6 @@
 #include <ATen/Utils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/sparse/Macros.h>
-#include <ATen/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -49,6 +48,55 @@ _assert(const bool cond, const char* const message) {
 }
 
 enum class CDimName : bool { CRow, CCol };
+
+template <size_t static_shape_max_len>
+class TensorGeometryHolder {
+  using geometry_holder_t = std::array<int64_t, static_shape_max_len>;
+
+public:
+  explicit TensorGeometryHolder(const Tensor& t) {
+    std::copy(t.sizes().begin(), t.sizes().end(), t_sizes.begin());
+    std::copy(t.strides().begin(), t.strides().end(), t_strides.begin());
+  }
+
+  auto operator*() const {
+    return std::make_tuple(t_sizes, t_strides);
+  }
+
+private:
+  geometry_holder_t t_sizes;
+  geometry_holder_t t_strides;
+};
+
+template <>
+class TensorGeometryHolder<0> {
+  using geometry_holder_t = Tensor;
+
+public:
+  explicit TensorGeometryHolder(const Tensor& t) {
+    const auto t_ndims = t.dim();
+    const auto cpu_options = t.options().dtype(kLong).device(kCPU);
+    Tensor t_sizes_and_strides_cpu = at::empty({2, t_ndims}, cpu_options);
+    t_sizes_and_strides_cpu.select(0, 0).copy_(
+        at::tensor(t.sizes(), cpu_options));
+    t_sizes_and_strides_cpu.select(0, 1).copy_(
+        at::tensor(t.strides(), cpu_options));
+    const Tensor t_sizes_and_strides =
+        t_sizes_and_strides_cpu.to(t.device());
+    t_sizes = t_sizes_and_strides.select(0, 0);
+    t_strides = t_sizes_and_strides.select(0, 1);
+  }
+
+  auto operator*() const {
+    return std::make_tuple(
+        t_sizes.template data_ptr<int64_t>(),
+        t_strides.template data_ptr<int64_t>());
+  }
+
+private:
+  geometry_holder_t t_sizes;
+  geometry_holder_t t_strides;
+};
 
 // Invariant 5.1
 // compressed_index[..., 0] == 0.
@@ -272,7 +320,7 @@ void _validate_compressed_sparse_indices_kernel(
 
     const auto idx_ndims = idx.dim();
 
-    const auto idx_geometry_holder = at::sparse::TensorGeometryHolder<static_shape_max_len>(idx);
+    const auto idx_geometry_holder = TensorGeometryHolder<static_shape_max_len>(idx);
     const auto idx_sizes = std::get<0>(*idx_geometry_holder);
     const auto idx_strides = std::get<1>(*idx_geometry_holder);
 
