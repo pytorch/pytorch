@@ -11,7 +11,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-inline Vectorized<bool> convert_to_bool(Vectorized<int8_t> x) {
+inline Vectorized<bool> convert_to_bool(const Vectorized<int8_t>& x) {
   __at_align__ bool buffer[x.size()];
   x.ne(Vectorized<int8_t>(0)).store(buffer);
 
