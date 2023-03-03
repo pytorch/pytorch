@@ -192,7 +192,7 @@ class triton:
     ordered_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    descriptive_kernel_names = True
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True

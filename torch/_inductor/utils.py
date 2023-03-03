@@ -216,22 +216,13 @@ def cache_on_self(fn):
 
 
 def get_fused_kernel_name(node_schedule):
+    all_origins = functools.reduce( operator.or_, [ node.node.origins for node in node_schedule if hasattr(node, "node") ])
+    sources = [str(origin.meta['source_fn'] if 'source_fn' in origin.meta else f"{origin.name}") for origin in all_origins if origin.op == 'call_function']
+    sources = set(sources)
+    sources = list(sources)[:config.kernel_name_max_ops]
     return "_".join(
         ["fused"]
-        + sorted(
-            [
-                str(origin.name)
-                for origin in functools.reduce(
-                    operator.or_,
-                    [
-                        node.node.origins
-                        for node in node_schedule
-                        if hasattr(node, "node")
-                    ],
-                )
-                if origin.op == "call_function"
-            ]
-        )[0 : config.kernel_name_max_ops]
+        + sources
     )
 
 

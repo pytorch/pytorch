@@ -810,6 +810,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
+        elif kind == 'call_module':
+            rv.node.meta['source_fn'] = rv.node.meta['nn_module_stack'][target][1]
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
