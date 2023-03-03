@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 import torch
 from torch._C import FileCheck
-from torch._dispatch.python import enable_python_dispatcher
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._dynamo.utils import same
@@ -69,13 +68,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 6
 
-            # non-ideally, i seem to need to enable this at user level in order to construct a torchdispatch subclass
-            # inside py registered collective ops
-            with enable_python_dispatcher():
-                eager_out = matmul_cat_col(*inputs)
-                compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
-                inductor_out = compiled_matmul_cat_col(*inputs)
-                assert same(eager_out, inductor_out, tol=0.001)
+            eager_out = matmul_cat_col(*inputs)
+            compiled_matmul_cat_col = compile(matmul_cat_col, inputs)
+            inductor_out = compiled_matmul_cat_col(*inputs)
+            assert same(eager_out, inductor_out, tol=0.001)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -104,13 +100,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
 
-            # non-ideally, i seem to need to enable this at user level in order to construct a torchdispatch subclass
-            # inside py registered collective ops
-            with enable_python_dispatcher():
-                eager_out = example(*inputs)
-                compiled_matmul_cat_col = compile(example, inputs)
-                inductor_out = compiled_matmul_cat_col(*inputs)
-                assert same(eager_out, inductor_out, tol=0.001)
+            eager_out = example(*inputs)
+            compiled_matmul_cat_col = compile(example, inputs)
+            inductor_out = compiled_matmul_cat_col(*inputs)
+            assert same(eager_out, inductor_out, tol=0.001)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
@@ -136,13 +129,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             )
             inputs = (torch.ones(4, 4, device="cuda") + self.rank,) * 2
 
-            # non-ideally, i seem to need to enable this at user level in order to construct a torchdispatch subclass
-            # inside py registered collective ops
-            with enable_python_dispatcher():
-                eager_out = example(*inputs)
-                compiled_fn = compile(example, inputs)
-                inductor_out = compiled_fn(*inputs)
-                assert same(eager_out, inductor_out, tol=0.001)
+            eager_out = example(*inputs)
+            compiled_fn = compile(example, inputs)
+            inductor_out = compiled_fn(*inputs)
+            assert same(eager_out, inductor_out, tol=0.001)
 
 
 @requires_nccl()
@@ -168,19 +158,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         inputs = torch.ones(4, 4, device="cuda")
 
-        with enable_python_dispatcher():
-            compiled = torch.compile(func)
-            out = compiled(inputs, **self.get_world_trs())
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            FileCheck() \
-                .check("buf0 = empty_strided") \
-                .check("buf0.copy_(arg0_1)") \
-                .check("buf0_work = dist.all_reduce(buf0") \
-                .check("buf0_work.wait()") \
-                .check("return (buf1, )") \
-                .run(code)
-            correct = func(inputs, **self.get_world_trs())
-            assert same(out, correct)
+        compiled = torch.compile(func)
+        out = compiled(inputs, **self.get_world_trs())
+        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        FileCheck() \
+            .check("buf0 = empty_strided") \
+            .check("buf0.copy_(arg0_1)") \
+            .check("buf0_work = dist.all_reduce(buf0") \
+            .check("buf0_work.wait()") \
+            .check("return (buf1, )") \
+            .run(code)
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_steal_buffer(self):
@@ -200,21 +189,20 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         inputs = torch.ones(4, 4, device="cuda")
 
-        with enable_python_dispatcher():
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            FileCheck() \
-                .check("buf1 = buf0; del buf0  # reuse") \
-                .check_not("buf1.copy_(") \
-                .check("buf1_work = dist.all_reduce(buf1") \
-                .check("buf1_work.wait()") \
-                .check("buf2 = buf1") \
-                .check("buf3 = empty_strided") \
-                .check("return (buf2, buf3") \
-                .run(code)
-            out = compiled(inputs, **self.get_world_trs())
-            correct = func(inputs, **self.get_world_trs())
-            assert same(out, correct)
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        FileCheck() \
+            .check("buf1 = buf0; del buf0  # reuse") \
+            .check_not("buf1.copy_(") \
+            .check("buf1_work = dist.all_reduce(buf1") \
+            .check("buf1_work.wait()") \
+            .check("buf2 = buf1") \
+            .check("buf3 = empty_strided") \
+            .check("return (buf2, buf3") \
+            .run(code)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_inductor_doesnt_mutate_shared(self):
@@ -234,23 +222,22 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         inputs = torch.ones(4, 4, device="cuda")
 
-        with enable_python_dispatcher():
-            compiled = torch.compile(func)
-            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            FileCheck() \
-                .check("buf0 = empty_strided(") \
-                .check("buf2 = empty_strided") \
-                .check("triton__0.run(arg0_1, buf0, buf2") \
-                .check_not("copy_(") \
-                .check("buf1 = buf0; del buf0  # reuse") \
-                .check("buf1_work = dist.all_reduce(buf1") \
-                .check("buf1_work.wait()") \
-                .check("buf3 = buf1") \
-                .check("return (buf3, buf2, buf4") \
-                .run(code)
-            out = compiled(inputs, **self.get_world_trs())
-            correct = func(inputs, **self.get_world_trs())
-            assert same(out, correct)
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+        FileCheck() \
+            .check("buf0 = empty_strided(") \
+            .check("buf2 = empty_strided") \
+            .check("triton__0.run(arg0_1, buf0, buf2") \
+            .check_not("copy_(") \
+            .check("buf1 = buf0; del buf0  # reuse") \
+            .check("buf1_work = dist.all_reduce(buf1") \
+            .check("buf1_work.wait()") \
+            .check("buf3 = buf1") \
+            .check("return (buf3, buf2, buf4") \
+            .run(code)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert same(out, correct)
 
     def test_dynamo_trace_allreduce(self):
         def func(inp, *, tag, ranks, group_size):
@@ -259,13 +246,12 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         inputs = torch.ones(4, 4, device="cuda")
         counter = CompileCounter()
-        with enable_python_dispatcher():
-            compiled = torch.compile(func, backend=counter)
-            out = compiled(inputs, **self.get_world_trs())
-            correct = func(inputs, **self.get_world_trs())
-            assert counter.frame_count == 1
-            assert counter.op_count == 1
-            assert same(out, correct)
+        compiled = torch.compile(func, backend=counter)
+        out = compiled(inputs, **self.get_world_trs())
+        correct = func(inputs, **self.get_world_trs())
+        assert counter.frame_count == 1
+        assert counter.op_count == 1
+        assert same(out, correct)
 
     def test_backwards(self):
         """
@@ -278,18 +264,17 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
-        with enable_python_dispatcher():
-            # TODO implement backwards
-            with self.assertRaisesRegex(RuntimeError, "derivative for aten::all_reduce is not implemented"):
-                compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
-                out = compiled(input, **self.get_world_trs())
-                out.sum().backward()
+        # TODO implement backwards
+        with self.assertRaisesRegex(RuntimeError, "derivative for aten::all_reduce is not implemented"):
+            compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
+            out = compiled(input, **self.get_world_trs())
+            out.sum().backward()
 
-                correct_input = input.clone().detach().requires_grad_()
-                correct = func(correct_input, **self.get_world_trs())
-                correct.sum().backward()
-                assert same(out, correct)
-                assert same(input.grad, correct_input.grad)
+            correct_input = input.clone().detach().requires_grad_()
+            correct = func(correct_input, **self.get_world_trs())
+            correct.sum().backward()
+            assert same(out, correct)
+            assert same(input.grad, correct_input.grad)
 
     def test_meta(self):
         x = torch.rand((2, 3, 4), device="meta")
