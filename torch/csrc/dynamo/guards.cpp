@@ -321,8 +321,8 @@ static PyTypeObject TensorGuardsType = {
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
   PyObject* obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+  unsigned long long expected;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return NULL;
   }
   if (Py_TYPE(obj) == (void*)expected) {
@@ -335,8 +335,8 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
   PyObject* obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+  unsigned long long expected;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return NULL;
   }
   if (obj == (void*)expected) {
