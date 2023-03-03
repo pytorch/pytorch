@@ -171,7 +171,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             self, fn, 1, expected_ops=1, expected_ops_dynamic=11
         )
 
-    def test_int_shape_inplace_binops(self):
+    def test_shape_int_inplace_binops(self):
         def fn(x):
             p = x.shape[0]
             p += 2
@@ -182,6 +182,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             p //= 2
             p %= 2
             return x + p
+
+        torch._dynamo.testing.standard_test(
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=10
+        )
+
+    def test_int_shape_inplace_binops(self):
+        def fn(x):
+            p = x.shape[0]
+            # Test reversal by putting constant first
+            y = 2
+            y += p
+            y = 2
+            y -= p
+            y = 2
+            y **= p
+            y = 2
+            y /= p
+            y = 2
+            y *= p
+            y = 2
+            y //= p
+            y = 2
+            y %= p
+            return x + y
 
         torch._dynamo.testing.standard_test(
             self, fn, 1, expected_ops=1, expected_ops_dynamic=10
@@ -210,7 +234,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     def test_shape_int_comparisons(self):
         def fn(x):
             a = x.shape[0]
-            # Ensure support for constant on left side
+            # Ensure support for constant on right side
             if a != 10:
                 out = 1
             elif a < 2:
@@ -4420,6 +4444,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             # TODO should also pass the code object back into dynamo again, but
             # dynamo is not enabled for Python 3.11 yet.
 
+    def test_ordered_dict_alias_reconstruct(self):
+        od = collections.OrderedDict
+
+        def fn():
+            d1 = dict()
+            d1["a"] = 1
+            d2 = od(d1)
+            d2["b"] = 2
+            torch._dynamo.graph_break()
+            if isinstance(d2, od):
+                return d2["a"] + d2["b"]
+            else:
+                return 0
+
+        dis.dis(fn)
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
+
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_guard_full_constraint(self):
         y = torch.randn([3, 3, 3])
@@ -4553,6 +4594,119 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             "mark_dynamic usage with dynamic_shapes=False is not yet supported",
         ):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    @torch._dynamo.config.patch(dynamic_shapes=False)
+    def test_parameter_mark_dynamic_illegal(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param)
+
+        e = encoder(y)
+        torch._dynamo.optimize("eager")(e)(x)
+        torch._dynamo.mark_dynamic(y, 0)
+        torch._dynamo.reset()
+        e = encoder(y)
+        with self.assertRaisesRegex(
+            AssertionError,
+            "mark_dynamic on parameter, parameters are always static today",
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_py_guards_mark_dynamic(self):
+        x = torch.randn([3, 3, 3])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 2:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.mark_dynamic(x, 0)
+        counter = CompileCounter()
+        # Run with dynamic
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        delattr(x, "_dynamo_dynamic_indices")
+
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Run without dynamic, no recompile
+        self.assertEqual(counter.frame_count, 1)
+
+        # Mark a new dim, 1, as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # Recompile triggered because we marked a new dym as dynamic
+        self.assertEqual(counter.frame_count, 2)
+
+        # Mark an existing dim, 1, as dynamic
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # No Recompile triggered because we marked an existing dym as dynamic
+        self.assertEqual(counter.frame_count, 2)
+
+        # Reset
+        torch._dynamo.reset()
+        # Reset counter
+        counter = CompileCounter()
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+
+        # Run with dynamic 1
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, not subset
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 1, 2, not subset
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, 1)
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
+
+        # Clear dynamic
+        delattr(x, "_dynamo_dynamic_indices")
+        # Run with dynamic 0, 2, subset!
+        torch._dynamo.mark_dynamic(x, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 3)
+
+    def test_torch_compile_ctx_on_forward_and_training_step(self):
+        class MyModel(torch.nn.Module):
+            def forward(self):
+                ...
+
+            def training_step(self):
+                self()
+
+        model = MyModel()
+        compiled_model = torch.compile(model)
+
+        model.forward = compiled_model.dynamo_ctx(model.forward)
+        model.training_step = compiled_model.dynamo_ctx(model.training_step)
+
+        model.training_step()
 
 
 class CustomFunc1(torch.autograd.Function):
