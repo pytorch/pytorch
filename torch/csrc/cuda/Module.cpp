@@ -20,7 +20,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
-#include <execinfo.h>
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
