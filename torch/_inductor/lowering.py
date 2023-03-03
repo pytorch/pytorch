@@ -2016,6 +2016,11 @@ def index(x, indices):
     output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
+
+    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    if 0 in indexed_size and 0 not in output_size:
+        raise IndexError("index is out of bounds for dimension with size 0")
+
     output_size = [
         *x_size[:start_offset],
         *output_size,
