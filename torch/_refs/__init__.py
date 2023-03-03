@@ -2045,7 +2045,7 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or py_all(a.shape[i] for i in dims)
+        valid_shape = a.ndim == 0 or py_all(a.shape[i] != 0 for i in dims)
         if not valid_shape:
             raise RuntimeError(
                 "reducing over zero-size dimension for reduction operation without identity"
