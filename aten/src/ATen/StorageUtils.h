@@ -38,10 +38,9 @@ C10_EXPORT void storage_copy(
 /**
  * In place change the storage to shm based.
  *
- * This would later be invoked by at::TensorBase user facing API.
- * For now, to keep the change minimal,
- * intentionally separate the API changes from the core logic,
- * as the API changes may also need to handle device/OS specifics.
+ * This is only applicable to CPU tensors not already shared.
+ * Otherwise, it's a no op to mirror the THP tensor behavior:
+ * https://pytorch.org/docs/stable/generated/torch.Tensor.share_memory_.html
  *
  * @param t  a tensor
  */

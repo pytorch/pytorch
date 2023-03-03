@@ -223,7 +223,6 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "opacus_cifar10",  # timeout
     # timm_models
     "pnasnet5large",  # ceiling is not defined
-    "swin_base_patch4_window7_224",  # floor is not defined
     "volo_d1_224",  # ceiling is not defined
 ]
 
@@ -934,6 +933,20 @@ class DummyGradScaler:
         return loss
 
 
+def get_dynamo_stats():
+    # TODO: consider deepcopy'ing the entire counters struct and
+    # adding a helper to do subtraction on it
+    return collections.Counter(
+        {
+            "calls_captured": torch._dynamo.utils.counters["stats"]["calls_captured"],
+            "unique_graphs": torch._dynamo.utils.counters["stats"]["unique_graphs"],
+            "graph_breaks": sum(torch._dynamo.utils.counters["graph_break"].values()),
+            # NB: The plus removes zero counts
+            "unique_graph_breaks": len(+torch._dynamo.utils.counters["graph_break"]),
+        }
+    )
+
+
 def maybe_fresh_cache(fn, is_cold_start):
     def inner(*args, **kwargs):
         cache_minder = NullContext()
@@ -1176,8 +1189,9 @@ class BenchmarkRunner:
         1) Collect the outputs with fp64 datatype. This is useful for error checking.
         2) Checks if eager itself has variations.
         """
+        start_stats = get_dynamo_stats()
 
-        def record_status(accuracy_status):
+        def record_status(accuracy_status, dynamo_start_stats):
             """
             Records the status in the csv file
             """
@@ -1192,11 +1206,17 @@ class BenchmarkRunner:
                 headers.insert(3, "tag")
                 fields.insert(3, tag)
 
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(dynamo_start_stats)
+            for k, v in dynamo_stats.items():
+                headers.append(k)
+                fields.append(v)
+
             output_csv(output_filename, headers, fields)
             return "PASS" if accuracy_status in ("pass", "pass_due_to_skip") else "FAIL"
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
-            return record_status("pass_due_to_skip")
+            return record_status("pass_due_to_skip", dynamo_start_stats=start_stats)
 
         def deepcopy_and_maybe_ddp(model):
             model = copy.deepcopy(model)
@@ -1254,11 +1274,11 @@ class BenchmarkRunner:
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_outputs,
+                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
-                return record_status(accuracy_status)
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
             correct_rerun_result = None
 
             # Run with Dynamo
@@ -1282,13 +1302,17 @@ class BenchmarkRunner:
                     )
                 ):
                     accuracy_status = "pass_due_to_skip"
-                    return record_status(accuracy_status)
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
                 else:
                     print(
                         "TorchDynamo optimized model failed to run because of following error"
                     )
                     accuracy_status = "fail_to_run"
-                    return record_status(accuracy_status)
+                    return record_status(
+                        accuracy_status, dynamo_start_stats=start_stats
+                    )
             if not same(
                 correct_result,
                 new_result,
@@ -1301,15 +1325,16 @@ class BenchmarkRunner:
                     accuracy_status = "pass_due_to_skip"
                 else:
                     accuracy_status = "fail_accuracy"
-                return record_status(accuracy_status)
+                return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
-        return record_status(accuracy_status)
+        return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def run_performance_test(
         self, name, model, example_inputs, optimize_ctx, experiment, tag=None
     ):
         def warmup(fn, model, example_inputs, mode, niters=5):
             peak_mem = 0
+            start_stats = get_dynamo_stats()
             try:
                 if current_device == "cuda":
                     torch.cuda.reset_peak_memory_stats()
@@ -1325,10 +1350,12 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception as e:
-                log.exception(f"Failed for {mode} {e}")
+            except Exception:
+                log.exception(f"Backend {mode} failed in warmup()")
                 return sys.exit(-1)
-            return latency, peak_mem
+            dynamo_stats = get_dynamo_stats()
+            dynamo_stats.subtract(start_stats)
+            return latency, peak_mem, dynamo_stats
 
         # Cast the model to float16/float32 as necessary
         model, example_inputs = self.maybe_cast(model, example_inputs)
@@ -1340,11 +1367,11 @@ class BenchmarkRunner:
                 experiment_kwargs["tag"] = tag
             results = []
 
-            eager_latency, eager_peak_mem = warmup(
+            eager_latency, eager_peak_mem, _ = warmup(
                 self.model_iter_fn, model, example_inputs, "eager"
             )
             optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
-            dynamo_latency, dynamo_peak_mem = warmup(
+            dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                 optimized_model_iter_fn, model, example_inputs, "dynamo"
             )
 
@@ -1361,6 +1388,7 @@ class BenchmarkRunner:
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
+                experiment_kwargs["dynamo_stats"] = dynamo_stats
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -1400,28 +1428,7 @@ class BenchmarkRunner:
             msg += f" {tag:26}"
         print(msg, end=" ", flush=True)
 
-        def get_stats():
-            # TODO: consider deepcopy'ing the entire counters struct and
-            # adding a helper to do subtraction on it
-            return collections.Counter(
-                {
-                    "calls_captured": torch._dynamo.utils.counters["stats"][
-                        "calls_captured"
-                    ],
-                    "unique_graphs": torch._dynamo.utils.counters["stats"][
-                        "unique_graphs"
-                    ],
-                    "graph_breaks": sum(
-                        torch._dynamo.utils.counters["graph_break"].values()
-                    ),
-                    # NB: The plus removes zero counts
-                    "unique_graph_breaks": len(
-                        +torch._dynamo.utils.counters["graph_break"]
-                    ),
-                }
-            )
-
-        start_stats = get_stats()
+        start_stats = get_dynamo_stats()
 
         if self.args.accuracy:
             status = self.check_accuracy(
@@ -1446,8 +1453,7 @@ class BenchmarkRunner:
                 )
             )
             print(stats)
-
-        stats = get_stats()
+        stats = get_dynamo_stats()
         stats.subtract(start_stats)
 
         if explain:
@@ -1747,8 +1753,8 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1200,
-        help="timeout (ms) for benchmarking.",
+        default=1800,
+        help="timeout (second) for benchmarking.",
     )
 
     parser.add_argument(
@@ -1873,9 +1879,9 @@ def main(runner, original_dir=None):
     with maybe_init_distributed(
         (args.ddp or args.fsdp) and args.only, port=args.distributed_master_port
     ):
-        return maybe_fresh_cache(run, args.cold_start_latency and args.only)(
-            runner, args, original_dir
-        )
+        return maybe_fresh_cache(
+            run, (args.cold_start_latency and args.only) or args.ci
+        )(runner, args, original_dir)
 
 
 def run(runner, args, original_dir=None):
