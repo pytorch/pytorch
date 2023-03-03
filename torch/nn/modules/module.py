@@ -97,7 +97,7 @@ _global_forward_hooks: Dict[int, Callable] = OrderedDict()
 _has_global_hooks: bool = False
 
 def _update_has_global_hooks():
-    _has_global_hooks = (
+    _has_global_hooks = bool(
         _global_backward_pre_hooks
         or _global_backward_hooks
         or _global_forward_hooks
@@ -489,7 +489,7 @@ class Module:
     forward: Callable[..., Any] = _forward_unimplemented
 
     def _update_has_hooks(self):
-        self._has_hooks = (
+        self._has_hooks = bool(
             self._backward_hooks
             or self._backward_pre_hooks
             or self._forward_hooks

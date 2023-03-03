@@ -28,7 +28,7 @@ class RemovableHandle:
         # TODO: we don't pickle/unpickle this field, which means the 'update_has_hooks'
         # functionality (which is an optimization) decays after pickling.  Can we fix this?
 
-        self.module = weakref.ref(module)
+        self.module_ref = weakref.ref(module)
         RemovableHandle.next_id += 1
 
         self.extra_dict_ref = (
@@ -47,8 +47,10 @@ class RemovableHandle:
             if extra_dict is not None and self.id in extra_dict:
                 del extra_dict[self.id]
 
-        if self.module:
-            self.module._update_has_hooks()
+        if self.module_ref is not None:
+            module = self.module_ref()
+            if module is not None:
+                module._update_has_hooks()
         torch.nn.modules.module._update_has_global_hooks()
 
     def __getstate__(self):
