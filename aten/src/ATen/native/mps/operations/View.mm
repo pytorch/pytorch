@@ -478,25 +478,19 @@ bool canSliceViewTensor(const Tensor& src, MPSShape *mpsShape) {
   }
 
   IntArrayRef src_base_shape = getIMPSAllocator()->getBufferShape(src.storage().data());
-  std::vector<int64_t> src_base_squeezed_shape = getSqueezedBaseShape(src, src_base_shape);
   size_t src_ndim_base = src_base_shape.size();
-  size_t src_squeezed_ndim_base = src_base_squeezed_shape.size();
-  std::vector<int64_t> src_view_squeezed_shape = getViewShape(src, mpsShape, true);
-  size_t src_ndim_view = getViewShape(src, mpsShape, false).size();
-  size_t src_squeezed_ndim_view = src_view_squeezed_shape.size();
+  std::vector<int64_t> src_view_shape = getViewShape(src, mpsShape, false);
+  size_t src_ndim_view = src_view_shape.size();
 
   if (src_ndim_base != src_ndim_view) {
     return false;
   }
 
-  if (src_squeezed_ndim_base == src_squeezed_ndim_view) {
-    for (const auto i: c10::irange(src_squeezed_ndim_base)) {
-      if (src_view_squeezed_shape[i] > src_base_squeezed_shape[i]) {
-        return false;
-      }
-    }
-  }
-
+  for (const auto i: c10::irange(src_ndim_base)) {
+     if (src_view_shape[i] > src_base_shape[i]) {
+       return false;
+     }
+   }
   return true;
 }
 

@@ -1956,9 +1956,10 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.backends.cudnn.allow_tf32 = False
-        torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.enabled = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
