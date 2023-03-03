@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import abc
+
+import contextlib
 import difflib
 
 from typing import Any, Callable, Dict, Generator, Sequence, Tuple
@@ -24,20 +26,24 @@ class FxReadableGraphDiffer(difflib.Differ):
     """
 
     def compare(self, a: Sequence[str], b: Sequence[str]) -> Generator[str, None, None]:
-        cruncher = difflib.SequenceMatcher(None, a, b, autojunk=False)
-        for tag, alo, ahi, blo, bhi in cruncher.get_opcodes():
-            if tag == "replace":
-                g = self._fancy_replace(a, alo, ahi, b, blo, bhi)  # type: ignore[attr-defined]
-            elif tag == "delete":
-                g = self._dump("-", a, alo, ahi)  # type: ignore[attr-defined]
-            elif tag == "insert":
-                g = self._dump("+", b, blo, bhi)  # type: ignore[attr-defined]
-            elif tag == "equal":
-                g = self._dump(" ", a, alo, ahi)  # type: ignore[attr-defined]
-            else:
-                raise ValueError("unknown tag %r" % (tag,))
 
-            yield from g
+        # Patch `difflib.SequenceMatcher` to set `autojunk` to `False`.
+        # More details are in the class docstring.
+        @contextlib.contextmanager
+        def patch_sequence_matcher_init():
+            original_init = difflib.SequenceMatcher.__init__
+
+            def patched_init(self, isjunk=None, a="", b="", autojunk=True):
+                original_init(self, isjunk, a, b, autojunk=False)
+
+            difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]
+            try:
+                yield
+            finally:
+                difflib.SequenceMatcher.__init__ = original_init  # type: ignore[assignment]
+
+        with patch_sequence_matcher_init():
+            yield from super().compare(a, b)
 
 
 class Pass(abc.ABC):
