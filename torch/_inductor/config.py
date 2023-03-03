@@ -15,6 +15,9 @@ verbose_progress = False
 # limit lines of inner_fn() when printing IR
 debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -52,9 +55,7 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = (
-    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
-)
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
