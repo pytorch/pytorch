@@ -1994,11 +1994,11 @@ class TestMPS(TestCaseMPS):
 
     def test_stack(self):
         # https://github.com/pytorch/pytorch/issues/87856
-        x_cpu = torch.tensor([[1,2]])
+        x_cpu = torch.tensor([[1, 2]])
         x_mps = x_cpu.detach().clone().to("mps")
 
-        y_cpu = torch.stack((x_cpu[:,:1], x_cpu[:,-1:]), dim=-1)
-        y_mps = torch.stack((x_mps[:,:1], x_mps[:,-1:]), dim=-1)
+        y_cpu = torch.stack((x_cpu[:, :1], x_cpu[:, -1:]), dim=-1)
+        y_mps = torch.stack((x_mps[:, :1], x_mps[:, -1:]), dim=-1)
 
         self.assertEqual(y_cpu, y_mps)
 
