@@ -1,7 +1,6 @@
 import collections
 import contextlib
 import functools
-import glob
 import itertools
 import logging
 import math
@@ -20,7 +19,7 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config, config as inductor_config
+from . import config
 from .cuda_properties import get_device_capability
 
 log = logging.getLogger(__name__)
@@ -80,6 +79,19 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     assert isinstance(numer, int) and isinstance(denom, int)
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
 
 
 def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
@@ -359,11 +371,9 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvalue(self, max_lines=None):
         buf = StringIO()
-        for line in self._lines:
+        for lineno, line in enumerate(self._lines):
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
@@ -371,6 +381,13 @@ class IndentedBuffer:
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
+            if max_lines and lineno == max_lines - 1 and len(line) > max_lines:
+                buf.write(
+                    f"{self.prefix()}... ({len(self._lines) - max_lines} lines hidden, "
+                    f"TORCHINDUCTOR_DEBUG_MAX_LINES={len(self._lines)} for all)\n"
+                )
+                break
+
         return buf.getvalue()
 
     def getrawvalue(self):
@@ -483,9 +500,9 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        (inductor_config.max_autotune or inductor_config.search_autotune_cache)
+        (config.max_autotune or config.search_autotune_cache)
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -507,33 +524,32 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_triton_code(fn, *args, **kwargs):
-    from torch._inductor.debug import DebugContext
-    from torch._inductor.virtualized import V
+def run_and_get_code(fn, *args, **kwargs):
+    from .graph import GraphLowering
 
-    torch._dynamo.reset()
+    compile_to_module = GraphLowering.compile_to_module
+    source_codes = []
 
-    context = DebugContext()
+    def patched_compile_to_module(self):
+        mod = compile_to_module(self)
+        with open(mod.__file__, "r") as f:
+            source_codes.append(f.read())
+        return mod
 
-    with DebugDirManager(), mock.patch.object(
-        config.trace, "enabled", True
-    ), context, V.set_debug_handler(context):
-
-        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-        fil = dir_name + "*inference*"
-        existing_dirs = glob.glob(fil)
-
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ):
+        torch._dynamo.reset()
         fn(*args, **kwargs)
+    return source_codes
 
-        assert context._path is not None
 
-        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
-
-        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
-
-        full_name = os.path.join(dir_dbg[0], "output_code.py")
-        with open(full_name, "r") as f:
-            return f.read()
+def run_and_get_triton_code(fn, *args, **kwargs):
+    source_codes = run_and_get_code(fn, *args, **kwargs)
+    assert (
+        len(source_codes) == 1
+    ), f"expected exactly one code output got {len(source_codes)}"
+    return source_codes[0]
 
 
 def developer_warning(msg):
@@ -546,3 +562,14 @@ def developer_warning(msg):
         log.warning(msg)
     else:
         log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )
