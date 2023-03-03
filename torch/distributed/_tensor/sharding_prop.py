@@ -1,12 +1,12 @@
-from typing import Callable, Dict, Tuple, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 import torch
 import torch.distributed._tensor.api as dtensor
-from torch._subclasses import FakeTensorMode
-from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 from torch._ops import OpOverload
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding, DTensorSpec
-from torch.utils._pytree import tree_map
+from torch._subclasses import FakeTensorMode
+from torch.distributed._tensor.op_schema import DTensorSpec, OpSchema, OutputSharding
+from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
+from torch.utils._pytree import tree_map, tree_flatten
 
 """
 Print information on ops input shape and sharding for debugging purposes.
@@ -30,11 +30,64 @@ class ShardingPropagator:
         """
         self.op_to_rules[op_overload] = rule_func
 
+    def _rebuild_tensor_from_dtensor(self, arg) -> object:
+        """ "
+        This is used to propagate sharding and tensor metadata, must be under fake mode
+        """
+        assert isinstance(arg, dtensor.DTensor), "must be DTensor"
+        return torch.empty_strided(
+            arg.shape, arg.stride, dtype=arg.dtype, requires_grad=arg.requires_grad
+        )
+
+    def propagate_sharding(
+        self, op_call: OpOverload, args: Tuple[object, ...], kwargs: Dict[str, object]
+    ) -> OutputSharding:
+        """
+        Propagate the sharding for an operator given the args/kwargs.
+        """
+        # prepare a fake graph to run the propagation
+        with FakeTensorMode():
+            fake_args = tree_map(self._rebuild_tensor_from_dtensor, args)
+            fake_kwargs = tree_map(self._rebuild_tensor_from_dtensor, kwargs)
+            op_graph = get_isolated_graphmodule(op_call, fake_args, fake_kwargs)
+
+        # unwrap the args/kwargs DTensor to DTensorSpec and pack them
+        # into an OpSchema for sharding propagation usage. 
+        args_schema = tree_map(unwrap_schema, args)
+        kwargs_schema = tree_map(unwrap_schema, kwargs)
+
+        # flatten the args schema/kwarg schema to feed into the graph
+        flat_args_sharding, _ = tree_flatten([args_schema, kwargs_schema])
+
+        self.run_propagation(op_graph, flat_args_sharding)
+
+
+        # return self.propagate_op_sharding(op_call, op_schema)
+
+    def run_propagation(self, op_graph: torch.fx.Graph, flat_args_sharding):
+        """
+        Run the sharding propagation on the op_graph.
+        """
+        # NOTE: we assume the first few nodes are all placeholders
+        num_inputs = len(flat_args_sharding)
+        placeholder_idx = 0
+        for node in op_graph.graph.nodes:
+            if node.op == "placeholder":
+                # set sharding to placeholders
+                node.meta["sharding"] = flat_args_sharding[placeholder_idx]
+                placeholder_idx += 1
+            elif node.op == "call_function":
+                self.propagate_op_sharding(node)
+            elif node.op == "output":
+                # get the sharding from the output node
+                output_sharding = node.meta["sharding"]
+            else:
+                raise ValueError(f"Unrecognized node type {node.op}")
+
+        return output_sharding
+
     def prepare_op_schema(
-        self,
-        op_call: OpOverload,
-        args: Tuple[object, ...],
-        kwargs: Dict[str, object]
+        self, op_call: OpOverload, args: Tuple[object, ...], kwargs: Dict[str, object]
     ) -> OpSchema:
         """
         This unwrap the args/kwargs DTensor to DTensorSpec and pack them
@@ -48,22 +101,19 @@ class ShardingPropagator:
         if _DEBUG_VERBOSE and torch.distributed.get_rank() == 0:
             print(f"OpSchema({op_schema})")
             local_shapes = tree_map(
-                lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
+                lambda t: t.to_local().shape
+                if isinstance(t, dtensor.DTensor)
+                else None,
                 args,
             )
             print(f"    local shapes: {local_shapes}")
 
         return op_schema
 
-    def propagate_op_sharding(
-        self, op_overload: OpOverload, op_schema: OpSchema
-    ) -> OutputSharding:
+    def propagate_op_sharding(self, node: torch.fx.Node) -> None:
         """
         Propagate the sharding for an operator given the op_schema.
         """
-        # first we propagate the tensor metadata
-        output_node = self._propagate_tensor_meta(op_overload, op_schema)
-
         # then we propagate the sharding
         sharding_prop_func = self.op_to_rules.get(op_overload, None)
 
@@ -84,7 +134,6 @@ class ShardingPropagator:
                 f"Input schema: {op_schema}.\n"
                 f"Error: {e}"
             ) from e
-
 
         # step 3. if can't get output_spec from sharding
         # propagation (i.e. no rules apply for input
@@ -131,11 +180,11 @@ class ShardingPropagator:
             if output_spec is not None:
                 assert isinstance(output_nodes, (tuple, list))
                 if isinstance(output_spec, DTensorSpec):
-                    output_spec.tensor_meta = output_nodes[0].meta['tensor_meta']
+                    output_spec.tensor_meta = output_nodes[0].meta["tensor_meta"]
                 elif isinstance(output_spec, (tuple, list)):
                     for i, spec in enumerate(output_spec):
                         if isinstance(spec, DTensorSpec):
-                            spec.tensor_meta = output_nodes[i].meta['tensor_meta']
+                            spec.tensor_meta = output_nodes[i].meta["tensor_meta"]
 
         return output_sharding
 
@@ -151,7 +200,7 @@ class ShardingPropagator:
         # scalar. TODO: figure out a better way to handle this
         skip_prop_list = [
             torch.ops.aten._local_scalar_dense.default,
-            torch.ops.aten.equal.default
+            torch.ops.aten.equal.default,
         ]
         if op_overload in skip_prop_list:
             return None
@@ -165,7 +214,7 @@ class ShardingPropagator:
 
         output = None
         for node in g.graph.nodes:
-            if node.op == 'output':
+            if node.op == "output":
                 output = node
         return output
 
