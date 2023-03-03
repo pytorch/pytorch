@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     TEST_WITH_ROCM,
     skip_but_pass_in_sandcastle_if,
+    NoTest,
 )
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
@@ -33,8 +34,8 @@ load_tests = load_tests
 
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
-    print("CUDA not available, skipping tests", file=sys.stderr)
-    TestCase = object  # noqa: F811
+    print('CUDA not available, skipping tests', file=sys.stderr)
+    TestCase = NoTest  # noqa: F811
 
 
 datatypes = [torch.float]
