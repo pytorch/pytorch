@@ -10,18 +10,17 @@
 namespace at::native {
 
 // custom min and max to be used in logcumsumexp for complex arguments
-template <typename scalar_t, bool min>
-__host__ __device__ c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+template <typename scalar_t>
+__host__ __device__ std::pair<c10::complex<scalar_t>, c10::complex<scalar_t>> _logcumsumexp_minmax(
+    const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
   scalar_t xr = std::real(x);
   scalar_t yr = std::real(y);
   if (::isnan(yr) || (::isnan(std::imag(y)))) {
-    return y;
+    return std::make_pair(y, y);
   } else if (::isnan(xr) || (::isnan(std::imag(x)))) {
-    return x;
-  } else if (min) { // min
-    return (xr < yr) ? x : y;
-  } else { // max
-    return (xr >= yr) ? x : y;
+    return std::make_pair(x, x);
+  } else {
+    return (xr < yr) ? std::make_pair(x, y) : std::make_pair(y, x);
   }
 }
 
@@ -70,8 +69,9 @@ __host__ __device__ c10::complex<scalar_t> _fast_build_exp_inf(const c10::comple
 
 template <typename scalar_t>
 __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-  c10::complex<scalar_t> min = _logcumsumexp_minmax<scalar_t, /*min=*/true>(x, y);
-  c10::complex<scalar_t> max = _logcumsumexp_minmax<scalar_t, /*min=*/false>(x, y);
+  auto [min, max] = _logcumsumexp_minmax<scalar_t>(x, y);
+//   auto min = minmax.first;
+//   auto max = minmax.second;
   scalar_t min_real = std::real(min);
   scalar_t max_real = std::real(max);
 
