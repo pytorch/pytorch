@@ -52,18 +52,19 @@ class ExprPrinter(Printer):
         # Pow() confuses triton
         base, exp = expr.args
         base = self._print(base)
-        if exp.is_integer:
-            exp = int(exp)
-            if exp > 0:
-                return "*".join([self.paren(base)] * exp)
-            elif exp < 0:
-                return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-            else:  # exp == 0
-                return "1"
-        elif isinstance(exp, sympy.core.numbers.Half):
-            return f"tl.libdevice.sqrt({self.paren(base)}.to(tl.float32))"
-        else:
-            return f"tl.libdevice.pow({base}, {self._print(exp)})"
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for sqrt/floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
 
     def _print_Mul(self, expr):
         return "*".join(map(self.paren, map(self._print, expr.args)))

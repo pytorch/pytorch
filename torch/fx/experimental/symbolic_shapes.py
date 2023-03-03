@@ -1331,14 +1331,6 @@ class ShapeEnv:
         self.var_to_range[symbol] = ValueRanges.unknown()
         return SymInt(SymNode(symbol, self, int, None))
 
-    def create_symfloat_arg(self, value, source):
-        assert isinstance(source, Source), f"{type(source)} {source}"
-        symbol = sympy.Symbol(f"d{len(self.var_to_val)}")
-        self.var_to_val[symbol] = sympy.Float(value)
-        self.var_to_sources[symbol] = [source]
-        self.var_to_range[symbol] = ValueRanges.unknown()
-        return SymFloat(SymNode(symbol, self, float, value))
-
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
@@ -1501,16 +1493,6 @@ class ShapeEnv:
             else:
                 input_guards.append((source, sympy.Integer(val)))
 
-        def track_symfloat(source, val):
-            if isinstance(val, SymFloat):
-                s = val.node.expr
-
-                if isinstance(s, sympy.Symbol):
-                    symbol_to_source[s].append(source)
-                input_guards.append((source, s))
-            else:
-                input_guards.append((source, sympy.Float(val)))
-
         def _verify(expr, potential_expr):
             # An expression of > 1 symbols is a relationship,
             # and relationships can be ignored due to the nature of the
@@ -1534,9 +1516,6 @@ class ShapeEnv:
                 continue
             if isinstance(t, SymInt):
                 track_symint(source, t)
-                continue
-            if isinstance(t, SymFloat):
-                track_symfloat(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
             for i, ss in enumerate(t.size()):
