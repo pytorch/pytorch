@@ -28,7 +28,7 @@ class RemovableHandle:
         # TODO: we don't pickle/unpickle this field, which means the 'update_has_hooks'
         # functionality (which is an optimization) decays after pickling.  Can we fix this?
 
-        self.module_ref = weakref.ref(module)
+        self.module_ref = weakref.ref(module) if module is not None else None
         RemovableHandle.next_id += 1
 
         self.extra_dict_ref = (
