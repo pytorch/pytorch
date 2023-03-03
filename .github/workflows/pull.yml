@@ -56,6 +56,10 @@ jobs:
     with:
       build-environment: linux-focal-py3.8-gcc7-no-ops
       docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-focal-py3_8-gcc7-pch:
     name: linux-focal-py3.8-gcc7-pch
@@ -63,6 +67,10 @@ jobs:
     with:
       build-environment: linux-focal-py3.8-gcc7-pch
       docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-focal-py3_9-clang7-asan-build:
     name: linux-focal-py3.9-clang7-asan
@@ -217,6 +225,10 @@ jobs:
       build-environment: linux-focal-py3-clang7-mobile-build
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
       build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-jammy-cuda-11_7-cudnn8-py3_8-clang12-build:
     name: linux-jammy-cuda11.7-cudnn8-py3.8-clang12
@@ -224,6 +236,10 @@ jobs:
     with:
       build-environment: linux-jammy-cuda11.7-cudnn8-py3.8-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.7-cudnn8-py3.8-clang12
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-focal-py3-clang7-mobile-custom-build-static:
     name: linux-focal-py3-clang7-mobile-custom-build-static
@@ -232,6 +248,10 @@ jobs:
       build-environment: linux-focal-py3-clang7-mobile-custom-build-static
       docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
       build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-bionic-py3_8-clang8-xla-build:
     name: linux-bionic-py3_8-clang8-xla
@@ -324,6 +344,10 @@ jobs:
     with:
       build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single
       docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
 
   linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit:
     name: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
@@ -331,6 +355,10 @@ jobs:
     with:
       build-environment: linux-focal-py3-clang7-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-focal-py3-clang7-android-ndk-r19c
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+        ]}
 
   linux-focal-py3_8-gcc7-mobile-lightweight-dispatch-build:
     name: linux-focal-py3.8-gcc7-mobile-lightweight-dispatch-build
@@ -339,6 +367,10 @@ jobs:
       build-environment: linux-focal-py3.8-gcc7-mobile-lightweight-dispatch-build
       docker-image-name: pytorch-linux-focal-py3.8-gcc7
       build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   linux-focal-rocm5_4_2-py3_8-build:
     # don't run build twice on master

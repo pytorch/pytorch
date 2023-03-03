@@ -185,6 +185,10 @@ jobs:
       build-environment: libtorch-linux-bionic-cuda11.8-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.8-cudnn8-py3-gcc7
       build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   win-vs2019-cuda11_8-py3-build:
     name: win-vs2019-cuda11.8-py3
@@ -216,6 +220,10 @@ jobs:
       build-environment: libtorch-linux-bionic-cuda11.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
       build-generates-artifacts: false
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1 },
+        ]}
 
   win-vs2019-cuda11_7-py3-build:
     name: win-vs2019-cuda11.7-py3
@@ -247,6 +255,10 @@ jobs:
       build-environment: ios-12-5-1-x86-64-coreml
       ios-platform: SIMULATOR
       ios-arch: x86_64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64
@@ -255,6 +267,10 @@ jobs:
       build-environment: ios-12-5-1-arm64
       ios-platform: OS
       ios-arch: arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
 
   ios-12-5-1-arm64-coreml:
     name: ios-12-5-1-arm64-coreml
@@ -263,6 +279,10 @@ jobs:
       build-environment: ios-12-5-1-arm64-coreml
       ios-platform: OS
       ios-arch: arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
 
   ios-12-5-1-arm64-custom-ops:
     name: ios-12-5-1-arm64-custom-ops
@@ -271,6 +291,10 @@ jobs:
       build-environment: ios-12-5-1-arm64-custom-ops
       ios-platform: OS
       ios-arch: arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
 
   ios-12-5-1-arm64-metal:
     name: ios-12-5-1-arm64-metal
@@ -279,7 +303,16 @@ jobs:
       build-environment: ios-12-5-1-arm64-metal
       ios-platform: OS
       ios-arch: arm64
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "macos-12" },
+        ]}
 
   buck-build-test:
     name: buck-build-test
     uses: ./.github/workflows/_buck-build-test.yml
+    with:
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "ubuntu-latest" },
+        ]}
