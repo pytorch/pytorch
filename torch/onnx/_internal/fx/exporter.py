@@ -36,13 +36,13 @@ def _export(
     # Make sure the feed-in "module" is stateless.
     # Ensure placeholder targets match the original module's signature since
     # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
-    decomposed_module = passes.decompose(
-        module, export_options.decomposition_table, *args
+    decomposed_module = passes.Decompose(export_options.decomposition_table).run(
+        module, *args
     )
     # Run FakeTensorProp on decomposed_module.
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
-    decomposed_module = passes.shape_inference_with_fake_tensor(
+    decomposed_module = passes.ShapeInferenceWithFakeTensor().run(
         decomposed_module, *args
     )
 
