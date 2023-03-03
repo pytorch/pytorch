@@ -362,7 +362,7 @@ class Loops(IRNode):
             [
                 f"'{self.device.type}'",
                 str(self.dtype),
-                self.inner_fn_str(),
+                self.inner_fn_str(max_lines=config.debug_max_lines),
             ]
             + [f"{name}={getattr(self, name)}" for name in names]
         )
@@ -393,13 +393,11 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
-    def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(self._index(self.ranges))
-            return formatter.getvalue(result)
+    def inner_fn_str(self, max_lines=None):
+        index = self._index(self.ranges)
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn, index, max_lines=max_lines
+        )
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -514,16 +512,15 @@ class Reduction(Loops):
         return len(self.ranges) + len(self.reduction_ranges)
 
     @cache_on_self
-    def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(
-                self._index(self.ranges),
-                self._index(self.reduction_ranges, "r"),
-            )
-            return formatter.getvalue(result)
+    def inner_fn_str(self, max_lines=None):
+        index = (self._index(self.ranges),)
+        rindex = self._index(self.reduction_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+            max_lines=max_lines,
+        )
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -2184,20 +2181,10 @@ class ComputedBuffer(Buffer):
             for reads_name in body.reads_name2expr.keys()
         ]
         priority_idx = []
-        if config.triton.convolution == "aten":
-            memory_addrs = [
-                *body.reads_name2expr.values(),
-                *body.writes_name2expr.values(),
-            ]
-        else:
-            # prioritize reads layout/loop_ordering over writes
-            if len(body.reads_name2expr.values()) > 0:
-                memory_addrs = [*body.reads_name2expr.values()]
-            else:
-                memory_addrs = [*body.writes_name2expr.values()]
-            for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
-                    priority_idx.append(i)
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -3140,12 +3127,8 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
-        if config.triton.convolution == "aten":
-            weight = cls.require_stride_order(weight, req_stride_order)
-            x = cls.require_stride_order(x, req_stride_order)
-        else:
-            x = cls.require_stride1(cls.realize_input(x))
-            weight = cls.require_stride1(cls.realize_input(weight))
+        weight = cls.require_stride_order(weight, req_stride_order)
+        x = cls.require_stride_order(x, req_stride_order)
 
         stride = tuple(stride_)
         padding = tuple(padding_)
@@ -3163,7 +3146,7 @@ class Convolution(ExternKernelAlloc):
         _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
-        config_conv = config.triton.convolution
+        config_conv = "aten"
         if (
             config_conv == "aten"
             or len(kernel_size) != 2  # triton conv only supports conv2d
@@ -3196,7 +3179,7 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
-        transform_x_layout = config.triton.convolution != "aten"
+        transform_x_layout = False
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
         else:
@@ -4204,7 +4187,7 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernel):
+class Wait(ExternKernelAlloc):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
     with a collective op that produces a work to wait on.
@@ -4216,16 +4199,17 @@ class Wait(ExternKernel):
         inputs,
         constant_args=(),
     ):
-        super().__init__(None, layout, inputs, constant_args)
-        self.name = V.graph.register_buffer(self)
+        super().__init__(layout, inputs, constant_args)
 
     def should_allocate(self):
         return False
 
     def codegen(self, wrapper):
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _wait_tensor"
+        )
         (input_collective,) = [t.codegen_reference() for t in self.inputs]
-        work = f"{input_collective}_work"  # hacky way to name work objs..
-        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
 
         # wait op still needs to produce a 'buffer' that represents the tensor output.
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
@@ -4235,6 +4219,8 @@ class Wait(ExternKernel):
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
+        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
+        collective_op.decide_layout()
         return Wait(
             layout=collective_op.get_layout(),
             inputs=[collective_op],
@@ -4245,18 +4231,53 @@ class Wait(ExternKernel):
         return [self.inputs[0].codegen_reference()]
 
 
-class AllReduce(ExternKernel):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
+class CollectiveKernel(ExternKernel):
+    """
+    Each CollectiveKernel should follow the patterns
+    - it writes into a given output buffer
+    - the kernel delegates into c10d processgroup, which returns a 'work' obj
+    - the work obj is registered via _register_tensor_work so it can be waited on later
+    """
+
+    def __init__(self, layout, inputs, constant_args):
         super().__init__(None, layout, inputs, constant_args)
         self.name = V.graph.register_buffer(self)
 
     def should_allocate(self):
         return True
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        # factor so the boilerplate can be handled in CollectiveKernel.codegen
+        raise NotImplementedError("Must implement")
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        input_names = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        self.codegen_collective(wrapper, output_name, input_names)
+
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
+
+class AllReduce(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
+        super().__init__(layout, inputs, constant_args)
+        self.reduce_op = reduce_op
 
     @classmethod
     def create(
@@ -4268,60 +4289,31 @@ class AllReduce(ExternKernel):
         # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
-        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
-        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
-        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         return AllReduce(
             layout=new_layout,
             inputs=[x],
-            constant_args=[reduce_op, tag, ranks, group_size],
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
         )
 
-    def codegen(self, wrapper):
-        wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op"
-        )
-        wrapper.add_import_once(
-            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
-        )
-
-        # extract references to our args in string form for codegen output
-        (input_name,) = [t.codegen_reference() for t in self.inputs]
-        output_name = self.get_name()
-        reduce_op, tag, ranks, group_size = self.constant_args
-
-        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
-        wrapper.writeline(
-            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
-        )
-
+    def codegen_collective(self, wrapper, output_name, input_names):
         # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
         # to reuse the input buffer.  (This requires no other users of the input buffer.)
         if not wrapper.did_reuse(self, self.inputs[0]):
-            wrapper.writeline(f"{output_name}.copy_({input_name})")
+            wrapper.writeline(f"{output_name}.copy_({input_names[0]})")
 
         # At this point, output_name points to a buffer that is either
         # (1) the input buffer, which we're allowed to inplace modify
         # (2) a freshly allocated buffer, which we've copied the input into above
         wrapper.writeline(
-            f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
-            f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
+            f"{output_name}_work = dist.all_reduce("
+            f"{output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
         )
 
 
-class AllGatherIntoTensor(ExternKernel):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
-        super().__init__(None, layout, inputs, constant_args)
-        self.name = V.graph.register_buffer(self)
-
-    def should_allocate(self):
-        return True
+class AllGatherIntoTensor(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args):
+        super().__init__(layout, inputs, constant_args)
 
     @classmethod
     def create(cls, x: "TensorBox", tag: str, ranks: List[int], group_size: int):
@@ -4342,24 +4334,56 @@ class AllGatherIntoTensor(ExternKernel):
             constant_args=[tag, ranks, group_size],
         )
 
-    def codegen(self, wrapper):
-        wrapper.add_import_once("import torch.distributed as dist")
-        wrapper.add_import_once(
-            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
-        )
-
-        # extract references to our args in string form for codegen output
-        (input_name,) = [t.codegen_reference() for t in self.inputs]
-        output_name = self.get_name()
-        tag, ranks, group_size = self.constant_args
-
-        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+    def codegen_collective(self, wrapper, output_name, input_names):
         wrapper.writeline(
-            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+            f"{output_name}_work = dist.all_gather_into_tensor("
+            f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
         )
 
         # At this point, output_name points to a fresh buffer
         wrapper.writeline(
-            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_name}, async_op=True,"
+            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"
             f" group={output_name}_pg)"
+        )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
+
+class ReduceScatterTensor(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+        super().__init__(layout, inputs, constant_args)
+        self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        reduce_op: str,
+        scatter_dim: int,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[scatter_dim] /= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        return ReduceScatterTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
+        )
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.reduce_scatter_tensor("
+            f"{output_name}, {input_names[0]}, "
+            f"async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
         )

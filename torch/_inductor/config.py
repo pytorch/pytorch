@@ -12,6 +12,12 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -49,9 +55,7 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = (
-    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
-)
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -172,9 +176,6 @@ class triton:
 
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
-
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
