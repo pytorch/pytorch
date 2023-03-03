@@ -1,7 +1,7 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Iterable, List, Tuple, Generator
+from typing import Any, Callable, ContextManager, Iterable, List, Tuple
 import contextlib
 
 __all__ = [
@@ -162,12 +162,15 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
+def noop_context_fn():
+    return contextlib.nullcontext(), contextlib.nullcontext()
+
+
 def checkpoint(
     function,
     *args,
     use_reentrant: bool = True,
-    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
-    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     **kwargs
 ):
     r"""Checkpoint a model or part of the model
@@ -243,12 +246,10 @@ def checkpoint(
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
             Default: ``True``
-        forward_context: The function will be run under the provided context
-            manager during forward. This should only be specified if
-            ``use_reentrant=False``.
-        recompute_context: The function will be run under the provided context
-            manager during its recomputation. This should only be specified if
-            ``use_reentrant=False``.
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively. This
+            argument can only be passed if ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -260,17 +261,14 @@ def checkpoint(
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
-        if forward_context is not contextlib.nullcontext or \
-           recompute_context is not contextlib.nullcontext:
-            raise ValueError("Passing forward_context and recompute_context are only supported "
-                             "when use_reentrant=False.")
+        if context_fn is not noop_context_fn:
+            raise ValueError("Passing context_fn is only supported when use_reentrant=False.")
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         return _checkpoint_without_reentrant(
             function,
             preserve,
-            forward_context,
-            recompute_context,
+            context_fn,
             *args,
             **kwargs,
         )
@@ -358,8 +356,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 def _checkpoint_without_reentrant(
     function,
     preserve_rng_state=True,
-    forward_context: Generator[None, None, None] = contextlib.nullcontext(),
-    recompute_context: Generator[None, None, None] = contextlib.nullcontext(),
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     *args,
     **kwargs
 ):
@@ -370,16 +367,16 @@ def _checkpoint_without_reentrant(
             passed as the tuple. For example, in LSTM, if user passes
             ``(activation, hidden)``, :attr:`function` should correctly use the
             first input as ``activation`` and the second input as ``hidden``
-        forward_context: the function will be run under the provided context
-            manager during forward.
-        recompute_context: the function will be run under the provided context
-            manager during its recomputation.
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively.
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
