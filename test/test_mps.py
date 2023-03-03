@@ -39,7 +39,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, onlyMPS
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
@@ -10295,7 +10295,6 @@ class TestCommon(TestCase):
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyMPS
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
@@ -10309,7 +10308,6 @@ class TestCommon(TestCase):
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
-    @onlyMPS
     @dtypes(*get_all_dtypes())
     def test_tensor_creation(self, device, dtype):
         def ones(device):
@@ -10327,7 +10325,7 @@ class TestCommon(TestCase):
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
-instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":
     run_tests()
