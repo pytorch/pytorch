@@ -6759,7 +6759,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 def forward(self, input: torch.Tensor):
                     input1 = input.permute(0, 2, 1)
                     if self.has_bias:
-                        return torch.nn.functional.linear(input1, self.weight, self.bias)
+                        return torch.nn.functional.linear(
+                            input1, self.weight, self.bias
+                        )
                     return torch.nn.functional.linear(input1, self.weight)
 
             m, k, n = 16, 8, 4
