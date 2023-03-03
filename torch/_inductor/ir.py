@@ -4187,7 +4187,7 @@ class LoopBodyBlock:
         )
 
 
-class Wait(ExternKernel):
+class Wait(ExternKernelAlloc):
     """
     Wait should not be used by itself.  It should always be constructed in tandem
     with a collective op that produces a work to wait on.
@@ -4199,16 +4199,17 @@ class Wait(ExternKernel):
         inputs,
         constant_args=(),
     ):
-        super().__init__(None, layout, inputs, constant_args)
-        self.name = V.graph.register_buffer(self)
+        super().__init__(layout, inputs, constant_args)
 
     def should_allocate(self):
         return False
 
     def codegen(self, wrapper):
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _wait_tensor"
+        )
         (input_collective,) = [t.codegen_reference() for t in self.inputs]
-        work = f"{input_collective}_work"  # hacky way to name work objs..
-        wrapper.writeline(f"{work}.wait()")
+        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
 
         # wait op still needs to produce a 'buffer' that represents the tensor output.
         # this is a symbolic gesture, and it gets handled by WrapperCodegen.
@@ -4218,6 +4219,8 @@ class Wait(ExternKernel):
 
     @classmethod
     def create(cls, collective_op: "TensorBox"):
+        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
+        collective_op.decide_layout()
         return Wait(
             layout=collective_op.get_layout(),
             inputs=[collective_op],
@@ -4251,9 +4254,6 @@ class AllReduce(ExternKernel):
         # creating a new one that has the same properties?
         new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
 
-        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
-        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
-        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
         return AllReduce(
             layout=new_layout,
             inputs=[x],
@@ -4263,7 +4263,7 @@ class AllReduce(ExternKernel):
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
         )
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
@@ -4291,6 +4291,7 @@ class AllReduce(ExternKernel):
             f"{output_name}_work = dist.all_reduce({output_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class AllGatherIntoTensor(ExternKernel):
@@ -4330,7 +4331,9 @@ class AllGatherIntoTensor(ExternKernel):
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
         )
-
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _register_tensor_work"
+        )
         # extract references to our args in string form for codegen output
         (input_name,) = [t.codegen_reference() for t in self.inputs]
         output_name = self.get_name()
@@ -4346,6 +4349,7 @@ class AllGatherIntoTensor(ExternKernel):
             f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_name}, async_op=True,"
             f" group={output_name}_pg)"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
 
 
 class ReduceScatterTensor(ExternKernel):
@@ -4388,7 +4392,7 @@ class ReduceScatterTensor(ExternKernel):
     def codegen(self, wrapper):
         wrapper.add_import_once("import torch.distributed as dist")
         wrapper.add_import_once(
-            "from torch.distributed._functional_collectives import _str_to_reduce_op"
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
         )
         wrapper.add_import_once(
             "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
@@ -4408,3 +4412,4 @@ class ReduceScatterTensor(ExternKernel):
             f"{output_name}_work = dist.reduce_scatter_tensor({output_name}, {input_name}, async_op=True,"
             f" group={output_name}_pg, op=_str_to_reduce_op('{str(reduce_op)}'))"
         )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
