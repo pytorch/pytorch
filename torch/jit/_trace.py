@@ -1002,7 +1002,7 @@ def trace_module(
 
     if not isinstance(mod, torch.nn.Module):
         raise AttributeError("expected torch.nn.Module as the first argument")
-   
+
     from torch._dynamo.eval_frame import OptimizedModule
     if isinstance(mod, OptimizedModule):
         raise AttributeError("it is not possible to torch.jit.trace() a torch.compile() model")

@@ -1152,18 +1152,17 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
 
-
     def test_torchscript_failure(self):
         model = BasicModule()
         compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10,10)
+        example_forward_input = torch.rand(10, 10)
         with pytest.raises(AttributeError):
             c_model_scripted = torch.jit.script(compile_model, example_forward_input)
-    
+
     def test_torchtrace_failure(self):
         model = BasicModule()
         compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10,10)
+        example_forward_input = torch.rand(10, 10)
         with pytest.raises(AttributeError):
             c_model_traced = torch.jit.trace(compile_model, example_forward_input)
 
