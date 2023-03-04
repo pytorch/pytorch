@@ -1353,8 +1353,8 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+            except Exception as e:
+                log.exception(f"Failed for {mode} {e}")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1647,6 +1647,9 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
+        "--unspecialize-int", action="store_true", help="Run with specialize_int=False."
+    )
+    parser.add_argument(
         "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
@@ -1903,6 +1906,8 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+    if args.unspecialize_int:
+        torch._dynamo.config.specialize_int = False
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
@@ -1956,10 +1961,12 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.backends.cudnn.enabled = False
+        torch.use_deterministic_algorithms(True)
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.allow_tf32 = False
+        torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
