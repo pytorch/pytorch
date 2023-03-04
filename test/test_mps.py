@@ -59,6 +59,10 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
+
+        'addr': [torch.float16],
+        'empty': [torch.float16, torch.float32],
+
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'logaddexp2': [torch.float32],
@@ -103,7 +107,7 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.mse_loss': [torch.float16],
         # "smooth_l1_backward_cpu_out" not implemented for 'Half'
         'nn.functional.smooth_l1_loss': [torch.float16],
-        # grad requires non-empty inputs
+        # cpu error: grad requires non-empty inputs
         'randn': [torch.float16, torch.float32],
         'signal.windows.bartlett': [torch.float32],
         'signal.windows.blackman': [torch.float32],
@@ -156,17 +160,12 @@ def mps_ops_modifier(ops):
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
         # expected failures
-        'nn.functional.interpolatenearest': [torch.float32],
-        'nn.functional.upsample_nearest': [torch.float32],
         # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
         # fixed in macOS 13.3
         'pow': [torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         '__rpow__': [torch.float32, torch.uint8, torch.int8],
 
         # Failures due to precision issues. These has been fixed in MacOS 13.3+
-        'masked.softmin': [torch.float32],
-        'masked.softmax': [torch.float32],
-        'masked.log_softmax': [torch.float32],
         'cdist': [torch.float32],
         'tan': [torch.uint8, torch.float32],
 
@@ -268,6 +267,8 @@ def mps_ops_modifier(ops):
         # fill tensors with uninitialized data, causing mismatch with CPU
         'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
                            torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
@@ -303,7 +304,8 @@ def mps_ops_modifier(ops):
         'nn.functional.hardsigmoid': None,
         'nn.functional.logsigmoid':  None,
         'nn.functional.multilabel_soft_margin_loss': None,
-        'trace': None,
+        # Fixed in https://github.com/pytorch/pytorch/pull/95045
+        'trace': [torch.int8, torch.uint8, torch.int16, torch.int32],
         'roll': None,
         'xlogy': None,
         'logit': None,
@@ -564,7 +566,6 @@ def mps_ops_modifier(ops):
         'index_add': [torch.int64],
         'log1p': [torch.int64],
         'median': [torch.int64],
-        'remainder': [torch.int64],
         'sigmoid': [torch.int64],
         'atan2': [torch.int64],
         'minreduction_with_dim': [torch.int64],
@@ -603,7 +604,7 @@ def mps_ops_modifier(ops):
     UNDEFINED_XFAILLIST = {
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'addr': [torch.float16, torch.bool, torch.int16, torch.int32,
+        'addr': [torch.bool, torch.int16, torch.int32,
                  torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
         'dist': [torch.float16],  # cpu result off, showing inf values
         'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
@@ -629,13 +630,13 @@ def mps_ops_modifier(ops):
         # these fill tensors with uninitialized data, causing mismatch with CPU
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        'empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty': [torch.int8],
         'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
                               torch.int32, torch.int64, torch.uint8, torch.int8],
         # duplicate indices are used in the testcase - undefined behaviour
         'index_put': None,
         # zero to negative integer powers are undefined
-        '__rpow__': [torch.float16, torch.int8, torch.int16, torch.int32, torch.int64],
+        '__rpow__': [torch.int8, torch.int16, torch.int32, torch.int64],
         'resize_': [torch.float16, torch.float32],
         'resize_as_': [torch.float16, torch.float32],
 
