@@ -6347,7 +6347,7 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA: zero_
+    CPU, CUDA, QuantizedCPU: zero_
     MPS: zero_mps_
     Meta: zero_meta_
     SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
