@@ -3332,6 +3332,13 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
+@register_decomposition(aten.aminmax.default)
+def aminmax(self, *, dim=None, keepdim=False):
+    return torch.amin(self, dim=dim, keepdim=keepdim), torch.amax(
+        self, dim=dim, keepdim=keepdim
+    )
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

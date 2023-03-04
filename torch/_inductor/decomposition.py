@@ -33,15 +33,6 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
-        aten.isneginf,
-        aten.isposinf,
-        aten.logspace,
-        aten.log_sigmoid_forward,
-        aten.log_sigmoid_backward,
-        aten.threshold,
-        aten.trace,
-        aten.unfold,
-        aten.unfold_copy,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -403,13 +394,6 @@ def fmin(self, other):
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
-
-
-@register_decomposition([aten.aminmax.default])
-def aminmax(self, *, dim=None, keepdim=False):
-    return torch.amin(self, dim=dim, keepdim=keepdim), torch.amax(
-        self, dim=dim, keepdim=keepdim
-    )
 
 
 @register_decomposition([aten.narrow_copy])
