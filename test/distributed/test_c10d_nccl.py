@@ -1049,6 +1049,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         # Initialize DDP to ensure "destroy_process_group" will not call
         # ProcessGroupNCCL destructor since DDP holds a reference to process group.
+        # Run a single iteration of DDP to initialize state.
         model = DistributedDataParallel(
             torch.nn.Linear(10, 10).to(device), device_ids=[device]
         )
