@@ -38,7 +38,7 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
         check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
-                print(f"package:\n  name: torchtriton\n  version: 2.0.0+{commit_hash[:10]}\n", file=meta)
+                print("package:\n  name: torchtriton\n  version: 2.0.0\n", file=meta)
                 print("source:\n  path: .\n", file=meta)
                 print("build:\n  string: py{{py}}\n  number: 1\n  script: cd python; "
                       "python setup.py install --single-version-externally-managed --record=record.txt\n", file=meta)

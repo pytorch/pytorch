@@ -137,7 +137,7 @@ jobs:
         run: |
             set -ex
             pip install -q awscli
-            s3_dir="${UPLOAD_BUCKET}/whl/nightly/"
+            s3_dir="${UPLOAD_BUCKET}/whl/test/"
             for pkg in "${PKG_DIR}/"*.whl; do
               aws s3 cp --no-progress --acl public-read "${pkg}" "${s3_dir}"
              done
@@ -193,7 +193,7 @@ jobs:
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/master' || github.event.ref == 'refs/heads/main') }}
         run: |
           container_name=$(docker container ps --format '{{.ID}}')
-          docker exec -t "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-nightly --label main --no-progress --force"
+          docker exec -t "${container_name}" sh -c "anaconda upload /artifacts/torch*.tar.bz2 -u pytorch-test --label main --no-progress --force"
 
       - name: Chown artifacts
         run: |
