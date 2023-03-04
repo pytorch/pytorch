@@ -194,7 +194,7 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 # inclusive both ways
-def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_directive=False):
     if min is None:
         min = -sympy.oo
     if max is None:
@@ -211,6 +211,8 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
+    if user_directive:
+        a.node.shape_env.user_constrained.add(a.node.expr)
 
 
 def constrain_unify(a, b):
@@ -1210,6 +1212,8 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
+        # var_to_range entries which were modified by manual user directive
+        self.user_constrained: Set["sympy.Symbol"] = set()
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
         # Maps from sympy ints to expressions representing them
@@ -1308,7 +1312,7 @@ class ShapeEnv:
             if is_dynamic:
                 constraint = _dynamic_dim_range(ex, i)
                 if constraint != MinMaxConstraint.NONE():
-                    constrain_range(syms, min=constraint.min, max=constraint.max)
+                    constrain_range(syms, min=constraint.min, max=constraint.max, user_directive=True)
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -1677,11 +1681,12 @@ class ShapeEnv:
         new_range_env = {}
         for idx, k in enumerate(symbols):
             vr = self.var_to_range[k]
-            _verify_valid_range(k, vr, expr)
-            # We did not raise, so we need to check if the underlying expr is valid for the range
+            if k in self.user_constrained:
+                _verify_valid_range(k, vr, expr)
+            # So far so good, We did not raise, so we need to check if the underlying expr is valid for the range
             # free variables NYI, so, we have to size hint
             if self.size_hint(k) not in vr:
-                raise RuntimeError(f"User provided constraint of {vr}, contradicts traced value of {k}, {self.size_hint(k)}")
+                raise RuntimeError(f"Valid range, {vr}, contradicts traced value of {k}, {self.size_hint(k)}")
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
