@@ -1248,10 +1248,9 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
-    else:
-        from torch._dynamo.eval_frame import OptimizedModule
-        if isinstance(obj, OptimizedModule):
-            raise AttributeError("it is not possible to torch.jit.script() a torch.compile() model")
+    from torch._dynamo.eval_frame import OptimizedModule
+    if isinstance(obj, OptimizedModule):
+        raise AttributeError("it is not possible to torch.jit.script() a torch.compile() model")
 
 
     if example_inputs:
