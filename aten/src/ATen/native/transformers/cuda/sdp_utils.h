@@ -18,6 +18,7 @@
 #include <unordered_set>
 #include <vector>
 #include <cmath>
+#include <c10/util/string_view.h>
 
 namespace sdp {
 
@@ -56,7 +57,7 @@ inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
   // FlashAttention parallelizes across "batch_size * num_heads"
   // MemEff parallelizes across "batch_size * num_heads * num_queries" and can
   // be more efficient. batch_size, q_len, num_heads, k = inp.query.shape
-  if (params.query.is_nested()) {
+  if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
     // See check_for_nested_inputs for details
     return {
         SDPBackend::efficient_attention,
@@ -124,23 +125,125 @@ inline bool check_for_non_zero_dropout(sdp_params params, bool debug) {
   return true;
 }
 
+inline bool check_for_nested_inputs(sdp_params params){
+  if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
+    return true;
+  }
+  return false;
+}
+
+inline bool try_broadcast_param_size(int64_t q_size,
+                                    int64_t k_size,
+                                    int64_t v_size,
+                                    c10::string_view param_name,
+                                    bool debug) {
+  auto max_size = std::max({q_size, k_size, v_size});
+  if ((q_size != max_size && q_size != 1) ||
+      (k_size != max_size && k_size != 1) ||
+      (v_size != max_size && v_size != 1)) {
+        if (debug) {
+          TORCH_WARN(
+            "Both fused kernels require query, key and value to have broadcastable ",
+            param_name,
+            "got Query ",
+            param_name,
+            q_size,
+            ", Key ",
+            param_name,
+            k_size,
+            ", Value ",
+            param_name,
+            v_size,
+            " instead.");
+        }
+        return false;
+  }
+  return true;
+}
+
+inline bool check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(at::Tensor param,
+                                                                           c10::string_view param_name,
+                                                                           bool debug) {
+  const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
+  const at::Tensor& sizes = nt_tensor_impl->get_nested_size_tensor();
+  auto num_head_dims = nt_tensor_impl->opt_size(1);
+  if (!num_head_dims.has_value() ) {
+    // num_head_dims is ragged
+    if (debug) {
+      TORCH_WARN("Fused kernels do not support ragged num_head_dims, ",
+                 param_name,
+                 "has a ragged num_heads.");
+    }
+    return false;
+  }
+
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  const int64_t n_tensors = param.size(0);
+  const int64_t size_tensor_stride = sizes.stride(0);
+
+  // This is being called inside sdp with shape [batch, heads, {seq_len}, dim]
+  for (const auto i : c10::irange(n_tensors)) {
+    if (sizes_ptr[(i * size_tensor_stride) + 1] == 0) {
+      if (debug) {
+        TORCH_WARN("Fused kernels do not support seq_len == 0, ",
+                    param_name,
+                    "has a seq len of 0.");
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
+inline bool check_for_seq_len_0_nested_tensor(sdp_params params, bool debug) {
+  // When this function is called we are assured that the nt is dim==4
+  if (!check_for_nested_inputs(params)) {
+    return true;
+  }
+
+  bool q_is_safe = params.query.is_nested() ?
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.query, "query ", debug) :
+                   true;
+  // short circuit if any is unsafe
+  if (!q_is_safe) {
+    return false;
+  }
+
+  bool k_is_safe = params.key.is_nested() ?
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.key, "key ", debug) :
+                   true;
+  if (!k_is_safe) {
+    return false;
+  }
+
+  bool v_is_safe = params.value.is_nested() ?
+                   check_for_seq_len_0_and_consistent_head_dim_nested_tensor_helper(params.value, "value ", debug) :
+                   true;
+  if (!v_is_safe) {
+    return false;
+  }
+
+  // We now know none of the inputs have ragged num_heads, so we can safely access .size(1)
+  auto q_num_heads = params.query.size(1);
+  auto k_num_heads = params.key.size(1);
+  auto v_num_heads = params.value.size(1);
+  bool same_num_heads = q_num_heads == k_num_heads && q_num_heads == v_num_heads;
+
+  if (!same_num_heads) {
+    return try_broadcast_param_size(q_num_heads, k_num_heads, v_num_heads, "num heads ", debug);
+  }
+
+  return true;
+}
+
 inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   // When this function is called we are assured that the nt is dim==4
   if (!params.query.is_nested()) {
     return true;
   }
-  // we are only checking query but should probably check all of them
+
   const auto nt_q_tensor_impl = at::native::get_nested_tensor_impl(params.query);
   const at::Tensor& sizes = nt_q_tensor_impl->get_nested_size_tensor();
-  auto num_head_dims = nt_q_tensor_impl->opt_size(1);
-  if (!num_head_dims.has_value() ) {
-    // num_head_dims is ragged
-    if (debug) {
-      TORCH_WARN("Memory efficient attention does not support ragged num_head_dims");
-    }
-    return false;
-  }
-
   auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
@@ -149,22 +252,12 @@ inline bool check_for_seq_len_1_nested_tensor(sdp_params params, bool debug) {
   for (const auto i : c10::irange(n_tensors)) {
     if (sizes_ptr[(i * size_tensor_stride) + 1] <= 1) {
       if (debug) {
-        TORCH_WARN("Memory efficient attention does not support sequence_length <= 1");
+        TORCH_WARN("Packed projection for fused kernels does not support sequence_length <= 1");
       }
       return false;
     }
   }
 
-  return true;
-}
-
-inline bool check_for_nested_inputs(sdp_params params, bool debug){
-  if (params.query.is_nested() || params.key.is_nested() || params.value.is_nested()) {
-    if (debug) {
-      TORCH_WARN("We are not enabling nested Tensors for Flash Attention because of cuda memory errors.");
-    }
-    return false;
-  }
   return true;
 }
 
@@ -183,7 +276,7 @@ inline bool check_requires_grad(sdp_params params, bool debug) {
 
 inline bool check_requires_grad_and_nested(sdp_params params, bool debug) {
   // If we fail both checks then we return false
-  if (!check_for_nested_inputs(params, false) && !check_requires_grad(params,false)){
+  if (check_for_nested_inputs(params) && !check_requires_grad(params, false)){
     if (debug){
       TORCH_WARN("Memory efficient attention currently doesn't support training with NT inputs.");
     }
@@ -221,27 +314,72 @@ inline bool check_tensor_shapes(sdp_params params, bool debug) {
   return true;
 }
 
-inline bool check_equal_batch_size_and_num_heads(sdp_params params, bool debug) {
+inline bool check_safe_kv_broadcast(at::Tensor param, bool debug){
+  const auto nt_tensor_impl = at::native::get_nested_tensor_impl(param);
+  auto seq_len = nt_tensor_impl->opt_size(2);
+  if (!seq_len.has_value()) {
+    if (debug) {
+      TORCH_WARN("For both fused kernels, if one of key/value batch_size requires "
+                 "broadcasting and the other does not, then the other must have a ",
+                 "consistent seq_len dim.")
+    }
+    return false;
+  }
+  return true;
+}
+
+inline bool check_batch_size_and_num_heads(sdp_params params, bool debug) {
   // This is expected to be called after check_tensor_shapes ensuring that the size()
   // calls won't error since the inputs are all 4 dimensional
-  bool same_batch_size = params.query.size(0) == params.key.size(0) &&
-      params.query.size(0) == params.value.size(0);
-  // We pass through for NestedTensors since this is checked in a later filter
-  bool same_num_heads = params.query.is_nested()
-      ? true
-      : params.query.size(1) == params.key.size(1) &&
-          params.query.size(1) == params.value.size(1);
+  auto q_batch_size = params.query.size(0);
+  auto k_batch_size = params.key.size(0);
+  auto v_batch_size = params.value.size(0);
+
+  bool has_nested_input = check_for_nested_inputs(params);
+  bool same_batch_size = q_batch_size == k_batch_size && q_batch_size == v_batch_size;
+
+  // num_heads logic for nested input is checked in check_for_seq_len_0_nested_tensor
+  // as there is handling there to make sure num_heads is not ragged
+  if (has_nested_input) {
+    bool broadcastable_batch_size = true;
+    if (!same_batch_size) {
+      // try to broadcast batchsize
+      broadcastable_batch_size = try_broadcast_param_size(q_batch_size,
+                                                          k_batch_size,
+                                                          v_batch_size,
+                                                          "batch size ",
+                                                          debug);
+
+      // if only one of k or v require broadcasting of batch size, the other
+      // must have a consistent seq_len dim
+      if (broadcastable_batch_size) {
+        if (k_batch_size == 1 && v_batch_size != 1 && !check_safe_kv_broadcast(params.value, debug)) {
+          return false;
+        }
+        if (v_batch_size == 1 && k_batch_size != 1 && !check_safe_kv_broadcast(params.key, debug)) {
+          return false;
+        }
+      }
+    }
+    return broadcastable_batch_size;
+  }
+
+  auto q_num_heads = params.query.size(1);
+  auto k_num_heads = params.key.size(1);
+  auto v_num_heads = params.value.size(1);
+  bool same_num_heads = q_num_heads == k_num_heads && q_num_heads == v_num_heads;
 
   if (!(same_batch_size && same_num_heads)) {
     if (debug) {
       TORCH_WARN(
-        "Both fused kernels requires query, key and value to have the same batch_size and num_heads. Query.sizes(): ",
+        "For dense inputs, both fused kernels require query, key and value to have the same batch_size and num_heads. ",
+        "Query.sizes(): ",
         params.query.sizes(),
         ", Key sizes(): ",
         params.key.sizes(),
         ", Value sizes(): ",
         params.value.sizes(),
-        " instead.");
+        " instead. To broadcast dense inputs, try using unsqueeze and expand_to before passing them into the kernel.");
     }
     return false;
   }
@@ -446,12 +584,12 @@ inline bool use_flash_attention(sdp_params params, bool debug) {
   constexpr auto constraints = array_of<bool (*)(sdp_params, bool)>(
       check_runtime_disabled_flash,
       check_tensor_shapes,
-      check_equal_batch_size_and_num_heads,
+      check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size,
       check_gpu_sm75_or_greater,
       check_requires_grad_and_head_dim_128_and_sm86,
-      check_for_seq_len_1_nested_tensor);
+      check_for_seq_len_0_nested_tensor);
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;
@@ -483,11 +621,11 @@ inline bool use_mem_efficient_attention(sdp_params params, bool debug) {
       check_runtime_disabled_mem_efficient,
       check_requires_grad_and_nested,
       check_tensor_shapes,
-      check_equal_batch_size_and_num_heads,
+      check_batch_size_and_num_heads,
       check_for_attn_mask,
       check_head_dim_size_mem_efficient,
       check_gpu_sm86_head_dim_128,
-      check_for_seq_len_1_nested_tensor,
+      check_for_seq_len_0_nested_tensor,
       check_for_non_zero_dropout,
       check_use_deterministic_algorithms);
   for (auto& constraint : constraints) {
