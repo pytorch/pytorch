@@ -42,4 +42,5 @@ enum {
   DW_CFA_expression = 0x10,
   DW_CFA_offset_extended_sf = 0x11,
   DW_CFA_GNU_args_size = 0x2e,
+  DW_OP_deref = 0x6,
 };

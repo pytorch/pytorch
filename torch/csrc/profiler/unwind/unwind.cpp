@@ -338,7 +338,6 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
     auto libaddress = ((uint64_t)f - entry.lib->load_bias() - 1);
     entry.comm->out() << (void*)libaddress << "\n";
     if (entry.queried.size() - entry.completed > BLOCK) {
-      std::cout << "FLUSHING\n";
       entry.comm->out().flush();
       read_pending_results(entry);
     }
