@@ -153,7 +153,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: release/2.0
           submodules: recursive
           repository: pytorch/builder
           path: builder
