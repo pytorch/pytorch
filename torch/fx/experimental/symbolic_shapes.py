@@ -1683,11 +1683,7 @@ class ShapeEnv:
         for idx, k in enumerate(symbols):
             vr = self.var_to_range[k]
             if k in self.user_constrained:
-                _verify_valid_range(k, vr, expr)
-            # So far so good, We did not raise, so we need to check if the underlying expr is valid for the range
-            # free variables NYI, so, we have to size hint
-            if self.size_hint(k) not in vr:
-                raise RuntimeError(f"Valid range, {vr}, contradicts traced value of {k}, {self.size_hint(k)}")
+                self._verify_valid_range(k, vr, expr)
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
@@ -1891,6 +1887,25 @@ class ShapeEnv:
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
 
+    def _verify_valid_range(self, symbol, valid_range, expr):
+        context = {"symbol": symbol, "oo": sympy.oo, "-oo": -sympy.oo}
+        lt = eval(f"symbol >= {valid_range.lower}", context)
+        gt = eval(f"symbol <= {valid_range.upper}", context)
+
+        try:
+            sympy.And(lt, expr)
+            sympy.And(gt, expr)
+        except TypeError:
+            log.debug(f"Cannot do constraint verification! {symbol} is not boolean")
+        except Exception:
+            raise RuntimeError(f"Constraint contradiction! {symbol} from {expr} cannot be constrained to {valid_range}")
+        else:
+            log.debug(f"Constraint verification! {symbol} from {expr} constrained to {valid_range}")
+        # So far so good, We did not raise, so we need to check if the underlying expr is valid for the range
+        # free variables NYI, so, we have to size hint
+        if has_hint(symbol) and self.size_hint(symbol) not in valid_range:
+            raise RuntimeError(f"Valid range, {valid_range}, contradicts traced value of {symbol}, {self.size_hint(symbol)}")
+
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
         """
@@ -1993,14 +2008,3 @@ def _is_int(expr):
     if len(expr.node.expr.free_symbols) > 0:
         return False
     return True
-
-def _verify_valid_range(symbol, valid_range, expr):
-    context = {"symbol": symbol, "oo": sympy.oo, "-oo": -sympy.oo}
-    lt = eval(f"symbol >= {valid_range.lower}", context)
-    gt = eval(f"symbol <= {valid_range.upper}", context)
-    try:
-        sympy.And(lt, expr)
-        sympy.And(gt, expr)
-    except Exception:
-        raise RuntimeError(f"Constraint contradiction! {symbol} from {expr} cannot be constrained to {valid_range}")
-    log.debug(f"Constraint verification! {symbol} from {expr} constrained to {valid_range}")

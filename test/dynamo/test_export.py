@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import operator
-import unittest
 from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
@@ -1918,7 +1917,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     # This should not fail, but it does, because
     # symbolic_shapes simplification _maybe_evaluate_static removes this guard
     # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
-    @unittest.expectedFailure
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
