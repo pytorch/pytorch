@@ -24,6 +24,10 @@ at::Tensor all_gather_into_tensor(at::Tensor const& shard, const c10::string_vie
     TORCH_INTERNAL_ASSERT(false);
 }
 
+at::Tensor reduce_scatter_tensor(at::Tensor const& input, const c10::string_view reduceOp, int64_t scatter_dim, const c10::string_view tag, c10::ArrayRef<int64_t> ranks, int64_t group_size) {
+    TORCH_INTERNAL_ASSERT(false);
+}
+
 at::Tensor wait_tensor(at::Tensor const& self) {
     TORCH_INTERNAL_ASSERT(false);
 }
