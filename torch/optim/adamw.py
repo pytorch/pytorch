@@ -602,16 +602,15 @@ def _fused_adamw(
             device_max_exp_avg_sqs,
             device_state_steps,
         ) = grouped_tensors[(device, dtype)]
-        if grad_scale is not None and found_inf is not None:
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
             if device not in grad_scale_dict:
                 grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
             if found_inf not in found_inf_dict:
                 found_inf_dict[device] = found_inf.to(device, non_blocking=True)
-            device_grad_scale = grad_scale_dict[device]
             device_found_inf = found_inf_dict[device]
-        else:
-            device_grad_scale = None
-            device_found_inf = None
         torch._foreach_add_(device_state_steps, 1)
         torch._fused_adamw_(
             device_params,
