@@ -318,6 +318,7 @@ CI_SERIAL_LIST = [
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    '_nvfuser/test_torchscript',  # OOM on test_issue_1785
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -884,6 +885,30 @@ CUSTOM_HANDLERS = {
 }
 
 
+PYTEST_BLOCKLIST = [
+    "test_package",
+    "test_nccl",
+    "inductor/test_torchinductor",
+    "test_cuda",
+    "test_quantization",
+    "test_cuda_nvml_based_avail",
+    "test_cuda_primary_ctx",
+    "test_cuda_sanitizer",
+    "test_cuda_trace",
+    "test_fx",
+    "test_jiterator",
+    "test_mps",
+    "test_cuda_trace",
+    "profiler/test_profiler",
+    "test_jit",
+    "test_jit_legacy",
+    "dynamo/test_repros",  # skip_if_pytest
+    "dynamo/test_optimizers",  # skip_if_pytest
+    "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
+    "dynamo/test_unspec",  # imports repros
+] + list(CUSTOM_HANDLERS.keys())
+
+
 def parse_test_module(test):
     return test.split(".")[0]
 
@@ -1055,6 +1080,19 @@ def parse_args():
             "Use 'all' to execute all doctests or specify a specific "
             "doctest to run")
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+
     return parser.parse_args()
 
 
@@ -1298,6 +1336,11 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
     failure_messages = []
 
     # parallel = in parallel with other files
@@ -1324,7 +1367,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1342,7 +1385,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
