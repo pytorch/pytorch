@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <cmath>
+#include <c10/core/SymFloat.h>
 namespace sdp {
 
 constexpr int32_t num_backends = 3;
@@ -13,10 +14,10 @@ enum class SDPBackend {
   efficient_attention = 2
 };
 
-inline double calculate_scale(const at::Tensor& query, c10::optional<double> scale) {
-    double softmax_scale =
-      scale.has_value() ? scale.value() : std::pow(query.size(-1), -0.5);
-    return softmax_scale;
+inline c10::SymFloat calculate_scale(const at::Tensor& query, c10::optional<double> scale) {
+    const auto softmax_scale =
+      scale.has_value() ? scale.value() : c10::SymFloat(1) / c10::SymFloat(query.sym_size(-1)).sqrt();
+    return c10::SymFloat(softmax_scale);
 }
 
 } // namespace sdp

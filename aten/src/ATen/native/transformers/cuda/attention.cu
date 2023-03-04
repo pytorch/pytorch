@@ -838,7 +838,7 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
   benchmarking. We will hard code it to 0 for now
   */
   constexpr int num_splits{0};
-  const auto softmax_scale = sdp::calculate_scale(query, scale);
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
 
   Tensor logsumexp, debug_attn_mask;
@@ -992,7 +992,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     TORCH_CHECK(B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
   }
 
-    p.scale = sdp::calculate_scale(query, scale);
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.num_heads = num_heads;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);

@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   benchmarking. We will hard code it to 0 for now
   */
   constexpr int num_splits{0};
-  const auto softmax_scale = sdp::calculate_scale(query, scale);
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
@@ -250,7 +250,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
     p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
     p.delta_ptr = (float*)delta.data_ptr();
-    p.scale = sdp::calculate_scale(query, scale);
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = query.size(1);

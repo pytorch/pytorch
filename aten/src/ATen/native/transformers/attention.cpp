@@ -830,7 +830,7 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     // Naive, composite implementation defined here.
 
     // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    const auto scaling_factor = std::sqrt(sdp::calculate_scale(query_, scale));
+    const auto scaling_factor = sdp::calculate_scale(query_, scale).sqrt();
     const auto query = query_ * scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
