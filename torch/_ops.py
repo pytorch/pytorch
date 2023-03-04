@@ -150,7 +150,7 @@ class PyOperator(PyOperatorABC):
 
             dispatch_key = dispatch_key_or_mode_or_transform
             assert (
-                dispatch_key != DispatchKey.Python
+                dispatch_key != torch._C.DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
             assert isinstance(dispatch_key, torch._C.DispatchKey)
             assert dispatch_key not in self.table
@@ -162,10 +162,10 @@ class PyOperator(PyOperatorABC):
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-        if dispatch_key == DispatchKey.FuncTorchDynamicLayerFrontMode:
+        if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
             return dispatch_functorch(self, args, kwargs)
 
-        if dispatch_key == DispatchKey.Python:
+        if dispatch_key == torch._C.DispatchKey.Python:
             # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
             curr_mode = _get_current_dispatch_mode()
             assert (
@@ -205,8 +205,9 @@ class PyOperator(PyOperatorABC):
                 - self.fallthrough_keys
                 - DispatchKeySet(dispatch_key)
             )
-            highest_key = all_keys_after_current_masked.highestPriorityTypeId()
-            return self.dispatch(highest_key, *args, **kwargs)
+            return self.dispatch(
+                all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
+            )
 
         return inner
 
@@ -225,9 +226,9 @@ class PyOperator(PyOperatorABC):
             all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
                 args, kwargs
             )
-            highest_key = all_keys_after_current_masked.highestPriorityTypeId()
-
-            return self.dispatch(highest_key, *args, **kwargs)
+            return self.dispatch(
+                all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
+            )
 
         return inner
 
