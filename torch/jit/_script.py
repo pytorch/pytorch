@@ -14,7 +14,6 @@ import copy
 import pickle
 import warnings
 from typing import Any, Dict, List, Set, Tuple, Union, Callable
-from torch._dynamo.eval_frame import OptimizedModule
 
 import torch
 import torch._jit_internal as _jit_internal
@@ -1249,8 +1248,10 @@ def script(obj, optimize=None, _frames_up=0, _rcb=None,
         return obj
     if isinstance(obj, ScriptFunction):
         return obj
-    if isinstance(obj, OptimizedModule):
-        raise AttributeError("it is not possible to torch.jit.script() a torch.compile() model")
+    else:
+        from torch._dynamo.eval_frame import OptimizedModule
+        if isinstance(obj, OptimizedModule):
+            raise AttributeError("it is not possible to torch.jit.script() a torch.compile() model")
 
 
     if example_inputs:
