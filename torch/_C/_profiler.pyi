@@ -53,7 +53,6 @@ class _ExperimentalConfig:
         profiler_measure_per_kernel: bool = ...,
         verbose: bool = ...,
     ) -> None: ...
-    ...
 
 class ProfilerConfig:
     def __init__(
@@ -66,7 +65,6 @@ class ProfilerConfig:
         with_modules: bool,
         experimental_config: _ExperimentalConfig,
     ) -> None: ...
-    ...
 
 class _ProfilerEvent:
     start_tid: int
