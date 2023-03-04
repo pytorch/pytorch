@@ -381,7 +381,6 @@ class WrapperCodeGen(CodeGen):
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
-
         if isinstance(
             buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),
