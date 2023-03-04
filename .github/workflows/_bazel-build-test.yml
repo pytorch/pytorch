@@ -84,6 +84,10 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        if: ${{ inputs.cuda-version != 'cpu' }}
+
       - name: Output disk space left
         run: |
           sudo df -H
@@ -175,6 +179,7 @@ jobs:
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
