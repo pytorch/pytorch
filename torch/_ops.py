@@ -9,7 +9,7 @@ from typing import Any, Dict
 import torch._C
 
 from torch import _utils_internal
-from torch._dispatch.python import enable_python_dispatcher, no_python_dispatcher
+from torch._C import DispatchKey, DispatchKeySet
 from torch._functorch.pyfunctorch import dispatch_functorch
 
 # Query `hasattr` only once.
@@ -52,7 +52,6 @@ class PyOperatorABC(ABC):
 
 is_included_in_alias = torch._C._dispatch_is_included_in_alias
 
-DispatchKey = torch._C.DispatchKey
 
 # Equivalent to computeDispatchTableEntryWithDebug
 def resolve_key(op: PyOperatorABC, k: DispatchKey):  # type: ignore[valid-type]
@@ -120,9 +119,15 @@ class PyOperator(PyOperatorABC):
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         pyop_namespace[name] = self
+        self.fallthrough_keys = None
 
     def fallthrough(self, dispatch_key):
-        self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
+        if dispatch_key == DispatchKey.PythonDispatcher:
+            self.table[dispatch_key] = self._python_dispatcher_fallthrough_fn(
+                self, dispatch_key
+            )
+        else:
+            self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
 
     def py_impl(self, dispatch_key_or_mode_or_transform):
         def inner(fn):
@@ -145,7 +150,7 @@ class PyOperator(PyOperatorABC):
 
             dispatch_key = dispatch_key_or_mode_or_transform
             assert (
-                dispatch_key != torch._C.DispatchKey.Python
+                dispatch_key != DispatchKey.Python
             ), "Please register a mode for the torch._C.DispatchKey.Python key instead."
             assert isinstance(dispatch_key, torch._C.DispatchKey)
             assert dispatch_key not in self.table
@@ -155,26 +160,25 @@ class PyOperator(PyOperatorABC):
         return inner
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        with enable_python_dispatcher():
-            from torch.utils._python_dispatch import _get_current_dispatch_mode
+        from torch.utils._python_dispatch import _get_current_dispatch_mode
 
-            if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
-                return dispatch_functorch(self, args, kwargs)
+        if dispatch_key == DispatchKey.FuncTorchDynamicLayerFrontMode:
+            return dispatch_functorch(self, args, kwargs)
 
-            if dispatch_key == torch._C.DispatchKey.Python:
-                # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
-                curr_mode = _get_current_dispatch_mode()
-                assert (
-                    curr_mode is not None
-                ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
-                assert (
-                    type(curr_mode) in self.python_key_mode_table
-                ), f"Current active mode {curr_mode} not registered"
-                # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-                return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
+        if dispatch_key == DispatchKey.Python:
+            # TODO(voz): We should walk all the nodes here / turn it into a list, topmode is ok for now.
+            curr_mode = _get_current_dispatch_mode()
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+            assert (
+                type(curr_mode) in self.python_key_mode_table
+            ), f"Current active mode {curr_mode} not registered"
+            # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
+            return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
 
-            assert dispatch_key in self.table, dispatch_key
-            return self.table[dispatch_key](*args, **kwargs)
+        assert dispatch_key in self.table, dispatch_key
+        return self.table[dispatch_key](*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
@@ -189,18 +193,39 @@ class PyOperator(PyOperatorABC):
     def name(self):
         return self.name
 
+    def _python_dispatcher_fallthrough_fn(self, operator, dispatch_key):
+        def inner(*args, **kwargs):
+            """
+            Find the highest priority dispatch key, temporarily excluding the
+            PythonDispatcher key, and any other keys we have fallen through.
+            """
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
+            all_keys_after_current_masked = (
+                (all_keys_after_current & _compute_keyset(args, kwargs))
+                - self.fallthrough_keys
+                - DispatchKeySet(dispatch_key)
+            )
+            highest_key = all_keys_after_current_masked.highestPriorityTypeId()
+            return self.dispatch(highest_key, *args, **kwargs)
+
+        return inner
+
     # TODO(voz): Should rewrite fallthrough register as the impl for keys we do not specify
     # as opposed to being this sort of explicit thing where ops are a little too key aware...
     def _fallthrough_fn(self, operator, dispatch_key):
         def inner(*args, **kwargs):
-            with no_python_dispatcher():
-                all_keys_after_current = torch._C._dispatch_keyset_full_after(
+            if self.fallthrough_keys is None:
+                self.fallthrough_keys = DispatchKeySet(dispatch_key)
+            else:
+                self.fallthrough_keys = self.fallthrough_keys | DispatchKeySet(
                     dispatch_key
                 )
-                all_keys_after_current_masked = (
-                    all_keys_after_current & _compute_keyset(args, kwargs)
-                )
-                highest_key = all_keys_after_current_masked.highestPriorityTypeId()
+
+            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
+            all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
+                args, kwargs
+            )
+            highest_key = all_keys_after_current_masked.highestPriorityTypeId()
 
             return self.dispatch(highest_key, *args, **kwargs)
 
