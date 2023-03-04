@@ -3,31 +3,24 @@ from typing import Callable
 import torch
 from .function_dispatcher import _ATENLIB_FUNCTIONS, _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
 
-CUSTOM_OP_OVERLOADS = []
+ONNX_CUSTOM_OP_LIB = torch.library.Library("onnx_custom", "DEF")
 
 
-def custom_op_overload(schema: str):
+def _register_onnx_custom_op_overload(schema: str):
     def inner(f: Callable):
-        # TODO: Refactor the Library API so this is less rage inducing
-        # TODO: Perhaps the namespace should be directly based on Python
-        # module
         if "::" in schema:
-            ns = schema.split("::", 2)[0]
-        else:
-            ns = "contrib"
-        # TODO: Library doesn't allow FRAGMENT, need to allow it
-        lib = torch.library.Library(ns, "DEF")
-        name = lib.define(schema)
-        if "::" in name:
-            name = name.split("::", 2)[1]
-        lib.impl(name, f, "CompositeExplicitAutograd")
-        CUSTOM_OP_OVERLOADS.append(lib)
-        return getattr(getattr(torch.ops, ns), name)
+            domain = schema.split("::", 2)[0]
+            assert (
+                domain == "onnx_custom"
+            ), f"operator domain must be onnx_custom but found {schema}"
+        name = ONNX_CUSTOM_OP_LIB.define(schema)
+        ONNX_CUSTOM_OP_LIB.impl(name, f, "CompositeExplicitAutograd")
+        return getattr(torch.ops.onnx_custom, name)
 
     return inner
 
 
-def _register_custom_op_overload(
+def _register_exporter_for_op_overload(
     op_overload: torch._ops.OpOverload, exporter_key: str, exporter: Callable
 ) -> None:
     assert op_overload not in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
