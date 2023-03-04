@@ -21,7 +21,7 @@ using vec_scalar_t = typename VecScalarType<scalar_t>::type;
 //   Vec one = Vec(BFloat16(1));
 //   vec::map([](Vec x) { return one / (one + x.exp()); }, y_ptr, x_ptr, N);
 //
-// Then why we still need to specialize "funtional"?
+// Then why we still need to specialize "functional"?
 //   If we do specialization at Vectorized<> level, the above example would need 3 pairs of
 //   conversion of bf16->fp32/fp32->bf16, each for ".exp()", "+" and "/".
 //   If we do specialization at vec::map<>() level, we have only 1 pair of conversion
