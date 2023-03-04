@@ -274,7 +274,14 @@ static int THPFunction_clear(THPFunction* self) {
 
   self->output_info.clear();
   self->input_info.clear();
-  self->saved_variables.clear();
+  {
+    // If this is part of a gc cycle, clearing this field might
+    // end up calling release_variables() on this. So we must make
+    // sure that self->saved_variables is in a good state when we
+    // start de-allocating the SavedVariables
+    auto tmp  = std::move(self->saved_variables);
+    self->saved_variables.clear();
+  }
   self->is_variable_input.clear();
 
   return 0;
