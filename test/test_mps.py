@@ -59,23 +59,26 @@ _ref_test_ops = tuple(
 
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
-
-        'addr': [torch.float16],
+        # Top 60
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
         'empty': [torch.float16, torch.float32],
+
+        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+        'addr': [torch.float16],
 
         # Unimplemented ops
         '__getitem__': [torch.float16],
         'logaddexp2': [torch.float32],
-        'prod': [torch.float32],
+        'prod': [torch.float32],  # The operator 'aten::cumprod.out'
         'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
-        # unfold_backward is not implemented
-        'unfold_copy': [torch.float16, torch.float32],
+        'unfold_copy': [torch.float16, torch.float32], # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
-        # missing in place aten::index_fill_.int_Tensor
-        'trace': [torch.float32],
-        # csr not supported
-        'sparse.mmreduce': [torch.float32],
+        'trace': [torch.float32], # missing in place aten::index_fill_.int_Tensor
+        'sparse.mmreduce': [torch.float32], # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
@@ -93,9 +96,9 @@ def mps_ops_grad_modifier(ops):
         'exponential': [torch.float16, torch.float32],
 
         # CPU errors
-        # derivative for aten::floor_divide is not implemented
+        # derivative for aten::floor_divide is not implemented on CPU
         'floor_divide': [torch.float16, torch.float32],
-        # derivative for aten::narrow_copy is not implemented
+        # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
         # RuntimeError: "log_vml_cpu" not implemented for 'Half'
         '__rpow__': [torch.float16],
@@ -136,7 +139,6 @@ def mps_ops_grad_modifier(ops):
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
-        'remainder': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
@@ -159,13 +161,15 @@ def mps_ops_grad_modifier(ops):
 def mps_ops_modifier(ops):
     # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
     MACOS_12_3_XFAILLIST = {
+        # Top 60
         # expected failures
         # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13.3
+        # fixed in macOS 13.3. Currently error is not raised.
         'pow': [torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # expected failures
         '__rpow__': [torch.float32, torch.uint8, torch.int8],
 
-        # Failures due to precision issues. These has been fixed in MacOS 13.3+
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'cdist': [torch.float32],
         'tan': [torch.uint8, torch.float32],
 
@@ -259,11 +263,11 @@ def mps_ops_modifier(ops):
         'divfloor_rounding': [torch.uint8],
         'divno_rounding_mode': [torch.uint8],
         'floor_divide': [torch.uint8],
-        # square internally calls into power, and will type cast to int64, which supports starting from macOS 12
+        # square internally calls into power, and will type cast to int64, which supports starting from macOS 13
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
         # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # fill tensors with uninitialized data, causing mismatch with CPU
         'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
                            torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -273,19 +277,19 @@ def mps_ops_modifier(ops):
 
     MACOS_BEFORE_13_3_XFAILLIST = {
         # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13.3
-        'pow': [torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        '__rpow__': [torch.float32, torch.uint8, torch.int8],
+        # fixed in macOS 13. We are not raising error.
+        'pow': [torch.float32, torch.int8],
+        '__rpow__': [torch.float32],
 
-        # Failures due to precision issues. These has been fixed in MacOS 13.3+
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
+        'cdist': [torch.float32],
         'masked.softmin': [torch.float32],
         'masked.softmax': [torch.float32],
         'masked.log_softmax': [torch.float32],
-        'cdist': [torch.float32],
 
-        # cpu not giving nan for x/0.0
-        'atan2': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # CPU Error: cpu not giving nan for x/0.0
+        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
     MACOS_13_3_XFAILLIST = {
@@ -448,7 +452,6 @@ def mps_ops_modifier(ops):
         'nn.functional.rrelu': None,
         'nn.functional.softshrink': None,
         'nn.functional.norm': None,
-        'ones_like': None,
         'ormqr': None,
         'pca_lowrank': None,
         'pinverse': None,
@@ -519,7 +522,6 @@ def mps_ops_modifier(ops):
         'unique': None,
         'vdot': None,
         'view_as_complex': None,
-        'zeros_like': None,
         'segment_reduce': None,
         'segment_reduce_': None,
         '_segment_reduce_lengths': None,
@@ -551,14 +553,19 @@ def mps_ops_modifier(ops):
         # Unsupported dtypes
         # bmm is not supported for integral types
         'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # batch_norm  Cannot convert a MPS Tensor to float64 dtype
+        # Cannot convert a MPS Tensor to float64 dtype. The tensors
+        # input data is created with double in common_methods_invocations.py
         'nn.functional.batch_norm': [torch.float32],
+        'ones_like': None,
+        'zeros_like': None,
 
         # Convolution for integral types is not supported on MPS
         'nn.functional.conv1d': [torch.int64],
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
+
+        # Unsupported dtypes
         'cumsum': [torch.int64],
         'masked.cumsum': [torch.int64],
         'cumulative_trapezoid': [torch.int64],
@@ -602,17 +609,16 @@ def mps_ops_modifier(ops):
     }
 
     UNDEFINED_XFAILLIST = {
+        # Top 60 operators
+        # topk fails with duplicate indices
+        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
-        'addr': [torch.bool, torch.int16, torch.int32,
-                 torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
-        'dist': [torch.float16],  # cpu result off, showing inf values
-        'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
-                                    torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
-        'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
-                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
         'multinomial': [torch.float32],  # random results
-        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],  # topk fails with duplicate indices
         'uniform': [torch.float16, torch.float32],
         'rand_like': [torch.float16, torch.float32],
         'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -627,6 +633,7 @@ def mps_ops_modifier(ops):
         'nn.functional.dropout': [torch.float32],
         'nn.functional.dropout2d': [torch.float32],
         'nn.functional.dropout3d': [torch.float32],
+
         # these fill tensors with uninitialized data, causing mismatch with CPU
         'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
@@ -640,6 +647,15 @@ def mps_ops_modifier(ops):
         'resize_': [torch.float16, torch.float32],
         'resize_as_': [torch.float16, torch.float32],
 
+        # CPU Errors:
+        'addr': [torch.bool, torch.int16, torch.int32,
+                 torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
+        'dist': [torch.float16],  # cpu result off, showing inf values
+        'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                    torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+        'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+
         # Argsort case using duplicate indices (undefined behaviour):
         #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
         #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
@@ -647,9 +663,6 @@ def mps_ops_modifier(ops):
         # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
         'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
 
-        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
-        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
-        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
 
         # random results
         # mps vs cpu:
