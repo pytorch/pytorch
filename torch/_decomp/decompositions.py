@@ -3339,6 +3339,11 @@ def aminmax(self, *, dim=None, keepdim=False):
     )
 
 
+@register_decomposition([aten.nansum])
+def nansum(self, dim=None, keepdim=False, *, dtype=None):
+    return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

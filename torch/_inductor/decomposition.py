@@ -416,11 +416,6 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
-@register_decomposition([aten.nansum])
-def nansum(self, dim=None, keepdim=False, *, dtype=None):
-    return aten.sum(self.nan_to_num(), dim, keepdim, dtype=dtype)
-
-
 """
 Some decomps result in differences from eager related to randomness.
 We put these decomps in a separate table `extra_random_decomps` to allow
