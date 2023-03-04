@@ -24,7 +24,7 @@ output_code = False
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
+verbose = False
 
 # If true, traced graph outputs will be outputted as Python GraphModule code.
 # If false, traced graph outputs will be outputted in tabular form.
@@ -42,8 +42,10 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
+# whether or not to specialize on int inputs.  This only has an effect with
+# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
+# inputs
+specialize_int = True
 
 # Assume these functions return constants
 constant_functions = {
