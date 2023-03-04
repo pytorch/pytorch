@@ -1946,7 +1946,11 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def(
               "_abort",
-              &::c10d::ProcessGroupNCCL::abort,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const c10::optional<std::string>& abortReason) {
+                return self->abort(abortReason);
+              },
+              py::arg("abort_reason") = c10::optional<std::string>(),
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
