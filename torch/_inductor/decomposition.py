@@ -32,6 +32,15 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.unsafe_split,
+        aten.isneginf,
+        aten.isposinf,
+        aten.logspace,
+        aten.log_sigmoid_forward,
+        aten.log_sigmoid_backward,
+        aten.threshold,
+        aten.trace,
+        aten.unfold,
+        aten.unfold_copy,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
