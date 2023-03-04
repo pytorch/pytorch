@@ -728,7 +728,12 @@ class CheckFunctionManager:
         closure_vars.update(CLOSURE_VARS)
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
-    return lambda {args}: {code}
+    
+    def real_guard_fn({args}):
+        with torch.autograd.profiler.record_function("guards"):
+            return lambda {args}: {code}
+    
+    return real_guard_fn
 """
         if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
             print("GUARDS", code)

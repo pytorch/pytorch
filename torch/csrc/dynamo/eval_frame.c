@@ -662,7 +662,9 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  // #TODO profiler_event_start("dynamo_cache_lookup")
   PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  // #TODO profiler_event_end("dynamo_cache_lookup")
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
