@@ -3345,7 +3345,7 @@ def aminmax(self, *, dim=None, keepdim=False):
         # the behavior of aminmax differs from amin/amax for 0D tensors on CPU
         # https://github.com/pytorch/pytorch/issues/96042
         amin = amin.expand([1])
-        amax = amin.expand([1])
+        amax = amax.expand([1])
     return torch.return_types.aminmax([amin, amax])  # type: ignore[call-arg,arg-type]
 
 
