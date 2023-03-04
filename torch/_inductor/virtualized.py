@@ -101,7 +101,7 @@ class KernelFormatterHandler:
         self.var_counter = itertools.count()
 
     @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None, max_lines=None):
+    def ir_to_string(ir_fn, index, rindex=None):
         from .ir import FlexibleLayout
 
         args = [index, rindex] if rindex is not None else [index]
@@ -124,7 +124,7 @@ class KernelFormatterHandler:
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)
-            return formatter.getvalue(result, max_lines=max_lines)
+            return formatter.getvalue(result)
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
