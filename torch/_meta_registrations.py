@@ -2676,6 +2676,27 @@ def meta_upsample_bilinear2d_aa(
     )
 
 
+# From aten/src/ATen/native/cuda/AmpKernels.cu
+@register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
+def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
+    check(found_inf.numel() == 1, lambda: "found_inf must be a 1-element tensor.")
+    check(inv_scale.numel() == 1, lambda: "inv_scale must be a 1-element tensor.")
+    check(
+        found_inf.dtype.is_floating_point, lambda: "found_inf must be a float tensor."
+    )
+    check(
+        inv_scale.dtype.is_floating_point, lambda: "inv_scale must be a float tensor."
+    )
+
+
+# From aten/src/ATen/native/UnaryOps.cpp
+@register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
+@out_wrapper()
+def nan_to_num(self, nan=None, posinf=None, neginf=None):
+    result_size = list(self.size())
+    return self.new_empty(result_size)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -2749,6 +2770,13 @@ def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     out_size = list(shard.size())
     out_size[0] *= group_size
     return shard.new_empty(out_size)
+
+
+@register_meta(aten.reduce_scatter_tensor)
+def reduce_scatter_tensor_meta(input, reduce_op, scatter_dim, tag, rankset, group_size):
+    out_size = list(input.size())
+    out_size[scatter_dim] //= group_size
+    return input.new_empty(out_size)
 
 
 @register_meta(aten.wait_tensor)
