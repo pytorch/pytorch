@@ -1269,10 +1269,13 @@ class BenchmarkRunner:
             correct_rerun_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
+            # Two eager runs should have exactly same result
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
+                fp64_ref=None,
+                cos_similarity=False,
+                tol=0,
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
@@ -1956,9 +1959,12 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.use_deterministic_algorithms(True)
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()
