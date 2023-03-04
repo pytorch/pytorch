@@ -3432,16 +3432,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         real_dtype_32 = real_32.dtype
 
         graph = torch._dynamo.optimize("eager")(module)
-        exported_16, exported_32 = graph(torch.tensor([0.5]))
-        self.assertEqual(exported_16.device, real_device_16)
-        self.assertEqual(exported_16.dtype, real_dtype_16)
-        self.assertEqual(exported_32.device, real_device_32)
-        self.assertEqual(exported_32.dtype, real_dtype_32)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
 
-        self.assertEqual(exported_16.device.type, "cpu")
-        self.assertEqual(exported_16.dtype, torch.bfloat16)
-        self.assertEqual(exported_32.device.type, "cpu")
-        self.assertEqual(exported_32.dtype, torch.float32)
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
 
     def test_autocast_graph_break_method(self):
         class MyModule(torch.nn.Module):
@@ -3488,16 +3488,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         real_dtype_32 = real_32.dtype
 
         graph = torch._dynamo.optimize("eager")(module)
-        exported_16, exported_32 = graph(torch.tensor([0.5]))
-        self.assertEqual(exported_16.device, real_device_16)
-        self.assertEqual(exported_16.dtype, real_dtype_16)
-        self.assertEqual(exported_32.device, real_device_32)
-        self.assertEqual(exported_32.dtype, real_dtype_32)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
 
-        self.assertEqual(exported_16.device.type, "cpu")
-        self.assertEqual(exported_16.dtype, torch.bfloat16)
-        self.assertEqual(exported_32.device.type, "cpu")
-        self.assertEqual(exported_32.dtype, torch.float32)
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
