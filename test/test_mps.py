@@ -7916,9 +7916,9 @@ class TestViewOpsMPS(TestCaseMPS):
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
 
-    def test_resize_all_dtypes_and_devices(self, device="mps"):
+    def test_resize_mps_dtypes(self, device="mps"):
         shape = (2, 2)
-        for dt in (torch.half, torch.bfloat16, torch.bool):
+        for dt in MPS_DTYPES:
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
