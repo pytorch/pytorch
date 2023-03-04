@@ -472,7 +472,7 @@ inductor_all_samples = {
     "mT",
     "mH",
     "rsub",
-    "triu"
+    "triu",
 }
 
 
