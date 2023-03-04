@@ -1539,6 +1539,7 @@ class ShapeEnv:
                     # constrained to an integer.
                     if _is_int(ss):
                         raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
+                    dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
