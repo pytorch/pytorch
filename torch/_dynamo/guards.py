@@ -30,6 +30,7 @@ from .utils import (
     dict_const_keys,
     dict_const_keys_repr,
     dict_param_key_ids,
+    dynamic_dims_check,
     guard_failures,
     HAS_NUMPY,
     istype,
@@ -58,6 +59,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("___dynamic_dims_check", dynamic_dims_check),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -474,6 +476,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
 
+            # Note - [On Dynamic Dim Guards]
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
             #
@@ -505,11 +508,9 @@ class GuardBuilder(GuardBuilderBase):
                 value, guard.source, is_tensor=True
             )
             if not static:
-                # TODO(voz): WE NEED TO REWRITE THIS TO HAVE PROPER RANGE GUARDS!!!!
-                # DO NOT LAND THIS PR WITHOUT THAT!!
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.keys().issubset({value._dynamo_dynamic_indices.keys()})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
+                        f"___dynamic_dims_check({tensor_name}, {dict(value._dynamo_dynamic_indices)})"
                     )
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
@@ -724,6 +725,7 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
+                ("oo", float("inf")),
             ]
             + list(SYMPY_INTERP.items())
         )

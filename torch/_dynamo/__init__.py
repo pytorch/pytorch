@@ -181,4 +181,4 @@ def mark_dynamic_constrained(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic_constrained(t, i)
+        mark_dynamic_constrained(t, i, min=min, max=max)

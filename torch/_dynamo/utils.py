@@ -741,6 +741,24 @@ tuple_iterator = type(iter(tuple()))
 tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
+# See Note - [On Dynamic Dim Guards]
+def dynamic_dims_check(tensor, prior_dynamo_dynamic_indices):
+    if not hasattr(tensor, "_dynamo_dynamic_indices"):
+        return True
+    if not set(tensor._dynamo_dynamic_indices.keys()).issubset(
+        set(prior_dynamo_dynamic_indices.keys())
+    ):
+        return False
+    for key, vr in tensor._dynamo_dynamic_indices.items():
+        prior_vr = prior_dynamo_dynamic_indices[key]
+        # If the new range min is lower, we must reject
+        if vr.min < prior_vr[0]:
+            return False
+        # If the new range min is higher, we must reject
+        if vr.max > prior_vr[1]:
+            return False
+    return True
+
 
 def product(it):
     return functools.reduce(operator.mul, it, 1)

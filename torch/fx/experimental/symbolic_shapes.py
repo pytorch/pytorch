@@ -1510,7 +1510,6 @@ class ShapeEnv:
             # In a future where we want to extend the constraint API to include
             # user directives about relationships, we can remove this check from
             # verification.
-            breakpoint()
             if len(expr.free_symbols) == 1:
                 srcs = symbol_to_source[expr.free_symbols.pop()]
                 for src in srcs:
@@ -1688,7 +1687,6 @@ class ShapeEnv:
             # SymInt
             if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
                 new_range_env[k] = vr
-                breakpoint()
                 continue
             # Positive means >= 1
             # Positive - 1 means >= 0
@@ -1998,6 +1996,5 @@ def _verify_valid_range(symbol, valid_range, expr):
         sympy.And(lt, expr)
         sympy.And(gt, expr)
     except Exception:
-        breakpoint()
         raise RuntimeError(f"Constraint contradiction! {symbol} from {expr} cannot be constrained to {valid_range}")
     log.debug(f"Constraint verification! {symbol} from {expr} constrained to {valid_range}")

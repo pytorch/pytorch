@@ -4732,6 +4732,30 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 3)
 
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_py_guards_constrain_dynamic(self):
+        x = torch.randn([7, 7, 7])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 5:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+        counter = CompileCounter()
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        # First compile
+        self.assertEqual(counter.frame_count, 1)
+        # Constrain, narrowing, should not recompile
+        torch._dynamo.mark_dynamic_constrained(x, 0, min=5, max=8)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 1)
+        delattr(x, "_dynamo_dynamic_indices")
+        # Constrain, widening, should recompile
+        torch._dynamo.mark_dynamic_constrained(x, 0, min=3, max=10)
+        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
+        self.assertEqual(counter.frame_count, 2)
+
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):
             def forward(self):
