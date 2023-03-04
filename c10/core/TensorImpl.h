@@ -3077,16 +3077,6 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     return true;
   }
 
-  // Provides compile-time <= check that reveals what numbers
-  // were used and on which quantity
-  template <size_t Actual, size_t Expected, FieldNameEnum FiledName>
-  constexpr static bool is_le() {
-    static_assert(
-        Actual <= Expected,
-        "Actual and Expected sizes of a field did not match!");
-    return true;
-  }
-
  public:
   // Compile-time check that TensorImpl field sizes are as expected
   //
@@ -3113,14 +3103,14 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
     are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
     are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
-    is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(pyobj_slot_),         8,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(sizes_and_strides_), 88, FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
     are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
     are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
     are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
-    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    are_equal<sizeof(TensorImpl),      tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
@@ -3128,24 +3118,24 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
 #else
   // This is a 64-bit system
   static constexpr bool check_sizes() {
-    constexpr size_t tsize = 26 * sizeof(int64_t);
+    constexpr size_t tsize = 24 * sizeof(int64_t);
 
     // clang-format off
     are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
     // On some systems involving NVCC the size of unique_ptr is 16 bytes. We haven't
     // figured out how to detect those via macro preprocessors yet, so we use <=
     // comparisons for the relevant fields.
-    is_le<sizeof(autograd_meta_),         16,  FieldNameEnum::autograd_meta_>();
-    is_le<sizeof(extra_meta_),            16,  FieldNameEnum::extra_meta_>();
+    are_equal<sizeof(autograd_meta_),      8,  FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(extra_meta_),         8,  FieldNameEnum::extra_meta_>();
     are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),   16,  FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(pyobj_slot_),        16,  FieldNameEnum::pyobj_slot_>();
     are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
     are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
     are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
     are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
     are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
     are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
-    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    are_equal<sizeof(TensorImpl),      tsize,  FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
 
     return true;
