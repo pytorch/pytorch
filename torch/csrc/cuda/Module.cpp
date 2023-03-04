@@ -699,7 +699,7 @@ void gatherFrames(
       frame[name_s] = f.funcname;
       frame[line_s] = f.lineno;
       CPPFrame::Kind kind = CPPFrame::REPORT;
-      if (f.funcname == "_PyEval_EvalFrame") {
+      if (f.funcname.find("PyEval_EvalFrame") != std::string::npos) {
         kind = CPPFrame::PYTHON;
       } else if (
           f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
@@ -757,7 +757,9 @@ void gatherFrames(
       for (void* f : sc->cpp_frames) {
         const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
         if (wf.kind == CPPFrame::PYTHON) {
-          append_python(*py_it++);
+          if (py_it != py_end) {
+            append_python(*py_it++);
+          }
         } else if (wf.kind == CPPFrame::JIT) {
           append_jit();
         }
