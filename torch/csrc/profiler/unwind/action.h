@@ -5,7 +5,8 @@
 enum {
   A_UNDEFINED = 0x0,
   A_REG_PLUS_DATA = 0x1, // exp = REG[reg] + data0
-  A_LOAD_CFA_OFFSET = 0x4, // exp = *(cfa + data0)
+  A_LOAD_CFA_OFFSET = 0x2, // exp = *(cfa + data0)
+  A_REG_PLUS_DATA_DEREF = 0x3 // exp = *(REG[reg] + data0)
 };
 
 // register numbers in dwarf info
@@ -27,6 +28,9 @@ struct Action {
   static Action regPlusData(int32_t reg, int64_t offset) {
     return Action{A_REG_PLUS_DATA, reg, offset};
   }
+  static Action regPlusDataDeref(int32_t reg, int64_t offset) {
+    return Action{A_REG_PLUS_DATA_DEREF, reg, offset};
+  }
   static Action loadCfaOffset(int64_t offset) {
     return Action{A_LOAD_CFA_OFFSET, D_UNDEFINED, offset};
   }
@@ -38,6 +42,9 @@ struct Action {
         break;
       case A_REG_PLUS_DATA:
         out << "r" << (int)self.reg << " + " << self.data;
+        break;
+      case A_REG_PLUS_DATA_DEREF:
+        out << "*(r" << (int)self.reg << " + " << self.data << ")";
         break;
       case A_LOAD_CFA_OFFSET:
         out << "*(cfa + " << self.data << ")";

@@ -192,6 +192,10 @@ struct FDE {
 
   TableState readUpTo(uint64_t addr) {
     TORCH_INTERNAL_ASSERT(low_pc_ <= addr && addr <= high_pc_, "NOT IN RANGE?");
+    if (LOG) {
+      (*out_) << "readUpTo " << (void*)addr << " for " << library_name_
+              << " at " << (void*)load_bias_ << "\n";
+    }
     state_stack_.emplace_back();
     current_pc_ = low_pc_;
     // parse instructions...
@@ -288,6 +292,39 @@ struct FDE {
             // GNU_args_size, we do not need to know it..
             L.readULEB128();
             return;
+          }
+          case DW_CFA_expression: {
+            auto reg = L.readULEB128();
+            auto len = L.readULEB128();
+            auto end = (void*)((uint64_t)L.loc() + len);
+            auto op = L.read<uint8_t>();
+            if ((op & 0xF0) == 0x70) { // DW_bregX
+              auto rhs_reg = (op & 0xF);
+              auto addend = L.readSLEB128();
+              if (L.loc() == end) {
+                state().registers.at(reg) =
+                    Action::regPlusDataDeref(rhs_reg, addend);
+                return;
+              }
+            }
+            throw UnwindError("Unsupported dwarf expression");
+          }
+          case DW_CFA_def_cfa_expression: {
+            auto len = L.readULEB128();
+            auto end = (void*)((uint64_t)L.loc() + len);
+            auto op = L.read<uint8_t>();
+            if ((op & 0xF0) == 0x70) { // DW_bregX
+              auto rhs_reg = (op & 0xF);
+              auto addend = L.readSLEB128();
+              if (L.loc() != end) {
+                auto op2 = L.read<uint8_t>();
+                if (op2 == DW_OP_deref && L.loc() == end) { // deref
+                  state().cfa = Action::regPlusDataDeref(rhs_reg, addend);
+                  return;
+                }
+              }
+            }
+            throw UnwindError("Unsupported def_cfa dwarf expression");
           }
           default: {
             std::stringstream ss;

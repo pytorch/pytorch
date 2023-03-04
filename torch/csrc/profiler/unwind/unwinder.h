@@ -29,11 +29,24 @@ struct Unwinder {
         rip_off_(rip.data),
         rbp_off_(
             rbp.kind == A_UNDEFINED ? std::numeric_limits<int64_t>::max()
-                                    : rbp.data) {
-    bool standard = rsp.kind == A_REG_PLUS_DATA &&
-        (rip.kind == A_UNDEFINED || rip.kind == A_LOAD_CFA_OFFSET) &&
-        (rbp.kind == A_LOAD_CFA_OFFSET || rbp.kind == A_UNDEFINED);
-    if (!standard) {
+                                    : rbp.data),
+        deref_(rsp.kind == A_REG_PLUS_DATA_DEREF) {
+    check(rip.kind == A_UNDEFINED || rip.kind == A_LOAD_CFA_OFFSET);
+    if (rsp.kind == A_REG_PLUS_DATA) {
+      check(rbp.kind == A_LOAD_CFA_OFFSET || rbp.kind == A_UNDEFINED);
+    } else if (rsp.kind == A_REG_PLUS_DATA_DEREF) {
+      if (rbp.kind == A_REG_PLUS_DATA_DEREF) {
+        check(rbp.reg == rsp.reg);
+        rbp_off_ -= rsp.data;
+      } else {
+        check(rbp.kind == A_UNDEFINED);
+      }
+    } else {
+      check(false);
+    }
+  }
+  void check(bool cond) {
+    if (!cond) {
       throw UnwindError("Unwinding actions do not follow supported patterns");
     }
   }
@@ -51,10 +64,14 @@ struct Unwinder {
   UnwindState run(const UnwindState& cur) const {
     UnwindState r = cur;
     r.rsp = (reg_ == US_RSP ? cur.rsp : cur.rbp) + off_;
-    r.rip = *(int64_t*)(r.rsp + rip_off_);
     r.rbp = rbp_off_ == std::numeric_limits<int64_t>::max()
         ? cur.rbp
         : *(int64_t*)(r.rsp + rbp_off_);
+    if (deref_) {
+      r.rsp = *(int64_t*)r.rsp;
+    }
+    r.rip = *(int64_t*)(r.rsp + rip_off_);
+
     return r;
   }
 
@@ -81,4 +98,5 @@ struct Unwinder {
   int64_t off_;
   int64_t rip_off_;
   int64_t rbp_off_;
+  bool deref_;
 };
