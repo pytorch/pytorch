@@ -145,6 +145,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -175,6 +176,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TIMM
     "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
+    "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
