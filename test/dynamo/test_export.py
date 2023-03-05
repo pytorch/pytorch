@@ -109,23 +109,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(hit)
 
-    @config.patch(dynamic_shapes=True)
-    def test_export_not_tensor(self):
-        def true_fn(x, y):
-            return x + y
-
-        def false_fn(x, y):
-            return x - y
-
-        def f(x, y):
-            return cond(not torch.any(x), true_fn, false_fn, [x, y])
-
-        input = (torch.zeros(1), torch.ones(1))
-        resA = f(*input)
-        graph, _ = torch._dynamo.export(f, *input)
-        resB = graph(*input)
-        self.assertTrue(torch._dynamo.utils.same(resA, resB))
-
     def test_export_control_flow_with_getattr(self):
         class Animal(Enum):
             COW = "moo"
@@ -952,6 +935,51 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
                 self.assertTrue(node.meta["source_fn"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
+
+    def test_export_preserves_nn_module_stack_for_get_attr(self):
+        inp = torch.randn(4, 4)
+
+        class MyBlock(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(1, 1))
+                self.register_buffer("buffer", torch.ones(1, 1))
+
+            def forward(self, x):
+                x = torch.nn.functional.linear(x, torch.randn(4, 4))
+                return torch.cos(x).relu() + self.weight + self.buffer
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block = MyBlock()
+
+            def forward(self, x):
+                out = self.block(x)
+                return out
+
+        m = MyModule()
+        exported = torch._dynamo.export(m, inp, aten_graph=False)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
+
+        torch._dynamo.reset()
+
+        exported = torch._dynamo.export(m, inp, aten_graph=True)
+        out_graph = exported[0]
+
+        attr_access_count = 0
+        for node in out_graph.graph.nodes:
+            if node.op == "get_attr":
+                attr_access_count += 1
+                self.assertTrue(node.meta["nn_module_stack"] is not None)
+        self.assertEqual(attr_access_count, 2)
 
     def test_export_compare_optimize_with_make_fx(self):
         inp = torch.tensor([0.1, 0.1])
@@ -1842,6 +1870,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         def my_dyn_fn(a, b, c):
             if a.shape[0] == b.shape[1] == c.shape[2]:
                 return a.sin()
+
             return a.cos()
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
@@ -1968,6 +1997,41 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(*inps)
 
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+    def test_export_identity(self):
+        inp = torch.tensor([0.1, 0.1])
+
+        def func(x):
+            return x
+
+        torch._dynamo.reset()
+        exported, _ = torch._dynamo.export(func, inp)
+        dynamo_result = exported(inp)
+        self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
+
+    def test_export_specialized_int_float(self):
+        class Foo(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim,
+            ):
+                super().__init__()
+                self.torch_module = torch.nn.LayerNorm(
+                    input_dim, eps=1e-5, elementwise_affine=True
+                )
+
+            def forward(self, input):
+                return input.cos() * self.torch_module.eps
+
+        mod = Foo(128)
+        inp = torch.randn(3, 128)
+
+        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+        count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                count += 1
+        self.assertEqual(count, 1)
 
 
 if __name__ == "__main__":

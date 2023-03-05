@@ -16,6 +16,7 @@ from torch.fx.experimental.symbolic_shapes import (
     magic_methods,
     method_to_operator,
     ShapeEnv,
+    SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
 
@@ -154,6 +155,13 @@ class GraphLowering(torch.fx.Interpreter):
     def fake_mode(self):
         return V.fake_mode
 
+    def get_buffer(self, buffer_name: str):
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name]
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name]
+        return None
+
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
             return self.constants[buffer_name].dtype
@@ -278,6 +286,10 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example: torch.Tensor = super().placeholder(target, args, kwargs)
+        if isinstance(example, SymTypes):
+            expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -383,6 +395,9 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
+            assert isinstance(value, (TensorBox, sympy.Expr))
+            if not isinstance(value, TensorBox):
+                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
@@ -468,6 +483,7 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
+                            torch.ops.aten._int_mm.default,
                         ):
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
@@ -593,8 +609,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        if dynamo_config.output_code:
-            log.info("Output code: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
