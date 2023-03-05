@@ -187,6 +187,25 @@ class CppPrinter(ExprPrinter):
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
 
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            return f"{expr.p}"
+        return f"{expr.p}.0/{expr.q}.0"
+
 
 cexpr = CppPrinter().doprint
 
@@ -395,14 +414,6 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def asin(x):
         return f"{x}.asin()"
-
-    @staticmethod
-    def cosh(x):
-        return f"{x}.cosh()"
-
-    @staticmethod
-    def sinh(x):
-        return f"{x}.sinh()"
 
     @staticmethod
     def log10(x):
@@ -700,14 +711,6 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def acosh(x):
         return f"std::acosh({x})"
-
-    @staticmethod
-    def cosh(x):
-        return f"std::cosh({x})"
-
-    @staticmethod
-    def sinh(x):
-        return f"std::sinh({x})"
 
     @staticmethod
     def asin(x):

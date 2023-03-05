@@ -1281,8 +1281,6 @@ make_fallback(aten.i0)
 make_fallback(aten.igamma, warn=False)
 make_fallback(aten.igammac, warn=False)
 make_fallback(aten.isin)
-make_fallback(aten.isneginf, warn=False)
-make_fallback(aten.isposinf, warn=False)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.linalg_cross)
@@ -1302,8 +1300,6 @@ make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
 make_fallback(aten.logaddexp2)
 make_fallback(aten.logcumsumexp)
-make_fallback(aten.log_sigmoid_forward, warn=False)
-make_fallback(aten.logspace, warn=False)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -1356,10 +1352,7 @@ make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten.take)
-make_fallback(aten.threshold, warn=False)
-make_fallback(aten.trace, warn=False)
 make_fallback(aten._trilinear)
-make_fallback(aten.unfold_copy, warn=False)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
@@ -1501,30 +1494,6 @@ def iota(
         dtype=dtype,
         inner_fn=fn,
         ranges=[length],
-    )
-
-
-@register_lowering(aten.triu)
-def triu(x, diagonal=0):
-    x_loader = x.make_loader()
-    dtype = x.get_dtype()
-
-    def inner_fn(index):
-        *_, i, j = index
-        return ops.where(
-            ops.ge(
-                ops.index_expr(j - i - diagonal, torch.int32),
-                ops.constant(0, torch.int32),
-            ),
-            x_loader(index),
-            ops.constant(0, dtype),
-        )
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(x.get_size()),
     )
 
 
