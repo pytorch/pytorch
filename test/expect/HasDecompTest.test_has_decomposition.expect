@@ -390,8 +390,6 @@ aten::_mps_convolution_transpose.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
 aten::_native_batch_norm_legit_no_training.out
-aten::_native_decoder_only_multi_head_attention
-aten::_native_decoder_only_multi_head_attention.out
 aten::_native_multi_head_attention
 aten::_native_multi_head_attention.out
 aten::_neg_view
@@ -511,8 +509,6 @@ aten::_to_dense
 aten::_to_dense.out
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
-aten::_transformer_decoder_only_layer_fwd
-aten::_transformer_decoder_only_layer_fwd.out
 aten::_transformer_encoder_layer_fwd
 aten::_transformer_encoder_layer_fwd.out
 aten::_trilinear
