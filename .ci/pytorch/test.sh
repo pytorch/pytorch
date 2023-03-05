@@ -320,8 +320,11 @@ test_inductor_benchmark() {
     # Check training with --amp
     test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
 
-    # Check inference with --dynamic-shapes
+    # Check inference with --float23 --dynamic-shapes
     test_single_dynamo_benchmark "dynamic_inductor_inference" "$@" --inductor --dynamic-shapes --unspecialize-int --device cuda
+
+    # Check training with --amp --dynamic-shapes
+    test_single_dynamo_benchmark "dynamic_inductor_training" "$@" --inductor --training --amp --dynamic-shapes --unspecialize-int --device cuda
   fi
 }
 
