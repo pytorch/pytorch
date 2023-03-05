@@ -1787,8 +1787,8 @@ Tensor cholesky_inverse_jvp(
 // of Ap^i, A^j, dA^k with i, j, k in {1, H}, where X^H = X.mH(). To prove that,
 // note (A Ap)^H = A Ap and (Ap A)^H = Ap A, which could be shown by taking the
 // product between the SVD decompositions of A and Ap. Consider the
-// conjugate-transposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating it
-// we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
+// conjugate-transposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating
+// it we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
 // left by Ap^H and using Ap^H A^H = (A Ap)^H = A Ap: Ap^H dA^H A Ap + A Ap dA
 // Ap + A Ap A dAp = Ap^H dA^H. By multiplying from the left by Ap and by
 // applying [1] and [2] repeatedly until impossible we get: Ap Ap^H dA^H A Ap +
