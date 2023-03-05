@@ -887,7 +887,7 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     # NB: This code path is currently dead because dynamic shapes takes
     # too long to run unsharded
-    test_aot_eager_all --dynamic-shapes
+    test_aot_eager_all --dynamic-shapes --unspecialize-int
   else
     test_aot_eager_all
   fi
@@ -895,7 +895,7 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   install_torchvision
   install_huggingface
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark huggingface "" --dynamic-shapes
+    test_aot_eager_benchmark huggingface "" --dynamic-shapes --unspecialize-int
   else
     test_aot_eager_benchmark huggingface ""
   fi
@@ -904,7 +904,7 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes --unspecialize-int
   else
     test_aot_eager_benchmark timm_models "$id"
   fi
@@ -913,7 +913,7 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_torchvision
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes --unspecialize-int
   else
     PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
   fi
