@@ -41,6 +41,7 @@ __all__ = [
     "is_compiling",
     "register_backend",
     "list_backends",
+    "mark_dynamic_constrained",
 ]
 
 

@@ -1515,10 +1515,13 @@ class ShapeEnv:
             # user directives about relationships, we can remove this check from
             # verification.
             if len(expr.free_symbols) == 1:
-                srcs = symbol_to_source[expr.free_symbols.pop()]
-                for src in srcs:
-                    if src in dynamic_sources:
-                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's mark_dynamic")
+                symbol = expr.free_symbols.pop()
+                # NOTE! Manual user directives override the rule around not allowing any constraining of dynamic dims
+                if symbol not in self.user_constrained:
+                    srcs = symbol_to_source[symbol]
+                    for src in srcs:
+                        if src in dynamic_sources:
+                            raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's mark_dynamic")  # noqa: B950
 
         for t, source in zip(placeholders, sources):
             if isinstance(source, str):
@@ -1995,6 +1998,9 @@ class MinMaxConstraint:
 
     def __repr__(self):
         return f"({self.min}, {self.max})"
+
+    def __eq__(self, other):
+        return self.min == other.min and self.max == other.max
 
 
 def _dynamic_dim_range(t, d) -> MinMaxConstraint:

@@ -1846,6 +1846,35 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.export(my_dyn_fn, y)
 
     @config.patch(dynamic_shapes=True)
+    def test_export_no_raise_guard_partial_constraint(self):
+        y = torch.randn([4, 4, 4])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=3, max=6)
+        torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_raise_guard_partial_wrong_constraint(self):
+        y = torch.randn([4, 4, 4])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=2, max=3)
+        with self.assertRaises(
+            torch._dynamo.exc.InternalTorchDynamoError,
+        ):
+            torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
     def test_export_raise_guard_partial_constraint(self):
         y = torch.randn([3, 3, 3])
 
