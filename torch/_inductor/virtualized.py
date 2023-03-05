@@ -2,7 +2,6 @@ import itertools
 from contextlib import contextmanager
 from itertools import chain
 from threading import local
-from unittest.mock import patch
 
 import sympy
 
@@ -67,13 +66,13 @@ class MockHandler:
         def inner(*args, **kwargs):
             fargs = [_arg_str(a) for a in args]
             fargs.extend(f"{k}={v}" for k, v in kwargs.items())
-            return f"ops.{name}({', '.join(fargs)})"
+            return f"{name}({', '.join(fargs)})"
 
         return inner
 
     @staticmethod
     def masked(mask, body, other):
-        return f"ops.masked({mask}, {body()}, {other})"
+        return f"masked({mask}, {body()}, {other})"
 
     @staticmethod
     def indirect_indexing(index_var):
@@ -97,30 +96,8 @@ class MockHandler:
 class KernelFormatterHandler:
     def __init__(self, parent_handler):
         self.parent_handler = parent_handler
-        self.output = IndentedBuffer(1)
+        self.output = IndentedBuffer()
         self.var_counter = itertools.count()
-
-    @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None, max_lines=None):
-        from .ir import FlexibleLayout
-
-        args = [index, rindex] if rindex is not None else [index]
-        names = ["index", "rindex"] if rindex is not None else ["index"]
-        formatter = KernelFormatterHandler(MockHandler())
-
-        with formatter.output.indent(-1):
-            formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
-        for name, arg in zip(names, args):
-            lhs = ", ".join(
-                [str("_" if isinstance(v, (int, sympy.Integer)) else v) for v in arg]
-            )
-            formatter.output.writeline(f"{lhs} = {name}")
-
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = ir_fn(*args)
-            return formatter.getvalue(result, max_lines=max_lines)
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -134,9 +111,9 @@ class KernelFormatterHandler:
 
         return inner
 
-    def getvalue(self, result, max_lines=None):
+    def getvalue(self, result):
         self.output.writeline(f"return {result}")
-        return self.output.getvalue(max_lines=max_lines)
+        return self.output.getvalue()
 
 
 class WrapperHandler:

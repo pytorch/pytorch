@@ -176,32 +176,16 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return set(range(17)).union(
-            {
-                20,
-                30,
-                40,
-                32,
-                64,
-                96,
-                128,
-                144,
-                240,
-                256,
-                672,
-                1024,
-                2048,
-                4096,
-                0.1,
-                0.01,
-                0.001,
-                0.5,
-                0.05,
-                800,
-                1.873536229133606,
-                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
-            }
-        )
+        return {
+            # We zero-one specialize shapes, so specialize these constants
+            # too
+            0,
+            1,
+            # NB: There used to be more constants here, but honestly it was
+            # pretty confusing.  Note we specialize floats by default, and
+            # DON'T specialize ints by default.  This all only matters with
+            # dynamic_shapes
+        }
 
     @staticmethod
     def list_type(value):
@@ -689,8 +673,8 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) in (int, float) and not config.specialize_int_float:
-            # unspecializing int/float by default, but still
+        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
+            # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
@@ -700,6 +684,10 @@ class VariableBuilder:
                     isinstance(self.source, AttrSource)
                     and isinstance(self.source.base, GlobalSource)
                 )
+                # Assume that integers that came from NN modules want to be
+                # specialized (as we don't expect users to be changing the
+                # NN modules on the fly)
+                or self.source.guard_source().is_nn_module()
             ):
                 return ConstantVariable(
                     value=value,
@@ -811,7 +799,9 @@ class VariableBuilder:
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float
+                # TODO: Do float?
+                # Not entirely clear we want to do this, as float inputs don't
+                # work with inductor codegen at the moment
             else:
                 # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)

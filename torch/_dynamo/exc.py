@@ -44,7 +44,7 @@ class BackendCompilerFailed(TorchDynamoException):
     def __init__(self, backend_fn, inner_exception):
         self.backend_name = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
-        msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
+        msg = f"{self.backend_name} raised {type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg)
 
 
@@ -103,8 +103,8 @@ def augment_exc_message(exc, msg="\n"):
         msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
  torch._dynamo.replay('{exc.record_filename}').\n"
 
-    if not config.verbose and hasattr(exc, "real_stack"):
-        msg += "\nSet torch._dynamo.config.verbose=True or TORCHDYNAMO_VERBOSE=1 for more information\n"
+    if not config.verbose:
+        msg += "\nSet torch._dynamo.config.verbose=True for more information\n"
 
     if hasattr(exc, "inner_exception") and hasattr(
         exc.inner_exception, "minifier_path"

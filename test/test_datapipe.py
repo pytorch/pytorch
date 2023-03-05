@@ -1254,6 +1254,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         p_fn_n1 = partial(fn_n1, d1=1)
         p_fn_cmplx = partial(fn_cmplx, d2=2)
+        p_fn_cmplx_large_arg = partial(fn_cmplx, d2={i: list(range(i)) for i in range(10_000)})
 
         def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
@@ -1272,6 +1273,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0], data[1], data[0] + data[1]), fn_n1_def, [0, 1], 2)
         _helper(lambda data: data, p_fn_n1, 0, 1)
         _helper(lambda data: data, p_fn_cmplx, 0, 1)
+        _helper(lambda data: data, p_fn_cmplx_large_arg, 0, 1)
         _helper(lambda data: (data[0], data[1], data[0] + data[1]), p_fn_cmplx, [0, 1], 2)
         _helper(lambda data: (data[0] + data[1], ), fn_n1_pos, [0, 1, 2])
 
@@ -1359,6 +1361,7 @@ class TestFunctionalIterDataPipe(TestCase):
             return d0 + d1
 
         p_fn_cmplx = partial(fn_cmplx, d2=2)
+        p_fn_cmplx_large_arg = partial(fn_cmplx, d2={i: list(range(i)) for i in range(10_000)})
 
         # Prevent modification in-place to support resetting
         def _dict_update(data, newdata, remove_idx=None):
@@ -1389,6 +1392,7 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: data, fn_n1_def, 'x', 'y')
         _helper(lambda data: data, p_fn_n1, 'x', 'y')
         _helper(lambda data: data, p_fn_cmplx, 'x', 'y')
+        _helper(lambda data: data, p_fn_cmplx_large_arg, 'x', 'y')
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
                 p_fn_cmplx, ["x", "y", "z"], "z")
 
