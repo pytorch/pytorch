@@ -17,7 +17,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, 
 from unittest.mock import patch
 
 import torch
-from torch._guards import Checkpointable
+from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
@@ -611,29 +611,30 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         )
 
     def run(self):
-        try:
-            self.output.push_tx(self)
-            while (
-                self.instruction_pointer is not None
-                and not self.output.should_exit
-                and self.step()
-            ):
-                pass
-        except BackendCompilerFailed:
-            raise
-        except Exception as e:
-            if config.replay_record_enabled:
-                e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
-            raise
-        finally:
-            self.output.pop_tx()
-            # Cleanup the outputGraph to delete the held tensors. We perform the
-            # cleanup only for InstructionTranslator and not
-            # InliningInstructionTranslator. The InliningInstructionTranslator
-            # mutates the output object and is restored to original state if
-            # there was an exception.
-            if isinstance(self, InstructionTranslator):
-                self.output.cleanup()
+        with TracingContext.current_frame(self.frame_summary()):
+            try:
+                self.output.push_tx(self)
+                while (
+                    self.instruction_pointer is not None
+                    and not self.output.should_exit
+                    and self.step()
+                ):
+                    pass
+            except BackendCompilerFailed:
+                raise
+            except Exception as e:
+                if config.replay_record_enabled:
+                    e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                raise
+            finally:
+                self.output.pop_tx()
+                # Cleanup the outputGraph to delete the held tensors. We perform the
+                # cleanup only for InstructionTranslator and not
+                # InliningInstructionTranslator. The InliningInstructionTranslator
+                # mutates the output object and is restored to original state if
+                # there was an exception.
+                if isinstance(self, InstructionTranslator):
+                    self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(
@@ -1858,8 +1859,11 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
-        super().run()
+        with TracingContext.current_frame(self.frame_summary()):
+            _step_logger()(
+                logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}"
+            )
+            super().run()
 
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
@@ -1951,7 +1955,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
-        with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
+        with patch.dict(
+            counters, {"unimplemented": counters["inline_call"]}
+        ), TracingContext.current_frame(parent.frame_summary()):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
