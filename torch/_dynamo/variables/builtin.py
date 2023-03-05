@@ -606,22 +606,8 @@ class BuiltinVariable(VariableTracker):
             if isinstance(a, FakeItemVariable):
                 a = variables.TorchVariable(torch.tensor).call_function(tx, [a], {})
 
-            # Dynamic input does not get resolved, rather, gets stored as call_function
-            if isinstance(a, SymNodeVariable) or isinstance(b, SymNodeVariable):
-                from .builder import wrap_fx_proxy
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        self.fn,
-                        *proxy_args_kwargs([a, b], {}),
-                    ),
-                    **VariableTracker.propagate(self, [a, b]),
-                )
-
             # convert min/max to torch ops
-            if b.is_python_constant():
+            if b.is_python_constant() or isinstance(b, SymNodeVariable):
                 kwargs = {"min": b} if (self.fn is max) else {"max": b}
                 result = variables.TorchVariable(torch.clamp).call_function(
                     tx, [a], kwargs
