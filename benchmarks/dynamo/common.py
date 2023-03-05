@@ -145,6 +145,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -175,6 +176,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TIMM
     "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
+    "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -1269,10 +1271,13 @@ class BenchmarkRunner:
             correct_rerun_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
+            # Two eager runs should have exactly same result
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
+                fp64_ref=None,
+                cos_similarity=False,
+                tol=0,
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
@@ -1956,9 +1961,12 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        torch.use_deterministic_algorithms(True)
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()

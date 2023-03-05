@@ -7,7 +7,7 @@ import torch.distributed._tensor.ops
 from torch.distributed._tensor.api import distribute_module, distribute_tensor, DTensor
 from torch.distributed._tensor.device_mesh import DeviceMesh, get_global_device_mesh
 from torch.distributed._tensor.placement_types import Placement, Replicate, Shard
-from torch.distributed._tensor.utils import compute_local_tensor_size
+from torch.distributed._tensor._utils import compute_local_shape
 
 # All public APIs from dtensor package
 __all__ = [
@@ -65,12 +65,12 @@ def zeros(
     assert layout == torch.strided, "layout value not supported!"
     torch_stride = torch._prims_common.make_contiguous_strides_for(torch_size)
 
-    local_size = compute_local_tensor_size(torch_size, device_mesh, placements)
-    if local_size is None:
+    local_shape = compute_local_shape(torch_size, device_mesh, placements)
+    if len(local_shape) == 0:
         local_tensor = torch.tensor([], dtype=dtype, requires_grad=requires_grad)
     else:
         local_tensor = torch.zeros(
-            local_size,
+            local_shape,
             device=device_mesh.device_type,
             dtype=dtype,
             layout=layout,

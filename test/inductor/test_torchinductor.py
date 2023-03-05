@@ -1009,6 +1009,7 @@ class CommonTemplate:
                 x.argmax(-1),
                 x.amin(-1),
                 x.amax(-1),
+                x.aminmax(),
             )
 
         with config.patch(unroll_reductions_threshold=8):
@@ -1046,6 +1047,26 @@ class CommonTemplate:
             return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    def test_fmin_fmax(self):
+        def fn(a, b):
+            return (
+                torch.fmin(a, b),
+                torch.fmax(a, b),
+                torch.fmax(a + 1, torch.tensor(0.0)),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor(
+                    [-10.0, 10.0, float("nan"), float("nan"), float("nan"), 3, 4]
+                ),
+                torch.tensor(
+                    [float("nan"), float("nan"), -10.0, 10.0, float("nan"), 4, 3]
+                ),
+            ),
+        )
 
     def test_sum_int(self):
         def fn(x):
@@ -4453,7 +4474,11 @@ class CommonTemplate:
 
     def test_narrow(self):
         def fn(x):
-            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+            return (
+                aten.narrow(x, 1, 10, 16),
+                aten.narrow(x + 2, 0, 10, 16) + 1,
+                aten.narrow_copy(x, 1, 10, 16),
+            )
 
         self.common(fn, [torch.randn(64, 64)])
 
