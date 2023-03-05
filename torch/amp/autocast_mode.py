@@ -171,7 +171,8 @@ class autocast:
 
     Args:
         device_type(str, required):  Whether to use 'cuda' or 'cpu' device.
-                                     The type can be obtained by `device.type`.
+                                     The type is the same as the `type` attribute of a :class:`torch.device`.
+                                     Thus, you may obtain the device type of a tensor using `Tensor.device.type`.
         enabled(bool, optional):  Whether autocasting should be enabled in the region.
             Default: ``True``
         dtype(torch_dtype, optional):  Whether to use torch.float16 or torch.bfloat16.
