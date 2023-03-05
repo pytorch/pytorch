@@ -206,8 +206,6 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
-    # torchbench
-    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
@@ -1350,8 +1348,8 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception:
-                log.exception(f"Backend {mode} failed in warmup()")
+            except Exception as e:
+                log.exception(f"Failed for {mode} {e}")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1644,6 +1642,9 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
+        "--unspecialize-int", action="store_true", help="Run with specialize_int=False."
+    )
+    parser.add_argument(
         "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
@@ -1900,6 +1901,8 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+    if args.unspecialize_int:
+        torch._dynamo.config.specialize_int = False
     if args.ci:
         args.repeat = 2
         if args.dynamic_ci_skips_only:
