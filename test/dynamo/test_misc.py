@@ -28,6 +28,8 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
+
+from torch._dynamo.utils import ifunspec
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -932,8 +934,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(2), [None] * 4)
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        # TODO: the captured frame here is a bit goofy, because we don't
+        # output anything and none of the traced operations have side
+        # effects.  Probably need better heuristic for bailing on
+        # dynamo if there are no outputs
+        self.assertEqual(cnts.frame_count, ifunspec(1, 0))
+        self.assertEqual(cnts.op_count, ifunspec(2, 0))
 
     def test_list_slice_mul(self):
         def fn(count):
@@ -944,8 +950,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(2), [2, 3] * 4)
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, ifunspec(1, 0))
+        self.assertEqual(cnts.op_count, ifunspec(14, 0))
 
     def test_tuple_mul(self):
         def fn(count):
@@ -955,8 +961,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(2), (2, 3) * 4)
-        self.assertEqual(cnts.frame_count, 0)
-        self.assertEqual(cnts.op_count, 0)
+        self.assertEqual(cnts.frame_count, ifunspec(1, 0))
+        self.assertEqual(cnts.op_count, ifunspec(14, 0))
 
     def test_tuple_mul_with_shape(self):
         def fn(a):
@@ -2230,14 +2236,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         correct_ref_id = id(m)
         opt_m = torch._dynamo.optimize(cnts, nopython=True)(m)
         opt_m(data, correct_ref_id)
-        self.assertEqual(cnts.op_count, 2)
+        # Extra op is the recorded equality test (although once
+        # the trace is flattened this is dead!)
+        self.assertEqual(cnts.op_count, ifunspec(3, 2))
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
         incorrect_ref_id = id(m) + 1
         opt_m = torch._dynamo.optimize(cnts, nopython=True)(m)
         opt_m(data, incorrect_ref_id)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, ifunspec(2, 1))
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
@@ -3924,8 +3932,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, y, 3)
         opt_fn(x2, y2, 5)
 
-        self.assertTrue(guard_failure is not None)
-        self.assertEqual(guard_failure[0], "k == 3")
+        if (
+            torch._dynamo.config.dynamic_shapes
+            and not torch._dynamo.config.specialize_int
+            and not torch._dynamo.config.assume_static_by_default
+        ):
+            # we didn't actually test guard_failure_fn here but whatever,
+            # nice to see no guard failure on the test
+            self.assertTrue(guard_failure is None)
+        else:
+            self.assertTrue(guard_failure is not None)
+            if not torch._dynamo.config.dynamic_shapes:
+                self.assertEqual(guard_failure[0], "k == 3")
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     def test_guard_failure_fn_shape_control(self):
