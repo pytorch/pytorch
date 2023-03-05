@@ -46,14 +46,8 @@ test_skips = {
     "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
-    "test_sizehint_issue1_dynamic_shapes": ("cpu", "cuda"),
     "test_unroll_small_reduction_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu"),
-    "test_upsample_bilinear2d_b_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest1d_dynamic_shapes": ("cpu"),
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
-    "test_upsample_nearest2d_dynamic_shapes": ("cpu"),
-    "test_upsample_nearest3d_dynamic_shapes": ("cpu"),
 }
 
 
