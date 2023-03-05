@@ -4534,6 +4534,15 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.mark_dynamic_constrained(y, 0, min=2, max=4)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
+    def test_raise_illegal_constraint_range_min_max_only(self):
+        y = torch.randn([5, 3, 3])
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=5)
+        with self.assertRaisesRegex(
+            AssertionError, "Illegal intersection produced! 5 < 4"
+        ):
+            torch._dynamo.mark_dynamic_constrained(y, 0, max=4)
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint_across_break(self):
         y = torch.randn([3, 3, 3])
 

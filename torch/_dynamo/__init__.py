@@ -169,6 +169,19 @@ def mark_dynamic(t, index):
 def mark_dynamic_constrained(
     t, index, *, min: Optional[int] = None, max: Optional[int] = None
 ):
+    """
+    To fully understand this API, please read [Note - on the state of mark_dynamic] first,
+    as this API is an enrichment over that API.
+
+    In its current state, mark_dynamic_constrained fully subsumes mark_dynamic.
+
+    mark_dynamic_constrained allows users to provide a directive that the dimension will fall
+    within a given range. A range can be unbounded on either min, or max. Multiple calls to this API for
+    the same dimension will take the most conservative intersection of all ranges. At guard accumulation
+    time, we verify that the dimension fell within the specified range, and raise if it does not.
+
+    This API behaves identically for eager and export.
+    """
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = defaultdict(MinMaxConstraint.NONE)

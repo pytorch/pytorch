@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import unittest
 from enum import Enum
 from typing import Dict, List
 from unittest.mock import patch
@@ -1859,6 +1860,32 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.export(my_dyn_fn, y)
 
     @config.patch(dynamic_shapes=True)
+    def test_export_no_raise_guard_min_only_partial_constraint(self):
+        y = torch.randn([4, 4, 4])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, min=3)
+        torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
+    def test_export_no_raise_guard_max_only_partial_constraint(self):
+        y = torch.randn([4, 4, 4])
+
+        def my_dyn_fn(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.export(my_dyn_fn, y)
+        torch._dynamo.mark_dynamic_constrained(y, 0, max=5)
+        torch._dynamo.export(my_dyn_fn, y)
+
+    @config.patch(dynamic_shapes=True)
     def test_export_raise_guard_partial_wrong_constraint(self):
         y = torch.randn([4, 4, 4])
 
@@ -1946,6 +1973,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
     # This should not fail, but it does, because
     # symbolic_shapes simplification _maybe_evaluate_static removes this guard
     # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
+    @unittest.expectedFailure
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
