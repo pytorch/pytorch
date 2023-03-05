@@ -113,8 +113,13 @@ CI_SKIP[CI("aot_eager", training=True)] = [
     # TIMM
     "cait_m36_384",  # fp64_OOM
     "convit_base",  # fp64_OOM
+    "fbnetv3_b",  # Accuracy (blocks.2.2.bn1.weight.grad)
     "levit_128",  # Accuracy (patch_embed.0.c.weight.grad)
+    "sebotnet33ts_256",  # Accuracy (stem.conv1.conv.weight.grad)
     "xcit_large_24_p8_224",  # fp64_OOM,
+    "gernet_l",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "tinynet_a",  # accuracy https://github.com/pytorch/pytorch/issues/93847
 ]
 
 CI_SKIP[CI("inductor", training=False)] = [
@@ -138,6 +143,8 @@ CI_SKIP[CI("inductor", training=False)] = [
     "OPTForCausalLM",  # OOM
     # TIMM
     "cait_m36_384",  # Accuracy
+    "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
@@ -178,6 +185,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
     "hf_T5_base",  # accuracy
+    "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
@@ -188,8 +196,8 @@ CI_SKIP[CI("inductor", training=True)] = [
     "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
+    "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
-    "eca_halonext26ts",  # Internal Triton PTX codegen error
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
