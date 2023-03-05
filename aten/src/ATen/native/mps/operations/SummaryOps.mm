@@ -7,6 +7,12 @@
 namespace at::native {
 namespace mps {
 
+enum BIN_SELECTION_ALGORITHM {
+    LINEAR_INTERPOLATION,
+    LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
+    BINARY_SEARCH,
+};
+
 static const char* METAL_SUMMARY = R"SUMMARY_METAL(
 
 #include <metal_stdlib>
@@ -51,7 +57,7 @@ kernel void histogramdd(constant void     * input_    [[buffer(0)]],
                   constant T        * leftmost_edge   [[buffer(7)]],
                   constant T        * rightmost_edge  [[buffer(8)]],
                   constant int64_t  * local_out_strides  [[buffer(9)]],
-                  constant uint8_t  & bin_search_algorithm [[buffer(10)]],
+                  constant uint8_t  & algorithm [[buffer(10)]],
                   constant uint8_t  & has_weight [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
   
@@ -70,12 +76,27 @@ kernel void histogramdd(constant void     * input_    [[buffer(0)]],
     }
     int64_t pos = -1;
     
-    if (bin_search_algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
+    if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
       pos = (int64_t)upper_bound(
         (thread T*)(int64_t)(bin_seq + bin_seq_offset),
         (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
         element
       ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+    } else if (
+      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION || 
+      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+      pos = static_cast<int64_t>((element - leftmost_edge[dim])
+                            * (num_bin_edges[dim] - 1)
+                            / (rightmost_edge[dim] - leftmost_edge[dim]));
+      if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+          int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
+          int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
+          pos = (int64_t)upper_bound(
+            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
+            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
+            element
+          ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+      }
     }
 
     if (pos == (num_bin_edges[dim] - 1)) {
@@ -104,7 +125,7 @@ kernel void histogramdd<DTYPE>(                  \
   constant DTYPE    * leftmost_edge   [[buffer(7)]], \
   constant DTYPE    * rightmost_edge  [[buffer(8)]], \
   constant int64_t  * local_out_strides  [[buffer(9)]], \
-  constant uint8_t  & bin_search_algorithm [[buffer(10)]], \
+  constant uint8_t  & bin_selection_algorithm [[buffer(10)]], \
   constant uint8_t  & has_weight [[buffer(11)]], \
   uint tid [[thread_position_in_grid]]);
 
@@ -153,7 +174,7 @@ static id<MTLComputePipelineState> summaryPipelineState(id<MTLDevice> device, co
   return pso;
 }
 
-template <typename input_t>
+template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(
     Tensor& hist_output,
     const TensorList& bin_edges,
@@ -162,8 +183,7 @@ void histogramdd_kernel_impl(
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
-  uint8_t bin_selection_algorithm = 2;
-
+  const uint8_t bin_selection_algorithm = 2;
   const int64_t N = input.size(0);
   const bool has_weight = weight.has_value();
 
@@ -204,6 +224,7 @@ void histogramdd_kernel_impl(
   }
 
 
+  const uint32_t kernelOffsetNumThreads = N;
   const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
 
@@ -250,7 +271,7 @@ void histogramdd_kernel_impl(
         strides[i][0] = input.stride(i);
         //}
       }
-
+      std::cout << "input_contig" << input.is_contiguous() << std::endl;
       id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
                                                                                                 error: &error] autorelease];
@@ -265,8 +286,8 @@ void histogramdd_kernel_impl(
       [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
 
       NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > numThreads)
-          kernelOffsetsTGSize = numThreads;
+      if (kernelOffsetsTGSize > kernelOffsetNumThreads)
+          kernelOffsetsTGSize = kernelOffsetNumThreads;
 
       MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
       [computeEncoder dispatchThreads: gridSize
@@ -491,9 +512,8 @@ Tensor _bincount_histc_mps(
     return output;
   }
 }
-} // namespace mps
-
-static void histogramdd_kernel(
+template<BIN_SELECTION_ALGORITHM bin_algorithm>
+static void histogramdd_out_mps_template(
   const Tensor& self,
   const c10::optional<Tensor>& weight,
   bool density,
@@ -518,7 +538,7 @@ static void histogramdd_kernel(
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_mps", [&]() {
-    mps::histogramdd_kernel_impl<scalar_t>(
+    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
       hist,
       bin_edges_contig,
       reshaped_input,
@@ -547,11 +567,31 @@ static void histogramdd_kernel(
       }
   }
 }
+} // namespace mps
+
+static void histogramdd_kernel(
+  const Tensor& self,
+  const c10::optional<Tensor>& weight,
+  bool density,
+  Tensor& hist,
+  const TensorList& bin_edges)
+{
+  mps::histogramdd_out_mps_template<mps::BINARY_SEARCH>(self, weight, density, hist, bin_edges);
+}
 
 static void histogramdd_linear_kernel(const Tensor& self, const c10::optional<Tensor>& weight,
         bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
 
-  histogramdd_kernel(self, weight, density, hist, bin_edges);
+  if (local_search) {
+    // histogramdd codepath: both hist and bin_edges are eventually returned as output,
+    // so we'll keep them consistent
+    mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
+      self, weight, density, hist, bin_edges);
+  } else {
+    // histc codepath: bin_edges are not returned to the caller
+    mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION>(
+      self, weight, density, hist, bin_edges);
+  }
 }
 
 Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
