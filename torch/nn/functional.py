@@ -5201,8 +5201,8 @@ def multi_head_attention_forward(
     attn_mask = _canonical_mask(
         mask=attn_mask,
         mask_name="attn_mask",
-        other_type=_none_or_dtype(key_padding_mask),
-        other_name="key_padding_mask",
+        other_type=None,
+        other_name="",
         target_type=q.dtype,
         check_other=False,
     )

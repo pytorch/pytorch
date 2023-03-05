@@ -1223,8 +1223,8 @@ class MultiheadAttention(Module):
         attn_mask = F._canonical_mask(
             mask=attn_mask,
             mask_name="attn_mask",
-            other_type=F._none_or_dtype(key_padding_mask),
-            other_name="key_padding_mask",
+            other_type=None,
+            other_name="",
             target_type=query.dtype,
             check_other=False,
         )
