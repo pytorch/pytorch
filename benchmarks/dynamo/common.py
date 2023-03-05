@@ -211,6 +211,14 @@ CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+
+    # torch/_functorch/aot_autograd.py", line 2389, in debug_compiled_function
+    # assert not isinstance(a, Tensor)
+
+    # torchbench
+    'yolov3',
+    # huggingface
+    'AllenaiLongformerBase',
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
