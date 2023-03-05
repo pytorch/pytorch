@@ -329,11 +329,11 @@ test_inductor_benchmark_perf() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   PARTITION_FLAGS=""
   if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
     PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
   fi
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   # Check training with --amp
   # Not checking accuracy for perf test for now
@@ -357,8 +357,13 @@ test_inductor_benchmark_perf() {
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
-    python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
-      --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
+      --no-graphs --no-update-archive --no-gh-comment
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
+      --no-graphs --no-update-archive --no-gh-comment
   fi
 }
 
@@ -921,6 +926,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+    install_matplotlib
+    install_tabulate
     test_inductor_huggingface_perf
   elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
     test_inductor_huggingface cpu
@@ -932,6 +939,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    install_matplotlib
+    install_tabulate
     test_inductor_timm_perf_shard $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
@@ -942,6 +951,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    install_matplotlib
+    install_tabulate
     checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
