@@ -12,6 +12,12 @@ static const char* METAL_SUMMARY = R"SUMMARY_METAL(
 #include <metal_stdlib>
 using namespace metal;
 
+enum BIN_SELECTION_ALGORITHM {
+  LINEAR_INTERPOLATION,
+  LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
+  BINARY_SEARCH,
+};
+
 template<typename T, typename U>
 thread T * upper_bound(thread T * first, thread T * last, U val) {
   thread T * middle;
@@ -36,15 +42,19 @@ thread T * upper_bound(thread T * first, thread T * last, U val) {
 
 template<typename T>
 kernel void histogramdd(constant void     * input_    [[buffer(0)]],
-                  device   T        * local_out      [[buffer(1)]],
-                  constant uint    * offsets         [[buffer(2)]],
-                  constant size_t   & num_dims        [[buffer(3)]],
-                  constant T        * bin_seq         [[buffer(4)]],
-                  constant int64_t  * num_bin_edges   [[buffer(5)]],
-                  constant T        * leftmost_edge   [[buffer(6)]],
-                  constant T        * rightmost_edge  [[buffer(7)]],
-                  constant int64_t  * local_out_strides  [[buffer(8)]],
+                  constant T        * weight        [[buffer(1)]],
+                  device   T        * local_out      [[buffer(2)]],
+                  constant uint     * offsets         [[buffer(3)]],
+                  constant size_t   & num_dims        [[buffer(4)]],
+                  constant T        * bin_seq         [[buffer(5)]],
+                  constant int64_t  * num_bin_edges   [[buffer(6)]],
+                  constant T        * leftmost_edge   [[buffer(7)]],
+                  constant T        * rightmost_edge  [[buffer(8)]],
+                  constant int64_t  * local_out_strides  [[buffer(9)]],
+                  constant uint8_t  & bin_search_algorithm [[buffer(10)]],
+                  constant uint8_t  & has_weight [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
+  
   constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid]);
 
   bool skip_element = false;
@@ -58,11 +68,15 @@ kernel void histogramdd(constant void     * input_    [[buffer(0)]],
         skip_element = true;
         break;
     }
-    int64_t pos = (int64_t)upper_bound(
-      (thread T*)(int64_t)(bin_seq + bin_seq_offset),
-      (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
-      element
-    ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+    int64_t pos = -1;
+    
+    if (bin_search_algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
+      pos = (int64_t)upper_bound(
+        (thread T*)(int64_t)(bin_seq + bin_seq_offset),
+        (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
+        element
+      ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+    }
 
     if (pos == (num_bin_edges[dim] - 1)) {
       pos -= 1;
@@ -72,9 +86,7 @@ kernel void histogramdd(constant void     * input_    [[buffer(0)]],
   }
   if (!skip_element) {
     // In the unweighted case, the default weight is 1
-    //input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
-
-    local_out[local_out_strides[0] * tid + hist_index] += 1;
+    local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
   }
 }
 
@@ -83,14 +95,17 @@ template                                               \
 [[host_name("histogramdd_" #DTYPE)]]                         \
 kernel void histogramdd<DTYPE>(                  \
   constant void     * input_        [[buffer(0)]],     \
-  device   DTYPE     * local_out          [[buffer(1)]],     \
-  constant uint     * offsets       [[buffer(2)]], \
-  constant size_t   & num_dims         [[buffer(3)]], \
-  constant DTYPE     * bin_seq         [[buffer(4)]], \
-  constant int64_t  * num_bin_edges   [[buffer(5)]], \
-  constant DTYPE    * leftmost_edge   [[buffer(6)]], \
-  constant DTYPE    * rightmost_edge  [[buffer(7)]], \
-  constant int64_t  * local_out_strides  [[buffer(8)]], \
+  constant DTYPE    * weight        [[buffer(1)]],     \
+  device   DTYPE    * local_out          [[buffer(2)]],     \
+  constant uint     * offsets       [[buffer(3)]], \
+  constant size_t   & num_dims         [[buffer(4)]], \
+  constant DTYPE    * bin_seq         [[buffer(5)]], \
+  constant int64_t  * num_bin_edges   [[buffer(6)]], \
+  constant DTYPE    * leftmost_edge   [[buffer(7)]], \
+  constant DTYPE    * rightmost_edge  [[buffer(8)]], \
+  constant int64_t  * local_out_strides  [[buffer(9)]], \
+  constant uint8_t  & bin_search_algorithm [[buffer(10)]], \
+  constant uint8_t  & has_weight [[buffer(11)]], \
   uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
@@ -138,6 +153,7 @@ static id<MTLComputePipelineState> summaryPipelineState(id<MTLDevice> device, co
   return pso;
 }
 
+template <typename input_t>
 void histogramdd_kernel_impl(
     Tensor& hist_output,
     const TensorList& bin_edges,
@@ -146,10 +162,13 @@ void histogramdd_kernel_impl(
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
-  using input_t = float;
+  uint8_t bin_selection_algorithm = 2;
 
   const int64_t N = input.size(0);
-  if (weight.has_value()) {
+  const bool has_weight = weight.has_value();
+
+  if (has_weight) {
+      TORCH_CHECK(weight.value().is_contiguous(), "histogramdd(): weight should be contiguous on MPS");
       TORCH_INTERNAL_ASSERT(weight.value().dim() == 1 && weight.value().numel() == N);
   }
 
@@ -200,10 +219,13 @@ void histogramdd_kernel_impl(
     c10::nullopt /* pin_memory */
   );
 
-  std::cout << "thread_hist" << thread_histograms << std::endl;
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  id<MTLBuffer> weightBuffer = has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength: 0
+                                                             options: 0] autorelease];
+  size_t weightOffset =  has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0; 
+  std::cout << "weight offset passes" << std::endl;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
   constexpr uint32_t nOffsets = 1;
@@ -256,17 +278,20 @@ void histogramdd_kernel_impl(
       std::cout << "PSO passes" << std::endl;
       [computeEncoder setComputePipelineState:summaryPSO];
       [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
+      [computeEncoder setBuffer:weightBuffer  offset:weightOffset atIndex:1];
       std::cout << "input buffer passes" << std::endl;
-      [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:1];
+      [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:2];
       std::cout << "output buffer passes" << std::endl;
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:2];
+      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
       std::cout << "All buffers passes" << std::endl;
-      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:3];
-      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:4];
-      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:5];
-      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:6];
-      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:7];
-      [computeEncoder setBytes:thread_histograms.strides().data() length:sizeof(int64_t) * (hist_sizes.size() + 1) atIndex:8];
+      [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
+      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:5];
+      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
+      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
+      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
+      [computeEncoder setBytes:thread_histograms.strides().data() length:sizeof(int64_t) * thread_hist_sizes.size() atIndex:9];
+      [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
+      [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
 
       NSUInteger tgSize = summaryPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
@@ -492,12 +517,14 @@ static void histogramdd_kernel(
       bin_edges_contig[dim] = bin_edges[dim].contiguous();
   }
 
-  mps::histogramdd_kernel_impl(
-    hist,
-    bin_edges_contig,
-    reshaped_input,
-    reshaped_weight
-  );
+  AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_mps", [&]() {
+    mps::histogramdd_kernel_impl<scalar_t>(
+      hist,
+      bin_edges_contig,
+      reshaped_input,
+      reshaped_weight
+    );
+  });
 
   /* Divides each bin's value by the total count/weight in all bins,
     * and by the bin's volume.
