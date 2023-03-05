@@ -256,10 +256,14 @@ def get_fused_kernel_name(node_schedule):
 def gather_origins(args, kwargs):
     import itertools
 
-    from .ir import ComputedBuffer, IRNode
+    from . import ir
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
