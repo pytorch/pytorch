@@ -61,12 +61,13 @@ kernel void histogramdd(constant void     * input_    [[buffer(0)]],
                   constant uint8_t  & has_weight [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
   
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid]);
+  
 
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
   for (size_t dim = 0; dim < num_dims; dim++) {
+    constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid * num_dims + dim]);
     const auto element = input[tid * num_dims + dim];
 
     // Skips elements which fall outside the specified bins and NaN elements
@@ -183,7 +184,7 @@ void histogramdd_kernel_impl(
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
-  const uint8_t bin_selection_algorithm = 2;
+  constexpr uint8_t bin_selection_algorithm = algorithm;
   const int64_t N = input.size(0);
   const bool has_weight = weight.has_value();
 
@@ -224,7 +225,7 @@ void histogramdd_kernel_impl(
   }
 
 
-  const uint32_t kernelOffsetNumThreads = N;
+  const uint32_t kernelOffsetNumThreads = input.numel();
   const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
 
@@ -256,7 +257,7 @@ void histogramdd_kernel_impl(
       NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
+      MTLSize gridSize = MTLSizeMake(kernelOffsetNumThreads, 1, 1);
       const IntArrayRef& iterShape = input.sizes();
       std::vector<uint32_t> iterShapeData(iterShape.size());
       std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
@@ -275,7 +276,7 @@ void histogramdd_kernel_impl(
       id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
       id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
                                                                                                 error: &error] autorelease];
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(uint)
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
                                                              options: 0] autorelease];
       TORCH_CHECK(kernelDataOffsetsPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
@@ -318,7 +319,7 @@ void histogramdd_kernel_impl(
       if (tgSize > numThreads) {
           tgSize = numThreads;
       }
-
+      gridSize = MTLSizeMake(numThreads, 1, 1);
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
       [computeEncoder dispatchThreads: gridSize
                 threadsPerThreadgroup: threadGroupSize];
