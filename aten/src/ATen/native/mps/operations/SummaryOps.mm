@@ -12,62 +12,69 @@ static const char* METAL_SUMMARY = R"SUMMARY_METAL(
 #include <metal_stdlib>
 using namespace metal;
 
-template<typename T>
-kernel int upper_bound(int64_t * first, int64_t * last, T val){
-  int64_t half;
-  int64_t * middle;
-  int64_t len = last - first;
+template<typename T, typename U>
+thread T * upper_bound(thread T * first, thread T * last, U val) {
+  thread T * middle;
+  thread T * first_ = first;
+  int64_t half_ = 0;
+  int64_t len = (int64_t)(last - first_);
 
-  // Till low is less than high
   while (len > 0) {
-    half = len >> 1;
-    middle = start + half;
+    half_ = (len >> 1);
+    middle = first_ + half_;
 
     if (val >= *middle) {
-      len = half;
+      len = half_;
     } else {
-      first = middle;
-      ++first;
-      len = len - half - 1;
+      first_ = middle;
+      ++first_;
+      len = len - half_ - 1;
     }
   }
-  return first;
+  return first_;
 }
 
 template<typename T>
-kernel void histogramdd(constant void     * input_        [[buffer(0)]],
-                  device   void     * local_out_        [[buffer(1)]],
-                  constant uint3    * offsets       [[buffer(2)]],
-                  constant size_t  num_dims         [[buffer(3)]],
-                  constant int64_t  & bin_seq         [[buffer(4)]],
-                  constant int64_t  & num_bin_edges   [[buffer(5)]],
-                  constant int64_t  & leftmost_edge   [[buffer(6)]],
-                  constant int64_t  & rightmost_edge  [[buffer(7)]],
+kernel void histogramdd(constant void     * input_    [[buffer(0)]],
+                  device   T        * local_out      [[buffer(1)]],
+                  constant uint    * offsets         [[buffer(2)]],
+                  constant size_t   & num_dims        [[buffer(3)]],
+                  constant T        * bin_seq         [[buffer(4)]],
+                  constant int64_t  * num_bin_edges   [[buffer(5)]],
+                  constant T        * leftmost_edge   [[buffer(6)]],
+                  constant T        * rightmost_edge  [[buffer(7)]],
+                  constant int64_t  * local_out_strides  [[buffer(8)]],
                   uint tid [[thread_position_in_grid]]) {
-  device   T* local_out   = (device   T*)((device uint8_t*)out_ + offsets[tid].x);
-  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid].y);
-  //constant T* other = (constant T*)((constant uint8_t*)other_ + offsets[tid].z);
+  constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid]);
 
   bool skip_element = false;
-  int64_t hist_index = 0
+  int64_t hist_index = 0;
+  int64_t bin_seq_offset = 0;
   for (size_t dim = 0; dim < num_dims; dim++) {
-    const auto element = input[dim];
+    const auto element = input[tid * num_dims + dim];
+
+    // Skips elements which fall outside the specified bins and NaN elements
     if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) {
         skip_element = true;
         break;
     }
-    int64_t pos = upper_bound(bin_seq[dim], bin_seq[dim] + num_bin_edges[dim], element) - bin_seq[dim] - 1;
+    int64_t pos = (int64_t)upper_bound(
+      (thread T*)(int64_t)(bin_seq + bin_seq_offset),
+      (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
+      element
+    ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
 
     if (pos == (num_bin_edges[dim] - 1)) {
       pos -= 1;
     }
-    hist_index += pos;
+    hist_index += local_out_strides[dim + 1] * pos;
+    bin_seq_offset += num_bin_edges[dim];
   }
   if (!skip_element) {
     // In the unweighted case, the default weight is 1
     //input_t wt = accessor_wt.has_value() ? accessor_wt.value()[i] : static_cast<input_t>(1);
 
-    local_out[hist_index] += 1;
+    local_out[local_out_strides[0] * tid + hist_index] += 1;
   }
 }
 
@@ -76,13 +83,14 @@ template                                               \
 [[host_name("histogramdd_" #DTYPE)]]                         \
 kernel void histogramdd<DTYPE>(                  \
   constant void     * input_        [[buffer(0)]],     \
-  device   void     * local_out_          [[buffer(1)]],     \
-  constant uint2    * offsets       [[buffer(2)]],
-  constant size_t  num_dims         [[buffer(3)]], \
-  constant int64_t  & bin_seq         [[buffer(4)]], \
-  constant int64_t  & num_bin_edges   [[buffer(5)]], \
-  constant int64_t  & leftmost_edge   [[buffer(6)]], \
-  constant int64_t  & rightmost_edge  [[buffer(7)]], \
+  device   DTYPE     * local_out          [[buffer(1)]],     \
+  constant uint     * offsets       [[buffer(2)]], \
+  constant size_t   & num_dims         [[buffer(3)]], \
+  constant DTYPE     * bin_seq         [[buffer(4)]], \
+  constant int64_t  * num_bin_edges   [[buffer(5)]], \
+  constant DTYPE    * leftmost_edge   [[buffer(6)]], \
+  constant DTYPE    * rightmost_edge  [[buffer(7)]], \
+  constant int64_t  * local_out_strides  [[buffer(8)]], \
   uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
@@ -146,8 +154,10 @@ void histogramdd_kernel_impl(
   }
 
   const int64_t D = input.size(1);
+  int64_t bin_edges_numel = 0;
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
+      bin_edges_numel += bin_edges[dim].numel();
       TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
       TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
   }
@@ -157,35 +167,45 @@ void histogramdd_kernel_impl(
       return;
   }
 
-  std::vector<input_t*> bin_seq(D);
+  std::vector<input_t> bin_seq;
   std::vector<int64_t> num_bin_edges(D);
   std::vector<input_t> leftmost_edge(D);
   std::vector<input_t> rightmost_edge(D);
+  size_t bin_seq_offset = 0;
 
+  std::cout << "bin_edges[0]" << bin_edges[0] << std::endl; 
   for (const auto dim : c10::irange(D)) {
-      bin_seq[dim] = bin_edges[dim].data_ptr<input_t>();
-      num_bin_edges[dim] = bin_edges[dim].numel();
-      leftmost_edge[dim] = bin_seq[dim][0];
-      rightmost_edge[dim] = bin_seq[dim][num_bin_edges[dim] - 1];
+    for (const auto elem_idx : c10::irange(bin_edges[dim].numel())) {
+      bin_seq.push_back(bin_edges[dim][elem_idx].item().to<input_t>());
+    }
+    num_bin_edges[dim] = bin_edges[dim].numel();
+    leftmost_edge[dim] = bin_seq[bin_seq_offset];
+    rightmost_edge[dim] = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
+    bin_seq_offset += num_bin_edges[dim];
   }
 
-  const uint32_t numThreads = input.numel();
+
+  const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
 
-  DimVector thread_hist_sizes(hist_sizes.size() + 1); // [n_threads, output_sizes..]
+  DimVector thread_hist_sizes(hist_sizes.size() + 1); // [n_threads, output_sizes...]
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(),
               thread_hist_sizes.begin() + 1);
-  Tensor thread_histograms = at::zeros(thread_hist_sizes, hist_output.dtype());
+  Tensor thread_histograms = at::zeros(
+    thread_hist_sizes,
+    hist_output.scalar_type(),
+    c10::nullopt /* layout */,
+    kMPS,
+    c10::nullopt /* pin_memory */
+  );
 
+  std::cout << "thread_hist" << thread_histograms << std::endl;
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
-  //const int64_t out_dim_stride =  out.stride(dim);
-  //const int64_t input_dim_stride = input.stride(nDim);
-  //const int64_t other_dim_stride = other.stride(dim);
   constexpr uint32_t nOffsets = 1;
   
   dispatch_sync(mpsStream->queue(), ^(){
@@ -214,7 +234,7 @@ void histogramdd_kernel_impl(
                                                                                                 error: &error] autorelease];
       id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(uint)
                                                              options: 0] autorelease];
-      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
@@ -230,17 +250,23 @@ void histogramdd_kernel_impl(
       [computeEncoder dispatchThreads: gridSize
                 threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
 
+      std::cout << "Kernel offset passes" << std::endl;
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> summaryPSO = summaryPipelineState(device, kernel);
+      std::cout << "PSO passes" << std::endl;
       [computeEncoder setComputePipelineState:summaryPSO];
       [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
+      std::cout << "input buffer passes" << std::endl;
       [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:1];
+      std::cout << "output buffer passes" << std::endl;
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:2];
+      std::cout << "All buffers passes" << std::endl;
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:3];
-      [computeEncoder setBytes:&bin_seq  length:sizeof(input_t) * D  atIndex:4];
-      [computeEncoder setBytes:&num_bin_edges length:sizeof(int64_t) * D atIndex:5];
-      [computeEncoder setBytes:&leftmost_edge length:sizeof(input_t) * D atIndex:6];
-      [computeEncoder setBytes:&rightmost_edge length:sizeof(input_t) * D atIndex:7];
+      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:4];
+      [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:5];
+      [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:6];
+      [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:7];
+      [computeEncoder setBytes:thread_histograms.strides().data() length:sizeof(int64_t) * (hist_sizes.size() + 1) atIndex:8];
 
       NSUInteger tgSize = summaryPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
@@ -252,9 +278,12 @@ void histogramdd_kernel_impl(
                 threadsPerThreadgroup: threadGroupSize];
 
       [computeEncoder endEncoding];
+      std::cout << "Before commit" << std::endl;
       mpsStream->commit(true);
+      std::cout << "After commit" << std::endl;
     }
   });
+  std::cout << "thread_histograms" << thread_histograms << std::endl;
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
 }
 
@@ -492,6 +521,12 @@ static void histogramdd_kernel(
   }
 }
 
+static void histogramdd_linear_kernel(const Tensor& self, const c10::optional<Tensor>& weight,
+        bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
+
+  histogramdd_kernel(self, weight, density, hist, bin_edges);
+}
+
 Tensor _bincount_mps(const Tensor& self, const c10::optional<Tensor>& weights_opt, int64_t minlength) {
   return mps::_bincount_histc_mps(
     self,
@@ -519,6 +554,7 @@ Tensor _histc_mps(
     c10::nullopt /* output_opt */
   );
 }
+
 Tensor& _histc_out_mps(const Tensor& self, int64_t bins, const Scalar& min, const Scalar& max, Tensor& result) {
   mps::_bincount_histc_mps(
     self,
@@ -533,5 +569,5 @@ Tensor& _histc_out_mps(const Tensor& self, int64_t bins, const Scalar& min, cons
 }
 
 REGISTER_DISPATCH(histogramdd_stub, &histogramdd_kernel);
-
+REGISTER_DISPATCH(histogramdd_linear_stub, &histogramdd_linear_kernel);
 } // namespace at::native
