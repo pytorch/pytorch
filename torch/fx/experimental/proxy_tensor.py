@@ -8,6 +8,7 @@ import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
+import torch._dynamo as torchdynamo
 from torch.fx import Tracer, GraphModule
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch._dispatch.python import enable_python_dispatcher
@@ -639,7 +640,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, _is_dynamo_frontend=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -657,7 +658,13 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 allow_fallback_kernels=True,
                 allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
+            if not _is_dynamo_frontend:
+                shape_env = ShapeEnv()
+            else:
+                shape_env = ShapeEnv(
+                    assume_static_by_default=torchdynamo.config.assume_static_by_default,
+                )
+
             fake_tensor_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=_allow_non_fake_inputs,

@@ -736,6 +736,7 @@ def export(
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
             _allow_non_fake_inputs=True,
+            _is_dynamo_frontend=True,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(
