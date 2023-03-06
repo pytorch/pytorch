@@ -3103,51 +3103,51 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
   //
   // To keep things clean, we split on systems here.
 
-#if UINTPTR_MAX == 0xFFFFFFFF
-  // This is a 32-bit system
   static constexpr bool check_sizes() {
+    constexpr auto expected_sizeof_sizes_and_strides
+      = sizeof(std::size_t)                                               // size of length
+      + (alignof(std::int64_t) - sizeof(std::size_t))                     // padding between length and data
+      + 2 * C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(std::int64_t); // size of data
+
+#if UINTPTR_MAX == 0xFFFFFFFF
+    // This is a 32-bit system
     constexpr size_t tsize = 20 * sizeof(int64_t);
 
     // clang-format off
-    are_equal<sizeof(storage_),            4,  FieldNameEnum::storage_>();
-    are_equal<sizeof(autograd_meta_),      4,  FieldNameEnum::autograd_meta_>();
-    are_equal<sizeof(extra_meta_),         4,  FieldNameEnum::extra_meta_>();
-    are_equal<sizeof(version_counter_),    4,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),    8,  FieldNameEnum::pyobj_slot_>();
-    is_le<sizeof(sizes_and_strides_),     88, FieldNameEnum::sizes_and_strides_>();
-    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
-    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
-    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
-    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
-    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
-    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    are_equal<sizeof(storage_),                                           4, FieldNameEnum::storage_>();
+    are_equal<sizeof(autograd_meta_),                                     4, FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(extra_meta_),                                        4, FieldNameEnum::extra_meta_>();
+    are_equal<sizeof(version_counter_),                                   4, FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_slot_),                                        8, FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(sizes_and_strides_), expected_sizeof_sizes_and_strides, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),                                    8, FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),                                             8, FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),                                         2, FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),                                        3, FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),                                           8, FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),                                         tsize, FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
-
-    return true;
-  }
 #else
-  // This is a 64-bit system
-  static constexpr bool check_sizes() {
+    // This is a 64-bit system
     constexpr size_t tsize = 26 * sizeof(int64_t);
 
     // clang-format off
-    are_equal<sizeof(storage_),            8,  FieldNameEnum::storage_>();
-    are_equal<sizeof(autograd_meta_),      8,  FieldNameEnum::autograd_meta_>();
-    are_equal<sizeof(extra_meta_),         8,  FieldNameEnum::extra_meta_>();
-    are_equal<sizeof(version_counter_),    8,  FieldNameEnum::version_counter_>();
-    are_equal<sizeof(pyobj_slot_),        16,  FieldNameEnum::pyobj_slot_>();
-    are_equal<sizeof(sizes_and_strides_), 88,  FieldNameEnum::sizes_and_strides_>();
-    are_equal<sizeof(storage_offset_),     8,  FieldNameEnum::storage_offset_>();
-    are_equal<sizeof(numel_),              8,  FieldNameEnum::numel_>();
-    are_equal<sizeof(data_type_),          2,  FieldNameEnum::data_type_>();
-    are_equal<sizeof(device_opt_),         3,  FieldNameEnum::device_opt_>();
-    are_equal<sizeof(key_set_),            8,  FieldNameEnum::key_set_>();
-    is_le<sizeof(TensorImpl),          tsize,  FieldNameEnum::TOTAL_SIZE>();
+    are_equal<sizeof(storage_),                                           8, FieldNameEnum::storage_>();
+    are_equal<sizeof(autograd_meta_),                                     8, FieldNameEnum::autograd_meta_>();
+    are_equal<sizeof(extra_meta_),                                        8, FieldNameEnum::extra_meta_>();
+    are_equal<sizeof(version_counter_),                                   8, FieldNameEnum::version_counter_>();
+    are_equal<sizeof(pyobj_slot_),                                       16, FieldNameEnum::pyobj_slot_>();
+    are_equal<sizeof(sizes_and_strides_), expected_sizeof_sizes_and_strides, FieldNameEnum::sizes_and_strides_>();
+    are_equal<sizeof(storage_offset_),                                    8, FieldNameEnum::storage_offset_>();
+    are_equal<sizeof(numel_),                                             8, FieldNameEnum::numel_>();
+    are_equal<sizeof(data_type_),                                         2, FieldNameEnum::data_type_>();
+    are_equal<sizeof(device_opt_),                                        3, FieldNameEnum::device_opt_>();
+    are_equal<sizeof(key_set_),                                           8, FieldNameEnum::key_set_>();
+    is_le<sizeof(TensorImpl),                                         tsize, FieldNameEnum::TOTAL_SIZE>();
     // clang-format on
-
+#endif
     return true;
   }
-#endif
 };
 
 // Clean up after ourselves
