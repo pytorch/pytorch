@@ -227,9 +227,9 @@ def mark_dynamic_constrained(
 
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
     torch._dynamo.mark_dynamic_constrained(x, 0, min=2, max=4)
-    ``` 
+    ```
 
-    We would raise. 
+    We would raise.
 
     This API behaves identically for eager and export.
     """
@@ -248,10 +248,13 @@ def mark_dynamic_constrained(
     for i in index:
         mark_dynamic_constrained(t, i, min=min, max=max)
 
+
 @forbid_in_graph
 def clear_dynamic(t, index):
     if isinstance(index, int):
-        assert hasattr(t, "_dynamo_dynamic_indices"), "Illegal call to clear without dynamic dims"
+        assert hasattr(
+            t, "_dynamo_dynamic_indices"
+        ), "Illegal call to clear without dynamic dims"
         delattr(t, "_dynamo_dynamic_indices")
         return
 

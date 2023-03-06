@@ -195,6 +195,27 @@ def guard_scalar(a):
 
 # inclusive both ways
 def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_directive=False):
+    """
+    Constrain range takes a symbol, and records a valid value range for it in the graph.
+    That value range is the narrowest intersection of the current value range for the symbol.
+
+    Ex:
+    constrain_range(x, min=3, max=10)
+    constrain_range(x, min=4, max=12)
+
+    Would have a range of (4, 10)
+
+    min and max are optional, and not specifying one will leave the range unbounded, but
+    still constrained to any past min or maxes, as in the comment above.
+
+    In this way, it is a one directional api - it can only constrain ranges for a shape further.
+
+    The user_directive flag is used for recording a constrain_range that comes from a manually
+    user specified constrain_range. In the dynamo case, this means it is downstream of mark_dynamic_constrained.
+
+    Setting this flag records the range into the user_constrained field on shape_env. See the docs on that field
+    for more information.
+    """
     if min is None:
         min = -sympy.oo
     if max is None:
@@ -1213,6 +1234,12 @@ class ShapeEnv:
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         # var_to_range entries which were modified by manual user directive
+        # [NOTE - on user_constrained]
+        # User constrained symbols have an entry in var_to_range, but some of their range
+        # comes from manual user directives like dynamo's constrain api. This distinction is maintained
+        # for the purposes of protecting and enforcing user directives. In strict_mark_dyn mode, we do not
+        # allow ANY constraining of values for a given symbol. However, if this symbol is user constrained, we
+        # relax this requirement in favor of honoring the user directive and allowing the user specified range.
         self.user_constrained: Set["sympy.Symbol"] = set()
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
