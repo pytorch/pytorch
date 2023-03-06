@@ -2528,7 +2528,7 @@
 - func: unflatten.Dimname(Tensor(a) self, Dimname dim, SymInt[] sizes, Dimname[] names) -> Tensor(a)
   variants: function, method
   dispatch:
-    CompositeImplicitAutograd: unflatten_symint
+    CompositeImplicitAutograd: unflatten_dimname_symint
 
 - func: fill.Scalar(Tensor self, Scalar value) -> Tensor
   variants: function

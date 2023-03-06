@@ -3397,7 +3397,7 @@ Tensor ravel(const Tensor& self) {
 static inline void handle_unflatten_exception(const std::runtime_error &e,
                                               const Tensor &self,
                                               int64_t dim,
-                                              IntArrayRef sizes,
+                                              SymIntArrayRef sizes,
                                               c10::optional <DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
@@ -3406,12 +3406,12 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   if (self.has_names()) {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+                dim, " (", self.names()[dim], ": ", self.sym_size(dim), ") in Tensor", self.names());
 
   } else {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.size(dim), ") in the input tensor");
+                dim, " (", self.sym_size(dim), ") in the input tensor");
   }
 }
 
@@ -3458,7 +3458,7 @@ Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
   return native::unflatten_impl(self, dim, sizes, c10::nullopt);
 }
 
-Tensor unflatten_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {
+Tensor unflatten_dimname_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {
   return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
