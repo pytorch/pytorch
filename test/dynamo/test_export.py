@@ -2009,6 +2009,30 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = exported(inp)
         self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
+    def test_export_specialized_int_float(self):
+        class Foo(torch.nn.Module):
+            def __init__(
+                self,
+                input_dim,
+            ):
+                super().__init__()
+                self.torch_module = torch.nn.LayerNorm(
+                    input_dim, eps=1e-5, elementwise_affine=True
+                )
+
+            def forward(self, input):
+                return input.cos() * self.torch_module.eps
+
+        mod = Foo(128)
+        inp = torch.randn(3, 128)
+
+        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+        count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                count += 1
+        self.assertEqual(count, 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
