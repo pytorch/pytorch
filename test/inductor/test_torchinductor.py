@@ -1009,6 +1009,7 @@ class CommonTemplate:
                 x.argmax(-1),
                 x.amin(-1),
                 x.amax(-1),
+                x.aminmax(),
             )
 
         with config.patch(unroll_reductions_threshold=8):
@@ -1043,9 +1044,35 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
+            return (
+                (a + b).max(),
+                (a + b).min(),
+                torch.amax(a + 1, keepdim=True),
+                torch.amin(b + 1, keepdim=True),
+            )
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+            self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
+
+    def test_fmin_fmax(self):
+        def fn(a, b):
+            return (
+                torch.fmin(a, b),
+                torch.fmax(a, b),
+                torch.fmax(a + 1, torch.tensor(0.0)),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor(
+                    [-10.0, 10.0, float("nan"), float("nan"), float("nan"), 3, 4]
+                ),
+                torch.tensor(
+                    [float("nan"), float("nan"), -10.0, 10.0, float("nan"), 4, 3]
+                ),
+            ),
+        )
 
     def test_sum_int(self):
         def fn(x):
@@ -2175,7 +2202,6 @@ class CommonTemplate:
                 (v,),
             )
 
-    @slow()
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -4454,7 +4480,11 @@ class CommonTemplate:
 
     def test_narrow(self):
         def fn(x):
-            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+            return (
+                aten.narrow(x, 1, 10, 16),
+                aten.narrow(x + 2, 0, 10, 16) + 1,
+                aten.narrow_copy(x, 1, 10, 16),
+            )
 
         self.common(fn, [torch.randn(64, 64)])
 
@@ -6616,6 +6646,7 @@ if HAS_CPU:
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
+            assert metrics.generated_cpp_vec_kernel_count == 0
 
         def test_invalid_index_of_empty_tensor(self):
             def fn(a):
@@ -7385,18 +7416,25 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
             ),
-            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
             # Test Pow directly.
-            (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
-            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
-            (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
+            (
+                sympy.Pow(s1 + s2, 0),
+                lambda _: "1",
+            ),  # note: simplified before _print_Pow
+            (
+                sympy.Pow(s1 + s2, -3),
+                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
+            ),
+            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
         )
 
         for expr, result in cases:
-            self.assertEqual(cexpr(expr), result)
-            self.assertEqual(texpr(expr), result)
+            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
+            self.assertEqual(texpr(expr), result(1))
+            self.assertEqual(pexpr(expr), result(1))
 
     def test_print_floor(self):
         s1 = sympy.Symbol("s1", integer=False)

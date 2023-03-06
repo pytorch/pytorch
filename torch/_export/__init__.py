@@ -192,7 +192,7 @@ def _aot_capture(mod, flat_args):
 @patch.object(torchdynamo.config, "dynamic_shapes", True)
 @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
 @patch.object(torchdynamo.config, "guard_nn_modules", True)
-@patch.object(torchdynamo.config, "specialize_int_float", True)
+@patch.object(torchdynamo.config, "specialize_int", True)
 @patch.object(torchdynamo.config, "allow_rnn", True)
 @patch.object(torchdynamo.config, "verbose", True)
 def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
