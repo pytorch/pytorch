@@ -322,9 +322,34 @@ void gemm(
      return;
    }
 #endif
+   std::vector<float> float_c(n * ldc);
+   std::vector<float> float_a(k * lda);
+   std::vector<float> float_b(n * ldb);
+   for (auto& av : float_a) {
+     av = c10::convert<float>(*(a++));
+   }
+   for (auto& bv : float_b) {
+     bv = c10::convert<float>(*(b++));
+   }
    gemm_stub(
-      at::kCPU, at::kBFloat16,
-      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
+       at::kCPU,
+       at::kFloat,
+       transa,
+       transb,
+       m,
+       n,
+       k,
+       alpha,
+       float_a.data(),
+       lda,
+       float_b.data(),
+       ldb,
+       beta,
+       float_c.data(),
+       ldc);
+   for (auto cv : float_c) {
+     *(c++) = c10::convert<at::BFloat16>(cv);
+   }
 }
 
 void gemm(

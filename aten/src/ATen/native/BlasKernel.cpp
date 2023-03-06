@@ -1,12 +1,13 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <limits>
-#include <algorithm>
-#include <climits>
+#include <ATen/AccumulateType.h>
 #include <ATen/Config.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/irange.h>
 #include <c10/util/Exception.h>
 #include <c10/util/complex.h>
+#include <c10/util/irange.h>
+#include <algorithm>
+#include <climits>
+#include <limits>
 
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
@@ -180,18 +181,22 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     return;
   }
 
+  using accscalar_t = at::acc_type<scalar_t, false>;
   if ((trans == 'T') || (trans == 't')) {
     for (const auto i : c10::irange(n)) {
-      scalar_t sum = 0;
+      accscalar_t sum = 0;
+      accscalar_t y_sum = 0;
       scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
         sum += x[j * incx] * row_[j];
       }
       if (beta == scalar_t(0)) {
-        y[i * incy] = alpha * sum;
+        y_sum = static_cast<accscalar_t>(alpha) * sum;
       } else {
-        y[i * incy] = beta * y[i * incy] + alpha * sum;
+        y_sum = static_cast<accscalar_t>(beta) * y_sum +
+            static_cast<accscalar_t>(alpha) * sum;
       }
+      y[i * incy] = y_sum;
     }
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
@@ -263,11 +268,12 @@ scalar_t dot_naive(
     Functor op) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i;
-  scalar_t sum = 0;
+  using accscalar_t = at::acc_type<scalar_t, false>;
+  accscalar_t sum = 0;
   for (i = 0; i < n; i++) {
-    sum += op(x[i * incx], y[i * incy]);
+    sum += static_cast<accscalar_t>(op(x[i * incx], y[i * incy]));
   }
-  return sum;
+  return static_cast<scalar_t>(sum);
 }
 
 } // namespace blas_impl
