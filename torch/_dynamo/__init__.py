@@ -180,6 +180,57 @@ def mark_dynamic_constrained(
     the same dimension will take the most conservative intersection of all ranges. At guard accumulation
     time, we verify that the dimension fell within the specified range, and raise if it does not.
 
+    Example usage is as follow:
+
+    ```
+    x = torch.randn([7, 7, 7])
+
+    def my_dyn_fn(a):
+        if a.shape[0] > 5:
+            return a.cos()
+        return a.sin()
+
+    torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    ```
+
+    We will get a new guard, '4 <= a.size()[0] <= 10'
+
+    If we run it again, with a wider constraint, by adding these 2 lines:
+
+    ```
+    torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    ```
+
+    Nothing happens - mark_dynamic_constrained is sticky unless reset, so the range is still
+    at the narrowst intersection (4, 10)
+
+    If we delete the field first:
+
+    ```
+    torch._dynamo.clear_dynamic(x, 0)
+    torch._dynamo.mark_dynamic_constrained(x, 0, min=3, max=12)
+    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    ```
+    We will recompile, and get a new guard, `3 <= a.size()[0] <= 12`
+
+    Alternatively, if our directive had been counter to the guards:
+
+    ```
+    x = torch.randn([7, 7, 7])
+
+    def my_dyn_fn(a):
+        if a.shape[0] > 5:
+            return a.cos()
+        return a.sin()
+
+    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    torch._dynamo.mark_dynamic_constrained(x, 0, min=2, max=4)
+    ``` 
+
+    We would raise. 
+
     This API behaves identically for eager and export.
     """
     if isinstance(index, int):
@@ -196,3 +247,14 @@ def mark_dynamic_constrained(
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic_constrained(t, i, min=min, max=max)
+
+@forbid_in_graph
+def clear_dynamic(t, index):
+    if isinstance(index, int):
+        assert hasattr(t, "_dynamo_dynamic_indices"), "Illegal call to clear without dynamic dims"
+        delattr(t, "_dynamo_dynamic_indices")
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        clear_dynamic(t, i)
