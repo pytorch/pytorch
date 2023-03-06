@@ -208,6 +208,8 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [

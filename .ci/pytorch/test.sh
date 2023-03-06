@@ -337,7 +337,7 @@ test_dynamo_benchmark() {
   fi
 }
 
-test_inductor_benchmark_smoketest_perf() {
+test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
 
