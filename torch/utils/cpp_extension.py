@@ -214,7 +214,7 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/wd4624', '/wd4067', '/wd4068', '/EHsc']
 
 MSVC_IGNORE_CUDAFE_WARNINGS = [
     'base_class_has_different_dll_interface',
@@ -1734,9 +1734,11 @@ def _get_cuda_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         ('Maxwell+Tegra', '5.3'),
         ('Maxwell', '5.0;5.2+PTX'),
         ('Pascal', '6.0;6.1+PTX'),
+        ('Volta+Tegra', '7.2'),
         ('Volta', '7.0+PTX'),
         ('Turing', '7.5+PTX'),
-        ('Ampere', '8.0;8.6+PTX;8.7+PTX'),
+        ('Ampere+Tegra', '8.7'),
+        ('Ampere', '8.0;8.6+PTX'),
         ('Ada', '8.9+PTX'),
         ('Hopper', '9.0+PTX'),
     ])

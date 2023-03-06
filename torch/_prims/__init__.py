@@ -347,7 +347,7 @@ def _elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    strides = utils.compute_elementwise_output_strides(*args_)
+    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -398,7 +398,8 @@ def _elementwise_meta(
             else:
                 dtype = dtype
 
-        return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
+        assert shape is not None
+        return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
     # TODO: fix number type promotion (bool, complex->float)
@@ -2329,7 +2330,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,

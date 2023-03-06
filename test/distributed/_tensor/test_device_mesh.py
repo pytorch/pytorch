@@ -13,6 +13,7 @@ from torch.distributed.distributed_c10d import (
     is_initialized,
     new_group,
     ProcessGroup,
+    get_process_group_ranks,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -239,7 +240,8 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
     def test_all_reduce_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
-        mesh.all_reduce(local_tensor, mesh_dim=0)
+        # multiply with 1 to trigger wait
+        local_tensor = mesh.all_reduce(local_tensor, mesh_dim=0) * 1
         res_num = ((0 + self.world_size - 1) * self.world_size) / 2
         self.assertEqual(local_tensor, torch.ones(3, 3) * res_num)
 
@@ -460,7 +462,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 contiguous=True,
             )
             scattered_tensor = torch.empty_like(
-                local_rs_list[mesh.get_coordinate_on_dim(dim)],
+                local_rs_list[mesh.get_coordinate()[dim]],
                 device=self.device_type,
             )
             global_ranks = [
@@ -479,12 +481,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         # check all dim groups
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
-            dim_group_size = get_world_size(dim_group)
-            global_ranks = [
-                get_global_rank(dim_group, i) for i in range(dim_group_size)
-            ]
+            global_ranks = get_process_group_ranks(dim_group)
             cloned_local_tensor = local_tensor.clone()
-            mesh.all_reduce(cloned_local_tensor, mesh_dim=dim)
+            cloned_local_tensor = mesh.all_reduce(cloned_local_tensor, mesh_dim=dim) * 1
             res_num = sum(global_ranks)
             self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
@@ -523,7 +522,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 for global_rank in global_ranks
             ]
             received_tensor = torch.empty_like(
-                scattered_tensors[mesh.get_coordinate_on_dim(dim)]
+                scattered_tensors[mesh.get_coordinate()[dim]]
             )
             mesh.scatter(received_tensor, scattered_tensors, mesh_dim=dim)
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
@@ -563,7 +562,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         # check all dim groups
         dim_to_subgroups = mesh.get_dim_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
-            my_coordinate = mesh.get_coordinate_on_dim(dim)
+            my_coordinate = mesh.get_coordinate()[dim]
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
                 get_global_rank(dim_group, i) for i in range(dim_group_size)

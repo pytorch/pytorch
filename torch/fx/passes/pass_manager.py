@@ -5,6 +5,14 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "PassManager",
+    "inplace_wrapper",
+    "log_hook",
+    "loop_pass",
+    "this_before_that_pass_constraint",
+    "these_before_those_pass_constraint",
+]
 
 # for callables which modify object inplace and return something other than
 # the object on which they act

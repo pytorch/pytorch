@@ -1221,6 +1221,11 @@ class TestMeta(TestCase):
         r = torch.empty(2 ** 52, device='meta', dtype=torch.qint8)
         self.assertEqual(r.device.type, 'meta')
 
+    def test_nan_to_num(self):
+        t = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14], device='meta')
+        r = t.nan_to_num()
+        self.assertEqual(r.device.type, 'meta')
+
     @onlyCPU
     def test_meta_autograd_no_error(self):
         lib = torch.library.Library("meta_test", "DEF")

@@ -328,7 +328,7 @@ def remove_load_call_method(instructions: List[Instruction]):
 
 
 def explicit_super(code: types.CodeType, instructions: List[Instruction]):
-    """convert super() with no args into explict arg form"""
+    """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
     output = []
     for idx, inst in enumerate(instructions):
