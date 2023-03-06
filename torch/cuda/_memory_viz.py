@@ -5,7 +5,7 @@ import io
 import subprocess
 import json
 from functools import lru_cache
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 cache = lru_cache(None)
 
@@ -311,13 +311,26 @@ def trace(data):
     return out.getvalue()
 
 class PlotWriter:
-    def __init__(self):
+    def __init__(self, categories: List[str] = None):
         string_table: List[str] = []
-        suffix_table: List[Tuple[int, int]] = []
 
-        elements = []
+        # compresses lists of strings that have common suffixes
+        # such as stack traces with the most recent frame first.
+        # (reference to string table, another suffix table entry)
+        suffix_table: List[Tuple[int, Optional[int]]] = []
+
+        elements_size = []
+
+        # indexes into the suffix_table
+        elements_info = []
+
+        # indexes into category table
+        elements_category: Optional[List[int]] = None if categories is None else []
+
+        # indexes into the elements_ tables
         actions: List[int] = []
 
+        # indexes into the elements_ tables
         initially_allocated: List[int] = []
 
         @cache
@@ -330,25 +343,37 @@ class PlotWriter:
             suffix_table.append((sid, restid))
             return len(suffix_table) - 1
 
-
         def intern_stack(frames):
-            sids = [intern_str(f) for f in frames]
             next_id = None
-            for sid in reversed(sids):
-                next_id = intern_suffix(sid, next_id)
+            for f in reversed(frames):
+                next_id = intern_suffix(intern_str(f), next_id)
             return next_id
 
-        def add_element(size, lines):
-            elements.append({'size': size, 'info': intern_stack(lines)})
-            return len(elements) - 1
+        def add_element(size, lines, category=None):
+            nonlocal elements_category
+            # note: struct of arrays format to info about elements
+            # avoids a lot of repeated string keys when serialized
+            elements_size.append(size)
+            elements_info.append(intern_stack(lines))
+
+            # lazily create since we will not always have categories
+            if categories is not None:
+                assert category >= 0 and category < len(categories)
+                assert elements_category is not None
+                elements_category.append(category)
+
+            return len(elements_size) - 1
 
         def to_html():
             r = {
                 'actions': actions,
-                'elements': elements,
+                'elements_size': elements_size,
+                'elements_info': elements_info,
+                'elements_category': elements_category,
                 'suffix_table': suffix_table,
                 'string_table': string_table,
                 'initially_allocated': list(reversed(initially_allocated)),
+                'categories': categories,
             }
             plot_data = json.dumps(r)
             return _memory_over_time_template.replace('$PLOT_DATA', plot_data)
@@ -358,8 +383,20 @@ class PlotWriter:
         self.free = actions.append
         self.initially_allocated = initially_allocated.append
         self.to_html = to_html
+        self.categories = categories
 
 def trace_plot(data, device=None, plot_segments=False):
+    """Generate a visualization over time of the memory usage recorded by the trace as an html file.
+
+    Args:
+        data: Memory snapshot as generated from torch.cuda.memory._snapshot()
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+        plot_segments (bool, optional): Plots memory returned from cudaMalloc, rather than individual allocations.
+                                        Defaults to False.
+
+    Returns:
+        str: HTML of visualization
+    """
     w = PlotWriter()
     addr_to_alloc = {}
 
@@ -387,28 +424,39 @@ def trace_plot(data, device=None, plot_segments=False):
 
     for i, e in enumerate(trace):
         if e['action'] == alloc:
-            elemid = add_element(e['size'], e['frames'])
+            elemid = add_element(e['size'], e.get('frames', []))
             addr_to_alloc[e['addr']] = elemid
             w.allocate(elemid)
         elif e['action'] == free:
             idx = addr_to_alloc.pop(e['addr'], None)
             if idx is None:
-                idx = add_element(e['size'], e['frames'], extra=('alloc not recorded, stack trace for free:',))
+                idx = add_element(e['size'], e.get('frames', []), extra=('alloc not recorded, stack trace for free:',))
                 w.initially_allocated(idx)
             w.free(idx)
     return w.to_html()
 
-def profile_plot(memory_profile, device=None):
+def profile_plot(profile, device=None):
+    """Generate a visualization over time of the memory usage recorded by kineto memory profiling as an html file.
+
+    Args:
+        profile: profile as genererated by `torch.profiler.profile(profile_memory=True)`
+        device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
+
+    Returns:
+        str: HTML of visualization
+    """
     import torch
-    from torch.profiler._memory_profiler import Action, TensorKey
+    from torch.profiler._memory_profiler import Action, TensorKey, Category
     from torch._C._profiler import _EventType
+    memory_profile = profile._memory_profile()
 
     if device is None:
         if torch.cuda.is_available():
             device = torch.device('cuda', torch.cuda.current_device())
         else:
             device = torch.device('cpu')
-    w = PlotWriter()
+
+    w = PlotWriter(categories=["unknown", *(c.name.lower() for c in Category)])
 
 
     allocation_stacks = {}
@@ -429,12 +477,12 @@ def profile_plot(memory_profile, device=None):
 
     def add_element(size, tensor_key, version):
         category = memory_profile._categories.get(tensor_key, version)
-        if category is None:
-            category = 'unknown'
-        else:
-            category = category.name.lower()
+        category = category.value if category is not None else 0
         stack = allocation_stacks.get(tensor_key, ())
-        return w.add_element(size, [f"{_format_size(size)} allocation ({category})", *(p.name for p in stack)])
+        assert w.categories is not None
+        return w.add_element(size,
+                             [f"{_format_size(size)} allocation ({w.categories[category]})", *(p.name for p in stack)],
+                             category)
 
     kv_to_elem = {}
     for time, action, (tensor_key, version), size in memory_profile.timeline:
@@ -494,7 +542,7 @@ function process_alloc_data(fraction_of_memory_reported=1) {
 
     let mini_points = []
 
-    let sizes = alloc_data.elements.map(x => x.size).sort((x, y) => y - x)
+    let sizes = alloc_data.elements_size.map(x => x).sort((x, y) => y - x)
     let total_size = sizes.reduce((x, y) => x + y)
     const memory_threshold = fraction_of_memory_reported * total_size
     let total_seen = 0
@@ -509,9 +557,13 @@ function process_alloc_data(fraction_of_memory_reported=1) {
     }
 
     function add_allocation(elem) {
-        let size = alloc_data.elements[elem].size
+        let size = alloc_data.elements_size[elem]
         current.push(elem)
-        let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: alloc_data.elements[elem].size}
+        let color = elem
+        if (alloc_data.elements_category !== null) {
+            color = alloc_data.elements_category[elem]
+        }
+        let e = {elem: elem, timesteps: [timestep], offsets: [total_mem], size: size, color: color}
         current_data.push(e)
         data.push(e)
         total_mem += size
@@ -524,7 +576,7 @@ function process_alloc_data(fraction_of_memory_reported=1) {
     for (const action of alloc_data.actions) {
         const elem = action
         const idx = current.findIndex(x => x === elem)
-        const size = alloc_data.elements[elem].size
+        const size = alloc_data.elements_size[elem]
         if (size < memory_threshold_size) {
             continue
         }
@@ -566,7 +618,7 @@ function process_alloc_data(fraction_of_memory_reported=1) {
         max_at_time: max_at_time,
         context_for_id:  (elem) => {
             let strings = []
-            let id = alloc_data.elements[elem].info
+            let id = alloc_data.elements_info[elem]
             while (id !== null) {
                 const [sid, next_id] = alloc_data.suffix_table[id]
                 strings.push(alloc_data.string_table[sid])
@@ -626,7 +678,7 @@ function MemoryPlot(svg, data, left_pad, colors=schemeTableau10) {
     .enter()
     .append("polygon")
     .attr('points', format_points)
-    .attr('fill', d => colors[d.elem % colors.length])
+    .attr('fill', d => colors[d.color % colors.length])
 
     let axis = plot_coordinate_space.append('g').call(yaxis)
 
@@ -726,13 +778,42 @@ function MiniMap(mini_svg, plot, data, left_pad, height=70) {
     return {}
 }
 
+function Legend(svg, categories) {
+    let xstart = width - 100
+    let ystart = 30
+    plot_svg.append('g').selectAll('rect')
+    .data(categories)
+    .enter()
+    .append('rect')
+    .attr('x', (c, i) => xstart)
+    .attr('y', (c, i) => ystart + i*15)
+    .attr('width', 10)
+    .attr('height', 10)
+    .attr('fill', (c, i) => schemeTableau10[i % schemeTableau10.length])
+    plot_svg.append('g').selectAll('text')
+    .data(categories)
+    .enter()
+    .append('text')
+    .attr('x', (c, i) => xstart + 20)
+    .attr('y', (c, i) => ystart + i*15 + 8)
+    .attr("font-family", "helvetica")
+    .attr('font-size', 10)
+    .text((c) => c)
+    return {}
+}
+
 let left_pad = 70
 let width = 1024
 let height = 768
 let data = process_alloc_data()
 let body = d3.select("body")
 
-let plot = MemoryPlot(body.append("svg").attr('width', width).attr('height', height).attr('display', 'block'), data, left_pad)
+let plot_svg = body.append("svg").attr('width', width).attr('height', height).attr('display', 'block')
+let plot = MemoryPlot(plot_svg, data, left_pad)
+
+if (alloc_data.categories !== null) {
+    Legend(plot_svg.append('g'), alloc_data.categories)
+}
 
 MiniMap(body.append("svg").attr('width', width).attr('height', 80).attr('display', 'block'), plot, data, left_pad)
 let delegate = ContextViewer(body.append("div").append("pre").text('none'), data)
