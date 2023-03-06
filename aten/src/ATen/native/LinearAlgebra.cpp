@@ -1309,6 +1309,19 @@ Tensor outer(const Tensor& self, const Tensor& vec2) {
   return self.reshape_symint({self.sym_size(0), 1}) * vec2;
 }
 
+#ifdef __aarch64__
+static inline bool is_mkldnn_matmul_enabled() {
+  static bool value = [&](const char* pt) {
+    if (pt != nullptr) {
+      return std::atoi(pt);
+    } else {
+      return 1;
+    }
+  }(std::getenv("MKLDNN_MATMUL_ENABLE"));
+  return value;
+}
+#endif
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1652,10 +1665,19 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
             || (strides[1] == 1 && strides[2] >= sizes[1]);
   };
 
+#ifdef __aarch64__
+  if (is_mkldnn_matmul_enabled() &&
+      use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)) {
+    mkldnn_matmul(
+        batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
+    return;
+  }
+#else
   if (use_mkldnn_bf16_matmul(batch1, batch2, self_or_result)){
     mkldnn_matmul(batch1, batch2, self_or_result, beta.to<float>(), alpha.to<float>());
     return;
   }
+#endif
 
   if (contraction_size * res_rows * res_cols < 400) {
     if (is_bmm_out) {
