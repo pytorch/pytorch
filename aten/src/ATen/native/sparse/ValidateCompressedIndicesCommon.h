@@ -191,8 +191,7 @@ template <
     class kernel_t,
     template <typename func_t, typename vec_func_t>
     class vec_kernel_t = EmptyVecKernel,
-    template <typename scalar_t> class Vec = DummyVec,
-    size_t static_shape_max_len = 0>
+    template <typename scalar_t> class Vec = DummyVec>
 void _validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
@@ -289,8 +288,11 @@ void _validate_compressed_sparse_indices_kernel(
     AT_DISPATCH_INDEX_TYPES(
         idx.scalar_type(),
         NAME,
-        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_and_strides]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
+          const int64_t* RESTRICT idx_sizes =
+              idx_sizes_and_strides.data_ptr<int64_t>();
+          const int64_t* RESTRICT idx_strides = idx_sizes + idx_ndims;
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
@@ -343,41 +345,18 @@ void validate_compressed_sparse_indices_kernel(
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
-  constexpr size_t idx_max_ndims = 8; // up to 7-dim batch.
-  const int64_t idx_ndims = idx.dim();
-
   if (is_crow) {
-    if (idx_ndims <= idx_max_ndims) {
-      _validate_compressed_sparse_indices_kernel<
-          CDimName::CRow,
-          kernel_t,
-          vec_kernel_t,
-          Vec,
-          idx_max_ndims>(cidx, idx, cdim, dim, nnz);
-    }
-    else {
-      _validate_compressed_sparse_indices_kernel<
-          CDimName::CRow,
-          kernel_t,
-          vec_kernel_t,
-          Vec>(cidx, idx, cdim, dim, nnz);
-    }
+    _validate_compressed_sparse_indices_kernel<
+        CDimName::CRow,
+        kernel_t,
+        vec_kernel_t,
+        Vec>(cidx, idx, cdim, dim, nnz);
   } else {
-    if (idx_ndims <= idx_max_ndims) {
-      _validate_compressed_sparse_indices_kernel<
-          CDimName::CCol,
-          kernel_t,
-          vec_kernel_t,
-          Vec,
-          idx_max_ndims>(cidx, idx, cdim, dim, nnz);
-    }
-    else {
-      _validate_compressed_sparse_indices_kernel<
-          CDimName::CCol,
-          kernel_t,
-          vec_kernel_t,
-          Vec>(cidx, idx, cdim, dim, nnz);
-    }
+    _validate_compressed_sparse_indices_kernel<
+        CDimName::CCol,
+        kernel_t,
+        vec_kernel_t,
+        Vec>(cidx, idx, cdim, dim, nnz);
   }
 }
 

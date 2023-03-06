@@ -801,16 +801,17 @@ class SkipFilesVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builtin import BuiltinVariable
-        from .dicts import ConstDictVariable
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
         # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
         elif self.value is collections.OrderedDict and (
-            len(args) == 0 or len(args) == 1 and isinstance(args[0], ConstDictVariable)
+            len(args) == 0
+            or len(args) == 1
+            and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
             return BuiltinVariable.call_dict_helper(
-                collections.OrderedDict, None if len(args) == 0 else args[0]
+                tx, collections.OrderedDict, None if len(args) == 0 else args[0]
             )
         else:
             try:
