@@ -248,7 +248,7 @@ test_inductor_distributed() {
   assert_git_not_dirty
 }
 
-test_inductor() {
+test_inductor_unit_test() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
@@ -268,13 +268,16 @@ test_single_dynamo_benchmark() {
   shift
   local suite="$1"
   shift
+  # total_shards is mandatory, even if it is not passed
+  local total_shards="$1"
+  shift
   # shard id is mandatory, even if it is not passed
   local shard_id="$1"
   shift
 
   local partition_flags=()
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
-    partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
+  if [[ -n "$total_shards" && -n "$shard_id" ]]; then
+    partition_flags=( --total-partitions "$total_shards" --partition-id "$shard_id" )
   fi
 
   # Feel free to remove --device cuda if you ever decide to need to
@@ -288,7 +291,7 @@ test_single_dynamo_benchmark() {
 }
 
 test_aot_eager_benchmark() {
-  # Usage: test_dynamo_benchmark huggingface 0
+  # Usage: test_aot_eager_benchmark huggingface 1 0
 
   local exit_status=0
 
@@ -305,7 +308,7 @@ test_aot_eager_benchmark() {
 }
 
 test_inductor_benchmark() {
-  # Usage: test_dynamo_benchmark huggingface 0
+  # Usage: test_inductor_benchmark huggingface 1 0
 
   local device="$1"
   shift
@@ -362,12 +365,11 @@ test_inductor_benchmark_perf() {
   fi
 }
 
-# No sharding for the periodic job, we don't care if latency is bad
 test_aot_eager_all() {
   local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
+  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "" || exit_status=$?
+  test_aot_eager_benchmark huggingface "" "" || exit_status=$?
+  test_aot_eager_benchmark timm_models "" "" || exit_status=$?
   if [[ $exit_status -ne 0 ]]; then
     echo "Some benchmarks failed; scroll up for details"
   fi
@@ -377,7 +379,7 @@ test_aot_eager_all() {
 test_inductor_huggingface() {
   local device=$1
   shift
-  test_inductor_benchmark "$device" huggingface ""
+  test_inductor_benchmark "$device" huggingface "" ""
 }
 
 test_inductor_huggingface_perf() {
@@ -385,13 +387,13 @@ test_inductor_huggingface_perf() {
 }
 
 test_inductor_timm_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
   local device=$1
   shift
-  test_inductor_benchmark "$device" timm_models "$1"
+  local total_shards=$1
+  shift
+  local shard_id=$1
+  shift
+  test_inductor_benchmark "$device" timm_models "$total_shards" "$shard_id"
 }
 
 test_inductor_timm_perf_shard() {
@@ -405,7 +407,7 @@ test_inductor_timm_perf_shard() {
 test_inductor_torchbench() {
   local device=$1
   shift
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench ""
+  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench "" ""
 }
 
 test_inductor_torchbench_perf() {
@@ -414,6 +416,43 @@ test_inductor_torchbench_perf() {
 
 test_inductor_torchbench_smoketest_perf(){
   PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf smoketest
+}
+
+test_inductor_integration(){
+  # This runs on a linux.p4d24xlarge.nvidia.gpu instance which contains 8 A100.
+  # Sharding is done by specifying CUDA_VISIBLE_DEVICES for each benchmark test.
+  # TODO: need more balanced sharding to leverage all 8 GPUs
+  output_files=()
+  for i in {0..7}; do
+      output_files+=("/tmp/test_inductor_integration_output_$i")
+  done
+
+  pids=()
+  CUDA_VISIBLE_DEVICES=0 test_aot_eager_all > "${output_files[0]}" 2>&1 &
+  pids[0]=$!
+  CUDA_VISIBLE_DEVICES=1 test_inductor_torchbench cuda > "${output_files[1]}" 2>&1 &
+  pids[1]=$!
+  CUDA_VISIBLE_DEVICES=2 test_inductor_huggingface cuda > "${output_files[2]}" 2>&1 &
+  pids[2]=$!
+  CUDA_VISIBLE_DEVICES=3 test_inductor_timm_shard cuda 3 0 > "${output_files[3]}" 2>&1 &
+  pids[3]=$!
+  CUDA_VISIBLE_DEVICES=4 test_inductor_timm_shard cuda 3 1 > "${output_files[4]}" 2>&1 &
+  pids[4]=$!
+  CUDA_VISIBLE_DEVICES=5 test_inductor_timm_shard cuda 3 2 > "${output_files[5]}" 2>&1 &
+  pids[5]=$!
+
+  exit_statuses=()
+  for i in "${!pids[@]}"; do
+    wait ${pids[$i]}
+    exit_statuses[$i]=$?
+    cat "${output_files[$i]}"
+  done
+
+  for exit_status in "${exit_statuses[@]}"; do
+    if [[ $exit_status -ne 0 ]]; then
+      return $exit_status
+    fi
+  done
 }
 
 test_python_gloo_with_tls() {
@@ -878,45 +917,39 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
-  install_torchtext
-  install_torchvision
-  checkout_install_torchbench
-  install_huggingface
-  install_timm
-  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    # NB: This code path is currently dead because dynamic shapes takes
-    # too long to run unsharded
-    test_aot_eager_all --dynamic-shapes
-  else
-    test_aot_eager_all
-  fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   install_torchvision
   install_huggingface
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark huggingface "" --dynamic-shapes
+    test_aot_eager_benchmark huggingface "" "" --dynamic-shapes
   else
-    test_aot_eager_benchmark huggingface ""
+    test_aot_eager_benchmark huggingface "" ""
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
+    test_aot_eager_benchmark timm_models "${SHARD_NUMBER}" "$id" --dynamic-shapes
   else
-    test_aot_eager_benchmark timm_models "$id"
+    test_aot_eager_benchmark timm_models "${SHARD_NUMBER}" "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_torchtext
   install_torchvision
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "" --dynamic-shapes
   else
-    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
+    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" ""
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_integration* ]]; then
+  install_torchtext
+  install_torchvision
+  checkout_install_torchbench
+  install_huggingface
+  install_timm
+  test_inductor_integration
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
   install_huggingface
@@ -954,10 +987,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     checkout_install_torchbench
     test_inductor_torchbench cuda
   fi
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_unit_test* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
-  test_inductor
-  test_inductor_distributed
+  test_inductor_unit_test
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision

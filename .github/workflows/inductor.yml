@@ -23,12 +23,9 @@ jobs:
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_torchbench", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_unit_test", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor_integration", shard: 1, num_shards: 1, runner: "linux.p4d24xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_7-py3_10-gcc7-inductor-test:
