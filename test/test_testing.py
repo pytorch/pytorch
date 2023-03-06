@@ -1398,6 +1398,21 @@ class TestAssertCloseQuantized(TestCase):
             fn()
 
 
+class TestMakeTensor(TestCase):
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_low_high_bool_integral(self, dtype, device):
+        shape = (100,)
+        eps = 1e-4
+
+        actual = torch.testing.make_tensor(shape, dtype=dtype, device=device, low=-(1 - eps), high=1 - eps)
+        expected = torch.zeros(shape, dtype=dtype, device=device)
+
+        torch.testing.assert_close(actual, expected)
+
+
+instantiate_device_type_tests(TestMakeTensor, globals(), only_for="cpu")
+
+
 def _get_test_names_for_test_class(test_cls):
     """ Convenience function to get all test names for a given test class. """
     test_names = ['{}.{}'.format(test_cls.__name__, key) for key in test_cls.__dict__
