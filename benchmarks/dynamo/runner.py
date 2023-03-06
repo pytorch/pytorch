@@ -217,6 +217,21 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--base-sha",
+        help="commit id for the tested pytorch",
+    )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        help="Total number of partitions, to be passed to the actual benchmark script",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        help="ID of partition, to be passed to the actual benchmark script",
+    )
+
+    parser.add_argument(
         "--update-dashboard",
         action="store_true",
         default=False,
@@ -244,7 +259,7 @@ def parse_args():
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
+        help="does all of --no-graphs, --no-update-archive, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -385,6 +400,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
 
                     if args.threads is not None:
                         cmd = f"{cmd} --threads {args.threads}"
+
+                    if args.total_partitions is not None:
+                        cmd = f"{cmd} --total-partitions {args.total_partitions}"
+
+                    if args.partition_id is not None:
+                        cmd = f"{cmd} --partition-id {args.partition_id}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -403,12 +424,15 @@ def generate_dropdown_comment(title, body):
 
 
 def build_summary(args):
-    import git
-
     out_io = io.StringIO()
 
     def print_commit_hash(path, name):
-        if exists(path):
+        if args.base_sha is not None:
+            if name == "pytorch":
+                out_io.write(f"{name} commit: {args.base_sha}\n")
+        elif exists(path):
+            import git
+
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
             date = repo.head.object.committed_datetime
@@ -431,7 +455,6 @@ def build_summary(args):
     out_io.write("\n")
     out_io.write("### Commit hashes ###\n")
     print_commit_hash("../pytorch", "pytorch")
-    print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")
