@@ -76,7 +76,6 @@ class Interpreter:
         self.env : Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
-        self.extra_traceback = True
 
         if self.garbage_collect_values:
             # Run through reverse nodes and record the first instance of a use
@@ -136,13 +135,12 @@ class Interpreter:
             try:
                 self.env[node] = self.run_node(node)
             except Exception as e:
-                if self.extra_traceback:
-                    msg = f"While executing {node.format_node()}"
-                    msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
-                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
-                    e.args = (msg,) + e.args[1:]
-                    if isinstance(e, KeyError):
-                        raise RuntimeError(*e.args) from e
+                msg = f"While executing {node.format_node()}"
+                msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
+                msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                e.args = (msg,) + e.args[1:]
+                if isinstance(e, KeyError):
+                    raise RuntimeError(*e.args) from e
                 raise
 
             if self.garbage_collect_values:

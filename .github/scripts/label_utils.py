@@ -20,11 +20,12 @@ BOT_AUTHORS = ["github-actions", "pytorchmergebot", "pytorch-bot"]
 
 LABEL_ERR_MSG_TITLE = "This PR needs a label"
 LABEL_ERR_MSG = f"""# {LABEL_ERR_MSG_TITLE}
-    If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.
+If your changes are user facing and intended to be a part of release notes, please use a label starting with `release notes:`.
 
-    If not, please add the `topic: not user facing` label.
-    For more information, see
-    https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.
+If not, please add the `topic: not user facing` label.
+
+For more information, see
+https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.
 """
 
 # Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129

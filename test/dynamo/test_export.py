@@ -2026,23 +2026,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mod = Foo(128)
         inp = torch.randn(3, 128)
 
-        with config.patch(dynamic_shapes=True, specialize_int_float=True):
-            gm, _ = torch._dynamo.export(
-                mod, inp, aten_graph=True, tracing_mode="symbolic"
-            )
-            count = 0
-            for node in gm.graph.nodes:
-                if node.op == "placeholder":
-                    count += 1
-            self.assertEqual(count, 1)
-
-        with config.patch(dynamic_shapes=True, specialize_int_float=False):
-            # TODO (tmanlaibaatar) We should error when it tries to add input, not after
-            with self.assertRaisesRegex(
-                AssertionError,
-                "Dynamo input/output is not consistent with traced input/output",
-            ):
-                torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+        count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                count += 1
+        self.assertEqual(count, 1)
 
 
 if __name__ == "__main__":
