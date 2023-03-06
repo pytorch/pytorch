@@ -50,10 +50,6 @@ def _reducer_allreduce_and_upcast_hook(
             # free storage for mp param as it will be allocated again in next
             # forward pass.
             _free_storage(p._mp_param)
-            # if not gradient_is_bucket_view:
-            #     g.data = g.data.to(p.data.dtype)
-            #     # p.grad = g
-            # else:
             p.grad.data = p.grad.to(p.data.dtype)
 
     # enqueue a callback to wait for this stream at end of backward
