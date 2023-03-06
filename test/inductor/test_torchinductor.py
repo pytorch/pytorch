@@ -4263,15 +4263,18 @@ class CommonTemplate:
         self.common(fn, [torch.randn(64) * 10])
 
     def test_baddbmm(self):
-        def fn(a, b, c):
-            return aten.baddbmm(a, b, c)
+        def fn(a, b, c, beta):
+            return aten.baddbmm(a, b, c, beta=beta)
 
         b = torch.randn(6, 128, 64)
         c = torch.randn(6, 64, 100)
-        for a in [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)]:
+        options = itertools.product(
+            [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)], [0.0]
+        )
+        for a, beta in options:
             self.common(
                 fn,
-                [a, b, c],
+                [a, b, c, beta],
                 # Mismatched elements: 1212 / 76800 (1.6%)
                 # Greatest absolute difference: 0.001953125 at index (0, 0, 93) (up to 1e-05 allowed)
                 # Greatest relative difference: 1.0 at index (3, 19, 4) (up to 0.001 allowed)
