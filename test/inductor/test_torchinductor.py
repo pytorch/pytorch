@@ -4046,7 +4046,7 @@ class CommonTemplate:
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
         self.assertTrue(same(out, out_eager))
 
-    @config.patch({"triton.unique_names": True, "triton.descriptive_names": False})
+    @config.patch({"triton.unique_kernel_names": True, "triton.descriptive_names": False})
     def test_kernel_names(self):
         @torch._dynamo.optimize("inductor")
         def fn(x):
