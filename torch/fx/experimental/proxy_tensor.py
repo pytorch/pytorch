@@ -476,7 +476,7 @@ ORIGINAL_ATEN = None
 @contextmanager
 def set_original_aten_op(func):
     global ORIGINAL_ATEN
-    if ORIGINAL_ATEN is None:
+    if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
         fx_traceback.current_meta['original_aten'] = func
         try:

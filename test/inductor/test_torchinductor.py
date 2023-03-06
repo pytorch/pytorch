@@ -20,8 +20,8 @@ import sympy
 import torch
 
 import torch._dynamo
-from torch._dispatch.python import enable_python_dispatcher
 import torch.nn as nn
+from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
