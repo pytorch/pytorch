@@ -24,11 +24,12 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
+        clear_profiler_hooks,
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
         set_guard_fail_hook,
-        set_guard_profiler_hooks,
+        set_profiler_hooks,
         skip_code,
         unsupported,
     )
@@ -55,18 +56,20 @@ null_context = contextlib.nullcontext
 class Unset(Enum):
     token = 0
 
-last_profiler = None
-def _guard_profiler_start():
-    global last_profiler
-    name = "guards"
+
+def _profiler_start(name):
+    # what is args for?
     args = None
-    last_profiler = torch.ops.profiler._record_function_enter_new(name, args)
+    return torch.ops.profiler._record_function_enter_new(name, args)
 
-def _guard_profiler_end():
-    global last_profiler
-    torch.ops.profiler._record_function_exit._RecordFunction(last_profiler)
 
-set_guard_profiler_hooks(_guard_profiler_start, _guard_profiler_end)
+def _profiler_end(record):
+    torch.ops.profiler._record_function_exit._RecordFunction(record)
+
+
+# TODO can we enable by default? (check perf CI) otherwise, guard behind config
+set_profiler_hooks(_profiler_start, _profiler_end)
+# clear_profiler_hooks()
 
 unset = Unset.token
 
