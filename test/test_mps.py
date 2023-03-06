@@ -39,7 +39,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests, onlyMPS
+from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
 import torch
@@ -141,7 +141,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv2d': [torch.int64],
         'nn.functional.conv_transpose1d': [torch.int64],
         'nn.functional.conv_transpose2d': [torch.int64],
-        'remainder': [torch.int64],
+        # 'remainder': [torch.int64],
         'sigmoid': [torch.int64],
         # failures due to lack of op implementation on MPS backend
         'put': None,
@@ -1954,6 +1954,78 @@ class TestMPS(TestCaseMPS):
         x_cpu = x_cpu + 2
         self.assertEqual(x, x_cpu)
 
+    def test_reshape_storage_offset(self):
+        # https://github.com/pytorch/pytorch/issues/95883
+        B = 4
+        T = 1
+
+        lin_cpu = nn.Linear(10, 256)
+        lin_mps = nn.Linear(10, 256, device="mps")
+
+        # Use the same weights and bias as the ones from the cpu
+        lin_mps.weight.data = lin_cpu.weight.data.detach().clone().to("mps").requires_grad_()
+        lin_mps.bias.data = lin_cpu.bias.data.detach().clone().to("mps").requires_grad_()
+
+        x_mps = torch.rand([B, T, 10], device="mps", requires_grad=True)
+        x_cpu = x_mps.detach().clone().cpu().requires_grad_()
+        x_mps = lin_mps(x_mps)
+        x_cpu = lin_cpu(x_cpu)
+
+        self.assertEqual(x_mps.shape, (B, T, 256))
+        self.assertEqual(x_cpu.shape, (B, T, 256))
+
+        cls_token_mps = torch.rand([1, 256], device="mps", requires_grad=True).repeat(B, 1, 1)
+        cls_token_cpu = cls_token_mps.detach().clone().cpu()
+        x_mps = torch.cat([cls_token_mps, x_mps], dim=1)
+        x_cpu = torch.cat([cls_token_cpu, x_cpu], dim=1)
+
+        x_mps = x_mps.transpose(0, 1)
+        x_cpu = x_cpu.transpose(0, 1)
+
+        target_mps = torch.rand_like(x_mps)
+        target_cpu = target_mps.detach().clone().cpu()
+        loss_mps = F.mse_loss(x_mps, target_mps)
+        loss_cpu = F.mse_loss(x_cpu, target_cpu)
+        self.assertEqual(loss_mps, loss_cpu)
+
+        loss_mps.backward()
+        loss_cpu.backward()
+        self.assertEqual(x_mps.grad, x_cpu.grad)
+
+    def test_stack(self):
+        # https://github.com/pytorch/pytorch/issues/87856
+        x_cpu = torch.tensor([[1, 2]])
+        x_mps = x_cpu.detach().clone().to("mps")
+
+        y_cpu = torch.stack((x_cpu[:, :1], x_cpu[:, -1:]), dim=-1)
+        y_mps = torch.stack((x_mps[:, :1], x_mps[:, -1:]), dim=-1)
+
+        self.assertEqual(y_cpu, y_mps)
+
+        t_mps = torch.tensor([1, 2, 3, 4], device="mps")
+        t_cpu = t_mps.detach().cpu().detach()
+
+        x_mps = t_mps[2:]
+        y_mps = t_mps[:2]
+
+        x_cpu = t_cpu[2:]
+        y_cpu = t_cpu[:2]
+
+        res_mps = torch.stack((y_mps, x_mps), dim=-1)
+        res_cpu = torch.stack((y_cpu, x_cpu), dim=-1)
+
+        self.assertEqual(res_mps, res_cpu)
+
+    def test_unsafe_chunk(self):
+        # https://github.com/pytorch/pytorch/issues/91065
+        a = torch.rand(5, dtype=torch.float32, device="cpu")
+        ret = a.unsafe_chunk(4, 0)
+        y = ret[0] * ret[2]
+        a_mps = a.to("mps")
+        ret_mps = a_mps.unsafe_chunk(4, 0)
+        y_mps = ret_mps[0] * ret_mps[2]
+        self.assertEqual(y, y_mps)
+
     def test_slice_casting(self):
         # generate random binary numbers
         cpu_in = torch.bernoulli(torch.empty(1, 1, 128, 128).uniform_(0, 1)).to(torch.uint8)
@@ -2030,6 +2102,15 @@ class TestMPS(TestCaseMPS):
         helper([9, 3, 2])
         helper([3, 4, 18, 22])
         helper([3, 4, 18, 22, 150])
+
+    def test_contiguous_slice_3d(self):
+        x = torch.randn(2, 3, 3, device="mps")
+        x_cpu = x.detach().clone().cpu()
+        x = x[:1]
+        x_cpu = x_cpu[:1]
+        out = x[:, 0:1, 0:1] * x[:, 1:2, 1:2]
+        out_cpu = x_cpu[:, 0:1, 0:1] * x_cpu[:, 1:2, 1:2]
+        self.assertEqual(out, out_cpu)
 
     def test_view_slice(self):
         # https://github.com/pytorch/pytorch/issues/83995
@@ -2831,7 +2912,7 @@ class TestMPS(TestCaseMPS):
             helper(torch.int64)
         except Exception as e:
             e_string = str(e)
-            self.assertEqual(e_string, "MPS does not support cumsum op with int64 input")
+            self.assertEqual(e_string, "MPS does not support cumsum op with int64 input. Support has been added in macOS 13.3")
 
     def test_cumsum_minus_one_axis(self):
         def helper(dtype):
@@ -3843,6 +3924,15 @@ class TestNLLLoss(TestCaseMPS):
         helper(2, 8, 4, 4, "min", torch.float16)
         helper(2, 8, 4, 4, "min", torch.int64)
 
+    @unittest.skipIf(product_version < 13.3, "Long data type supported from macOS 13.3 and above")
+    def test_reduction_sum_max_long_val(self):
+        x_mps = torch.tensor([sys.maxsize, sys.maxsize - 10, sys.maxsize - 5, sys.maxsize - 18], device="mps")
+        x_cpu = x_mps.detach().clone().cpu()
+
+        res_mps = torch.sum(x_mps)
+        res_cpu = torch.sum(x_cpu)
+        self.assertEqual(res_mps, res_cpu)
+
     # Test forward max
     # Note - don't test grad now
     def test_max_el(self):
@@ -4660,7 +4750,8 @@ class TestNLLLoss(TestCaseMPS):
     def test_divmode(self):
         def helper(shape, rounding_mode):
             for dtype in [torch.float32, torch.float16, torch.int32, torch.int64]:
-                if (rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) is False:
+                if ((rounding_mode is not None and "floor" in rounding_mode and dtype == torch.int64) or
+                        (rounding_mode is not None and "trunc" in rounding_mode and dtype == torch.float16)) is False:
                     cpu_x = None
                     cpu_y = None
                     if (dtype in [torch.float32, torch.float16]):
@@ -7897,15 +7988,15 @@ class TestViewOpsMPS(TestCaseMPS):
         x.set_(x.storage(), 0, x.size(), stride)
         self.assertTrue(x.is_contiguous())
 
-    def test_resize_all_dtypes_and_devices(self, device="mps"):
+    def test_resize_mps_dtypes(self, device="mps"):
         shape = (2, 2)
-        for dt in (torch.half, torch.bfloat16, torch.bool):
+        for dt in MPS_DTYPES:
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             x.resize_(shape)
             self.assertEqual(shape, x.shape)
 
-    def test_resize_as_all_dtypes_and_devices(self, device="mps"):
-        for dt in (torch.half, torch.bfloat16, torch.bool):
+    def test_resize_as_mps_dtypes(self, device="mps"):
+        for dt in MPS_DTYPES:
             x = torch.tensor([[1, 2], [3, 4], [5, 6]], dtype=dt, device=device)
             y = torch.tensor([[1, 2, 3], [4, 5, 6]], dtype=dt, device=device)
             x.resize_as_(y)
@@ -9164,91 +9255,91 @@ class TestAdvancedIndexing(TestCaseMPS):
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
 class TestRNNMPS(TestCaseMPS):
-    def test_lstm_1(self, device="mps", dtype=torch.float32):
-        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
-            torch.random.manual_seed(42)
-            rnn = nn.LSTM(7, 4, layers, device="cpu")
-            input = torch.randn(2, 3, 7, device="cpu")
-            hx = torch.randn(layers, 3, 4, device="cpu")
-            cx = torch.randn(layers, 3, 4, device="cpu")
+    def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
+                     seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
+        rnn = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            bias=bias,
+            bidirectional=bidirectional,
+            batch_first=batch_first,
+            device="cpu"
+        )
+        bidirectional_mul = 2 if bidirectional else 1
 
-            cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+        if batch_first:
+            input = torch.randn(batch_size, seq_len, input_size, device="cpu", dtype=dtype, requires_grad=backward)
+            hx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+            cx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+        else:
+            input = torch.randn(seq_len, batch_size, input_size, device="cpu", dtype=dtype, requires_grad=backward)
+            hx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
+            cx = torch.randn(num_layers * bidirectional_mul, batch_size, hidden_size, device="cpu", dtype=dtype,
+                             requires_grad=backward)
 
+        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+
+        rnn = rnn.to(device)
+        input = input.to(device)
+        hx = hx.to(device)
+        cx = cx.to(device)
+        output, (hn, cn) = rnn(input, (hx, cx))
+
+        self.assertEqual(cpu_output, output)
+        self.assertEqual(cpu_hn, hn)
+        self.assertEqual(cpu_cn, cn)
+
+        def get_backward_results(rnn, device, inp, hx, cx):
             rnn = rnn.to(device)
-            input = input.to(device)
-            hx = hx.to(device)
-            cx = cx.to(device)
-            output, (hn, cn) = rnn(input, (hx, cx))
+            inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
-            self.assertEqual(cpu_output, output)
-            self.assertEqual(cpu_hn, hn)
-            self.assertEqual(cpu_cn, cn)
+            output, _ = rnn(inp, (hx, cx))
+            f = 3 * output.sum() + (hx * cx).sum()
 
-            # test batch_first
-            rnn = nn.LSTM(7, 4, layers, device="cpu", batch_first=True)
-            input = torch.randn(3, 2, 7, device="cpu")
-            hx = torch.randn(layers, 3, 4, device="cpu")
-            cx = torch.randn(layers, 3, 4, device="cpu")
-            cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+            param_names, params = zip(*rnn.named_parameters())
+            param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
 
-            rnn = rnn.to(device)
-            input = input.to(device)
-            hx = hx.to(device)
-            cx = cx.to(device)
-            output, (hn, cn) = rnn(input, (hx, cx))
+            input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
+            return output, param_grads, input_grad, hx_grad, cx_grad
 
-            self.assertEqual(cpu_output, output)
-            self.assertEqual(cpu_hn, hn)
-            self.assertEqual(cpu_cn, cn)
+        if backward:
+            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad =\
+                get_backward_results(rnn, "cpu", input, hx, cx)
+            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad =\
+                get_backward_results(rnn, device, input, hx, cx)
+
+            self.assertEqual(cpu_hx_grad, mps_hx_grad)
+            self.assertEqual(cpu_cx_grad, mps_cx_grad)
+            self.assertEqual(cpu_output, mps_output)
+            self.assertEqual(cpu_input_grad, mps_input_grad)
+            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                self.assertEqual(cpu_weight_grad, mps_weight_grad,
+                                 f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
+
+    LSTM_TEST_CASES = [
+        dict(),  # default
+        dict(batch_first=True),
+        dict(bias=False),
+        dict(bidirectional=True),
+        dict(batch_first=True, bias=False),
+        dict(bidirectional=True, bias=False),
+        dict(bidirectional=True, batch_first=True),
+        dict(bidirectional=True, batch_first=True, bias=False)
+    ]
+
+    def test_lstm_forward(self, device="mps", dtype=torch.float32):
+        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+            for test_options in self.LSTM_TEST_CASES:
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for layers in [1] if product_version < 13.0 else [1, 2, 5]:
-            lstm = nn.LSTM(2, 4, layers)  # initialized globally for consistent parameters init
-            lstm.train()
-
-            def get_results(device, inp, hx, cx):
-                rnn = lstm.to(device)
-                inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
-
-                output, _ = rnn(inp, (hx, cx))
-                f = output.sum()
-
-                param_names, params = zip(*rnn.named_parameters())
-                param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
-
-                input_grad, hx_grad, cx_grad = torch.autograd.grad(f, [inp, hx, cx])
-                return output, param_grads, input_grad, hx_grad, cx_grad
-
-            inp = torch.randn((5, 3, 2), requires_grad=True, dtype=dtype, device=device)
-            hx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
-            cx = torch.randn((layers, 3, 4), requires_grad=True, dtype=dtype, device=device)
-
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
-
-            self.assertEqual(cpu_hx_grad, mps_hx_grad)
-            self.assertEqual(cpu_cx_grad, mps_cx_grad)
-            self.assertEqual(cpu_output, mps_output)
-            self.assertEqual(cpu_input_grad, mps_input_grad)
-            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
-                self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
-
-            # test batch_first backward
-            lstm = nn.LSTM(2, 4, layers, batch_first=True)
-            lstm.train()
-
-            hx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
-            cx = torch.randn((layers, 5, 4), requires_grad=True, dtype=dtype, device=device)
-
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad = get_results("cpu", inp, hx, cx)
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad = get_results(device, inp, hx, cx)
-
-            self.assertEqual(cpu_hx_grad, mps_hx_grad)
-            self.assertEqual(cpu_cx_grad, mps_cx_grad)
-            self.assertEqual(cpu_output, mps_output)
-            self.assertEqual(cpu_input_grad, mps_input_grad)
-            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
-                self.assertEqual(cpu_weight_grad, mps_weight_grad, f"mismatch in cpu:{cpu_name} vs mps:{mps_name}")
+        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+            for test_options in self.LSTM_TEST_CASES:
+                self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
 
     def test_RNN_cell_no_broadcasting(self):
@@ -9540,7 +9631,7 @@ class TestConsistency(TestCaseMPS):
         'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
         'cov': ['f32'],
-        'cumsum': ['f16', 'f32', 'int16', 'int32'],
+        'cumsum': ['i8', 'b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
         'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
         'diag': ['f32', 'i32'],
         'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
@@ -10171,6 +10262,9 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
+                if any(s in str(e).lower() for s in ["int64", "float16", "div truc rounding"]):
+                    self.skipTest(f"Expected Runtime Error: {str(e)}")
+
                 if not generate_new_truth:
                     raise e
                 forward_failed = True
@@ -10273,7 +10367,6 @@ class TestCommon(TestCase):
     # When MPS becomes more consistent, this can probably be merged with that test using
     # `@dtypesIfMPS(torch.float32)`, but for now, the assertions themselves need to be loosened
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyMPS
     @suppress_warnings
     # MPS only supports float32
     @ops(_ref_test_ops, allowed_dtypes=(torch.float32,))
@@ -10287,12 +10380,24 @@ class TestCommon(TestCase):
         for sample_input in inputs:
             self.compare_with_reference(op, op.ref, sample_input)
 
+    @dtypes(*get_all_dtypes())
+    def test_tensor_creation(self, device, dtype):
+        def ones(device):
+            return torch.ones((2, 2), dtype=dtype, device=device)
+        if dtype not in MPS_DTYPES:
+            with self.assertRaises(TypeError):
+                ones(device)
+        else:
+            mps_tensor = ones(device)
+            cpu_tensor = ones("cpu")
+            self.assertEqual(mps_tensor.cpu(), cpu_tensor)
+
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
 instantiate_device_type_tests(TestConsistency, globals(), only_for="cpu")
-instantiate_device_type_tests(TestCommon, globals(), allow_mps=True)
+instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")
 
 if __name__ == "__main__":
     run_tests()

@@ -748,11 +748,11 @@ def run_tests(argv=UNITTEST_ARGS):
             failed |= wait_for_process(p) != 0
         assert not failed, "Some test shards have failed"
     elif USE_PYTEST:
-        pytest_args = argv
+        pytest_args = argv + ["--use-main-module"]
         if TEST_SAVE_XML:
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
-            pytest_args = pytest_args + [f'--junit-xml-reruns={test_report_path}']
+            pytest_args.append(f'--junit-xml-reruns={test_report_path}')
 
         import pytest
         os.environ["NO_COLOR"] = "1"
@@ -2142,19 +2142,15 @@ class TestCase(expecttest.TestCase):
             errors_before = 0 if result is None else len(result.errors)
             skipped_before = 0 if result is None else len(result.skipped)
 
+        super_run = super().run
         # TODO remove version check once dynamo supports 3.11
-        if TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
+        if TEST_WITH_TORCHINDUCTOR and sys.version_info < (3, 11):
+            super_run = torch._dynamo.optimize("inductor")(super_run)
+        elif TEST_WITH_TORCHDYNAMO and sys.version_info < (3, 11):
             # TorchDynamo optimize annotation
-            if TEST_WITH_TORCHINDUCTOR:
-                super_run = torch._dynamo.optimize("inductor")(super().run)
-            else:
-                super_run = torch._dynamo.optimize("eager")(super().run)
-            super_run(result=result)
+            super_run = torch._dynamo.optimize("eager")(super_run)
 
-            # TODO - Reset for each test slows down testing significantly.
-            # torch._dynamo.reset()
-        else:
-            super().run(result=result)
+        super_run(result=result)
 
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
@@ -3901,7 +3897,7 @@ def find_library_location(lib_name: str) -> Path:
     torch_root = Path(__file__).resolve().parent.parent.parent
     return torch_root / 'build' / 'lib' / lib_name
 
-def sandcastle_skip(reason):
+def skip_but_pass_in_sandcastle(reason):
     """
     Similar to unittest.skip, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
@@ -4005,7 +4001,7 @@ def xfail_inherited_tests(tests):
     return deco
 
 
-def sandcastle_skip_if(condition, reason):
+def skip_but_pass_in_sandcastle_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
     "passes" the test instead to avoid creating tasks complaining about tests
