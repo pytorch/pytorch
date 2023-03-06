@@ -657,7 +657,6 @@ class TestModuleGlobalHooks(TestCase):
             self.assertTrue(isinstance(h_module, module))
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
-
         test_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(1, *args))
 
         module_1(input)
