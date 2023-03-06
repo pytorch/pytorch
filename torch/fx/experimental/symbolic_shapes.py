@@ -1098,19 +1098,38 @@ def _make_user_magic(method, user_type):
     else:
         method_attr = method
 
+    def update_ranges(symbol, method, other):
+        min_ = -sympy.oo
+        max_ = sympy.oo
+        if method == 'gt':
+            min_ = other.hint + 1
+        elif method == 'ge':
+            min_ = other.hint
+        elif method == 'le':
+            max_ = other.hint
+        elif method == 'lt':
+            max_ = other.hint - 1
+        lower_limit = 2 if symbol.node.shape_env.specialize_zero_one else 0
+        if max_ < lower_limit:
+            return
+        constrain_range(symbol, min=min_, max=max_)
+
     def unary_magic_impl(self):
+        update_ranges(self, method_attr, other_node)
         return wrap_node(getattr(self.node, method_attr)())
 
     def binary_magic_impl(self, other):
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
+        update_ranges(self, method_attr, other_node)
         return wrap_node(getattr(self.node, method_attr)(other_node))
 
     def rbinary_magic_impl(self, other):
         other_node = to_node(self.node, other)
         if other_node is NotImplemented:
             return NotImplemented
+        update_ranges(self, method_attr, other_node)
         return wrap_node(getattr(other_node, method_attr)(self.node))
 
     if method in unary_magic_methods:

@@ -3961,7 +3961,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         if torch._dynamo.config.assume_static_by_default:
             self.assertEqual(guard_failure[0], "x.size()[0] == 2")
         else:
-            self.assertEqual(guard_failure[0], "x.size()[0] < 3")
+            self.assertEqual(guard_failure[0], "2 <= x.size()[0] <= 2")
 
     def test_guard_failure_fn2(self):
         def fn(x, y):

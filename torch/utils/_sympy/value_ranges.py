@@ -67,7 +67,7 @@ class ValueRanges:
         upper = simple_sympify(upper)
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
-        assert sympy_generic_le(lower, upper)
+        assert sympy_generic_le(lower, upper), breakpoint()
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
