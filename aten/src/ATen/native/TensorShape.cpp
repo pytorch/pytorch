@@ -1118,8 +1118,8 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand_symint(other.sym_sizes());
 }
 
-Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(is_expandable_to(size, self.sizes()),
+Tensor sum_to_size_symint(const Tensor& self, SymIntArrayRef size) {
+  TORCH_CHECK(is_expandable_to(size, self.sym_sizes()),
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
   return sum_to(self, size);

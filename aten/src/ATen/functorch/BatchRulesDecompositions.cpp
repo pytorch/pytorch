@@ -259,7 +259,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(std_mean, dim);
   OP_DECOMPOSE(swapaxes);
   OP_DECOMPOSE2(subtract, Tensor);
-  OP_DECOMPOSE(sum_to_size);
+  m.impl("sum_to_size", native::sum_to_size_symint);
   OP_DECOMPOSE(svd);
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
