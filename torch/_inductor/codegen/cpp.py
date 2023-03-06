@@ -514,7 +514,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def square(a):
-        return f"{a}.pow(2)"
+        return f"{a} * {a}"
 
     @staticmethod
     def where(a, b, c):
