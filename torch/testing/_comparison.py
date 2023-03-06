@@ -955,13 +955,13 @@ class TensorLikePair(Pair):
             )
 
         self._compare_regular_values_equal(
-            compressed_indices_method(actual),
-            compressed_indices_method(expected),
+            compressed_indices_method(actual).to(torch.int64),
+            compressed_indices_method(expected).to(torch.int64),
             identifier=f"Sparse {format_name} {compressed_indices_method.__name__}",
         )
         self._compare_regular_values_equal(
-            plain_indices_method(actual),
-            plain_indices_method(expected),
+            plain_indices_method(actual).to(torch.int64),
+            plain_indices_method(expected).to(torch.int64),
             identifier=f"Sparse {format_name} {plain_indices_method.__name__}",
         )
         self._compare_regular_values_close(
