@@ -3426,7 +3426,7 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10
 
   SymDimVector inferred_size;
   try {
-    inferred_size = at::infer_size_dv(sizes, self.size(dim));
+    inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
   } catch (const std::runtime_error& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more user-friendly way
