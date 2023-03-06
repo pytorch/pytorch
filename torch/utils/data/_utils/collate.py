@@ -249,18 +249,30 @@ def collate_pad(
                 )
                 for key in first_elem
             }
+    elif isinstance(first_elem, tuple) and hasattr(first_elem, '_fields'):  # namedtuple
+        return elem_type(*(collate_pad(samples) for samples in zip(*batch)))
+    elif isinstance(first_elem, collections.abc.Sequence):
+        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+
+        if isinstance(first_elem, tuple):
+            return [collate_pad(samples) for samples in transposed]  # Backwards compatibility.
+        else:
+            try:
+                return elem_type([collate_pad(samples) for samples in transposed])
+            except TypeError:
+                # The sequence type may not support `__init__(iterable)` (e.g., `range`).
+                return [collate_pad(samples) for samples in transposed]
     elif isinstance(first_elem, np.ndarray):
         batch = [torch.from_numpy(b) for b in batch]
         return torch.nn.utils.rnn.pad_sequence(
             batch, batch_first=batch_first, padding_value=padding_value
         )
-    elif isinstance(first_elem, torch.Tensor) and any(first_elem.shape != elem_.shape for elem_ in batch):
+    elif isinstance(first_elem, torch.Tensor):
         return torch.nn.utils.rnn.pad_sequence(
             batch, batch_first=batch_first, padding_value=padding_value
         )
     else:
-        return default_collate(batch)
-
+        raise Exception(f"Unknown batch input type {type(first_elem)}. Are you sure you want to pad this input?")
 
 
 def default_collate(batch):

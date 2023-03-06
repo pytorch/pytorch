@@ -2234,6 +2234,27 @@ except RuntimeError as e:
         arr = [torch.zeros(4), torch.zeros(4), torch.zeros(4)]
         collated = _utils.collate.collate_pad(arr)
         self.assertEqual(collated.shape, (3, 4))
+        
+    def test_collate_pad_mapping(self):
+        input = [{"a": torch.zeros(4), "b": torch.ones(4)}, 
+                 {"a": torch.zeros(4), "b": torch.ones(2)}, 
+                 {"a": torch.zeros(4), "b": torch.ones(8)}]
+        collated = _utils.collate.collate_pad(input)
+        self.assertEqual(collated["a"].shape, (3, 4))
+        self.assertEqual(collated["b"].shape, (3, 8))
+        
+    def test_collate_pad_sequence(self):
+        input = [(torch.zeros(4), torch.ones(4)), 
+                 (torch.zeros(4), torch.ones(2)), 
+                 (torch.zeros(4), torch.ones(8))]
+        collated = _utils.collate.collate_pad(input)
+        self.assertEqual(collated[0].shape, (3, 4))
+        self.assertEqual(collated[1].shape, (3, 8))
+
+    def test_collate_pad_exception(self):
+        arr = [0]
+        self.assertRaises(Exception, lambda:  _utils.collate.collate_pad(arr))
+
 
 class IntegrationTestDataLoaderDataPipe(TestCase):
     r"""
