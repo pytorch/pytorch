@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -392,7 +392,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                     results = pc.wait(period=0.1)
                     self.assertEqual({0: None, 1: None}, results.return_values)
 
-        @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
+        @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "tests incompatible with asan")
         def test_function_large_ret_val(self):
             # python multiprocessing.queue module uses pipes and actually PipedQueues
             # This means that if a single object is greater than a pipe size
@@ -522,7 +522,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             with self.assertRaises(RuntimeError):
                 _validate_full_rank({}, 10, "")
 
-        @sandcastle_skip_if(
+        @skip_but_pass_in_sandcastle_if(
             NO_MULTIPROCESSING_SPAWN,
             "Disabled for environments that \
                         don't support multiprocessing with spawn start method",
