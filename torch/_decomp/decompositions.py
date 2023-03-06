@@ -3332,6 +3332,30 @@ def upsample_bicubic2d_vec(
     return upsample_bicubic2d_default(a, output_size, align_corners, scale_h, scale_w)
 
 
+@register_decomposition(aten.aminmax)
+@out_wrapper("min", "max")
+def aminmax(self, *, dim=None, keepdim=False):
+    amin = torch.amin(self, dim=dim, keepdim=keepdim)
+    amax = torch.amax(self, dim=dim, keepdim=keepdim)
+    if (
+        keepdim
+        and dim is not None
+        and self.ndimension() == 0
+        and self.device.type == "cpu"
+    ):
+        # the behavior of aminmax differs from amin/amax for 0D tensors on CPU
+        # https://github.com/pytorch/pytorch/issues/96042
+        amin = amin.expand([1])
+        amax = amax.expand([1])
+    return amin, amax
+
+
+@register_decomposition(aten.nansum)
+@out_wrapper()
+def nansum(self, dim=None, keepdim=False, *, dtype=None):
+    return aten.sum(torch.where(torch.isnan(self), 0, self), dim, keepdim, dtype=dtype)
+
+
 def register_inplace(aten_op, outplace_op):
     @register_decomposition(aten_op)
     def inplace_op(*args, **kwargs):

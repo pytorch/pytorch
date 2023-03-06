@@ -958,7 +958,10 @@ def same(
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
-            ref = ref.item()
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
             log.error(f"Accuracy failed (numpy): {ref} != {res}")
@@ -1290,6 +1293,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2
