@@ -4,7 +4,7 @@
           type: string
           default: ""
       machine:
-        image: ubuntu-2004:202104-01
+        image: ubuntu-2204:2023.02.1
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>

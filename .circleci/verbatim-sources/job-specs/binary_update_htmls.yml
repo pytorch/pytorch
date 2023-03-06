@@ -8,7 +8,7 @@
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     resource_class: medium
     steps:
     - checkout

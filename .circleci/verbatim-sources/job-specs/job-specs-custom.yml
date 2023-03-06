@@ -1,7 +1,7 @@
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     parameters:
       branch:
         type: string
@@ -338,7 +338,7 @@
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -424,7 +424,7 @@
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -460,7 +460,7 @@
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -654,7 +654,7 @@
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -692,7 +692,7 @@
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -735,7 +735,7 @@
 
   pytorch_windows_test_multigpu:
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
       - checkout
       - run:

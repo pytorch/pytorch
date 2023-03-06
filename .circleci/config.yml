@@ -31,13 +31,13 @@ executors:
   windows-xlarge-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.xlarge
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2022-gui:2022.08.1
       shell: bash.exe
 
   windows-medium-cpu-with-nvidia-cuda:
     machine:
       resource_class: windows.medium
-      image: windows-server-2019-vs2019:stable
+      image: windows-server-2022-gui:2022.08.1
       shell: bash.exe
 commands:
 
@@ -312,7 +312,7 @@ pytorch_windows_params: &pytorch_windows_params
       default: "14.16"
     vc_year:
       type: string
-      default: "2019"
+      default: "2022"
     vc_product:
       type: string
       default: "BuildTools"
@@ -476,7 +476,7 @@ jobs:
   pytorch_doc_push:
     resource_class: medium
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     parameters:
       branch:
         type: string
@@ -743,7 +743,7 @@ jobs:
 
   upload_test_stats:
     machine: # executor type
-      image: ubuntu-2004:202010-01 # # recommended linux image - includes Ubuntu 20.04, docker 19.03.13, docker-compose 1.27.4
+      image: ubuntu-2204:2023.02.1 # # recommended linux image - includes Ubuntu 20.04, docker 19.03.13, docker-compose 1.27.4
     steps:
       - checkout
       - attach_workspace:
@@ -813,7 +813,7 @@ jobs:
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -899,7 +899,7 @@ jobs:
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -935,7 +935,7 @@ jobs:
       PYTHON_VERSION: "3.7"
     resource_class: large
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1129,7 +1129,7 @@ jobs:
   pytorch_linux_bazel_build:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1167,7 +1167,7 @@ jobs:
   pytorch_linux_bazel_test:
     <<: *pytorch_params
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
     - checkout
     - calculate_docker_image_tag
@@ -1210,7 +1210,7 @@ jobs:
 
   pytorch_windows_test_multigpu:
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     steps:
       - checkout
       - run:
@@ -1230,7 +1230,7 @@ jobs:
   # then install the one with the most recent version.
   update_s3_htmls: &update_s3_htmls
     machine:
-      image: ubuntu-2004:202104-01
+      image: ubuntu-2204:2023.02.1
     resource_class: medium
     steps:
     - checkout
@@ -1293,7 +1293,7 @@ jobs:
           type: string
           default: ""
       machine:
-        image: ubuntu-2004:202104-01
+        image: ubuntu-2204:2023.02.1
       resource_class: large
       environment:
         IMAGE_NAME: << parameters.image_name >>
