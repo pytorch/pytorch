@@ -77,6 +77,7 @@ using vqint8 = VecType<c10::qint8>;
 using vquint8 = VecType<c10::quint8>;
 using vqint = VecType<c10::qint32>;
 using vBFloat16 = VecType<c10::BFloat16>;
+using vHalf = VecType<c10::Half>;
 
 template <typename T>
 using ValueType = typename T::value_type;
@@ -159,6 +160,22 @@ struct VecTypeHelper<vqint> {
     using holdType = c10::qint32;
     using memStorageType = typename c10::qint32::underlying;
     static constexpr int holdCount = vqint::size();
+    static constexpr int unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vBFloat16> {
+    using holdType = c10::BFloat16;
+    using memStorageType = typename vBFloat16::value_type;
+    static constexpr int holdCount = vBFloat16::size();
+    static constexpr int unitStorageCount = 1;
+};
+
+template<>
+struct VecTypeHelper<vHalf> {
+    using holdType = c10::Half;
+    using memStorageType = typename vHalf::value_type;
+    static constexpr int holdCount = vHalf::size();
     static constexpr int unitStorageCount = 1;
 };
 

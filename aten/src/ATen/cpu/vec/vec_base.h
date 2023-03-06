@@ -71,6 +71,13 @@ struct is_floating_point:
       std::is_same<T, at::BFloat16>::value> {
 };
 
+template <typename T>
+struct is_reduced_floating_point:
+    std::integral_constant<bool,
+      std::is_same<T, at::Half>::value ||
+      std::is_same<T, at::BFloat16>::value> {
+};
+
 template<size_t n> struct int_of_size;
 
 #define DEFINE_INT_OF_SIZE(int_t) \
