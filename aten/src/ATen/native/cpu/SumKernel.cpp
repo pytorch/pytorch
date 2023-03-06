@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Reduce.h>
@@ -104,22 +105,25 @@ struct InnerSumCastLoadPolicy<scalar_t, scalar_t>:
     LoadPolicy<scalar_t> {
 };
 
-template <>
-struct InnerSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static constexpr int64_t memsize() {
-    return LoadPolicy<vec_t>::memsize();
-  }
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
-    vacc_t first, second;
-    vec::load_fp32_from_bf16(ptr, first, second);
-    return first + second;
-  }
-};
+#define INNER_SUM_CAST_LOAD_POLICY_INIT(type, name) \
+template <> \
+struct InnerSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
+  using vec_t = Vectorized<type>; \
+  using vacc_t = Vectorized<float>; \
+\
+  static constexpr int64_t memsize() { \
+    return LoadPolicy<vec_t>::memsize(); \
+  } \
+\
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
+    auto ptr = reinterpret_cast<const type*>(data + stride * index); \
+    vacc_t first, second; \
+    vec::load_fp32_from_##name(ptr, first, second); \
+    return first + second; \
+  } \
+}
+INNER_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+INNER_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 // For outer sum, load a partial vec_t of size vacc_t then cast to vacc_t
 template <typename vec_t, typename vacc_t>
@@ -146,22 +150,25 @@ struct OuterSumCastLoadPolicy {
   }
 };
 
-template <>
-struct OuterSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static constexpr int64_t memsize() {
-    return sizeof(c10::BFloat16) * vacc_t::size();
-  }
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
-    vacc_t values;
-    vec::load_fp32_from_bf16(ptr, values);
-    return values;
-  }
-};
+#define OUTER_SUM_CAST_LOAD_POLICY_INIT(type, name) \
+template <> \
+struct OuterSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
+  using vec_t = Vectorized<type>; \
+  using vacc_t = Vectorized<float>; \
+\
+  static constexpr int64_t memsize() { \
+    return sizeof(type) * vacc_t::size(); \
+  } \
+\
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
+    auto ptr = reinterpret_cast<const type*>(data + stride * index); \
+    vacc_t values; \
+    vec::load_fp32_from_##name(ptr, values); \
+    return values; \
+  } \
+}
+OUTER_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+OUTER_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 template <typename scalar_t>
 struct OuterSumCastLoadPolicy<scalar_t, scalar_t>:
@@ -232,24 +239,27 @@ struct InnerNanSumCastLoadPolicy<scalar_t, scalar_t> :
     NanSumLoadPolicy<scalar_t> {
 };
 
-template <>
-struct InnerNanSumCastLoadPolicy<Vectorized<c10::BFloat16>, Vectorized<float>> {
-  using vec_t = Vectorized<c10::BFloat16>;
-  using vacc_t = Vectorized<float>;
-
-  static constexpr int64_t memsize() {
-    return LoadPolicy<vec_t>::memsize();
-  }
-
-  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) {
-    auto ptr = reinterpret_cast<const c10::BFloat16*>(data + stride * index);
-    vacc_t first, second;
-    vec::load_fp32_from_bf16(ptr, first, second);
-    const vacc_t zero(0);
-    return (vacc_t::blendv(first, zero, first.isnan()) +
-            vacc_t::blendv(second, zero, second.isnan()));
-  }
-};
+#define INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(type, name) \
+template <> \
+struct InnerNanSumCastLoadPolicy<Vectorized<type>, Vectorized<float>> { \
+  using vec_t = Vectorized<type>; \
+  using vacc_t = Vectorized<float>; \
+\
+  static constexpr int64_t memsize() { \
+    return LoadPolicy<vec_t>::memsize(); \
+  } \
+\
+  static vacc_t load(const char * C10_RESTRICT data, int64_t stride, int64_t index) { \
+    auto ptr = reinterpret_cast<const type*>(data + stride * index); \
+    vacc_t first, second; \
+    vec::load_fp32_from_##name(ptr, first, second); \
+    const vacc_t zero(0); \
+    return (vacc_t::blendv(first, zero, first.isnan()) + \
+            vacc_t::blendv(second, zero, second.isnan())); \
+  } \
+}
+INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(BFloat16, bf16);
+INNER_NAN_SUM_CAST_LOAD_POLICY_INIT(Half, fp16);
 
 template <typename vec_t, typename vacc_t>
 struct OuterNanSumCastLoadPolicy {
@@ -569,7 +579,7 @@ void cascade_sum(TensorIterator &iter) {
       TORCH_INTERNAL_ASSERT(out_strides[0] == 0);
 
       using vec_t = Vectorized<scalar_t>;
-      using acc_t = at::acc_type<scalar_t, true>;
+      using acc_t = at::opmath_type<scalar_t>;
       using vacc_t = Vectorized<acc_t>;
       using ScalarLoadPolicy = std::conditional_t<
           ignore_nan,
