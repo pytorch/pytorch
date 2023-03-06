@@ -10,8 +10,12 @@ from .api import (
     _CUSTOM_SHARDED_OPS,
     _SHARDED_OPS,
     Shard,
+    ShardedTensorBase,
     ShardedTensor,
+    ShardedTensorMetadata,
+    TensorProperties,
 )
+from .metadata import ShardMetadata  # noqa: F401
 from torch.distributed._shard.op_registry_utils import _decorator_func
 
 
