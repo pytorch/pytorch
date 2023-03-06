@@ -506,7 +506,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
         TORCH_WARN("strided tensor to dense backward ignores masked=true");
       }
       // TODO: return grad as it is
-      return grad.to_dense();
+      return grad.to_dense(c10::nullopt, masked);
     case kSparse:
       // Autograd operates on the coalesced assumption, i.e. no duplicate values.
       if (masked.value_or(false)) {
@@ -527,7 +527,6 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
     case kSparseBsr:
     case kSparseBsc: {
       // TODO: add efficient BSR/BSC support for sparse_mask
-      //const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
       const auto blocksize = at::sparse_csr::getBlockSize(input_);
       if (masked.value_or(false)) {
         return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout, blocksize);
