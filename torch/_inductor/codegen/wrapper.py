@@ -296,15 +296,6 @@ class WrapperCodeGen(CodeGen):
                 """
             )
 
-            if config.triton.convolution != "aten":
-                self.header.splice(
-                    """
-                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
-                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torch._inductor.triton_ops.autotune import conv_heuristics
-                    """
-                )
-
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -390,7 +381,6 @@ class WrapperCodeGen(CodeGen):
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
-
         if isinstance(
             buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),

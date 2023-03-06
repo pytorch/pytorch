@@ -240,9 +240,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     return at::sparse::TensorGeometryHolder<max_static_len>(strides, strides, probably_coalesced.options());
   }();
 
-  const auto hash_coeffs = [&]() -> auto {
-    return std::get<0>(*hash_coeffs_storage);
-  }();
+  const auto hash_coeffs = std::get<0>(*hash_coeffs_storage);
 
   const auto nnz_arange = at::arange(
       std::max(probably_coalesced._nnz(), source._nnz()),
