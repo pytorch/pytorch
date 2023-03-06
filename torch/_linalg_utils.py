@@ -95,8 +95,10 @@ def symeig(A: Tensor, largest: Optional[bool] = False) -> Tuple[Tensor, Tensor]:
 # This nice error message can be removed in version 1.13+
 def cholesky(input: Tensor, upper: bool = False, *, out=None) -> Tensor:
     raise RuntimeError(
-        "This function was deprecated since version 1.9 and is now removed. Please use the `torch.linalg.cholesky` function instead.",
+        "This function was deprecated since version 1.9 and is now removed."
+        + "Please use the `torch.linalg.cholesky` function instead.",
     )
+
 
 def matrix_rank(input, tol=None, symmetric=False, *, out=None) -> Tensor:
     raise RuntimeError(
