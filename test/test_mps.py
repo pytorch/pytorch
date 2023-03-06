@@ -178,6 +178,11 @@ def mps_ops_grad_modifier(ops):
                          unittest.expectedFailure,
                          dtypes=XFAILLIST_GRAD[key]))
 
+        if key in XPASSLIST_GRAD:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip,
+                         dtypes=XPASSLIST_GRAD[key]))
+
         if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
@@ -367,10 +372,6 @@ def mps_ops_modifier(ops):
         'cumulative_trapezoid': [torch.int64],
         'masked.cumsum': [torch.int64],
     }
-
-    MACOS_BEFORE_13_3_XPASSLIST = {
-    }
-
 
     # Those ops are not expected to work
     UNIMPLEMENTED_XFAILLIST = {
@@ -676,9 +677,6 @@ def mps_ops_modifier(ops):
         'new_full': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
         # returned output on CPU is float64
         'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-    }
-
-    XFAILLIST = {
     }
 
     UNDEFINED_XFAILLIST = {
