@@ -5,7 +5,7 @@ from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Generator
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -253,7 +253,7 @@ class _node_list:
     def __len__(self):
         return self.graph._len
 
-    def __iter__(self):
+    def __iter__(self) -> Generator[Node, None, None]:
         root, direction = self.graph._root, self.direction
         cur = getattr(root, direction)
         while cur is not root:
