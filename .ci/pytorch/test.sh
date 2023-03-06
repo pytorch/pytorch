@@ -255,6 +255,29 @@ test_inductor() {
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
+# "Global" flags for inductor benchmarking controlled by TEST_CONFIG
+# For example 'dynamic_aot_eager_torchbench' TEST_CONFIG means we run
+# the benchmark script with '--dynamic-shapes --backend aot_eager --device cuda'
+# The matrix of test options is specified in .github/workflows/periodic.yml
+# and .github/workflows/inductor.yml
+DYNAMO_BENCHMARK_FLAGS=()
+
+if [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
+elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--inductor)
+fi
+
+if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes)
+fi
+
+if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--device cpu)
+else
+  DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
+fi
+
 test_single_dynamo_benchmark() {
   # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
 
@@ -277,148 +300,66 @@ test_single_dynamo_benchmark() {
     partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
   fi
 
-  # Feel free to remove --device cuda if you ever decide to need to
-  # test CPU as well in CI
-  python "benchmarks/dynamo/$suite.py" \
-    --ci --accuracy --timing --explain \
-    "$@" "${partition_flags[@]}" \
-    --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-  python benchmarks/dynamo/check_csv.py \
-    -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-}
-
-test_aot_eager_benchmark() {
-  # Usage: test_dynamo_benchmark huggingface 0
-
-  local exit_status=0
-
-  # Check inference with --float32
-  test_single_dynamo_benchmark "aot_eager_inference" "$@" --backend aot_eager --device cuda || exit_status=$?
-
-  # Check training with --amp
-  test_single_dynamo_benchmark "aot_eager_training" "$@" --backend aot_eager  --device cuda --training --amp || exit_status=$?
-
-  if [[ $exit_status -ne 0 ]]; then
-    echo "Some benchmarks failed; scroll up for details"
+  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
+      --no-graphs --no-update-archive --no-gh-comment
+  else
+    python "benchmarks/dynamo/$suite.py" \
+      --ci --accuracy --timing --explain \
+      "${DYNAMO_BENCHMARK_FLAGS[@]}" \
+      "$@" "${partition_flags[@]}" \
+      --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    python benchmarks/dynamo/check_csv.py \
+      -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   fi
-  return $exit_status
 }
 
-test_inductor_benchmark() {
+test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
-  local device="$1"
+  local suite="$1"
+  shift
+  local shard_id="$1"
   shift
 
-  if [[ $device == "cpu" ]]; then
-    # TODO: Add training and dynamic shape test
-    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --float32 --device cpu
+  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+    # Performance test training only, for float32 and amp
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
+    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 "$@"
   else
     # Check inference with --float32
-    test_single_dynamo_benchmark "inductor_inference" "$@" --inductor --device cuda
+    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
 
-    # Check training with --amp
-    test_single_dynamo_benchmark "inductor_training" "$@" --inductor --training --amp --device cuda
-
-    # Check inference with --dynamic-shapes
-    test_single_dynamo_benchmark "dynamic_inductor-inference" "$@" --inductor --dynamic-shapes --device cuda
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* && "${TEST_CONFIG}" != *dynamic* ]]; then
+      # Check training with --amp
+      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
+    fi
   fi
 }
 
-test_inductor_benchmark_perf() {
-  # Use test-reports directory under test folder will allow the CI to automatically pick up
-  # the test reports and upload them to S3. Need to use full path here otherwise the script
-  # will bark about file not found later on
-  PARTITION_FLAGS=""
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
-  fi
+test_inductor_torchbench_smoketest_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
-  # Check training with --amp
-  # Not checking accuracy for perf test for now
-  # shellcheck disable=SC2086
-  if [[ "$1" == *smoketest* ]]; then
-    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
-      --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
-      --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
-    # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
-    # this value needs to be actively maintained to make this check useful
-    python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR"/inductor_training_$1.csv
 
-    # Check memory compression ratio for a few models
-    for test in hf_Albert timm_efficientdet timm_vision_transformer; do
-      python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
-        --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
-        --only $test --output "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
-      cat "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv
-      python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
-        "$TEST_REPORTS_DIR"/inductor_training_$1_$test.csv \
-        --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
-    done
-  else
-    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
-    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
-      --no-graphs --no-update-archive --no-gh-comment
-    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
-      --no-graphs --no-update-archive --no-gh-comment
-  fi
-}
+  python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
+    --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
+    --output "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
+  # the reference speedup value is hardcoded in check_hf_bert_perf_csv.py
+  # this value needs to be actively maintained to make this check useful
+  python benchmarks/dynamo/check_hf_bert_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_training_smoketest.csv"
 
-# No sharding for the periodic job, we don't care if latency is bad
-test_aot_eager_all() {
-  local exit_status=0
-  PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" "$@" || exit_status=$?
-  test_aot_eager_benchmark huggingface "" "$@" || exit_status=$?
-  test_aot_eager_benchmark timm_models "" "$@" || exit_status=$?
-  if [[ $exit_status -ne 0 ]]; then
-    echo "Some benchmarks failed; scroll up for details"
-  fi
-  return $exit_status
-}
-
-test_inductor_huggingface() {
-  local device=$1
-  shift
-  test_inductor_benchmark "$device" huggingface ""
-}
-
-test_inductor_huggingface_perf() {
-  test_inductor_benchmark_perf huggingface
-}
-
-test_inductor_timm_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
-  local device=$1
-  shift
-  test_inductor_benchmark "$device" timm_models "$1"
-}
-
-test_inductor_timm_perf_shard() {
-  if [[ -z "$NUM_TEST_SHARDS" ]]; then
-    echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
-    exit 1
-  fi
-  test_inductor_benchmark_perf timm_models "$1"
-}
-
-test_inductor_torchbench() {
-  local device=$1
-  shift
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark "$device" torchbench ""
-}
-
-test_inductor_torchbench_perf() {
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf torchbench
-}
-
-test_inductor_torchbench_smoketest_perf(){
-  PYTHONPATH=$(pwd)/torchbench test_inductor_benchmark_perf smoketest
+  # Check memory compression ratio for a few models
+  for test in hf_Albert timm_efficientdet timm_vision_transformer; do
+    python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --amp --training \
+      --disable-cudagraphs --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" \
+      --only $test --output "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
+    cat "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv"
+    python benchmarks/dynamo/check_memory_compression_ratio.py --actual \
+      "$TEST_REPORTS_DIR/inductor_training_smoketest_$test.csv" \
+      --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
+  done
 }
 
 test_python_gloo_with_tls() {
@@ -847,6 +788,12 @@ test_executorch() {
   assert_git_not_dirty
 }
 
+# TODO: Include this in the Docker image
+if [[ "${TEST_CONFIG}" == *_perf* ]]; then
+  install_matplotlib
+  install_tabulate
+fi
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -883,87 +830,24 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
   test_dynamo_shard 2
-elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
-  install_torchtext
-  install_torchvision
-  checkout_install_torchbench
-  install_huggingface
-  install_timm
-  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    # NB: This code path is currently dead because dynamic shapes takes
-    # too long to run unsharded
-    test_aot_eager_all --dynamic-shapes
-  else
-    test_aot_eager_all
-  fi
-elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
+elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
-  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark huggingface "" --dynamic-shapes
-  else
-    test_aot_eager_benchmark huggingface ""
-  fi
-elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_dynamo_benchmark huggingface ""
+elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   install_timm
   id=$((SHARD_NUMBER-1))
-  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    test_aot_eager_benchmark timm_models "$id" --dynamic-shapes
-  else
-    test_aot_eager_benchmark timm_models "$id"
-  fi
-elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
+  test_dynamo_benchmark timm_models "$id"
+elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   install_torchtext
   install_torchvision
-  checkout_install_torchbench
-  if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
-  else
-    PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench ""
-  fi
-elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
-  install_torchvision
-  install_huggingface
-  if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
-    install_matplotlib
-    install_tabulate
-    test_inductor_huggingface_perf
-  elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
-    test_inductor_huggingface cpu
-  else
-    test_inductor_huggingface cuda
-  fi
-elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  install_timm
-  id=$((SHARD_NUMBER-1))
-  if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
-    install_matplotlib
-    install_tabulate
-    test_inductor_timm_perf_shard $id
-  elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_inductor_timm_shard cpu $id
-  else
-    test_inductor_timm_shard cuda $id
-  fi
-elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
-  install_torchtext
-  install_torchvision
-  if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
-    install_matplotlib
-    install_tabulate
-    checkout_install_torchbench
-    test_inductor_torchbench_perf
-  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
-    checkout_install_torchbench
-    test_inductor_torchbench cpu
-  elif [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
-    test_inductor_torchbench_smoketest_perf
+    PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-    test_inductor_torchbench cuda
+    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench ""
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
