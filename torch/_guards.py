@@ -336,8 +336,10 @@ class TracingContext:
             tc is not None
         ), "Frame context manager must be called within an ongoing trace."
         tc.frame_summary_stack.append(frame_summary)
-        yield
-        TracingContext.get().frame_summary_stack.pop()
+        try:
+            yield
+        finally:
+            tc.frame_summary_stack.pop()
 
 
 """

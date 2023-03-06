@@ -1859,11 +1859,8 @@ class InstructionTranslator(InstructionTranslatorBase):
                 self._freevars_ids[name] = id(f_locals[name])
 
     def run(self):
-        with TracingContext.current_frame(self.frame_summary()):
-            _step_logger()(
-                logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}"
-            )
-            super().run()
+        _step_logger()(logging.INFO, f"torchdynamo start tracing {self.f_code.co_name}")
+        super().run()
 
     def match_nested_cell(self, name, cell):
         """Match a cell in this method to one in a function we are inlining"""
@@ -1955,9 +1952,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     @classmethod
     def inline_call(cls, parent, func, args, kwargs):
-        with patch.dict(
-            counters, {"unimplemented": counters["inline_call"]}
-        ), TracingContext.current_frame(parent.frame_summary()):
+        with patch.dict(counters, {"unimplemented": counters["inline_call"]}):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
