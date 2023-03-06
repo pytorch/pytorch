@@ -1272,6 +1272,15 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
+    # If None, defer to config
+    _dynamic_shapes: Optional[bool] = None
+
+    @property
+    def dynamic_shapes(self):
+        if self._dynamic_shapes is None:
+            return config.use_dynamic_shapes
+        else:
+            return self._dynamic_shapes
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -2315,12 +2324,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
-                    # TODO - pass in fake tensors ?
-                    context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args
+                    if aot_config.dynamic_shapes:
+                        all_args_list = list(all_args)
+                        CompiledFunction.compiled_bw = create_aot_dispatcher_function(
+                            bw_module, all_args_list, AOTConfig(
+                                aot_config.bw_compiler, None, None,
+                                aot_config.decompositions, 0, aot_config.aot_id,
+                                aot_config.keep_inference_input_mutations,
+                                aot_config._dynamic_shapes
+                            )
                         )
+                    else:
+                        context = disable_autocast_manager if disable_amp else nullcontext
+                        with context(), track_graph_compiling(aot_config, "backward"):
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, all_args
+                            )
 
                 ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
@@ -2445,7 +2464,7 @@ def create_aot_dispatcher_function(
             shape_env = fake_mode.shape_env
             break
     else:
-        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = (
             FakeTensorMode(shape_env=shape_env)
             if config.use_fake_tensor
@@ -2463,8 +2482,11 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
-
                 def convert(idx, x):
+                    if shape_env is not None:
+                        from torch._dynamo.source import ConstantSource
+                        if isinstance(x, int):
+                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
@@ -2607,7 +2629,7 @@ def aot_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        keep_inference_input_mutations=keep_inference_input_mutations
+        keep_inference_input_mutations=keep_inference_input_mutations,
     )
     cached_res = None
 
@@ -2790,6 +2812,19 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
+
+    dynamic_shapes = False
+    for x in full_args:
+        if isinstance(x, FakeTensor):
+            dynamic_shapes = x.fake_mode.shape_env is not None
+            break
+    else:
+        dynamic_shapes = config.use_dynamic_shapes
+
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
@@ -2798,11 +2833,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
+        _dynamic_shapes=dynamic_shapes
     )
-
-    full_args = []
-    full_args.extend(params_flat)
-    full_args.extend(args)
 
     compiled_fn = create_aot_dispatcher_function(
         functional_call,

@@ -50,6 +50,7 @@ from torch.fx.experimental import proxy_tensor
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
 null_context = contextlib.nullcontext
 
+
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
     token = 0
@@ -78,13 +79,26 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
+    def __setattr__(self, name, value):
+        if name == "forward":
+            log.warning(
+                "Modifying OptimizedModule.forward may not do what you expect. "
+                "Most usage of OptimizedModule routes through __call__, which will never call OptimizedModule.forward. "
+                "Instead, OptimizedModule.__call__ will invoke a compiled version of the wrapped module's __call__. "
+                "OptimizedModule.forward is provided only as an escape hatch for invoking the compiled wrapped module "
+                "forward method without __call__ (and thus bypassing module hooks). "
+                "To alter the behavior of the wrapped module, modify its forward before compilation. "
+            )
+        super().__setattr__(name, value)
+
     def __call__(self, *args, **kwargs):
         return self.dynamo_ctx(self._orig_mod.__call__)(*args, **kwargs)
 
     def forward(self, *args, **kwargs):
-        # TODO: should this actually be a warning? Should we omit this? (There was a test that literally calls .forward)
-        # Warning: usually you don't want to call this.  You probably want to go through
-        # __call__ instead.  If you go through __call__, you'll get hooks support.
+        log.warning(
+            "Calling OptimizedModule.forward will compile/execute wrapped model forward without running module hooks. "
+            "Usually, you should invoke OptimizedModule.__call__ instead, which follows pytorch module behavior."
+        )
         return self.dynamo_ctx(self._orig_mod.forward)(*args, **kwargs)
 
 
@@ -123,11 +137,11 @@ def innermost_fn(fn):
 
 
 @contextlib.contextmanager
-def enable_dynamic(enable: bool = True):
+def enable_dynamic(enable: bool = True, export: bool = False):
     if not enable:
         yield
         return
-    with config.patch(dynamic_shapes=True, specialize_int_float=False):
+    with config.patch(dynamic_shapes=True):
         yield
 
 
@@ -140,6 +154,7 @@ class _TorchDynamoContext:
         patch_fn=nothing,
         first_ctx=False,
         *,
+        export=False,
         dynamic=False,
     ):
         super().__init__()
@@ -149,6 +164,7 @@ class _TorchDynamoContext:
         self.on_enter = on_enter
         self.extra_ctx_ctor = backend_ctx_ctor
         self.first_ctx = first_ctx
+        self.export = export
         self.dynamic = dynamic
         patch_fn()
 
@@ -163,7 +179,7 @@ class _TorchDynamoContext:
         self.prior = set_eval_frame(self.callback)
         self.backend_ctx = self.extra_ctx_ctor()
         self.backend_ctx.__enter__()
-        self.dynamic_ctx = enable_dynamic(self.dynamic)
+        self.dynamic_ctx = enable_dynamic(self.dynamic, self.export)
         self.dynamic_ctx.__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -209,7 +225,7 @@ class _TorchDynamoContext:
             prior = set_eval_frame(callback)
             backend_ctx = backend_ctx_ctor()
             backend_ctx.__enter__()
-            dynamic_ctx = enable_dynamic(self.dynamic)
+            dynamic_ctx = enable_dynamic(self.dynamic, self.export)
             dynamic_ctx.__enter__()
             try:
                 return fn(*args, **kwargs)
@@ -275,7 +291,15 @@ class OptimizeContext(_TorchDynamoContext):
     def _different_backend(old, new):
         return not (old == new or old is None)
 
-    def __init__(self, callback, backend_ctx_ctor, first_ctx=False, *, dynamic=False):
+    def __init__(
+        self,
+        callback,
+        backend_ctx_ctor,
+        first_ctx=False,
+        *,
+        export=False,
+        dynamic=False,
+    ):
         def on_enter():
             global most_recent_backend
             if OptimizeContext._different_backend(most_recent_backend, compiler_fn):
@@ -296,6 +320,7 @@ class OptimizeContext(_TorchDynamoContext):
             backend_ctx_ctor=backend_ctx_ctor,
             patch_fn=TorchPatcher.patch,
             first_ctx=first_ctx,
+            export=export,
             dynamic=dynamic,
         )
 
@@ -347,12 +372,13 @@ def catch_errors_wrapper(callback, hooks: Hooks):
 
 
 def _optimize_catch_errors(
-    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, dynamic=False
+    compile_fn, hooks: Hooks, backend_ctx_ctor=null_context, export=False, dynamic=False
 ):
     return OptimizeContext(
         catch_errors_wrapper(compile_fn, hooks),
         backend_ctx_ctor=backend_ctx_ctor,
         first_ctx=True,
+        export=export,
         dynamic=dynamic,
     )
 
@@ -535,6 +561,38 @@ def explain(f, *args, **kwargs):
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
+    """
+    Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
+
+    Args:
+        f (callable): A PyTorch function to be exported.
+
+        *args: Variable length argument list to be passed to the function f.
+
+        aten_graph (bool): If True, exports a graph with ATen operators.
+        If False, exports a graph with Python operators. Default is False.
+
+        decomposition_table (dict): A dictionary that maps operators to their decomposition functions.
+        Required if aten_graph or tracing_mode is specified. Default is None.
+
+        tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
+        If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
+
+        **kwargs: Arbitrary keyword arguments to be passed to the function f.
+
+    Returns:
+        A tuple of (graph, guards)
+        Graph: An FX graph representing the execution of the input PyTorch function with the provided arguments and options.
+        Guards: The guards we accumulated during tracing f above
+
+    Raises:
+        AssertionError: If decomposition_table or tracing_mode is specified without setting aten_graph=True,
+        or if graph breaks during tracing in export.
+
+        AssertionError: If Dynamo input and output is not consistent with traced input/output.
+
+    Note - this headerdoc was authored by ChatGPT, with slight modifications by the author.
+    """
     check_if_dynamo_supported()
     torch._C._log_api_usage_once("torch._dynamo.export")
     if decomposition_table is not None or tracing_mode != "real":
@@ -587,7 +645,9 @@ def export(
     ):
         nonlocal graph
 
-        assert graph is None, "whole graph export entails exactly one graph"
+        assert (
+            graph is None
+        ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
 
         def result_capturing_wrapper(*graph_inputs):
@@ -604,7 +664,9 @@ def export(
     flat_args, in_spec = pytree.tree_flatten((args, kwargs))
 
     remove_from_cache(f)
-    with patch(f"{__name__}.most_recent_backend", None):
+    with patch(f"{__name__}.most_recent_backend", None), config.patch(
+        specialize_int=True
+    ):
         opt_f = optimize_assert(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
@@ -615,8 +677,10 @@ def export(
         result_traced = opt_f(*args, **kwargs)
     remove_from_cache(f)
 
-    assert graph is not None, "whole graph export entails exactly one call"
-    assert out_guards is not None, "whole graph export entails exactly one guard export"
+    assert (
+        graph is not None
+    ), "Failed to produce a graph during tracing. Tracing through 'f' must produce a single graph."
+    assert out_guards is not None, "Failed to produce guards during tracing"
 
     matched_input_elements_positions = produce_matching(flat_args, graph_captured_input)
 
@@ -712,6 +776,7 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
         convert_frame.convert_frame_assert(backend, export=export),
         hooks,
         backend_ctx_ctor,
+        export=export,
         dynamic=dynamic,
     )
 

@@ -9164,6 +9164,15 @@ dedent """
         dims = 2
         self.checkScript(tensordot_dims_int, (a, b, dims))
 
+        for dims in [-1, 5]:
+            try:
+                tensordot_dims_int(a, b, dims)
+            except RuntimeError as error:
+                if dims < 0:
+                    self.assertEqual(str(error), "tensordot expects dims >= 0, but got dims=" + str(dims))
+                if dims > min(a.dim(), b.dim()):
+                    self.assertEqual(str(error), "tensordot expects dims < ndim_a or ndim_b, but got dims=" + str(dims))
+
     def test_torch_functional_tensordot_tensor(self):
         def tensordot_dims_tensor(a: torch.Tensor, b: torch.Tensor, dims: torch.Tensor):
             return torch.tensordot(a, b, dims=dims)
@@ -15913,6 +15922,34 @@ dedent """
         for fuser_name in ['fuser0', 'fuser1', 'none']:
             with torch.jit.fuser(fuser_name):
                 self.checkModule(MyModule(), (x, y))
+
+    def test_scriptmodule_update_has_hooks(self):
+
+        class SimpleModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self):
+                pass
+
+        def forward_hook(self, input: Tuple[()], output: None):
+            pass
+
+        m = SimpleModule()
+        hook = m.register_forward_hook(forward_hook)
+        sm = torch.jit.script(m)
+        self.assertTrue(sm._has_hooks)
+
+        # Todo this is bad: ideally the handle would update the scriptmodule too,
+        # but this is a pre-existing bug
+        hook.remove()
+        self.assertTrue(sm._has_hooks)
+        self.assertFalse(m._has_hooks)
+
+        # at least manual use of the update function works
+        del sm._forward_hooks[0]
+        sm._update_has_hooks()
+        self.assertFalse(sm._has_hooks)
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
