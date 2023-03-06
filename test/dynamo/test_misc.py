@@ -910,6 +910,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_nested_grad_mode_graph_break(self):
+        def fn(x):
+            before = torch.is_grad_enabled()
+            with torch.set_grad_enabled(False):
+                torch._dynamo.graph_break()
+                with torch.set_grad_enabled(True):
+                    x = torch.mul(x, 5)
+                    torch._dynamo.graph_break()
+                    x = torch.sqrt(x)
+                    assert torch.is_grad_enabled()
+                assert not torch.is_grad_enabled()
+            assert torch.is_grad_enabled() == before
+            return x
+
+        a = torch.randn([3, 4])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        for _ in range(10):
+            opt_fn(a)
+        self.assertEqual(cnts.frame_count, 3)
+
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
             return a - b / c
@@ -3381,6 +3403,109 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(res, opt_res))
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
+
+    def test_autocast_cpu_graph_break_inner_fn(self):
+        class MyModule(torch.nn.Module):
+            @staticmethod
+            def mm_breaks(x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y)
+
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    torch._dynamo.graph_break()
+                    with torch.autocast(
+                        device_type="cpu", dtype=torch.bfloat16, enabled=False
+                    ):
+                        torch._dynamo.graph_break()
+                        g_float32 = torch.mm(a_float32, b_float32)
+                        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                            # Check that nested with non-inlineable function with graph break
+                            torch._dynamo.graph_break()
+                            f_float16_1 = self.mm_breaks(a_float32, b_float32)
+                    # We remember to exit the inner autocast correctly to outer
+                    # even after graph breaks
+                    f_float16 = self.mm_breaks(a_float32, b_float32)
+                    assert f_float16.dtype == f_float16_1.dtype
+                return f_float16, g_float32
+
+        module = MyModule()
+        real_16, real_32 = module(torch.tensor([0.5]))
+        real_device_16 = real_16.device
+        real_dtype_16 = real_16.dtype
+        real_device_32 = real_32.device
+        real_dtype_32 = real_32.dtype
+
+        graph = torch._dynamo.optimize("eager")(module)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
+
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
+
+    def test_autocast_graph_break_method(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.bias = bias
+
+            def mm_not_break(self, x, y):
+                return torch.mm(x, y) + self.bias
+
+            def mm_breaks(self, x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y) + self.bias
+
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    with torch.autocast(
+                        device_type="cpu", dtype=torch.bfloat16, enabled=False
+                    ):
+                        g_float32 = torch.mm(a_float32, b_float32)
+                    f_float16 = self.mm_breaks(a_float32, b_float32)
+
+                    assert (
+                        f_float16[0][0] == self.mm_not_break(a_float32, b_float32)[0][0]
+                    )
+                return f_float16, g_float32
+
+        module = MyModule(bias=torch.rand((8, 8), device="cpu", dtype=torch.bfloat16))
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            # Autocast doesn't work on addition, so we need the bias to be `bfloat16`
+            res = torch.rand((8, 8), device="cpu", dtype=torch.float32) + torch.rand(
+                (8, 8), device="cpu", dtype=torch.bfloat16
+            )
+            self.assertEqual(res.dtype, torch.float32)
+
+        real_16, real_32 = module(torch.tensor([0.5]))
+        real_device_16 = real_16.device
+        real_dtype_16 = real_16.dtype
+        real_device_32 = real_32.device
+        real_dtype_32 = real_32.dtype
+
+        graph = torch._dynamo.optimize("eager")(module)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
+
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
