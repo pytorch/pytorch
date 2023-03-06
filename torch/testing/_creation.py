@@ -14,12 +14,9 @@ complex_to_corresponding_float_type_map = {
     torch.complex64: torch.float32,
     torch.complex128: torch.float64,
 }
-float_to_corresponding_complex_type_map = {
-    v: k for k, v in complex_to_corresponding_float_type_map.items()
-}
 
 
-def _uniform_random(t: torch.Tensor, low: float, high: float):
+def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
     # uniform_ requires to-from <= std::numeric_limits<scalar_t>::max()
     # Work around this by scaling the range before and after the PRNG
     if high - low >= torch.finfo(t.dtype).max:
@@ -73,20 +70,21 @@ def make_tensor(
             is determined based on the :attr:`dtype` (see the table above). Default: ``None``.
         requires_grad (Optional[bool]): If autograd should record operations on the returned tensor. Default: ``False``.
         noncontiguous (Optional[bool]): If `True`, the returned tensor will be noncontiguous. This argument is
-            ignored if the constructed tensor has fewer than two elements.
+            ignored if the constructed tensor has fewer than two elements. Mutually exclusive with ``memory_format``.
         exclude_zero (Optional[bool]): If ``True`` then zeros are replaced with the dtype's small positive value
             depending on the :attr:`dtype`. For bool and integer types zero is replaced with one. For floating
             point types it is replaced with the dtype's smallest positive normal number (the "tiny" value of the
             :attr:`dtype`'s :func:`~torch.finfo` object), and for complex types it is replaced with a complex number
             whose real and imaginary parts are both the smallest positive normal number representable by the complex
             type. Default ``False``.
-        memory_format (Optional[torch.memory_format]): The memory format of the returned tensor.  Incompatible
-            with :attr:`noncontiguous`.
+        memory_format (Optional[torch.memory_format]): The memory format of the returned tensor. Mutually exclusive
+            with ``noncontiguous``.
 
     Raises:
-        ValueError: if ``requires_grad=True`` is passed for integral `dtype`
-        ValueError: If ``low > high``.
+        ValueError: If ``requires_grad=True`` is passed for integral `dtype`
+        ValueError: If ``low >= high``.
         ValueError: If either :attr:`low` or :attr:`high` is ``nan``.
+        ValueError: If both :attr:`noncontiguous` and :attr:`memory_format` are passed.
         TypeError: If :attr:`dtype` isn't supported by this function.
 
     Examples:
@@ -103,12 +101,21 @@ def make_tensor(
                 [False, True]], device='cuda:0')
     """
 
-    def _modify_low_high(low, high, lowest, highest, default_low, default_high, dtype):
+    def modify_low_high(
+        low: Optional[float],
+        high: Optional[float],
+        *,
+        lowest: float,
+        highest: float,
+        default_low: float,
+        default_high: float,
+    ) -> Tuple[float, float]:
         """
-        Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high) if required.
+        Modifies (and raises ValueError when appropriate) low and high values given by the user (input_low, input_high)
+        if required.
         """
 
-        def clamp(a, l, h):
+        def clamp(a: float, l: float, h: float) -> float:
             return min(max(a, l), h)
 
         low = low if low is not None else default_low
@@ -116,14 +123,25 @@ def make_tensor(
 
         # Checks for error cases
         if low != low or high != high:
-            raise ValueError("make_tensor: one of low or high was NaN!")
-        if low > high:
-            raise ValueError("make_tensor: low must be weakly less than high!")
+            raise ValueError(
+                f"`low` and `high` cannot be NaN, but got {low} and {high}"
+            )
+        elif low > high:
+            raise ValueError(
+                f"`low` must be weakly less than `high`, but got {low} >= {high}"
+            )
 
         low = clamp(low, lowest, highest)
         high = clamp(high, lowest, highest)
 
-        if dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        if dtype in [
+            torch.bool,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        ]:
             # 1. `low` is ceiled to avoid creating values smaller than `low` and thus outside the specified interval
             # 2. Following the same reasoning as for 1., `high` should be floored. However, the higher bound of
             #    `torch.randint` is exclusive and thus ceiling here as well is fine.
@@ -135,53 +153,72 @@ def make_tensor(
         shape = shape[0]  # type: ignore[assignment]
     shape = cast(Tuple[int, ...], tuple(shape))
 
+    if noncontiguous and memory_format is not None:
+        raise ValueError(
+            f"The parameters `noncontiguous` and `memory_format` are mutually exclusive, "
+            f"but got {noncontiguous=} and {memory_format=}"
+        )
+
     _integral_types = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]
     _floating_types = [torch.float16, torch.bfloat16, torch.float32, torch.float64]
     _complex_types = [torch.complex32, torch.complex64, torch.complex128]
     if requires_grad and dtype not in _floating_types and dtype not in _complex_types:
-        raise ValueError("make_tensor: requires_grad must be False for integral dtype")
+        raise ValueError(
+            "`requires_grad=True` is not supported for integral dtypes, but got {torch.dtype}"
+        )
 
     if dtype is torch.bool:
-        ranges = (0, 2)
         low, high = cast(
             Tuple[int, int],
-            _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype),
+            modify_low_high(
+                low, high, lowest=0, highest=2, default_low=0, default_high=2
+            ),
         )
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
-    elif dtype is torch.uint8:
-        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = cast(
-            Tuple[int, int],
-            _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype),
-        )
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _integral_types:
-        ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
-        low, high = _modify_low_high(low, high, ranges[0], ranges[1], -9, 10, dtype)
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
+        low, high = cast(
+            Tuple[int, int],
+            modify_low_high(
+                low,
+                high,
+                lowest=torch.iinfo(dtype).min,
+                highest=torch.iinfo(dtype).max,
+                # This is incorrect for `torch.uint8`, but since we clamp to `lowest`, i.e. 0 for `torch.uint8`,
+                # _after_ we use the default value, we don't need to special case it here
+                default_low=-9,
+                default_high=10,
+            ),
+        )
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
     elif dtype in _floating_types:
-        ranges_floats = (torch.finfo(dtype).min, torch.finfo(dtype).max)
-        m_low, m_high = _modify_low_high(
-            low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype
+        low, high = modify_low_high(
+            low,
+            high,
+            lowest=torch.finfo(dtype).min,
+            highest=torch.finfo(dtype).max,
+            default_low=-9,
+            default_high=9,
         )
         result = torch.empty(shape, device=device, dtype=dtype)
-        _uniform_random(result, m_low, m_high)
+        _uniform_random_(result, low, high)
     elif dtype in _complex_types:
         float_dtype = complex_to_corresponding_float_type_map[dtype]
-        ranges_floats = (torch.finfo(float_dtype).min, torch.finfo(float_dtype).max)
-        m_low, m_high = _modify_low_high(
-            low, high, ranges_floats[0], ranges_floats[1], -9, 9, dtype
+        low, high = modify_low_high(
+            low,
+            high,
+            lowest=torch.finfo(float_dtype).min,
+            highest=torch.finfo(float_dtype).max,
+            default_low=-9,
+            default_high=9,
         )
         result = torch.empty(shape, device=device, dtype=dtype)
-        result_real = torch.view_as_real(result)
-        _uniform_random(result_real, m_low, m_high)
+        _uniform_random_(torch.view_as_real(result), low, high)
     else:
         raise TypeError(
             f"The requested dtype '{dtype}' is not supported by torch.testing.make_tensor()."
             " To request support, file an issue at: https://github.com/pytorch/pytorch/issues"
         )
 
-    assert not (noncontiguous and memory_format is not None)
     if noncontiguous and result.numel() > 1:
         result = torch.repeat_interleave(result, 2, dim=-1)
         result = result[..., ::2]
