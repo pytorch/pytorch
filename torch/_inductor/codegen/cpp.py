@@ -1720,7 +1720,9 @@ class CppTileKernel(CppKernel):
             TileBufferUseTracker(CppTile0DOverrides(V.MockHandler()))
         )
         # TODO(jgong5): support vectorized codegen for tile sizes larger than HW vector lengths
-        if self.tile_sizes and all(size == codecache.pick_vec_isa().nelements() for size in self.tile_sizes):
+        if self.tile_sizes and all(
+            size == codecache.pick_vec_isa().nelements() for size in self.tile_sizes
+        ):
             self.tile_ops_tbl[1] = CppTileFallbackWrapper(
                 TileBufferUseTracker(CppTile1DOverrides(V.MockHandler()))
             )
