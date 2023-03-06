@@ -3415,7 +3415,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3434,14 +3434,14 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
     handle_unflatten_exception(e, self, dim, sizes, names);
   }
 
-  DimVector shape(self.sizes().begin(), self.sizes().end());
+  SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());
   shape.erase(shape.begin() + dim);
   shape.insert(shape.begin() + dim, inferred_size.begin(), inferred_size.end());
 
   Tensor result;
   {
     NoNamesGuard guard;
-    result = self.view(shape);
+    result = self.view_symint(shape);
   }
 
   if (names) {
@@ -3454,11 +3454,11 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
   return result;
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
   return native::unflatten_impl(self, dim, sizes, c10::nullopt);
 }
 
-Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+Tensor unflatten_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {
   return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
