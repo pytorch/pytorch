@@ -443,7 +443,7 @@ def get_warning_all_flag(warning_all=True):
 
 
 def cpp_flags():
-    return "-std=c++17 -Wno-unused-variable -Wno-array-bounds"
+    return "-std=c++17 -Wno-unused-variable"
 
 
 def optimization_flags():
