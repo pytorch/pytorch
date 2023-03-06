@@ -1541,7 +1541,6 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   auto s0 = self.accessor<scalar_t, 3>();
   auto m0 = mat2.accessor<scalar_t, 3>();
 
-  printf("=========================================\n");
   int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
   using accscalar_t = at::acc_type<scalar_t, false>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
