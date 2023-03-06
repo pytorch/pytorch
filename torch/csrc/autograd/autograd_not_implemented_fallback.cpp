@@ -187,7 +187,7 @@ void autogradNotImplementedFallbackImpl(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
         // note(crcrpar): `_foreach_norm` returns a list of scalar Tensors and
         // each Tensor shares a storage of a hidden, intermediate 1D Tensor
-        // created inside the CUDA implemenetation. This is because the
+        // created inside the CUDA implementation. This is because the
         // reference implementation of nvidia/apex repo returns this 1D Tensor
         // where each element represents the norm of corresponding input Tensor,
         // here I want to return the same number of Tensors as the input
@@ -357,7 +357,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
                                             : CreationMeta::NO_GRAD_MODE));
-      // ^ pass in creation meta unecessarily even if not isDifferentiableType,
+      // ^ pass in creation meta unnecessarily even if not isDifferentiableType,
       // but we don't have that
       //   information here anyway.
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
