@@ -344,7 +344,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
         # TODO implement backwards
-        with self.assertRaisesRegex(RuntimeError, "derivative for aten::all_reduce is not implemented"):
+        with self.assertRaisesRegex(RuntimeError, "element 0 of tensors does not require grad and does not have a grad_fn"):
             compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
             out = compiled(input, **self.get_world_trs())
             out.sum().backward()
