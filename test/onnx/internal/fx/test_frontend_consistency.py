@@ -72,7 +72,7 @@ class FrontendInfo:
 FX_FRONTEND_INFOS: List[FrontendInfo] = []
 
 
-# MODIFY THIS SECTION to add a FxFrontend or modify skips/xfails ###############
+# MODIFY THIS SECTION to add a FxFrontend or modify skips ######################
 # See Note [Add new FxFrontend] for more details.
 
 FX_FRONTEND_INFOS.append(
@@ -120,9 +120,10 @@ FX_FRONTEND_INFOS.append(
 )
 
 
-# END OF SECTION TO MODIFY to add a FxFrontend or modify skips/xfails ##########
+# END OF SECTION TO MODIFY to add a FxFrontend or modify skips #################
 
 # MODIFY THIS SECTION to add or modify nn.Module test cases ####################
+# See Note [Add new module test cases] for more details.
 # TODO: Organize test models into a separate file to be re-used by other tests.
 class MLPModel(nn.Module):
     def __init__(self):
@@ -201,7 +202,7 @@ MODULES_DB = [
 
 
 class _TestFxFrontendConsistency(common_utils.TestCase):
-    frontendInfo: FrontendInfo
+    frontend_info: FrontendInfo
 
     @common_modules.modules(
         MODULES_DB, train_eval_mode=common_modules.TrainEvalMode.eval_only
@@ -217,10 +218,10 @@ class _TestFxFrontendConsistency(common_utils.TestCase):
         # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
         assert device == "cpu"
 
-        if skip_reason := self.frontendInfo.skips.get(module_info.formatted_name):
+        if skip_reason := self.frontend_info.skips.get(module_info.formatted_name):
             pytest.skip(skip_reason)
 
-        fx_frontend = self.frontendInfo.fx_frontend
+        fx_frontend = self.frontend_info.fx_frontend
 
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(
