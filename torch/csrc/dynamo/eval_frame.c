@@ -304,6 +304,8 @@ static PyObject* noargs = NULL; /* cached empty tuple */
 static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
+static PyObject* guard_profiler_start_hook = NULL;
+static PyObject* guard_profiler_end_hook = NULL;
 
 size_t extra_index = -1;
 
@@ -476,6 +478,22 @@ static PyObject* call_guard_fail_hook(
   return result;
 }
 
+static void call_guard_profiler_start_hook() {
+  if (guard_profiler_start_hook == NULL) return;
+  PyObject* args = PyTuple_Pack(0);
+  if (args == NULL) return;
+  PyObject_CallObject(guard_profiler_start_hook, args);
+  Py_DECREF(args);
+}
+
+static void call_guard_profiler_end_hook() {
+  if (guard_profiler_end_hook == NULL) return;
+  PyObject* args = PyTuple_Pack(0);
+  if (args == NULL) return;
+  PyObject_CallObject(guard_profiler_end_hook, args);
+  Py_DECREF(args);
+}
+
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev) {
@@ -640,7 +658,9 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
+    call_guard_profiler_start_hook();
     PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+    call_guard_profiler_end_hook();
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
       return NULL;
@@ -662,7 +682,9 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  call_guard_profiler_start_hook();
   PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  call_guard_profiler_end_hook();
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
@@ -840,6 +862,27 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+static PyObject* set_guard_profiler_hooks(PyObject* dummy, PyObject* args) {
+  PyObject* start = NULL;
+  PyObject* end = NULL;
+  if (!PyArg_ParseTuple(args, "OO", &start, &end)) {
+    return NULL;
+  }
+  Py_XDECREF(guard_profiler_start_hook);
+  Py_XDECREF(guard_profiler_end_hook);
+  if (start == Py_None || end == Py_None) {
+    guard_profiler_start_hook = NULL;
+    guard_profiler_end_hook = NULL;
+  } else {
+    guard_profiler_start_hook = start;
+    guard_profiler_end_hook = end;
+    Py_INCREF(guard_profiler_start_hook);
+    Py_INCREF(guard_profiler_end_hook);
+  }
+  Py_RETURN_NONE;
+}
+
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
@@ -847,6 +890,7 @@ static PyMethodDef _methods[] = {
     {"skip_code", skip_code, METH_VARARGS, NULL},
     {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_VARARGS, NULL},
+    {"set_guard_profiler_hooks", set_guard_profiler_hooks, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

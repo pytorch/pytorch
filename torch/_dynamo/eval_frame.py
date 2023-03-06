@@ -28,6 +28,7 @@ if TYPE_CHECKING:
         set_eval_frame,
         set_guard_error_hook,
         set_guard_fail_hook,
+        set_guard_profiler_hooks,
         skip_code,
         unsupported,
     )
@@ -54,6 +55,18 @@ null_context = contextlib.nullcontext
 class Unset(Enum):
     token = 0
 
+last_profiler = None
+def _guard_profiler_start():
+    global last_profiler
+    name = "guards"
+    args = None
+    last_profiler = torch.ops.profiler._record_function_enter_new(name, args)
+
+def _guard_profiler_end():
+    global last_profiler
+    torch.ops.profiler._record_function_exit._RecordFunction(last_profiler)
+
+set_guard_profiler_hooks(_guard_profiler_start, _guard_profiler_end)
 
 unset = Unset.token
 
