@@ -281,7 +281,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
                     break
         return lib_set or lib_find
 
-    
+
     def is_numactl_available(self):
         numactl_available = False
         try:
@@ -289,11 +289,11 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             r = subprocess.run(cmd, env=os.environ, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             if r.returncode == 0:
                 numactl_available = True
-        except:
+        except Exception:
             pass
         return numactl_available
-        
-        
+
+
     def set_memory_allocator(self, enable_tcmalloc=True, enable_jemalloc=False, use_default_allocator=False):
         """
         Enable TCMalloc/JeMalloc with LD_PRELOAD and set configuration for JeMalloc.
@@ -470,21 +470,23 @@ won\'t take effect even if it is set explicitly.')
 
         if args.ninstances > 1 and args.rank != -1:
             logger.info(f"assigning {args.ncores_per_instance} cores for instance {args.rank}")
-        
+
         if not args.disable_numactl:
             numactl_available = self.is_numactl_available()
             if not numactl_available:
                 if not args.disable_taskset:
-                    logger.warning("Core binding with numactl is not available. Disabling numactl and using taskset instead. This may affect performance in multi-socket system; please use numactl if memory binding is needed.")
-                    args.disable_numactl = True 
-                    enable_taskset = True 
+                    logger.warning("Core binding with numactl is not available. Disabling numactl and using taskset instead. \
+                    This may affect performance in multi-socket system; please use numactl if memory binding is needed.")
+                    args.disable_numactl = True
+                    enable_taskset = True
                 else:
-                    logger.warning("Core binding with numactl is not available, and --disable_taskset is set. Please unset --disable_taskset to use taskset insetad of numactl.")
+                    logger.warning("Core binding with numactl is not available, and --disable_taskset is set. \
+                    Please unset --disable_taskset to use taskset insetad of numactl.")
                     exit(-1)
-        
+
         if not args.disable_taskset:
-            enable_taskset = True 
-            
+            enable_taskset = True
+
         self.set_multi_thread_and_allocator(args.ncores_per_instance,
                                             args.disable_iomp,
                                             set_kmp_affinity,
