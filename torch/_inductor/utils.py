@@ -20,7 +20,7 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config, config as inductor_config
+from . import config
 from .cuda_properties import get_device_capability
 
 log = logging.getLogger(__name__)
@@ -78,8 +78,26 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
 
 
 def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
@@ -495,9 +513,9 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        (inductor_config.max_autotune or inductor_config.search_autotune_cache)
+        (config.max_autotune or config.search_autotune_cache)
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -558,3 +576,14 @@ def developer_warning(msg):
         log.warning(msg)
     else:
         log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )

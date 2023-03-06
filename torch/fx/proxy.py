@@ -126,7 +126,20 @@ class TracerBase:
             self.scope.module_path,
             self.scope.module_type,
         )
-        if self.module_stack:
+        # Optionally set stack trace on the created Node for debugging purposes
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                node.stack_trace = stack_trace
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
+            for field in copy_meta_fields:
+                if field in current_meta:
+                    node.meta[field] = current_meta[field]
+        elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
@@ -160,26 +173,12 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
-        # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.has_preserved_node_meta():
-            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
-
-            stack_trace = current_meta.get("stack_trace")
-            if stack_trace:
-                proxy.node.stack_trace = stack_trace
-            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
-            # If other meta fields are needed, they can be added here
-            copy_meta_fields = ["nn_module_stack", "source_fn", "original_aten"]
-            for field in copy_meta_fields:
-                if field in current_meta:
-                    proxy.node.meta[field] = current_meta[field]
-
-        elif self.record_stack_traces:
+        if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy
