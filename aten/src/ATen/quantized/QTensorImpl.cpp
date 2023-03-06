@@ -3,7 +3,7 @@
 namespace at {
 
 QTensorImpl::QTensorImpl(
-    Storage storage,
+    Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     QuantizerPtr quantizer)
@@ -12,12 +12,12 @@ QTensorImpl::QTensorImpl(
 
 QTensorImpl::QTensorImpl(
     ImplType type,
-    Storage storage,
+    Storage&& storage,
     DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
     QuantizerPtr quantizer)
     : TensorImpl(type, std::move(storage), std::move(key_set), data_type),
-      quantizer_(quantizer) {}
+      quantizer_(std::move(quantizer)) {}
 
 const char* QTensorImpl::tensorimpl_type_name() const {
   return "QTensorImpl";
