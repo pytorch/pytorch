@@ -3104,10 +3104,12 @@ class C10_TensorImpl_Size_Check_Dummy_Class : private TensorImpl {
   // To keep things clean, we split on systems here.
 
   static constexpr bool check_sizes() {
-    constexpr auto expected_sizeof_sizes_and_strides
-      = sizeof(std::size_t)                                               // size of length
-      + (alignof(std::int64_t) - sizeof(std::size_t))                     // padding between length and data
-      + 2 * C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE * sizeof(std::int64_t); // size of data
+    constexpr auto expected_sizeof_sizes_and_strides =
+        sizeof(std::size_t) // size of length
+        + (alignof(std::int64_t) -
+           sizeof(std::size_t)) // padding between length and data
+        + 2 * C10_SIZES_AND_STRIDES_MAX_INLINE_SIZE *
+            sizeof(std::int64_t); // size of data
 
 #if UINTPTR_MAX == 0xFFFFFFFF
     // This is a 32-bit system
