@@ -39,7 +39,7 @@ from torch.distributed._tensor import (
 from torch.distributed._tensor.api import DTensor
 from torch.distributed._tensor.placement_types import Placement
 
-DEVICE_TYPE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE_TYPE = "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 NUM_DEVICES = 4
 
 # We use this as a proxy for "multiple GPUs exist"
@@ -120,7 +120,8 @@ class DTensorTestBase(MultiProcessTestCase):
 
     def destroy_pg(self) -> None:
         # Wait for all ranks to reach here before starting shutdown.
-        dist.barrier()
+        # FIXME dist.barrier deadlocks with multiple threads and NCCL: https://github.com/pytorch/pytorch/issues/95895
+        dist.all_reduce(torch.zeros((1,), device="cuda" if torch.cuda.is_available() else "cpu"))
         dist.destroy_process_group()
 
     def setUp(self) -> None:
@@ -326,7 +327,9 @@ class DTensorConverter:
                         mesh,
                         placements,
                         size=t.size(),
+                        dtype=torch.bool,
                         requires_grad=t.requires_grad,
+                        stride=t.stride()
                     )
                 else:
                     r = distribute_tensor(t, mesh, placements)
