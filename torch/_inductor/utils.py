@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import functools
+import glob
 import itertools
 import logging
 import math
@@ -77,7 +78,12 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
 
 
@@ -250,10 +256,14 @@ def get_fused_kernel_name(node_schedule):
 def gather_origins(args, kwargs):
     import itertools
 
-    from .ir import ComputedBuffer, IRNode
+    from . import ir
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -375,10 +385,7 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvaluewithlinemap(
-        self,
-        max_lines=None
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
         p = 1
         linemap = []
@@ -393,15 +400,6 @@ class IndentedBuffer:
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-            if max_lines and lineno == max_lines - 1 and len(line) > max_lines:
-                buf.write(
-                    f"{self.prefix()}... ({len(self._lines) - max_lines} lines hidden, "
-                    f"TORCHINDUCTOR_DEBUG_MAX_LINES={len(self._lines)} for all)\n"
-                )
-                break
-
-            # note: some 'line's contain '\n'
-            p += 1 + line.count("\n")
         return buf.getvalue(), linemap
 
     def getvalue(self, max_lines=None):
@@ -549,32 +547,33 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_code(fn, *args, **kwargs):
-    from .graph import GraphLowering
-
-    compile_to_module = GraphLowering.compile_to_module
-    source_codes = []
-
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__, "r") as f:
-            source_codes.append(f.read())
-        return mod
-
-    with mock.patch.object(
-        GraphLowering, "compile_to_module", patched_compile_to_module
-    ):
-        torch._dynamo.reset()
-        fn(*args, **kwargs)
-    return source_codes
-
-
 def run_and_get_triton_code(fn, *args, **kwargs):
-    source_codes = run_and_get_code(fn, *args, **kwargs)
-    assert (
-        len(source_codes) == 1
-    ), f"expected exactly one code output got {len(source_codes)}"
-    return source_codes[0]
+    from torch._inductor.debug import DebugContext
+    from torch._inductor.virtualized import V
+
+    torch._dynamo.reset()
+
+    context = DebugContext()
+
+    with DebugDirManager(), mock.patch.object(
+        config.trace, "enabled", True
+    ), context, V.set_debug_handler(context):
+
+        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+        fil = dir_name + "*inference*"
+        existing_dirs = glob.glob(fil)
+
+        fn(*args, **kwargs)
+
+        assert context._path is not None
+
+        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+        full_name = os.path.join(dir_dbg[0], "output_code.py")
+        with open(full_name, "r") as f:
+            return f.read()
 
 
 def developer_warning(msg):

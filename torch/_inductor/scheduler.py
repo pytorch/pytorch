@@ -270,7 +270,6 @@ class BaseSchedulerNode:
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
                         return
-
         V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):

@@ -8,6 +8,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._tensor import DTensor
+from torch.distributed._tensor._utils import compute_local_shape, compute_local_offset
 
 from torch.distributed._shard.sharding_spec._internals import (
     _check_shard_metadata_pair_overlap,
@@ -70,8 +71,8 @@ def _create_write_items_for_dtensor(fqn: str, tensor: DTensor) -> WriteItem:
         device_mesh.ndim == 1
     ), "Only 1D DeviceMeshes can currently be handled."
 
-    sizes = torch.Size(tensor._spec.local_shape)
-    offsets = torch.Size(tensor._spec.local_offsets)
+    sizes = torch.Size(compute_local_shape(tensor.shape, device_mesh, tensor.placements))
+    offsets = torch.Size(compute_local_offset(tensor.shape, device_mesh, tensor.placements))
 
     return WriteItem(
         index=MetadataIndex(fqn, offsets),
@@ -233,8 +234,8 @@ def _create_shard_from_dtensor(tensor: DTensor) -> Shard:
         device_mesh.ndim == 1
     ), "Only 1D DeviceMeshes can currently be handled."
 
-    sizes = tensor._spec.local_shape
-    offsets = tensor._spec.local_offsets
+    sizes = torch.Size(compute_local_shape(tensor.shape, device_mesh, tensor.placements))
+    offsets = torch.Size(compute_local_offset(tensor.shape, device_mesh, tensor.placements))
     return Shard(
         tensor=tensor.to_local(),
         metadata=ShardMetadata(
