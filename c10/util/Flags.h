@@ -208,7 +208,7 @@ C10_DECLARE_REGISTRY(C10FlagsRegistry, C10FlagParser, const std::string&);
   C10_DEFINE_typed_var(std::string, name, default_value, help_str)
 
 // DECLARE_typed_var should be used in header files and in the global namespace.
-#define C10_DECLARE_typed_var(type, name) C10_IMPORT extern type FLAGS_##name
+#define C10_DECLARE_typed_var(type, name) C10_API extern type FLAGS_##name
 
 #define C10_DECLARE_int(name) C10_DECLARE_typed_var(int, name)
 #define C10_DECLARE_int32(name) C10_DECLARE_int(name)

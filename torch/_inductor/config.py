@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -82,6 +85,8 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
@@ -125,6 +130,11 @@ profiler_mark_wrapper_call = False
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
+_profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
+profile_bandwidth = _profile_var != ""
+profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+
+
 # config specific to codegen/cpp.pp
 class cpp:
     # set to torch.get_num_threads()
@@ -165,9 +175,6 @@ class triton:
 
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
-
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
 
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
