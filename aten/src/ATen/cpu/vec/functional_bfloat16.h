@@ -7,15 +7,6 @@
 
 namespace at { namespace vec {
 
-// BFloat16 specification
-template <typename scalar_t> struct VecScalarType { using type = scalar_t; };
-template <> struct VecScalarType<BFloat16> { using type = float; };
-template <> struct VecScalarType<Half> { using type = float; };
-
-// This is different from at::acc_type since we only need to specialize BFloat16
-template <typename scalar_t>
-using vec_scalar_t = typename VecScalarType<scalar_t>::type;
-
 // Vector conversion between float and bfloat16/half
 template <typename scalar_t,
           typename std::enable_if<is_reduced_floating_point<scalar_t>::value, int>::type = 0>

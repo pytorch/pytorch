@@ -3,6 +3,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/SpmmReduceKernel.h>
@@ -212,7 +213,7 @@ void spmm_reduce_backward_input_kernel_impl(
 
   int64_t K = grad_out.size(1);
 
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<opmath_type<scalar_t>>;
   at::parallel_for(0, nnz, 1, [&](int64_t begin, int64_t end) {
     for (const auto i : c10::irange(begin, end)) {
       index_t row = row_data[i], col = col_data[i];

@@ -2,6 +2,7 @@
 
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReductionType.h>
@@ -39,8 +40,8 @@ using namespace vec;
   }()
 
 template <typename scalar_t, ReductionType reduce>
-inline vec_scalar_t<scalar_t> init_value() {
-  using acc_t = vec_scalar_t<scalar_t>;
+inline opmath_type<scalar_t> init_value() {
+  using acc_t = opmath_type<scalar_t>;
   acc_t val;
   if (reduce == ReductionType::SUM ||
       reduce == ReductionType::MEAN) {
@@ -57,8 +58,8 @@ inline vec_scalar_t<scalar_t> init_value() {
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline vec_scalar_t<scalar_t> init_value(const c10::optional<Scalar>& initial) {
-  using acc_t = vec_scalar_t<scalar_t>;
+inline opmath_type<scalar_t> init_value(const c10::optional<Scalar>& initial) {
+  using acc_t = opmath_type<scalar_t>;
   if (initial.has_value()) {
     return initial.value().to<acc_t>();
   } else {
@@ -67,8 +68,8 @@ inline vec_scalar_t<scalar_t> init_value(const c10::optional<Scalar>& initial) {
 }
 
 template <typename scalar_t>
-inline void init(scalar_t* out, int64_t size, const vec_scalar_t<scalar_t>& val) {
-  using Vec = Vectorized<vec_scalar_t<scalar_t>>;
+inline void init(scalar_t* out, int64_t size, const opmath_type<scalar_t>& val) {
+  using Vec = Vectorized<opmath_type<scalar_t>>;
   map<scalar_t>(
       [val](Vec x) { return Vec(val); },
       out,
@@ -78,7 +79,7 @@ inline void init(scalar_t* out, int64_t size, const vec_scalar_t<scalar_t>& val)
 
 template <typename scalar_t, ReductionType reduce>
 inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initial) {
-  using acc_t = vec_scalar_t<scalar_t>;
+  using acc_t = opmath_type<scalar_t>;
   acc_t val = init_value<scalar_t, reduce>(initial);
   init(out, size, val);
 }
@@ -86,7 +87,7 @@ inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initi
 // overload with `include_self`, used by scatter_reduce
 template <typename scalar_t, ReductionType reduce>
 inline void init(scalar_t* out, int64_t size, bool include_self = false) {
-  using acc_t = vec_scalar_t<scalar_t>;
+  using acc_t = opmath_type<scalar_t>;
   if (!include_self) {
     acc_t val = init_value<scalar_t, reduce>();
     init(out, size, val);
@@ -133,7 +134,7 @@ inline T update(const T& x, const T& y) {
 
 template <typename scalar_t, ReductionType reduce>
 inline void update(scalar_t* out, scalar_t* data, int64_t K) {
-  using Vec = vec::Vectorized<vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<opmath_type<scalar_t>>;
   map2<scalar_t>(
       [](Vec x, Vec y) { return update<Vec, reduce>(x, y); },
       out,
@@ -144,7 +145,7 @@ inline void update(scalar_t* out, scalar_t* data, int64_t K) {
 
 template <typename scalar_t, ReductionType reduce>
 inline void write(scalar_t* out, int64_t count, int64_t K) {
-  using Vec = vec::Vectorized<vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<opmath_type<scalar_t>>;
   if (reduce == ReductionType::MEAN) {
     if (count > 0) {
       vec::map<scalar_t>(

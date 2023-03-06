@@ -35,7 +35,7 @@ inline void _vec_log_softmax_lastdim(
     scalar_t* output_data_base,
     int64_t outer_size,
     int64_t dim_size) {
-  using Vec = vec::Vectorized<vec::vec_scalar_t<scalar_t>>;
+  using Vec = vec::Vectorized<opmath_type<scalar_t>>;
   // Coincidentally, at::internal::GRAIN_SIZE is 32768, which is equal to the
   // size of L1D cache on many processors. Some processors have 48 KB L1D cache
   // nowadays, so maybe in the future, we can leverage the knowledge of a

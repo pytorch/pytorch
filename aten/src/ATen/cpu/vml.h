@@ -59,7 +59,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
 #define IMPLEMENT_VML(op)                                               \
   template <typename scalar_t>                                          \
   inline void v##op(scalar_t* out, const scalar_t* in, int64_t size) {  \
-    using vec_t = Vectorized<vec_scalar_t<scalar_t>>;                   \
+    using vec_t = Vectorized<opmath_type<scalar_t>>;                    \
     vec::map([](vec_t x) { return x.op(); }, out, in, size);            \
   }                                                                     \
 
