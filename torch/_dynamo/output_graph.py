@@ -709,9 +709,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
-                e.__traceback__
-            ) from None
+            compiled_fn = gm.forward
+            raise BackendCompilerFailed(self.compiler_fn, e) from e
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:
