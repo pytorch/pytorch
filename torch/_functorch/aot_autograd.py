@@ -2536,7 +2536,7 @@ def create_aot_dispatcher_function(
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn, fw_metadata=fw_metadata)
         # You can put more passes here
 
-        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
+        compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
 
         if not hasattr(compiled_fn, "_boxed_call"):
             compiled_fn = make_boxed_func(compiled_fn)
