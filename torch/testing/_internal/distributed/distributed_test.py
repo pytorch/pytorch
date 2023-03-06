@@ -4688,10 +4688,6 @@ class DistributedTest:
 
         @skip_if_lt_x_gpu(2)
         def test_ddp_native_mixed_precision_ignored_params(self):
-            from torch.nn.parallel._replicated_tensor_ddp_utils import (
-                _set_ddp_with_replicated_tensor
-            )
-            _set_ddp_with_replicated_tensor(False)
             rank = self.rank
             torch.manual_seed(rank)
             torch.cuda.manual_seed(rank)
@@ -4728,11 +4724,6 @@ class DistributedTest:
         def _test_ddp_native_mixed_precision(
             self, gradient_as_bucket_view, set_grad_to_none
         ):
-            # Not supported with replicated tensor.
-            from torch.nn.parallel._replicated_tensor_ddp_utils import (
-                _set_ddp_with_replicated_tensor
-            )
-            _set_ddp_with_replicated_tensor(False)
             rank = self.rank
             torch.manual_seed(rank)
             torch.cuda.manual_seed(rank)
@@ -4784,7 +4775,7 @@ class DistributedTest:
                     if param.grad is None:
                         assert n == 'module.p'  # Only param that doesn't require grad
                     else:
-                        assert param.grad is not None
+                        self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
                             torch.zeros_like(param.grad)
                             for _ in range(dist.get_world_size(net.process_group))
