@@ -356,17 +356,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             var = f"___{name}_{i}"
             if var not in existing:
-                self.code_options["co_varnames"] = self.code_options["co_varnames"] + (
-                    var,
-                )
+                self.code_options["co_varnames"] += (var,)
                 return var
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""
         if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
+            self.code_options["co_names"] += (name,)
 
     @staticmethod
     def module_has_hooks(mod, only_check_unsupported=False):
@@ -458,7 +454,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
         name = re.sub(r"[^a-zA-Z0-9]", "_", name)
@@ -818,10 +814,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
+        # Reverse the frame_summaries, such that the innermost frame is at the last
+        frame_summaries.reverse()
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = " | ".join(msgs)
+        rv.node.stack_trace = "".join(msgs)
 
         return rv
 

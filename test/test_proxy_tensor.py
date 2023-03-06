@@ -694,7 +694,6 @@ class TestGenericProxyTensorFake(TestGenericProxyTensor):
 
 @xfail_inherited_tests([
     "test_make_fx_overloads",
-    "test_trace_subclasses",
 ])
 class TestGenericProxyTensorSymbolic(TestGenericProxyTensor):
     tracing_mode = "symbolic"
@@ -900,7 +899,7 @@ def forward(self, a_1):
     def test_item_to_constructor(self):
         def f(a):
             r = a.item()
-            constrain_range(r, min=0)
+            constrain_range(r, min=2)
             return torch.empty(r)
 
         r = str(make_fx(f, tracing_mode="symbolic")(torch.randint(5, (1,))).code).strip()
@@ -1324,7 +1323,6 @@ symbolic_tensor_failures = {
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1424,7 +1422,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.grid_sample', ''),  # aten.grid_sampler_2d.default - couldn't find symbolic meta function/decompos...
-    xfail('nn.functional.interpolate', 'area'),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
     xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('nn.functional.max_pool1d', ''),  # Trying to call aten.size on a tensor with symbolic shapes.
