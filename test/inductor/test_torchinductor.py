@@ -4269,7 +4269,8 @@ class CommonTemplate:
         b = torch.randn(6, 128, 64)
         c = torch.randn(6, 64, 100)
         options = itertools.product(
-            [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)], [0.0]
+            [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)],
+            [0.0, 1.0],
         )
         for a, beta in options:
             self.common(
