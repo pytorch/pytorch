@@ -5,6 +5,7 @@ import torch
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import prod
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.placement_types import DTensorSpec
 
 
@@ -181,9 +182,14 @@ def einop_rule(
                         d in input_dim
                         and input_spec.dim_map[input_dim.index(d)] == mesh_dim
                     ):
-                        cost += prod(input_spec.local_shape) * input_spec.mesh.size(
-                            mesh_dim
+                        assert input_spec.tensor_meta is not None
+                        global_shape = input_spec.tensor_meta.shape
+                        local_shape = compute_local_shape(
+                            global_shape,
+                            input_spec.mesh,
+                            input_spec.placements
                         )
+                        cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 costs.append(cost)
             d_to_keep_sharding = dims[costs.index(max(costs))]
             for d in dims:

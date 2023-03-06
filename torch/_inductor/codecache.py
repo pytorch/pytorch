@@ -596,12 +596,7 @@ class PyCodeCache:
         key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
-                try:
-                    code = compile(f.read(), path, "exec")
-                except Exception as e:
-                    raise RuntimeError(
-                        f"Failed to import {path}\n{type(e).__name__}: {e}"
-                    )
+                code = compile(f.read(), path, "exec")
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key
