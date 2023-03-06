@@ -4503,8 +4503,6 @@ class TestSparseAny(TestCase):
             c0_results = []
             c1_results = []
             for meta_choice in (list(range(6)) + [None]):
-                print("m, n, k, meta_choice: ", m, n, k, meta_choice)
-
                 mask_entries = []
                 for i in range(m * (k // 4)):
                     mask_entries += random_mask_choice(meta_choice)
@@ -4516,12 +4514,9 @@ class TestSparseAny(TestCase):
 
                 c1 = torch.mm(a_dense, b)
 
-                handle = torch._cusparselt_create_sparse_gemm(a_sparse, b, mask)
-
-                c0 = torch._cusparselt_linear(a_sparse, b, handle)
+                meta, meta_reordered = torch._cusparselt_create_meta(mask)
+                c0 = torch._cusparselt_linear(a_sparse, b, meta, meta_reordered)
                 torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
-
-                torch._cusparselt_destroy_sparse_gemm(handle)
 
                 # sparse_t = benchmark_torch_function_in_microseconds(torch._cusparselt_linear, a_sparse, b, meta)
                 # dense_t = benchmark_torch_function_in_microseconds(torch.mm, a, b)

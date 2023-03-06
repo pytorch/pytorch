@@ -3826,13 +3826,11 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _cusparselt_create_sparse_gemm(Tensor sparse, Tensor dense, Tensor mask) -> int
+- func: _cusparselt_create_meta(Tensor mask) -> (Tensor, Tensor)
   dispatch:
-    CUDA: _cusparselt_create_sparse_gemm
+    CUDA: _cusparselt_create_meta
 
-- func: _cusparselt_destroy_sparse_gemm(int handle) -> ()
-
-- func: _cusparselt_linear(Tensor sparse, Tensor dense, int handle) -> Tensor
+- func: _cusparselt_linear(Tensor sparse, Tensor dense, Tensor meta, Tensor meta_reordered) -> Tensor
   dispatch:
     CUDA: _cusparselt_linear
 
