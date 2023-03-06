@@ -1119,7 +1119,7 @@ def split(self: Tensor, split_size: int, dim: int = 0) -> List[Tensor]:
 @register_decomposition(aten.addmm)
 @out_wrapper()
 @pw_cast_for_opmath
-def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 1):
+def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
@@ -1139,7 +1139,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 @register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
-def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta=1, alpha=1):
     if not self.is_floating_point() and not self.is_complex():
         beta = int(beta)
         alpha = int(alpha)
