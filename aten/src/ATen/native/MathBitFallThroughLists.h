@@ -63,7 +63,13 @@ namespace at {
   m.impl("size.Dimname", torch::CppFunction::makeFallthrough()); \
   m.impl("is_complex", torch::CppFunction::makeFallthrough()); \
   m.impl("is_floating_point", torch::CppFunction::makeFallthrough()); \
-  m.impl("requires_grad_", torch::CppFunction::makeFallthrough());
+  m.impl("requires_grad_", torch::CppFunction::makeFallthrough()); \
+  m.impl("qscheme", torch::CppFunction::makeFallthrough()); \
+  m.impl("q_scale", torch::CppFunction::makeFallthrough()); \
+  m.impl("q_zero_point", torch::CppFunction::makeFallthrough()); \
+  m.impl("q_per_channel_scales", torch::CppFunction::makeFallthrough()); \
+  m.impl("q_per_channel_zero_points", torch::CppFunction::makeFallthrough()); \
+  m.impl("q_per_channel_axis", torch::CppFunction::makeFallthrough());
 }
 
 #define TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m) \
