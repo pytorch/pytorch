@@ -317,17 +317,22 @@ test_single_dynamo_benchmark() {
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
 
+  local suite="$1"
+  shift
+  local shard_id="$1"
+  shift
+
   if [[ "${TEST_CONFIG}" == *perf* ]]; then
     # Performance test training only, for float32 and amp
-    test_single_dynamo_benchmark "amp" --training --dtypes=amp "$@"
-    test_single_dynamo_benchmark "amp" --training --dtypes=float32 "$@"
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
+    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 "$@"
   else
     # Check inference with --float32
-    test_single_dynamo_benchmark "inference" --float32 "$@"
+    test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
 
     if [[ "${TEST_CONFIG}" != *cpu_accuracy* && "${TEST_CONFIG}" != *dynamic* ]]; then
       # Check training with --amp
-      test_single_dynamo_benchmark "training" --training --amp "$@"
+      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
   fi
 }
