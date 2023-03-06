@@ -112,7 +112,6 @@ from torch.testing._internal.opinfo.utils import (
 )
 from torch.testing._internal import opinfo
 from torch.testing._internal.opinfo.definitions.linalg import (
-    sample_inputs_linalg_cholesky,
     sample_inputs_linalg_cholesky_inverse,
     sample_inputs_cross,
     sample_inputs_linalg_qr_geqrf,
