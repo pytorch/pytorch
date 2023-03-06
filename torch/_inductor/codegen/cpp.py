@@ -1368,7 +1368,7 @@ class CppTile1DOverrides(CppVecOverrides):
             if tile_var.meta.in_register:
                 return tile_var
             else:
-                return f"at::vec::Vectorized<{DTYPE_TO_CPP[tile_var.meta.dtype]}>::loadu({tile_var}) /* register load */"
+                return f"at::vec::Vectorized<{DTYPE_TO_CPP[tile_var.meta.dtype]}>::loadu(&{tile_var}[0]) /* register load */"
 
         assert isinstance(tile_var, CppTileCSEVariable)
         assert len(slice_indices) == 1
@@ -1474,7 +1474,7 @@ class CppTile2DOverrides:
         ld_dst = f"{cexpr(self.stride_at(self.itervars[tile_loop_indices[1]], index))}"
         ld_src = f"{tile_sizes[0]}"
 
-        store_line = f"at::vec::transpose_mxn<float,{tile_sizes[1]},{tile_sizes[0]}>({src}, {ld_src}, {dst}, {ld_dst});"
+        store_line = f"at::vec::transpose_mxn<float,{tile_sizes[1]},{tile_sizes[0]}>(&{src}[0], {ld_src}, {dst}, {ld_dst});"
         self.stores.writeline(name, store_line)
 
     @staticmethod
@@ -2007,7 +2007,7 @@ class CppTileKernel(CppKernel):
             assert tile_buf.meta.rank() == self.tile_rank()
             self.code.writeline(
                 None,
-                f"__at_align__ {DTYPE_TO_CPP[tile_buf.meta.dtype]} {tile_buf}[{math.prod(tile_buf.meta.sizes)}];",
+                f"__at_align__ std::array<{DTYPE_TO_CPP[tile_buf.meta.dtype]},{math.prod(tile_buf.meta.sizes)}> {tile_buf};",
             )
 
         # Sorting for maximum loop fusion
