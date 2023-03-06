@@ -36,10 +36,6 @@ def _prop_native_layer_norm(op_schema: OpSchema) -> OutputSharding:
     stats_spec = DTensorSpec(
         mesh=weight.mesh,
         placements=input.placements,
-        shape=torch.Size(
-            input.shape[:batch_ndim] + (1,) * len(normalized_shape)
-        ),
-        ndim=input.ndim,
     )
     return OutputSharding(output_spec=(input, stats_spec, stats_spec))
 
@@ -69,14 +65,10 @@ def _prop_native_layer_norm_backward(op_schema: OpSchema) -> OutputSharding:
     weight_grad = DTensorSpec(
         mesh=weight.mesh,
         placements=[_Partial()] * weight.mesh.ndim,
-        shape=weight.shape,
-        ndim=weight.ndim,
     )
     bias_grad = DTensorSpec(
         mesh=bias.mesh,
         placements=[_Partial()] * bias.mesh.ndim,
-        shape=bias.shape,
-        ndim=bias.ndim,
     )
     return OutputSharding(
         # NOTE: type errors below are legit. This is because DTensor currently
@@ -99,16 +91,28 @@ def _refine_sharding(
     # consider the operating dimension as a singleton to prevent sharding on it
     # however, if active_dim is None, this means the input and output shapes are equal and
     # we'll apply exactly the pointwise rule.
-    args_schema = [
-        DTensorSpec(
-            mesh=s.mesh,  # type: ignore[attr-defined]
-            placements=s.placements,  # type: ignore[attr-defined]
-            shape=s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :]  # type: ignore[attr-defined]
-            if active_dim is not None
-            else s.shape,  # type: ignore[attr-defined]
+    from torch.fx.passes.shape_prop import TensorMetadata
+
+    args_schema = []
+    for s in op_schema.args_schema[:2]:
+        assert isinstance(s, DTensorSpec) and s.tensor_meta is not None
+        args_schema.append(
+            DTensorSpec(
+                mesh=s.mesh,  # type: ignore[attr-defined]
+                placements=s.placements,  # type: ignore[attr-defined]
+                tensor_meta=TensorMetadata(
+                    shape=torch.Size(s.shape[0:active_dim] + (1,) + s.shape[active_dim + 1 :])
+                    if active_dim is not None
+                    else s.shape,
+                    dtype=s.tensor_meta.dtype,
+                    requires_grad=s.tensor_meta.requires_grad,
+                    stride=s.tensor_meta.stride,
+                    memory_format=s.tensor_meta.memory_format,
+                    is_quantized=s.tensor_meta.is_quantized,
+                    qparams=s.tensor_meta.qparams
+                )
+            )
         )
-        for s in op_schema.args_schema[:2]
-    ]
 
     op_schema = OpSchema(
         func_schema=op_schema.func_schema,
@@ -173,8 +177,6 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
             output_spec=DTensorSpec(
                 mesh=input.mesh,
                 placements=input.placements,
-                shape=input.shape,
-                ndim=input.ndim,
             )
         )
     else:
@@ -188,14 +190,12 @@ def prop_slice_scatter(op_schema: OpSchema) -> OutputSharding:
                         DTensorSpec(
                             mesh=input.mesh,
                             placements=input_suggestion,
-                            shape=input.shape,
-                            ndim=input.ndim,
+                            tensor_meta=input.tensor_meta,
                         ),
                         DTensorSpec(
                             mesh=src.mesh,
                             placements=input_suggestion,
-                            shape=src.shape,
-                            ndim=src.ndim,
+                            tensor_meta=src.tensor_meta,
                         ),
                     )
                     + op_schema.args_schema[2:],

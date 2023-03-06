@@ -367,6 +367,7 @@ include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -840,6 +841,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/**/*.pyi',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
     'torch/_functorch/make_functional.py',
