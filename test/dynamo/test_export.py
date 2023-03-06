@@ -2086,23 +2086,48 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mod = Foo(128)
         inp = torch.randn(3, 128)
 
-        with config.patch(dynamic_shapes=True, specialize_int_float=True):
-            gm, _ = torch._dynamo.export(
-                mod, inp, aten_graph=True, tracing_mode="symbolic"
-            )
-            count = 0
-            for node in gm.graph.nodes:
-                if node.op == "placeholder":
-                    count += 1
-            self.assertEqual(count, 1)
+        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+        count = 0
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                count += 1
+        self.assertEqual(count, 1)
 
-        with config.patch(dynamic_shapes=True, specialize_int_float=False):
-            # TODO (tmanlaibaatar) We should error when it tries to add input, not after
-            with self.assertRaisesRegex(
-                AssertionError,
-                "Dynamo input/output is not consistent with traced input/output",
-            ):
-                torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
+    def test_export_pass_arg_by_name(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_lin = torch.nn.Linear(3, 4, bias=True)
+
+            def forward(self, x):
+                return self.my_lin(x)
+
+        mod, input_tensor = BasicModule(), torch.randn(2, 3)
+        gm, guard = torch._dynamo.export(mod, input_tensor, aten_graph=True)
+        ref = mod(x=input_tensor)
+        res = gm(x=input_tensor)
+        self.assertTrue(torch._dynamo.utils.same(ref, res))
+
+    def test_export_pass_arg_by_name_star_args(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_lin = torch.nn.Linear(3, 4, bias=True)
+
+            def forward(self, *args):
+                return self.my_lin(args[0]) * self.my_lin(args[1])
+
+        mod, input_tensor, input_tensor2 = (
+            BasicModule(),
+            torch.randn(2, 3),
+            torch.randn(2, 3),
+        )
+        gm, guard = torch._dynamo.export(
+            mod, input_tensor, input_tensor2, aten_graph=True
+        )
+        ref = mod(input_tensor, input_tensor2)
+        res = gm(input_tensor, input_tensor2)
+        self.assertTrue(torch._dynamo.utils.same(ref, res))
 
 
 common_utils.instantiate_parametrized_tests(ExportTests)
