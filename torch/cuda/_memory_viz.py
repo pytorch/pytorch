@@ -410,9 +410,6 @@ def trace_plot(data, device=None, plot_segments=False):
     """
     w = PlotWriter()
     addr_to_alloc = {}
-
-    w = PlotWriter()
-    addr_to_alloc = {}
     device = _choose_device(data, device)
     if device is None:
         raise ValueError('No trace information was recorded.')
