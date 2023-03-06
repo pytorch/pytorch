@@ -902,7 +902,7 @@ class CppKernel(Kernel):
         else:
             if dtype in (torch.float16, torch.bfloat16):
                 self.reduction_prefix.writeline(
-                    f"{'float'} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
             else:
                 self.reduction_prefix.writeline(
