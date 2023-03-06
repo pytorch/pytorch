@@ -29,7 +29,7 @@ except ImportError:
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, requires_static_shapes, same
-from torch._dynamo.utils import ifdyn
+from torch._dynamo.utils import ifdyn, ifunspec
 from torch.nn import functional as F
 
 
@@ -849,6 +849,33 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
         return cnt
 
+    @requires_cuda()
+    def test_sub_alpha_scalar_repro(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sub(1, alpha=2)
+
+        f(torch.ones(2, device="cuda", dtype=torch.float64))
+
+    def test_embedding_backward_broadcasting_decomp(self):
+        def f(grad_output, indices):
+            num_weights = 10
+            padding_idx = 1
+            scale_grad_by_freq = True
+            return torch.ops.aten.embedding_dense_backward(
+                grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
+            )
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        grad_output = torch.ones(2, 4, 3, dtype=torch.float16)
+        indices = torch.ones(2, 4, dtype=torch.int64)
+
+        out_ref = f(grad_output, indices)
+        out_test = f_compiled(grad_output, indices)
+
+        self.assertEqual(out_ref, out_test)
+
     def test_reformer_eval(self):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
@@ -876,7 +903,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(input2), correct2))
 
         self.assertEqual(cnt.frame_count, 2)
-        self.assertEqual(cnt.op_count, ifdyn(38, 4))
+        self.assertEqual(cnt.op_count, ifunspec(42, ifdyn(38, 4)))
 
     def test_hf_t5_forward(self):
         input = torch.randn([1, 2048, 512])
@@ -973,9 +1000,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
-        self.assertEqual(cnt.frame_count, 5)
-        # TODO(jansel): figure out why op count depends on imports
-        self.assertIn(cnt.op_count, (31, 36, 35, 34, 29, 28))
+        # TODO: There is some bug here where corrects ends up with
+        # a Tensor in element 0.  We graph break on that (reflected here)
+        # but really we shouldn't have gotten a Tensor at all, as
+        # the operation is between an int and an item() result
+        self.assertEqual(cnt.frame_count, ifunspec(6, 5))
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1069,7 +1098,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         model = BatchNormAct2d(1).eval()
         correct = model(a)
         cnt = torch._dynamo.testing.CompileCounter()
-        if not torch._dynamo.config.specialize_int_float:
+        if not torch._dynamo.config.specialize_int:
             # _local_scalar_dense causes graph break w 0-dim tensor
             opt_model = torch._dynamo.optimize(cnt)(model)
             self.assertTrue(same(opt_model(a), correct))
@@ -1154,7 +1183,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize_assert(cnt)(fn)
         self.assertEqual(opt_fn(cfg), 64)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 3)
+        # With unspec int, maximum computation is preserved
+        self.assertEqual(cnt.op_count, ifunspec(4, 3))
 
     def test_reformer_sorting(self):
         x = torch.zeros([1, 12, 4096], dtype=torch.int64)
