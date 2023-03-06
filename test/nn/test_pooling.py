@@ -976,9 +976,10 @@ torch.cuda.synchronize()
         helper(None, 3, 50, 50, ks=5)
 
     @onlyCPU
-    def test_avg_pool2d_bfloat16(self, device):
+    @dtypes(torch.half, torch.bfloat16)
+    def test_avg_pool2d_reduced_floating(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
-            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).bfloat16()
+            input = torch.randn(n, c, h, w, dtype=torch.float32, device=device).to(dtype=dtype)
             input = input.to(memory_format=memory_format).requires_grad_()
             pool = torch.nn.AvgPool2d(kernel_size, stride).to(device)
 
@@ -990,10 +991,10 @@ torch.cuda.synchronize()
             out2.sum().backward()
 
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
-            self.assertEqual(out.dtype, torch.bfloat16)
-            self.assertEqual(input.grad.dtype, torch.bfloat16)
-            self.assertEqual(out, out2.bfloat16())
-            self.assertEqual(input.grad, input2.grad.bfloat16())
+            self.assertEqual(out.dtype, dtype)
+            self.assertEqual(input.grad.dtype, dtype)
+            self.assertEqual(out, out2.to(dtype=dtype))
+            self.assertEqual(input.grad, input2.grad.to(dtype=dtype))
 
         helper(4, 30, 8, 8, 7, 1, torch.contiguous_format)
         helper(4, 65, 8, 8, 7, 1, torch.channels_last)
