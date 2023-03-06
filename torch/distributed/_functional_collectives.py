@@ -72,11 +72,12 @@ def _register_tensor_work(tensor, work):
     data_ptr_to_work[tensor.data_ptr()] = (work_version, work)
     work_version += 1
 
-def _clear_tensor(data_ptr, version):
+def _wait_and_clear_tensor(data_ptr, version):
     global data_ptr_to_work
     version_and_work = data_ptr_to_work.get(data_ptr)
 
     if version_and_work is not None and version_and_work[0] == version:
+        version_and_work[1].wait()
         del data_ptr_to_work[data_ptr]
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
@@ -87,15 +88,15 @@ def _register_wrapper_tensor(tensor_wrapper, tensor):
             "Trying to register finalizers to AsyncCollectiveTensor but the inner tensor is already gone"
         )
     else:
-        weakref.finalize(tensor_wrapper, _clear_tensor, tensor.data_ptr(), version)
+        # We force the collective to be waited in the case this tensor goes away to reduce the change of deadlocks.
+        weakref.finalize(tensor_wrapper, _wait_and_clear_tensor, tensor.data_ptr(), version)
 
 def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     global data_ptr_to_work
     data_ptr = tensor.data_ptr()
     version_and_work = data_ptr_to_work.get(data_ptr)
     if version_and_work is not None:
-        version_and_work[1].wait()
-        _clear_tensor(data_ptr, version_and_work[0])
+        _wait_and_clear_tensor(data_ptr, version_and_work[0])
     return tensor
 
 
