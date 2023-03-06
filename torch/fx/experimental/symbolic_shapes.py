@@ -1334,7 +1334,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        self.var_to_range[symbol] = ValueRanges.unknown()
+        self.var_to_range[symbol] = ValueRanges(-sys.maxint - 1, sys.maxint)
         return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
@@ -1361,7 +1361,7 @@ class ShapeEnv:
 
             # We also infer that it must be not 0/1
             lower = 2 if self.specialize_zero_one else 0
-            self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sys.maxsize)
 
         if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
