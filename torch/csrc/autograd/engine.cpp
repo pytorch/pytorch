@@ -930,7 +930,6 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
