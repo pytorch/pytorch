@@ -198,7 +198,7 @@ class autocast:
         elif self.device == 'hpu':
             self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
         elif self.device == 'xla':
-            self.fast_dtype == torch.xla.get_autocast_xla_dtype()
+            self.fast_dtype = torch.get_autocast_xla_dtype()
         else:
             raise RuntimeError('User specified autocast device_type must be \'cuda\' or \'cpu\'')
         self._cache_enabled = torch.is_autocast_cache_enabled()
@@ -304,8 +304,8 @@ class autocast:
         elif self.device == 'xla':
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
-            torch.hpu.set_autocast_xla_enabled(self.prev)            # type: ignore[attr-defined]
-            torch.hpu.set_autocast_xla_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
+            torch.set_autocast_xla_enabled(self.prev)            # type: ignore[attr-defined]
+            torch.set_autocast_xla_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()

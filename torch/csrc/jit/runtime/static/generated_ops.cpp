@@ -5191,10 +5191,12 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           const auto& self = p_node->Input(0).toTensor();
           const auto cuda_enabled = p_node->Input(1).toBool();
           const auto cpu_enabled = p_node->Input(2).toBool();
-          const auto cuda_dtype = p_node->Input(3).toScalarType();
-          const auto cpu_dtype = p_node->Input(4).toScalarType();
+          const auto xla_enabled = p_node->Input(3).toBool();
+          const auto cuda_dtype = p_node->Input(4).toScalarType();
+          const auto cpu_dtype = p_node->Input(5).toScalarType();
+          const auto xla_dtype = p_node->Input(6).toScalarType();
           p_node->Output(0) = at::native::_autocast_to_reduced_precision(
-              self, cuda_enabled, cpu_enabled, cuda_dtype, cpu_dtype);
+              self, cuda_enabled, cpu_enabled, xla_enabled, cuda_dtype, cpu_dtype, xla_dtype);
         };
       }
       LogAndDumpSchema(n);
@@ -5211,8 +5213,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
           const auto& self = p_node->Input(0).toTensor();
           const auto cuda_enabled = p_node->Input(1).toBool();
           const auto cpu_enabled = p_node->Input(2).toBool();
+          const auto xla_enabled = p_node->Input(3).toBool();
           p_node->Output(0) = at::native::_autocast_to_full_precision(
-              self, cuda_enabled, cpu_enabled);
+              self, cuda_enabled, cpu_enabled, xla_enabled);
         };
       }
       LogAndDumpSchema(n);
