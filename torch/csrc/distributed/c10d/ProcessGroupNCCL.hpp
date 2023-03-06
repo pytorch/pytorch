@@ -644,7 +644,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Add Work Pointer to workVector
   void workEnqueue(c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL>);
 
-  // The CUDA steams used by NCCL kernels
+  // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, std::vector<at::cuda::CUDAStream>>
       ncclStreams_;
 
