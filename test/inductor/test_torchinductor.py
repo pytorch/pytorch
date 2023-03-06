@@ -1044,9 +1044,15 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
+            return (
+                (a + b).max(),
+                (a + b).min(),
+                torch.amax(a + 1, keepdim=True),
+                torch.amin(b + 1, keepdim=True),
+            )
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+            self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
 
     def test_fmin_fmax(self):
         def fn(a, b):
