@@ -2,12 +2,43 @@
 
 """Test consistency between the output values of fx.GraphModule produced by FX frontend
 and torch.nn.Modules.
+
+Note [Add new module test cases]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To add a new module test case, add a new entry to `MODULE_INFOS` below. The entry should
+be a `ModuleInfo` object. The `ModuleInfo` object should have the following fields:
+
+    1. `module_cls`: the class of the nn.Module to be tested.
+    2. `module_inputs_func`: a function that returns a list of `ModuleInput`s.
+        `ModuleInput` is a class that contains the constructor arguments and
+        the forward arguments for the module. Both are represented by `FunctionInput`.
+        `FunctionInput` is a class that contains the positional arguments and
+        the keyword arguments for the function.
+
+This is adopted from 'torch/testing/_internal/common_modules.py'. More details
+and example usages can be found there.
+
+Note [Add new FxFrontend]
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To add a new FxFrontend, add a new entry to `FX_FRONTEND_INFOS` below. The entry should
+be a `FrontendInfo` object. The `FrontendInfo` object should have the following fields:
+
+    1. `fx_frontend`: the FxFrontend to be tested.
+    2. `skips`: a mapping from module_info name to reason for skipping the test.
+        `ModuleInfo.formatted_name` is used as the model name to skip tests.
+
+
 """
 
 from __future__ import annotations
 
 import functools
-from typing import Sequence, Union
+import sys
+from typing import List, Mapping, Optional, Union
+
+import pytest
 
 import torch
 from torch import nn
@@ -16,16 +47,82 @@ from torch.testing._internal import common_device_type, common_modules, common_u
 from torch.utils import _pytree as pytree
 
 _FrontendType = Union[frontend.FxFrontend, frontend.FxFrontendUnpackKwargs]
-FX_FRONTENDS: Sequence[_FrontendType] = [
-    # TODO(bowbao): skip aotautograd, because it alters graph inputs/outputs.
-    # frontend.FxFrontendUnpackKwargs(frontend.AOTAutogradFrontend(dynamic=True)),
-    frontend.DynamoExport(tracing_mode="symbolic", aten_graph=True),
-    frontend.DynamoExport(tracing_mode="real", aten_graph=True),
-    frontend.FxFrontendUnpackKwargs(frontend.DynamoOptimize(dynamic=True)),
-    frontend.FxFrontendUnpackKwargs(frontend.MakeFx(tracing_mode="real")),
-    frontend.FxFrontendUnpackKwargs(frontend.DynamoOptimize(dynamic=False)),
-]
 
+
+class FrontendInfo:
+    """A container for FxFrontend and its skips for test cases."""
+
+    __slots__ = ["fx_frontend", "skips"]
+
+    fx_frontend: _FrontendType
+
+    # Mapping from module_info name to reason for skipping the test.
+    # NOTE: `ModuleInfo.formatted_name` is used as the model name to skip tests.
+    skips: Mapping[str, str]
+
+    def __init__(
+        self,
+        fx_frontend: _FrontendType,
+        skips: Optional[Mapping[str, str]] = None,
+    ):
+        self.fx_frontend = fx_frontend
+        self.skips = skips or {}
+
+
+FX_FRONTEND_INFOS: List[FrontendInfo] = []
+
+
+# MODIFY THIS SECTION to add a FxFrontend or modify skips/xfails ###############
+# See Note [Add new FxFrontend] for more details.
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.FxFrontendUnpackKwargs(frontend.AOTAutogradFrontend(dynamic=True)),
+        skips={
+            "MLPModel": "aotautograd alters graph inputs/outputs when there are parameters."
+        },
+    )
+)
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.DynamoExport(tracing_mode="symbolic", aten_graph=True),
+        skips={},
+    )
+)
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.DynamoExport(tracing_mode="real", aten_graph=True),
+        skips={},
+    )
+)
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.FxFrontendUnpackKwargs(frontend.DynamoOptimize(dynamic=True)),
+        skips={},
+    )
+)
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.FxFrontendUnpackKwargs(frontend.DynamoOptimize(dynamic=False)),
+        skips={},
+    )
+)
+
+FX_FRONTEND_INFOS.append(
+    FrontendInfo(
+        frontend.FxFrontendUnpackKwargs(frontend.MakeFx(tracing_mode="real")),
+        skips={},
+    )
+)
+
+
+# END OF SECTION TO MODIFY to add a FxFrontend or modify skips/xfails ##########
+
+# MODIFY THIS SECTION to add or modify nn.Module test cases ####################
 # TODO: Organize test models into a separate file to be re-used by other tests.
 class MLPModel(nn.Module):
     def __init__(self):
@@ -64,94 +161,133 @@ def module_inputs_mlp_model(
     return module_inputs
 
 
+class SingleAddModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, tensor_x: torch.Tensor):
+        output = tensor_x + 1
+        return output
+
+
+def module_inputs_single_add(
+    module_info, device, dtype, requires_grad, training, **kwargs
+):
+    make_input = functools.partial(
+        common_modules.make_tensor,
+        device=device,
+        dtype=dtype,
+        requires_grad=requires_grad,
+    )
+    module_inputs = [
+        common_modules.ModuleInput(
+            constructor_input=common_modules.FunctionInput(),
+            forward_input=common_modules.FunctionInput(make_input((97, 8))),
+        ),
+    ]
+    return module_inputs
+
+
+# Utilize `ModuleInfo` to define the test cases.
+# See Note [Add new module test cases] for more details.
 MODULES_DB = [
-    common_modules.ModuleInfo(MLPModel, module_inputs_func=module_inputs_mlp_model)
+    common_modules.ModuleInfo(MLPModel, module_inputs_func=module_inputs_mlp_model),
+    common_modules.ModuleInfo(
+        SingleAddModel, module_inputs_func=module_inputs_single_add
+    ),
 ]
 
+# END OF SECTION TO MODIFY to add or modify nn.Module test cases ###############
 
-class TestFxFrontendConsistency(common_utils.TestCase):
-    @classmethod
-    def create_test_base(cls, fx_frontend: _FrontendType):
-        """Returns the base test method for the given fx frontend."""
 
-        @common_modules.modules(
-            MODULES_DB, train_eval_mode=common_modules.TrainEvalMode.eval_only
+class _TestFxFrontendConsistency(common_utils.TestCase):
+    frontendInfo: FrontendInfo
+
+    @common_modules.modules(
+        MODULES_DB, train_eval_mode=common_modules.TrainEvalMode.eval_only
+    )
+    def test_output_match(
+        self,
+        device: str,
+        dtype: torch.dtype,
+        module_info: common_modules.ModuleInfo,
+        training: bool,
+    ):
+        """Base test method for testing each module_info with fx frontend."""
+        # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
+        assert device == "cpu"
+
+        if skip_reason := self.frontendInfo.skips.get(module_info.formatted_name):
+            pytest.skip(skip_reason)
+
+        fx_frontend = self.frontendInfo.fx_frontend
+
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(
+            module_info,
+            device=device,
+            dtype=dtype,
+            requires_grad=False,
+            training=training,
         )
-        def _output_match_base(
-            self: common_utils.TestCase,
-            device: str,
-            dtype: torch.dtype,
-            module_info: common_modules.ModuleInfo,
-            training: common_modules.TrainEvalMode,
-        ):
-            """Base test method for testing each fx frontend, used by instantiate_device_type_tests."""
-            # device is provided by instantiate_device_type_tests, but we only want to run in cpu.
-            assert device == "cpu"
 
-            module_cls = module_info.module_cls
-            module_inputs = module_info.module_inputs_func(
-                module_info,
-                device=device,
-                dtype=dtype,
-                requires_grad=False,
-                training=False,
-            )
+        for (i, module_input) in enumerate(module_inputs):
+            with self.subTest(
+                module_name=module_info.formatted_name,
+                sample_num=i,
+                fx_frontend=fx_frontend.name,
+            ):
+                init_args, init_kwargs = (
+                    module_input.constructor_input.args,
+                    module_input.constructor_input.kwargs,
+                )
+                model = module_cls(*init_args, **init_kwargs)
+                model.to(device).to(dtype)
+                model.train(training)
 
-            for (i, module_input) in enumerate(module_inputs):
-                with self.subTest(
-                    module_name=module_cls.__name__,
-                    sample_num=i,
-                    fx_frontend=fx_frontend.name,
-                ):
-                    init_args, init_kwargs = (
-                        module_input.constructor_input.args,
-                        module_input.constructor_input.kwargs,
-                    )
-                    model = module_cls(*init_args, **init_kwargs)
-                    model.to(device).to(dtype)
-                    model.eval()
+                args, kwargs = (
+                    module_input.forward_input.args,
+                    module_input.forward_input.kwargs,
+                )
 
-                    args, kwargs = (
-                        module_input.forward_input.args,
-                        module_input.forward_input.kwargs,
-                    )
+                if isinstance(fx_frontend, frontend.FxFrontendUnpackKwargs):
+                    graph_module, new_args = fx_frontend(model, *args, **kwargs)
+                    fx_outputs = graph_module(*new_args)
+                else:
+                    graph_module = fx_frontend(model, *args, **kwargs)
+                    fx_outputs = graph_module(*args, **kwargs)
 
-                    if isinstance(fx_frontend, frontend.FxFrontendUnpackKwargs):
-                        graph_module, new_args = fx_frontend(model, *args, **kwargs)
-                        fx_outputs = graph_module(*new_args)
-                    else:
-                        graph_module = fx_frontend(model, *args, **kwargs)
-                        fx_outputs = graph_module(*args, **kwargs)
+                outputs = model(*args, **kwargs)
 
-                    outputs = model(*args, **kwargs)
-
-                    self.assertEqual(
-                        pytree.tree_flatten(outputs)[0],
-                        pytree.tree_flatten(fx_outputs)[0],
-                    )
-
-        test_name = f"test_output_match_frontend_{fx_frontend.name}"
-        _output_match_base.__name__ = test_name
-        return _output_match_base
-
-    @classmethod
-    def parameterize_frontends(cls, frontends: Sequence[_FrontendType]):
-        for fx_frontend in frontends:
-            # Generate a test method for each frontend.
-            base_method = cls.create_test_base(fx_frontend)
-            # Important to rename the test method so that DecorateInfo can find it
-            test_name = base_method.__name__
-
-            # TODO(bowbao): Potentially re-use 'add_decorate_info' to have finer-grained
-            # control over which modules to skip or expect to fail, based on frontend.
-
-            setattr(cls, test_name, base_method)
+                self.assertEqual(
+                    pytree.tree_flatten(outputs)[0],
+                    pytree.tree_flatten(fx_outputs)[0],
+                )
 
 
-TestFxFrontendConsistency.parameterize_frontends(FX_FRONTENDS)
-common_device_type.instantiate_device_type_tests(
-    TestFxFrontendConsistency, globals(), only_for="cpu"
-)
+# 'Parameterize' the test class to run for each fx frontend.
+# Adopted from `parameterized` package.
+# The reason not using `parameterized` package is that it doesn't support
+# applying additional `common_device_type.instantiate_device_type_tests`.
+for frontend_info in FX_FRONTEND_INFOS:
+    test_class_module = sys.modules[_TestFxFrontendConsistency.__module__].__dict__
+    new_test_class_name = f"TestFxFrontendConsistency_{frontend_info.fx_frontend.name}"
+    test_class_module[new_test_class_name] = type(
+        new_test_class_name,
+        (_TestFxFrontendConsistency,),
+        dict(_TestFxFrontendConsistency.__dict__, frontendInfo=frontend_info),
+    )
+
+    # Adds 'instantiated' device-specific test cases to the given scope.
+    common_device_type.instantiate_device_type_tests(
+        test_class_module[new_test_class_name], globals(), only_for="cpu"
+    )
+
+# Remove all test methods from base class to avoid them being picked up and run by
+# the test runner.
+for method_name in list(_TestFxFrontendConsistency.__dict__):
+    if method_name.startswith("test_"):
+        delattr(_TestFxFrontendConsistency, method_name)
 
 if __name__ == "__main__":
     common_utils.run_tests()
