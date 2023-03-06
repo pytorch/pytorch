@@ -24,6 +24,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch.cuda._memory_viz import profile_plot
 from torch.cuda._memory_viz import trace_plot
+from torch.cuda._memory_viz import segment_plot
 
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
@@ -5009,7 +5010,7 @@ class TestCudaComm(TestCase):
         self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    def test_memory_trace_plot(self):
+    def test_memory_plots(self):
         for record_context in (True, False):
             try:
                 torch.cuda.memory.empty_cache()
@@ -5025,9 +5026,12 @@ class TestCudaComm(TestCase):
 
                 run()
                 ss = torch.cuda.memory._snapshot()
-                plot = trace_plot(ss)
-                self.assertTrue(record_context == ("test_memory_trace_plot" in plot))
-                self.assertTrue(str(128 * 128 * 4) in plot)
+                tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(str(128 * 128 * 4) in tplot)
+                splot = segment_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
                 torch.cuda.memory._record_memory_history(False)
             finally:
                 torch.cuda.memory._record_memory_history(False)
