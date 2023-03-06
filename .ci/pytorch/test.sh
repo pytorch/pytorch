@@ -108,14 +108,6 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
-if [[ "$TEST_CONFIG" == *dynamo* ]]; then
-  export PYTORCH_TEST_WITH_DYNAMO=1
-fi
-
-if [[ "$TEST_CONFIG" == *inductor* ]]; then
-  export PYTORCH_TEST_WITH_INDUCTOR=1
-fi
-
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # Print GPU info
   rocminfo
@@ -225,7 +217,7 @@ test_dynamo_shard() {
   python tools/dynamo/verify_dynamo.py
   # Temporarily disable test_fx for dynamo pending the investigation on TTS
   # regression in https://github.com/pytorch/torchdynamo/issues/784
-  time python test/run_test.py \
+  time python test/run_test.py --dynamo \
     --exclude-jit-executor \
     --exclude-distributed-tests \
     --exclude \
@@ -252,14 +244,15 @@ test_dynamo_shard() {
 test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_traceable_collectives --verbose
+  python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives --verbose
   assert_git_not_dirty
 }
 
 test_inductor() {
   python tools/dynamo/verify_dynamo.py
-  python test/run_test.py --include test_modules test_ops test_ops_gradients test_torch --verbose
-  PYTORCH_TEST_WITH_INDUCTOR=0 python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
+  # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
 test_single_dynamo_benchmark() {
@@ -336,11 +329,11 @@ test_inductor_benchmark_perf() {
   # Use test-reports directory under test folder will allow the CI to automatically pick up
   # the test reports and upload them to S3. Need to use full path here otherwise the script
   # will bark about file not found later on
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   PARTITION_FLAGS=""
   if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
     PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
   fi
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   # Check training with --amp
   # Not checking accuracy for perf test for now
@@ -364,8 +357,13 @@ test_inductor_benchmark_perf() {
         --expected benchmarks/dynamo/expected_ci_perf_inductor_torchbench.csv
     done
   else
-    python benchmarks/dynamo/$1.py --ci --training --performance --disable-cudagraphs\
-      --device cuda --inductor --amp $PARTITION_FLAGS  --output "$TEST_REPORTS_DIR"/inductor_training_$1.csv
+    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=amp \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
+      --no-graphs --no-update-archive --no-gh-comment
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites=$1 --training --dtypes=float32 \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" $PARTITION_FLAGS \
+      --no-graphs --no-update-archive --no-gh-comment
   fi
 }
 
@@ -784,13 +782,17 @@ test_bazel() {
 
   get_bazel
 
-   # Test //c10/... without Google flags and logging libraries. The
-   # :all_tests target in the subsequent Bazel invocation tests
-   # //c10/... with the Google libraries.
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
-              --no//c10:use_gflags --no//c10:use_glog //c10/...
+  if [[ "$CUDA_VERSION" == "cpu" ]]; then
+    # Test //c10/... without Google flags and logging libraries. The
+    # :all_tests target in the subsequent Bazel invocation tests
+    # //c10/... with the Google libraries.
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA \
+      --no//c10:use_gflags --no//c10:use_glog //c10/...
 
-  tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+    tools/bazel test --config=cpu-only --test_timeout=480 --test_output=all --test_tag_filters=-gpu-required --test_filter=-*CUDA :all_tests
+  else
+    tools/bazel test //c10/test:core_tests //c10/test:typeid_test //c10/test:util_base_tests
+  fi
 }
 
 test_benchmarks() {
@@ -862,8 +864,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
 elif [[ "$TEST_CONFIG" == distributed ]]; then
-  install_filelock
-  install_triton
   test_distributed
   # Only run RPC C++ tests on the first shard
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -873,25 +873,19 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
   checkout_install_torchdeploy
   test_torch_deploy
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
-  install_filelock
-  install_triton
   install_huggingface
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_triton
   test_dynamo_shard 1
   test_aten
 elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_filelock
-  install_triton
   test_dynamo_shard 2
 elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   install_torchtext
   install_torchvision
-  install_filelock
   checkout_install_torchbench
   install_huggingface
   install_timm
@@ -904,7 +898,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_all* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   install_torchvision
-  install_filelock
   install_huggingface
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     test_aot_eager_benchmark huggingface "" --dynamic-shapes
@@ -913,7 +906,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_huggingface* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_filelock
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
@@ -924,7 +916,6 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   install_torchtext
   install_torchvision
-  install_filelock
   checkout_install_torchbench
   if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_aot_eager_benchmark torchbench "" --dynamic-shapes
@@ -933,13 +924,10 @@ elif [[ "${TEST_CONFIG}" == *aot_eager_torchbench* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   install_torchvision
-  install_filelock
-  if [[ "${TEST_CONFIG}" != *inductor_huggingface_cpu_accuracy* ]]; then
-    # Cpp backend does not depend on triton
-    install_triton
-  fi
   install_huggingface
   if [[ "${TEST_CONFIG}" == *inductor_huggingface_perf* ]]; then
+    install_matplotlib
+    install_tabulate
     test_inductor_huggingface_perf
   elif [[ "${TEST_CONFIG}" == *inductor_huggingface_cpu_accuracy* ]]; then
     test_inductor_huggingface cpu
@@ -948,14 +936,11 @@ elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_filelock
-  if [[ "${TEST_CONFIG}" != *inductor_timm_cpu_accuracy* ]]; then
-    # Cpp backend does not depend on triton
-    install_triton
-  fi
   install_timm
   id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
+    install_matplotlib
+    install_tabulate
     test_inductor_timm_perf_shard $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_shard cpu $id
@@ -965,12 +950,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
   install_torchvision
-  install_filelock
-  if [[ "${TEST_CONFIG}" != *inductor_torchbench_cpu_accuracy* ]]; then
-    # Cpp backend does not depend on triton
-    install_triton
-  fi
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_perf* ]]; then
+    install_matplotlib
+    install_tabulate
     checkout_install_torchbench
     test_inductor_torchbench_perf
   elif [[ "${TEST_CONFIG}" == *inductor_torchbench_cpu_accuracy* ]]; then
@@ -985,19 +967,15 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
-  install_filelock
-  install_triton
   test_inductor
   test_inductor_distributed
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
-  install_triton
   test_python_shard 1
   test_aten
 elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   install_torchvision
-  install_triton
   test_python_shard 2
   test_libtorch
   test_aot_compilation
@@ -1007,7 +985,6 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
 elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
   # Handle arbitrary number of shards
   install_torchvision
-  install_triton
   test_python_shard "$SHARD_NUMBER"
 elif [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
   test_vulkan
@@ -1025,7 +1002,6 @@ elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
   test_functorch
 else
   install_torchvision
-  install_triton
   install_monkeytype
   test_python
   test_aten
