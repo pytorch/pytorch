@@ -335,7 +335,7 @@ test_inductor_benchmark_perf() {
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   PARTITION_FLAGS=""
   if [[ -n "$NUM_TEST_SHARDS" && -n "$2" ]]; then
-    PARTITION_FLAGS="--total-partitions 2 --partition-id $2"
+    PARTITION_FLAGS="--total-partitions $NUM_TEST_SHARDS --partition-id $2"
   fi
   mkdir -p "$TEST_REPORTS_DIR"
   # Check training with --amp
@@ -967,9 +967,9 @@ elif [[ "${TEST_CONFIG}" == *inductor_timm* && $NUM_TEST_SHARDS -gt 1 ]]; then
   if [[ "${TEST_CONFIG}" == *inductor_timm_perf* && $NUM_TEST_SHARDS -gt 1 ]]; then
     test_inductor_timm_perf_shard $id
   elif [[ "${TEST_CONFIG}" == *inductor_timm_cpu_accuracy* && $NUM_TEST_SHARDS -gt 1 ]]; then
-    test_inductor_timm_shard cpu $id
+    test_inductor_timm_shard cpu $NUM_TEST_SHARDS $id
   else
-    test_inductor_timm_shard cuda $id
+    test_inductor_timm_shard cuda $NUM_TEST_SHARDS $id
   fi
 elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
   install_torchtext
