@@ -498,25 +498,48 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
     return cpu_tensors;
 }
 
-Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional<bool> masked) {
   const auto input_layout = input_.layout();
   switch (input_layout) {
     case kStrided:
+      if (masked.value_or(false)) {
+        TORCH_WARN("strided tensor to dense backward ignores masked=true");
+      }
+      // TODO: return grad as it is
       return grad.to_dense();
     case kSparse:
       // Autograd operates on the coalesced assumption, i.e. no duplicate values.
-      return grad.sparse_mask(input_.coalesce());
+      if (masked.value_or(false)) {
+        return grad.sparse_mask(input_.coalesce());
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_.sparse_dim());
+      }
     case kSparseCsr:
     case kSparseCsc:
       // TODO: add efficient CSR/CSC support for sparse_mask
-      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout);
+      if (masked.value_or(false)) {
+        return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout);
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_layout, c10::nullopt, input_.dense_dim());
+      }
     case kSparseBsr:
     case kSparseBsc: {
       // TODO: add efficient BSR/BSC support for sparse_mask
-      const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
-      return grad.sparse_mask(input_.to_sparse()).to_sparse(input_layout, blocksize);
+      //const auto blocksize = at::DimVector(input_.values().sizes().slice(1, 2));
+      const auto blocksize = at::sparse_csr::getBlockSize(input_);
+      if (masked.value_or(false)) {
+        return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout, blocksize);
+      } else {
+        // TODO: return grad as it is
+        return grad.to_sparse(input_layout, blocksize, input_.dense_dim());
+      }
     }
     case kMkldnn:
+      if (masked.value_or(false)) {
+        TORCH_WARN("mkldnn tensor to dense backward ignores masked=true");
+      }
       return grad.to_mkldnn(input_.scalar_type());
     default:
       AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
@@ -529,18 +552,18 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
-Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype, c10::optional<bool> masked) {
   if (tensor.layout() == c10::kSparse) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked);
   }
   if (tensor.layout() == c10::kSparseCsr ||
       tensor.layout() == c10::kSparseCsc ||
       tensor.layout() == c10::kSparseBsr ||
       tensor.layout() == c10::kSparseBsc) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked);
   }
   if (tensor.layout() == c10::kMkldnn) {
-    return tensor._to_dense(dtype);
+    return tensor._to_dense(dtype, masked);
   }
   TORCH_CHECK(
       tensor.layout() == c10::kStrided,
@@ -552,7 +575,7 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
   return tensor;
 }
 
-Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
+Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
@@ -561,7 +584,7 @@ Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype) {
 
 Tensor sparse_compressed_to_dense(
     const Tensor& self,
-    c10::optional<ScalarType> dtype) {
+    c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");

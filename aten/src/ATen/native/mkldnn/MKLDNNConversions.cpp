@@ -23,10 +23,13 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
               "mkldnn_to_dense expects float or bfloat16 tensor input");
+  if (masked.value_or(false)) {
+    TORCH_WARN("mkldnn tensor to dense conversion ignores masked=true");
+  }
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
@@ -269,7 +272,7 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
