@@ -3,16 +3,16 @@ import torch
 from torch.ao.pruning import WeightNormSparsifier
 import torch.utils.benchmark as benchmark
 
-first_activation_dim =1000
+first_activation_dim = 3072
 num_batches = 1
-output_channel = 1024
-input_channel = 1024
+output_channel = 768
+input_channel = 768
 dtype = torch.float16
 
 torch.set_printoptions(precision=1, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
 
 
-def run_benchmark(model, description, num_samples=100):
+def run_benchmark(model, description):
     # random_example = torch.randn(100, 700)
     # device = next(model.parameters()).device
     random_example = torch.rand(num_batches, first_activation_dim, input_channel, device='cuda', dtype=dtype)
@@ -109,8 +109,6 @@ def cusparselt_linear(activation):
 
 sparse_output = cusparselt_linear(activation)
 dense_output = m(activation)
-
-# print(torch.permute(dense_output, (0, 2, 1)))
 
 print("sparse linear output ")
 print(sparse_output)
