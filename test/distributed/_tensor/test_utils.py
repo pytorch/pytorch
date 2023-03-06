@@ -3,7 +3,7 @@
 import torch
 from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import Replicate, Shard
-from torch.distributed._tensor.utils import compute_local_tensor_size
+from torch.distributed._tensor._utils import compute_local_shape
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -18,7 +18,7 @@ class UtilTest(DTensorTestBase):
         return 8
 
     @with_comms
-    def test_compute_local_tensor_size_2d(self):
+    def test_compute_local_shape_2d(self):
         # mesh: 4 * 2
         mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -26,21 +26,21 @@ class UtilTest(DTensorTestBase):
 
         # replicate, replicate
         placements1 = [Replicate(), Replicate()]
-        local_size1 = compute_local_tensor_size(size, mesh, placements1)
+        local_size1 = compute_local_shape(size, mesh, placements1)
         self.assertEqual(local_size1, torch.Size([8, 6]))
 
         # replicate, shard
         placements2 = [Replicate(), Shard(0)]
-        local_size2 = compute_local_tensor_size(size, mesh, placements2)
+        local_size2 = compute_local_shape(size, mesh, placements2)
         self.assertEqual(local_size2, torch.Size([4, 6]))
 
         # shard, shard
         placements3 = [Shard(0), Shard(1)]
-        local_size3 = compute_local_tensor_size(size, mesh, placements3)
+        local_size3 = compute_local_shape(size, mesh, placements3)
         self.assertEqual(local_size3, torch.Size([2, 3]))
 
     @with_comms
-    def test_compute_local_tensor_size_2d_not_evenly(self):
+    def test_compute_local_shape_2d_uneven(self):
         # mesh: 4 * 2
         mesh_tensor = torch.arange(self.world_size).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -49,7 +49,7 @@ class UtilTest(DTensorTestBase):
 
         # replicate, shard
         placements2 = [Replicate(), Shard(0)]
-        local_size2 = compute_local_tensor_size(size, mesh, placements2)
+        local_size2 = compute_local_shape(size, mesh, placements2)
         if rank_coordinates[1] < 1:
             self.assertEqual(local_size2, torch.Size([4, 7]))
         else:
@@ -57,7 +57,7 @@ class UtilTest(DTensorTestBase):
 
         # shard, shard
         placements3 = [Shard(0), Shard(1)]
-        local_size3 = compute_local_tensor_size(size, mesh, placements3)
+        local_size3 = compute_local_shape(size, mesh, placements3)
         # first dim
         if rank_coordinates[0] < 3:
             self.assertEqual(local_size3[0], 2)

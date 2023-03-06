@@ -510,6 +510,36 @@ class TestTransformers(NNTestCase):
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
 
+
+    def test_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        encoder(
+            inputs,
+            mask=src_mask,
+            src_key_padding_mask=padding_mask,
+        )
+
+
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_decoder_only_layer(self):
