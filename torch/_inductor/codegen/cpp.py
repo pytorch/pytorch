@@ -1607,7 +1607,9 @@ class TileBufferUseTracker(V.WrapperHandler):
 
 
 class CppTileOverrides:
-    """A proxy that delegates the ops to those supported by CPP language and libraries"""
+    """
+    A proxy that delegates the ops to those supported by low-level intrinsics from CPP language and libraries
+    """
 
     def __init__(self, parent):
         pass
@@ -1717,12 +1719,14 @@ class CppTileKernel(CppKernel):
         self.tile_ops_tbl[0] = CppTileFallbackWrapper(
             TileBufferUseTracker(CppTile0DOverrides(V.MockHandler()))
         )
-        self.tile_ops_tbl[1] = CppTileFallbackWrapper(
-            TileBufferUseTracker(CppTile1DOverrides(V.MockHandler()))
-        )
-        self.tile_ops_tbl[2] = CppTileFallbackWrapper(
-            TileBufferUseTracker(CppTile2DOverrides())
-        )
+        # TODO(jgong5): support vectorized codegen for tile sizes larger than HW vector lengths
+        if self.tile_sizes and all(size == codecache.pick_vec_isa().nelements() for size in self.tile_sizes):
+            self.tile_ops_tbl[1] = CppTileFallbackWrapper(
+                TileBufferUseTracker(CppTile1DOverrides(V.MockHandler()))
+            )
+            self.tile_ops_tbl[2] = CppTileFallbackWrapper(
+                TileBufferUseTracker(CppTile2DOverrides())
+            )
         self.fallback_ops = CppTileFallbackOverrides()
 
         # count CppTileKernel as vec kernel since it tiles at least on one dim
