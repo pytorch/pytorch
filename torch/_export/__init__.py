@@ -116,18 +116,8 @@ def _aot_capture(mod, flat_args):
         num_params_buffers=params_len,
         aot_id=-1,
         keep_inference_input_mutations=False,
+        dynamic_shapes=True,
     )
-
-    @contextlib.contextmanager
-    def setup_dynamic_shape():
-        prev, torch._functorch.config.use_dynamic_shapes = (
-            torch._functorch.config.use_dynamic_shapes,
-            True,
-        )
-        try:
-            yield
-        finally:
-            torch._functorch.config.use_dynamic_shapes = prev
 
     def exported_call(*args):
         state_args = args[:params_len]
@@ -141,7 +131,7 @@ def _aot_capture(mod, flat_args):
         outputs, out_spec = pytree.tree_flatten(outputs)
         return outputs
 
-    with torch.enable_grad(), setup_dynamic_shape():
+    with torch.enable_grad():
         create_aot_dispatcher_function(
             exported_call,
             full_args,
