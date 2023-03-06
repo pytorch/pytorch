@@ -276,7 +276,7 @@ for frontend_info in FX_FRONTEND_INFOS:
     test_class_module[new_test_class_name] = type(
         new_test_class_name,
         (_TestFxFrontendConsistency,),
-        dict(_TestFxFrontendConsistency.__dict__, frontendInfo=frontend_info),
+        dict(_TestFxFrontendConsistency.__dict__, frontend_info=frontend_info),
     )
 
     # Adds 'instantiated' device-specific test cases to the given scope.
