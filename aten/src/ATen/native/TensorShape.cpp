@@ -3424,7 +3424,7 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  DimVector inferred_size;
+  SymDimVector inferred_size;
   try {
     inferred_size = at::infer_size_dv(sizes, self.size(dim));
   } catch (const std::runtime_error& e) {
