@@ -30,7 +30,7 @@ const IrBuilder* getIrBuilder() {
 }
 
 at::Tensor MakeTensorFromComputationData(
-    const BackendDataPtr& data,
+    const BackendDataPtr data,
     c10::optional<at::ScalarType> logical_scalar_type) {
   return getBackend()->MakeTensorFromComputationData(data, logical_scalar_type);
 }

@@ -80,7 +80,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   }
 
   at::Tensor MakeTensorFromComputationData(
-      const torch::lazy::BackendDataPtr& data,
+      const torch::lazy::BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const override {
     const auto ts_data = std::static_pointer_cast<TSData>(data);
     return ts_data->data();
@@ -123,7 +123,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   }
 
   std::string GetComputationBackendText(
-      const torch::lazy::ComputationPtr& computation) const override {
+      const torch::lazy::ComputationPtr computation) const override {
     auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(computation.get());
     return ts_computation->graph()->toString();

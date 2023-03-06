@@ -62,7 +62,7 @@ class TORCH_API BackendImplInterface {
   virtual BackendDataPtr GetComputationDataFromNode(const Node*) const = 0;
 
   virtual at::Tensor MakeTensorFromComputationData(
-      const BackendDataPtr& data,
+      const BackendDataPtr data,
       c10::optional<at::ScalarType> logical_scalar_type) const = 0;
 
   /**
@@ -141,7 +141,7 @@ class TORCH_API BackendImplInterface {
   //   virtual MemoryInfo GetMemoryInfo(const std::string& device) = 0;
 
   virtual std::string GetComputationBackendText(
-      const ComputationPtr& computation) const = 0;
+      const ComputationPtr computation) const = 0;
 };
 
 class TORCH_API BackendRegistrar {
