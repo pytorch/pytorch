@@ -19,12 +19,14 @@ def parse_args():
     parser = argparse.ArgumentParser(description="test script")
 
     parser.add_argument(
+        "--init-method",
         "--init_method",
         type=str,
         required=True,
         help="init_method to pass to `dist.init_process_group()` (e.g. env://)",
     )
     parser.add_argument(
+        "--world-size",
         "--world_size",
         type=int,
         default=os.getenv("WORLD_SIZE", -1),

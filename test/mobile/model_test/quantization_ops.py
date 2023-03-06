@@ -4,7 +4,7 @@ import torch.nn as nn
 
 class GeneralQuantModule(torch.nn.Module):
     def __init__(self):
-        super(GeneralQuantModule, self).__init__()
+        super().__init__()
         self.embedding = torch.ao.nn.quantized.Embedding(
             num_embeddings=10, embedding_dim=12
         )
@@ -48,7 +48,7 @@ class GeneralQuantModule(torch.nn.Module):
 
 class DynamicQuantModule:
     def __init__(self):
-        super(DynamicQuantModule, self).__init__()
+        super().__init__()
         self.module = self.M()
 
     def getModule(self):
@@ -111,9 +111,6 @@ class DynamicQuantModule:
 
 
 class StaticQuantModule:
-    def __init__(self):
-        super(StaticQuantModule, self).__init__()
-
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()
@@ -165,9 +162,6 @@ class StaticQuantModule:
 
 
 class FusedQuantModule:
-    def __init__(self):
-        super(FusedQuantModule, self).__init__()
-
     def getModule(self):
         model_fp32 = self.M()
         model_fp32.eval()

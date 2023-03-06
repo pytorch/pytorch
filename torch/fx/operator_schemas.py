@@ -170,7 +170,7 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
     try:
-        if isinstance(x, list) or isinstance(x, tuple):
+        if isinstance(x, (list, tuple)):
             # todo(chilli): Figure out the right way for mypy to handle this
             if isinstance(x, list):
                 def ret_type(x):
@@ -274,7 +274,7 @@ def normalize_function(
         kwargs = {}
     new_args_and_kwargs = None
     if not isinstance(target, types.BuiltinFunctionType) and not (
-        isinstance(target, OpOverloadPacket) or isinstance(target, OpOverload)
+        isinstance(target, (OpOverloadPacket, OpOverload))
     ):
         target_for_analysis = target
         if target in boolean_dispatched:

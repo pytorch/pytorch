@@ -65,6 +65,26 @@ class ForeachFuncWrapper:
         return inputs[0] if self._is_inplace else actual
 
 
+def get_transform_func(num_tensors, dtype, device, is_fastpath):
+    def transform(t):
+        if not torch.is_tensor(t):
+            return t
+        return make_tensor(
+            (num_tensors, num_tensors), dtype=dtype, device=device,
+            requires_grad=True, noncontiguous=not is_fastpath,
+        )
+    return transform
+
+
+def clone(arg):
+    if isinstance(arg, (list, tuple)):
+        return [clone(a) for a in arg]
+    if torch.is_tensor(arg):
+        return arg.clone().detach().requires_grad_()
+    else:
+        return arg
+
+
 class TestForeach(TestCase):
 
     @property
@@ -82,18 +102,21 @@ class TestForeach(TestCase):
             RegularFuncWrapper(op.ref_inplace),
         )
 
-    def _binary_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, alpha=None):
+    def _binary_test(self, dtype, op, ref, inputs, is_fastpath, is_inplace, *, alpha=None, scalar_self_arg=False):
         ref_inputs = [[t.clone().detach() for t in inputs[0]], inputs[1]] if is_inplace else inputs
 
         try:
             actual = op(inputs, self.is_cuda, is_fastpath)
         except RuntimeError as e:
             with self.assertRaisesRegex(type(e), re.escape(str(e))):
-                ref(ref_inputs)
+                if not scalar_self_arg:
+                    ref(ref_inputs)
+                else:
+                    [ref.func(ref_inputs[0], t) for t in ref_inputs[1]]
         else:
-            expected = ref(ref_inputs)
+            expected = ref(ref_inputs) if not scalar_self_arg else [ref.func(ref_inputs[0], t) for t in ref_inputs[1]]
             self.assertEqual(actual, expected)
-        if alpha is not None:
+        if alpha is not None and not scalar_self_arg:
             kwargs = {'alpha': alpha}
             ref_inputs = inputs
             try:
@@ -112,24 +135,54 @@ class TestForeach(TestCase):
     @ops(foreach_binary_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_binary_op(self, device, dtype, op, is_fastpath):
-        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
+        scalar_self_arg_test_complete = False
+        for i, sample in enumerate(op.sample_inputs(device, dtype, noncontiguous=not is_fastpath)):
             rhs_arg, = sample.args
             kwargs = {} or sample.kwargs
             alpha = kwargs.pop("alpha", None)
             disable_fastpath = kwargs.pop("disable_fastpath") if is_fastpath else False
-
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             self._binary_test(
-                dtype, wrapped_op, ref, [sample.input, rhs_arg], is_fastpath and not disable_fastpath, False, alpha=alpha)
+                dtype, wrapped_op, ref, [sample.input, rhs_arg],
+                is_fastpath and not disable_fastpath, False, alpha=alpha)
             self._binary_test(
-                dtype, inplace_op, inplace_ref, [sample.input, rhs_arg], is_fastpath and not disable_fastpath, True, alpha=alpha)
+                dtype, inplace_op, inplace_ref, [sample.input, rhs_arg],
+                is_fastpath and not disable_fastpath, True, alpha=alpha)
+
+            if op.supports_autograd and dtype in floating_types():
+                transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
+                tensors = transformed_sample.input
+                rhs_arg, = transformed_sample.args
+                ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
+                try:
+                    sum(wrapped_op([tensors, rhs_arg], is_cuda=False, is_fastpath=False)).mean().backward()
+                except RuntimeError:
+                    with self.assertRaises(RuntimeError):
+                        sum(ref([ref_tensors, ref_rhs_arg])).mean().backward()
+                else:
+                    sum(ref([ref_tensors, ref_rhs_arg])).mean().backward()
+                    self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
+                    if isinstance(rhs_arg, list) and isinstance(rhs_arg[0], torch.Tensor):
+                        self.assertEqual([t.grad for t in rhs_arg], [t.grad for t in ref_rhs_arg])
+            if op.supports_scalar_self_arg and isinstance(rhs_arg, Number) and (not scalar_self_arg_test_complete):
+                scalar_self_arg_test_complete = True
+                self._binary_test(
+                    dtype, wrapped_op, ref, [rhs_arg, sample.input], is_fastpath, False,
+                    alpha=alpha, scalar_self_arg=True)
+                if op.supports_autograd and dtype == torch.float32:
+                    transformed_sample = sample.transform(
+                        get_transform_func(len(sample.input), dtype, device, is_fastpath))
+                    tensors = transformed_sample.input
+                    rhs_arg, = transformed_sample.args
+                    ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
+                    sum(wrapped_op([rhs_arg, tensors], is_cuda=False, is_fastpath=False)).mean().backward()
+                    sum([ref.func(ref_rhs_arg, t) for t in ref_tensors]).mean().backward()
+                    self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
 
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_pointwise_op(self, device, dtype, op, is_fastpath):
-        for sample in op.sample_inputs(device, dtype):
-            if not is_fastpath:
-                sample = sample.noncontiguous()
+        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             assert isinstance(sample.args, tuple)
             assert len(sample.args) == 2
             inputs = [sample.input, *sample.args]
@@ -138,7 +191,27 @@ class TestForeach(TestCase):
             wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
             values = kwargs.pop("values")
             self._pointwise_test(wrapped_op, ref, inputs, is_fastpath and not disable_fastpath, False, values=values)
-            self._pointwise_test(inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath, True, values=values)
+            self._pointwise_test(
+                inplace_op, inplace_ref, inputs, is_fastpath and not disable_fastpath,
+                True, values=values)
+
+            if op.supports_autograd and dtype in floating_types():
+                transformed_sample = sample.transform(
+                    get_transform_func(len(sample.input), dtype, device, is_fastpath))
+                tensors = transformed_sample.input
+                rhs_arg = transformed_sample.args
+                ref_tensors, ref_rhs_arg = clone(tensors), clone(rhs_arg)
+                try:
+                    sum(wrapped_op([tensors, *rhs_arg], is_cuda=False, is_fastpath=False)).mean().backward()
+                except RuntimeError:
+                    with self.assertRaises(RuntimeError):
+                        sum(ref([ref_tensors, *ref_rhs_arg])).mean().backward()
+                else:
+                    sum(ref([ref_tensors, *ref_rhs_arg])).mean().backward()
+                    self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
+                    for op_list, ref_list in zip(rhs_arg, ref_rhs_arg):
+                        if isinstance(op_list, list) and isinstance(op_list[0], torch.Tensor):
+                            self.assertEqual([t.grad for t in op_list], [t.grad for t in ref_list])
 
             if is_fastpath and isinstance(values, list):
                 sample = sample.transform(lambda t: t.clone().detach() if torch.is_tensor(t) else t)
@@ -222,24 +295,6 @@ class TestForeach(TestCase):
             inplace_ref(copied_inputs),
             self.assertEqual(copied_inputs, inputs)
 
-    def _test_unary(self, device, dtype, opinfo, N, is_fastpath):
-        op, ref, inplace_op, inplace_ref = self._get_funcs(opinfo, 1)
-        inputs = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath),
-        # note(mkozuki): Complex inputs for `_foreach_abs` go through slowpath.
-        if opinfo.name == "_foreach_abs" and dtype in complex_types():
-            is_fastpath = False
-        self._regular_unary_test(dtype, op, ref, inputs, is_fastpath)
-        self._inplace_unary_test(dtype, inplace_op, inplace_ref, inputs, is_fastpath)
-
-        if opinfo.supports_autograd and dtype in floating_types():
-            tensors = opinfo.sample_inputs(device, dtype, N, noncontiguous=not is_fastpath, same_size=True)
-            tensors = [t.requires_grad_() for t in tensors]
-            ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
-
-            sum(op.func(tensors)).mean().backward()
-            sum([ref.func(t) for t in ref_tensors]).mean().backward()
-            self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
-
     @skipMeta
     @ops(foreach_unary_op_db)
     @parametrize("is_fastpath", (True, False))
@@ -257,19 +312,39 @@ class TestForeach(TestCase):
             )
             self.assertEqual(ref(inputs), wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath))
             self._inplace_unary_test(inplace_op, inplace_ref, [sample.input], is_fastpath and not disable_fastpath)
+            if op.supports_autograd and dtype in floating_types():
+                num_tensors = len(sample.input)
+                tensors = [
+                    make_tensor(
+                        (num_tensors, num_tensors), dtype=dtype, device=device,
+                        requires_grad=True, noncontiguous=not is_fastpath,
+                    )
+                    for _ in range(num_tensors)
+                ]
+                ref_tensors = [t.clone().detach().requires_grad_() for t in tensors]
+                sum(wrapped_op.func(tensors)).mean().backward()
+                sum([ref.func(t) for t in ref_tensors]).mean().backward()
+                self.assertEqual([t.grad for t in tensors], [t.grad for t in ref_tensors])
 
     @ops(foreach_reduce_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_reduce_op(self, device, dtype, op, is_fastpath):
-        for sample in op.sample_inputs(device, dtype):
-            if not is_fastpath:
-                sample = sample.noncontiguous()
+        for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             ord = sample.kwargs.pop("ord")
             disable_fastpath = sample.kwargs.pop("disable_fastpath", False)
 
             inputs = (sample.input,)
             wrapped_op, ref, _, _ = self._get_funcs(op)
             self.assertEqual(ref(inputs, ord=ord), wrapped_op(inputs, self.is_cuda, is_fastpath and not disable_fastpath, ord=ord))
+            if op.supports_autograd and dtype in floating_types():
+                transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
+                tensors = transformed_sample.input
+                ref_tensors = clone(tensors)
+                sum(wrapped_op((tensors,), False, False, ord=ord)).backward()
+                sum(ref((ref_tensors,), ord=ord)).backward()
+                self.assertEqual(
+                    [t.grad for t in tensors], [t.grad for t in ref_tensors],
+                )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_add_scalar_with_empty_list_and_empty_tensor(self, device, dtype):
@@ -283,7 +358,6 @@ class TestForeach(TestCase):
 
     @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
     def test_binary_op_scalar_with_overlapping_tensors(self, device, dtype, op):
-        print(op, device, dtype)
         foreach_op, ref = op.method_variant, op.ref
         tensors = [torch.ones(1, 1, device=device, dtype=dtype).expand(2, 1, 3)]
 
@@ -466,7 +540,7 @@ class TestForeach(TestCase):
         # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[2], same_size=True))[0].input
         _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[2], same_size=True))[0].input
-        tensors1, tensors2 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
+        tensors1, tensors2 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_ = op.method_variant, op.inplace_variant
         native_op, native_op_ = op.ref, op.ref_inplace
@@ -494,7 +568,7 @@ class TestForeach(TestCase):
         # tensors3: ['cuda', 'cpu]
         _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True))[0].input
         _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))[0].input
-        tensors1, tensors2, tensors3 = list(tensors for tensors in zip(_cuda_tensors, _cpu_tensors))
+        tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 
         foreach_op, foreach_op_, native_op = op.method_variant, op.inplace_variant, op.ref
         actual = foreach_op(tensors1, tensors2, tensors3)
@@ -531,7 +605,6 @@ class TestForeach(TestCase):
     def test_lerp(self, device, dtype, op, is_fastpath):
         for sample in op.sample_inputs(device, dtype, noncontiguous=not is_fastpath):
             wrapped_op, ref, inplace_op, _ = self._get_funcs(op)
-
             args = [*sample.args]
             inputs = [sample.input, args[0]]
 
@@ -556,6 +629,24 @@ class TestForeach(TestCase):
             inplace_inputs = [[t.clone() for t in inputs[0]]] + inputs[1:]
             inplace_actual = inplace_op(inplace_inputs, self.is_cuda, is_fastpath, **kwargs)
             self.assertEqual(inplace_actual, expected)
+
+            if op.supports_autograd and dtype in floating_types():
+                transformed_sample = sample.transform(get_transform_func(len(sample.input), dtype, device, is_fastpath))
+                args = [*transformed_sample.args]
+                inputs = [transformed_sample.input, args[0]]
+
+                kwargs, ref_kwargs = {}, {}
+                if isinstance(args[1], list):
+                    inputs.append(args[1])
+                else:
+                    kwargs = ref_kwargs = {"weight": args[1]}
+                ref_tensors = clone(transformed_sample.input)
+                sum(wrapped_op((transformed_sample.input, *inputs[1:]), False, False, **kwargs)).mean().backward()
+                sum(ref((ref_tensors, *inputs[1:]), **ref_kwargs)).mean().backward()
+                self.assertEqual(
+                    [t.grad for t in transformed_sample.input], [t.grad for t in ref_tensors],
+                    msg=f"{transformed_sample.input[0].grad[:2, :2]}, {ref_tensors[0].grad[:2, :2]}"
+                )
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)

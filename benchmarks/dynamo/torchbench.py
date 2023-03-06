@@ -84,6 +84,8 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+    # segfault: Internal Triton PTX codegen error
+    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -195,7 +197,7 @@ MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
 
 class TorchBenchmarkRunner(BenchmarkRunner):
     def __init__(self):
-        super(TorchBenchmarkRunner, self).__init__()
+        super().__init__()
         self.suite_name = "torchbench"
         self.optimizer = None
 
@@ -374,9 +376,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
-
+def torchbench_main():
     original_dir = setup_torchbench_cwd()
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TorchBenchmarkRunner(), original_dir)
+
+
+if __name__ == "__main__":
+    torchbench_main()

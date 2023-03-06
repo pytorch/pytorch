@@ -22,7 +22,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 try:
     import numpy as np
@@ -90,6 +90,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
+
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame():
@@ -195,7 +196,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -689,6 +689,7 @@ def is_safe_constant(v):
             slice,
             type(type),
             torch.device,
+            torch.dtype,
         ),
     ) or isinstance(v, enum.Enum)
 
@@ -749,18 +750,18 @@ def enum_repr(value):
 
 
 def dict_param_key_ids(value):
-    return set([id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)])
+    return {id(k) for k in value.keys() if isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys(value):
-    return set(k for k in value.keys() if not isinstance(k, torch.nn.Parameter))
+    return {k for k in value.keys() if not isinstance(k, torch.nn.Parameter)}
 
 
 def dict_const_keys_repr(const_keys):
     if any(isinstance(k, enum.Enum) for k in const_keys):
         # To workaround repr(Enum) returning invalid global reference before python 3.11
         # by calling enum_repr and removing quotes to render enum in guard code.
-        const_keys_str = f"{set([enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys])}".replace(
+        const_keys_str = f"{ {enum_repr(k) if isinstance(k, enum.Enum) else repr(k) for k in const_keys} }".replace(
             "'", ""
         )
     else:
@@ -921,7 +922,7 @@ def same(
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
-                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
@@ -942,14 +943,17 @@ def same(
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
-            ref = ref.item()
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): {ref} != {res}")
+            log.error(f"Accuracy failed (numpy): {ref} != {res}")
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1088,7 +1092,13 @@ class CompileProfiler:
 # return same dir unless user changes config between calls
 @functools.lru_cache(None)
 def _get_debug_dir(root_dir):
-    dir_name = "run_" + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+    dir_name = (
+        "run_"
+        + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
+        # use pid to avoid conflicts among ranks
+        + "-pid_"
+        + str(os.getpid())
+    )
     return os.path.join(root_dir, dir_name)
 
 
@@ -1277,6 +1287,13 @@ def ifdyn(count1, count2):
         return count2
 
 
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
+        return count1
+    else:
+        return count2
+
+
 def import_submodule(mod: types.ModuleType):
     """
     Ensure all the files in a given submodule are imported
@@ -1284,3 +1301,72 @@ def import_submodule(mod: types.ModuleType):
     for filename in sorted(os.listdir(os.path.dirname(mod.__file__))):
         if filename.endswith(".py") and filename[0] != "_":
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
+
+
+def object_has_getattribute(value: Any):
+    try:
+        if isinstance(
+            inspect.getattr_static(type(value), "__getattribute__"),
+            types.FunctionType,
+        ):
+            return True
+    except AttributeError:
+        pass
+    return False
+
+
+def get_custom_getattr(value: Any):
+    try:
+        getattr_fn = inspect.getattr_static(type(value), "__getattr__")
+    except AttributeError:
+        getattr_fn = None
+    if getattr_fn is torch.nn.Module.__getattr__:
+        # ignore this case of getattr
+        getattr_fn = None
+    return getattr_fn
+
+
+class TensorStaticReason(enum.Enum):
+    NO_SOURCE = 1
+    PARAMETER = 2
+    CONFIG_NOT_DYN = 3
+    NOT_TENSOR = 4
+
+
+def tensor_static_reason_to_message(reason: TensorStaticReason):
+    if reason == TensorStaticReason.NO_SOURCE:
+        return "mark_dynamic usage without a source is illegal."
+    if reason == TensorStaticReason.PARAMETER:
+        return "mark_dynamic on parameter, parameters are always static today."
+    if reason == TensorStaticReason.CONFIG_NOT_DYN:
+        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if reason == TensorStaticReason.NOT_TENSOR:
+        return "mark_dynamic on a non tensor, how did this happen?"
+    raise AssertionError(f"Illegal reason {reason}")
+
+
+def tensor_always_has_static_shape(
+    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+) -> Tuple[bool, TensorStaticReason]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the real tensor to evaluate, parameters force a static shape.
+    source - an optional source, None forces a static shape
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
+    The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
+    """
+    if source is None:
+        # TODO(voz): Look into why we need this case?
+        return True, TensorStaticReason.NO_SOURCE
+    if type(tensor) is torch.nn.Parameter:
+        return True, TensorStaticReason.PARAMETER
+    if config.dynamic_shapes is False:
+        return True, TensorStaticReason.CONFIG_NOT_DYN
+    if not is_tensor:
+        return True, TensorStaticReason.NOT_TENSOR
+    return False, None

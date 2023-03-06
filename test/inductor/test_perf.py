@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import sys
 from unittest.mock import patch
 
 import functorch
@@ -10,6 +11,7 @@ from torch._dynamo.backends.registry import register_backend
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
     TEST_WITH_ROCM,
     TestCase as TorchTestCase,
 )
@@ -23,9 +25,17 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-@torch._dynamo.optimize("count_bytes_inductor")
-def f(x):
-    return torch.cat([x, x.cos()])
+# TODO remove version check once dynamo supports 3.11
+if sys.version_info < (3, 11) and not IS_WINDOWS:
+
+    @torch._dynamo.optimize("count_bytes_inductor")
+    def f(x):
+        return torch.cat([x, x.cos()])
+
+else:
+
+    def f(x):
+        return torch.cat([x, x.cos()])
 
 
 def count_numel(f, *args):
@@ -324,6 +334,16 @@ class FusionTests(TestCase):
 
         inp = (T(10, 10), TI(20, mx=10))
         self.assertExpectedInline(count_numel(f, *inp), """140""")
+
+    def test_mutation_fusion(self):
+        def f(a, b, c):
+            a0 = a.add(c)
+            b0 = b.add(a0)
+            b.copy_(b0)
+            a.copy_(a0)
+
+        inp = (T(10, 10), T(10, 10), T(10, 10))
+        self.assertExpectedInline(count_numel(f, *inp), """500""")
 
 
 class SchedulerFusionTests(TestCase):

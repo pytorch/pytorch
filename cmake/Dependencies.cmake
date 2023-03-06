@@ -53,7 +53,7 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -84,49 +84,11 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   enable_ubsan()
 endif()
 
-# For MSVC,
-# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
-# 2. Switch off incremental linking in debug builds
-# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
-#    for Debug and RelWithDebInfo builds
-if(MSVC)
-  # skip unwanted includes from windows.h
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-
-  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
-  add_definitions(-D_UCRT_LEGACY_INFINITY)
-
-  foreach(flag_var
-      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
-    if(${flag_var} MATCHES "/Z[iI7]")
-      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach(flag_var)
-  if(MSVC_Z7_OVERRIDE)
-    foreach(flag_var
-        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-      if(${flag_var} MATCHES "/Z[iI]")
-        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif()
-    endforeach(flag_var)
-  endif(MSVC_Z7_OVERRIDE)
-  foreach(flag_var
-      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
-      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
-      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
-    endif()
-  endforeach(flag_var)
-endif(MSVC)
-
 # ---[ Threads
-include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET caffe2::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
+find_package(Threads REQUIRED)
+if(TARGET Threads::Threads)
+  list(APPEND Caffe2_DEPENDENCY_LIBS Threads::Threads)
+  add_library(caffe2::Threads ALIAS Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
@@ -1080,7 +1042,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1088,9 +1050,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1145,6 +1107,9 @@ message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE python::python)
+if(APPLE)
+  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
+endif()
 
 # ---[ MPI
 if(USE_MPI)
@@ -1232,7 +1197,7 @@ endif(USE_LLVM)
 # ---[ cuDNN
 if(USE_CUDNN)
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
-  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+  target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
 # ---[ HIP
@@ -1265,6 +1230,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -DUSE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1430,8 +1396,7 @@ if(USE_GLOO)
         # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
         set(NCCL_EXTERNAL ON)
       endif()
-      # gloo uses cuda_add_library
-      torch_update_find_cuda_flags()
+      set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)
@@ -1724,17 +1689,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_CUDA_ENABLED 0)
   else()
     set(AT_CUDA_ENABLED 1)
-  endif()
-
-  if(NOT USE_CUDNN)
-    message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
-    set(AT_CUDNN_ENABLED 0)
-  elseif(NOT CUDNN_FOUND)
-    message(WARNING "CuDNN not found. Compiling without CuDNN support")
-    set(AT_CUDNN_ENABLED 0)
-  else()
-    include_directories(SYSTEM ${CUDNN_INCLUDE_PATH})
-    set(AT_CUDNN_ENABLED 1)
   endif()
 
   if(NOT USE_ROCM)

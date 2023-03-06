@@ -138,7 +138,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         cuda_model = model.cuda()
         # input might be nested - we want to move everything to GPU
         cuda_input = function._nested_map(
-            lambda o: isinstance(o, Variable) or isinstance(o, torch.Tensor),
+            lambda o: isinstance(o, (Variable, torch.Tensor)),
             lambda o: o.cuda(),
         )(input)
         return cuda_model, cuda_input
@@ -424,7 +424,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -485,7 +485,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -540,7 +540,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
         def make_input(batch_size):
             seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=batch_size)
-            seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+            seq_lengths = sorted(map(int, seq_lengths), reverse=True)
             inputs = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
             inputs = rnn_utils.pad_sequence(inputs, batch_first=batch_first)
             inputs = [inputs]
@@ -581,7 +581,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     def test_rnn_init_predict_split(self):
         model = nn.LSTM(RNN_INPUT_SIZE, RNN_HIDDEN_SIZE, 3, bidirectional=True)
         seq_lengths = np.random.randint(1, RNN_SEQUENCE_LENGTH + 1, size=7)
-        seq_lengths = list(reversed(sorted(map(int, seq_lengths))))
+        seq_lengths = sorted(map(int, seq_lengths), reverse=True)
         input = [torch.randn(l, RNN_INPUT_SIZE) for l in seq_lengths]
         input = rnn_utils.pad_sequence(input)
 
@@ -814,9 +814,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         c = torch.randn(BATCH_SIZE, 3, 224, 224)
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 return input + c.type_as(input)
 
@@ -828,9 +825,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def _test_index_generic(self, fn):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 return fn(input)
 
@@ -925,9 +919,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_chunk(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
@@ -937,9 +928,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_sqrt(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 return input.sqrt()
 
@@ -956,9 +944,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_log(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 return input.log()
 
@@ -968,9 +953,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_erf(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 return input.erf()
 
@@ -980,9 +962,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     def test_trigonometry(self):
         def test_func(name):
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, input):
                     return getattr(input, name)()
 
@@ -1000,9 +979,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_addconstant(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
@@ -1012,9 +988,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_subconstant(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, input):
                 # TODO: Why index? This returns a tuple and test runner doesn't
                 # support tuple comparison.
@@ -1169,9 +1142,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_mm(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, m1, m2):
                 return torch.mm(m1, m2)
 
@@ -1183,9 +1153,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_addmm(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, ma, m1, m2):
                 return torch.addmm(ma, m1, m2)
 
@@ -1259,9 +1226,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     # test for a pytorch optimization pass, see https://github.com/pytorch/pytorch/pull/7872
     def test_consecutive_transposes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x.transpose(1, 2).transpose(2, 3)
 
@@ -1275,9 +1239,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         for params in [{}] + [{"dim": i} for i in range(len(shape))]:
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x):
                     return torch.sum(x, **params)
 
@@ -1291,9 +1252,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         for params in [{"dim": i} for i in range(len(shape))]:
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x):
                     return torch.cumsum(x, **params)
 
@@ -1412,9 +1370,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_repeat(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x.repeat(1, 2, 3, 4)
 
@@ -1434,9 +1389,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     @skipIfUnsupportedOpsetVersion([10])
     def test_interpolate_upsample(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
                 # work around for now: turn the dynamic sizes into constant
@@ -1452,9 +1404,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
     @skipIfUnsupportedOpsetVersion([7, 8, 10])
     def test_interpolate_upsample_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 size = [v * 2 for v in x.size()[2:]]
                 return nn.functional.interpolate(x, size=size, mode="nearest")
@@ -1467,9 +1416,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_repeat_dim_overflow(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x.repeat(1, 2, 3, 4)
 
@@ -1480,9 +1426,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_repeat_dynamic(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x.repeat(y.size()[0] // 2, y.size()[1] * 2)
 
@@ -1511,9 +1454,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         for params in [{}] + [{"dim": i} for i in range(len(shape))]:
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x):
                     return torch.mean(x, **params)
 
@@ -1598,9 +1538,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         for dim in range(-len(shape) - 1, len(shape) + 1):
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x):
                     return x.unsqueeze(dim)
 
@@ -1615,9 +1552,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         for dim in range(-len(shape), len(shape)):
 
             class MyModel(torch.nn.Module):
-                def __init__(self):
-                    super().__init__()
-
                 def forward(self, x):
                     return x.squeeze(dim)
 
@@ -1644,9 +1578,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_dynamic_sizes(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 shape = torch.onnx.operators.shape_as_tensor(x)
                 new_shape = torch.cat((torch.LongTensor([-1]), shape[0].view(1)))
@@ -1659,9 +1590,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_advanced_broadcast(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return torch.mul(x, y)
 
@@ -2362,9 +2290,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_c2_roi_align(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, feature, rois):
                 roi_feature = torch.ops._caffe2.RoIAlign(
                     feature,
@@ -2395,9 +2320,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_c2_generate_proposals(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, scores, bbox_deltas, im_info, anchors):
                 a, b = torch.ops._caffe2.GenerateProposals(
                     scores,
@@ -2433,9 +2355,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
 
     def test_c2_bbox_transform(self):
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, rois, deltas, im_info):
                 a, b = torch.ops._caffe2.BBoxTransform(
                     rois,
@@ -2504,9 +2423,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         topk_per_image = int(sum(roi_counts) / 2)
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, class_prob, pred_bbox, batch_splits):
                 a, b, c, d, e, f = torch.ops._caffe2.BoxWithNMSLimit(
                     class_prob,
@@ -2545,9 +2461,6 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         is_bidirectional = True
 
         class MyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, lstm_in):
                 a, b, c = torch.ops._caffe2.InferenceLSTM(
                     lstm_in, num_layers, has_bias, batch_first, is_bidirectional

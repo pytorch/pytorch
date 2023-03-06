@@ -66,7 +66,7 @@ class Distribution:
                         f"to satisfy the constraint {repr(constraint)}, "
                         f"but found invalid values:\n{value}"
                     )
-        super(Distribution, self).__init__()
+        super().__init__()
 
     def expand(self, batch_shape: torch.Size, _instance=None):
         """

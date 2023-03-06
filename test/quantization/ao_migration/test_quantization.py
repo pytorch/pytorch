@@ -7,9 +7,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
     r"""Modules and functions related to the
     `torch/quantization` migration to `torch/ao/quantization`.
     """
-    def test_package_import_quantize(self):
-        self._test_package_import('quantize')
-
     def test_function_import_quantize(self):
         function_list = [
             '_convert',
@@ -34,9 +31,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('quantize', function_list)
 
-    def test_package_import_stubs(self):
-        self._test_package_import('stubs')
-
     def test_function_import_stubs(self):
         function_list = [
             'QuantStub',
@@ -44,9 +38,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'QuantWrapper',
         ]
         self._test_function_import('stubs', function_list)
-
-    def test_package_import_quantize_jit(self):
-        self._test_package_import('quantize_jit')
 
     def test_function_import_quantize_jit(self):
         function_list = [
@@ -66,9 +57,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             'quantize_dynamic_jit',
         ]
         self._test_function_import('quantize_jit', function_list)
-
-    def test_package_import_fake_quantize(self):
-        self._test_package_import('fake_quantize')
 
     def test_function_import_fake_quantize(self):
         function_list = [
@@ -96,9 +84,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('fake_quantize', function_list)
 
-    def test_package_import_fuse_modules(self):
-        self._test_package_import('fuse_modules')
-
     def test_function_import_fuse_modules(self):
         function_list = [
             '_fuse_modules',
@@ -112,18 +97,12 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('fuse_modules', function_list)
 
-    def test_package_import_quant_type(self):
-        self._test_package_import('quant_type')
-
     def test_function_import_quant_type(self):
         function_list = [
             'QuantType',
             '_get_quant_type_to_str',
         ]
         self._test_function_import('quant_type', function_list)
-
-    def test_package_import_observer(self):
-        self._test_package_import('observer')
 
     def test_function_import_observer(self):
         function_list = [
@@ -156,9 +135,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('observer', function_list)
 
-    def test_package_import_qconfig(self):
-        self._test_package_import('qconfig')
-
     def test_function_import_qconfig(self):
         function_list = [
             "QConfig",
@@ -183,9 +159,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
             "qconfig_equals"
         ]
         self._test_function_import('qconfig', function_list)
-
-    def test_package_import_quantization_mappings(self):
-        self._test_package_import('quantization_mappings')
 
     def test_function_import_quantization_mappings(self):
         function_list = [
@@ -214,9 +187,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         self._test_function_import('quantization_mappings', function_list)
         self._test_dict_import('quantization_mappings', dict_list)
 
-    def test_package_import_fuser_method_mappings(self):
-        self._test_package_import('fuser_method_mappings')
-
     def test_function_import_fuser_method_mappings(self):
         function_list = [
             "fuse_conv_bn",
@@ -229,9 +199,6 @@ class TestAOMigrationQuantization(AOMigrationTestCase):
         ]
         self._test_function_import('fuser_method_mappings', function_list)
         self._test_dict_import('fuser_method_mappings', dict_list)
-
-    def test_package_import_utils(self):
-        self._test_package_import('utils')
 
     def test_function_import_utils(self):
         function_list = [

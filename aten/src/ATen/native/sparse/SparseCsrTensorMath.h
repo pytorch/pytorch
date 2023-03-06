@@ -2,6 +2,9 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/core/Scalar.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/native/ReductionType.h>
+#include <ATen/native/cpu/SpmmReduceKernel.h>
 
 namespace at {
 namespace native {
@@ -57,6 +60,28 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
       " but got ",
       self.dim(),
       " instead.");
+}
+
+template <bool train>
+inline void check_sparse_mm_reduce_impl_inputs(
+    const Tensor& self,
+    const Tensor& grad_out,
+    const Tensor& other) {
+  TORCH_INTERNAL_ASSERT(self.is_sparse_csr());
+
+  const auto input_scalar_type = self.values().scalar_type();
+  CheckedFrom c = train ? "sparse_mm_reduce_backward" : "sparse_mm_reduce";
+  if (train) {
+    checkLayout(c, grad_out, kStrided);
+    checkScalarType(c, {grad_out, "grad_out", 1}, input_scalar_type);
+    check_dim_size(grad_out, 2, 0, self.size(0));
+    check_dim_size(grad_out, 2, 1, other.size(1));
+  }
+
+  int pos = train ? 2 : 1;
+  checkLayout(c, other, kStrided);
+  checkScalarType(c, {other, "other", pos}, input_scalar_type);
+  check_dim_size(other, 2, 0, self.size(1));
 }
 
 }

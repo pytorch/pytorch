@@ -11,6 +11,24 @@
 
 namespace at::native {
 
+void fill_depthwise_conv_desc(MPSGraphDepthwiseConvolution3DOpDescriptor* descriptor_,
+                    NSUInteger strideInX, NSUInteger strideInY,
+                    NSUInteger dilationRateInX, NSUInteger dilationRateInY,
+                    NSUInteger paddingHorizontal, NSUInteger paddingVertical,
+                    c10::MemoryFormat memory_format, NSUInteger groups) {
+  descriptor_.strides = @[@1, [[NSNumber alloc] initWithInteger: strideInY],
+                              [[NSNumber alloc] initWithInteger: strideInX]];
+  descriptor_.dilationRates = @[@1, [[NSNumber alloc] initWithInteger: dilationRateInY],
+                                      [[NSNumber alloc] initWithInteger: dilationRateInX]];
+
+  descriptor_.paddingStyle = MPSGraphPaddingStyleExplicit;
+  descriptor_.paddingValues = @[@0, @0, [[NSNumber alloc] initWithInteger: paddingVertical], [[NSNumber alloc]
+                                                            initWithInteger: paddingVertical], [[NSNumber alloc]
+                                                            initWithInteger: paddingHorizontal], [[NSNumber alloc]
+                                                            initWithInteger: paddingHorizontal]];
+  descriptor_.channelDimensionIndex = -3LL;
+}
+
 // Create convolution descriptor
 void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
                     NSUInteger strideInX, NSUInteger strideInY,
@@ -38,15 +56,17 @@ void fill_conv_desc(MPSGraphConvolution2DOpDescriptor* descriptor_,
   descriptor_.groups = groups;
 }
 
-Tensor _mps_convolution(
+Tensor _mps_convolution_impl(
     const Tensor& input_t,
     const Tensor& weight_t,
     const c10::optional<Tensor>& bias_opt,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::optional<IntArrayRef> input_shape) {
   TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
+  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
   namespace native_mps = at::native::mps;
   CheckedFrom c = "mps_convolution";
@@ -65,6 +85,8 @@ Tensor _mps_convolution(
   auto memory_format = input_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
   auto output_t = at::empty(
+                    input_shape.has_value() ?
+                    input_shape.value() :
                     conv_output_size(input->sizes(), weight->sizes(),
                                      padding, stride, dilation),
                     input->scalar_type(),
@@ -113,10 +135,11 @@ Tensor _mps_convolution(
     }
 
     string bias_shape_key;
-    if(bias_defined)
+    if(bias_defined) {
       bias_shape_key = to_string(bias_shape[0]);
-    else
+    } else {
       bias_shape_key = "nobias";
+    }
 
     string key = "mps_convolution:" + to_string(stride[0]) + ":" + to_string(stride[1]) + ":"
                                     + to_string(dilation[0]) + ":" + to_string(dilation[1]) + ":"
@@ -135,23 +158,45 @@ Tensor _mps_convolution(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[1], stride[0],
+          MPSGraphConvolution2DOpDescriptor *conv2dDescriptor_ =[[MPSGraphConvolution2DOpDescriptor new] autorelease];
+          MPSGraphDepthwiseConvolution3DOpDescriptor *depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new] autorelease];
+          MPSShape* weightShape = mps::getMPSShape(weight_t);
+          bool isDepthwiseConv = ((groups > 1 && (weightShape[1].intValue == 1)) &&
+                                  inputShape.count >= 4 && weightShape.count >= 4  && !is_channels_last);
+          if(isDepthwiseConv) {
+            fill_depthwise_conv_desc(depthWiseConv3dDescriptor_, stride[1], stride[0],
+                                            dilation[1], dilation[0],
+                                            padding[1], padding[0],
+                                            memory_format, groups);
+          } else {
+            fill_conv_desc(conv2dDescriptor_, stride[1], stride[0],
                                       dilation[1], dilation[0],
                                       padding[1], padding[0],
                                       memory_format, groups);
+          }
 
           MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(input_t.scalar_type()), inputShape);
           MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
           MPSGraphTensor* biasTensor = nil;
-          if(bias_defined)
+          if(bias_defined) {
             biasTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType((bias_opt.value()).scalar_type()));
+          }
 
-          MPSGraphTensor* outputTensor = [mpsGraph convolution2DWithSourceTensor: inputTensor
-                                                                   weightsTensor: weightTensor
-                                                                      descriptor: descriptor_
-                                                                            name: nil];
+          MPSGraphTensor* outputTensor;
+          if(isDepthwiseConv) {
+              MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor dimension:-3 withDimension:-4 name:nil];
+              outputTensor = [mpsGraph depthwiseConvolution3DWithSourceTensor: inputTensor
+                                                                weightsTensor: weightTransposeTensor
+                                                                   descriptor: depthWiseConv3dDescriptor_
+                                                                         name: nil];
+          } else {
+              outputTensor = [mpsGraph convolution2DWithSourceTensor: inputTensor
+                                                                 weightsTensor: weightTensor
+                                                                    descriptor: conv2dDescriptor_
+                                                                          name: nil];
+          }
+
           if (is_channels_last) {
             outputTensor = mps::convertNHWCtoNCHW(mpsGraph, outputTensor);
           }
@@ -161,7 +206,6 @@ Tensor _mps_convolution(
                                                secondaryTensor: biasTensor
                                                           name: nil];
           }
-
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->weightTensor_ = weightTensor;
           newCachedGraph->biasTensor_ = biasTensor;
@@ -197,11 +241,23 @@ Tensor _mps_convolution(
   return *output;
 }
 
+Tensor _mps_convolution(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+    return _mps_convolution_impl(input_t, weight_t, bias_opt, padding, stride, dilation, groups, c10::nullopt);
+}
+
 Tensor mps_convolution_backward_input(
     IntArrayRef input_size, const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_input";
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
@@ -209,14 +265,7 @@ Tensor mps_convolution_backward_input(
   checkAllSameGPU(c, {grad_output, weight});
   auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-
-  auto grad_input_t = at::empty(
-                    input_size,
-                    grad_output->scalar_type(),
-                    c10::nullopt,
-                    kMPS,
-                    c10::nullopt,
-                    c10::nullopt);
+  auto grad_input_t = at::empty( input_size, grad_output_t.options(), c10::nullopt);
 
   // Avoid "grad_input" when this is being used as transposed convolution
   TensorArg grad_input{ grad_input_t, "result", 0 };
@@ -270,25 +319,48 @@ Tensor mps_convolution_backward_input(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[1], stride[0],
-                                      dilation[1], dilation[0],
-                                      padding[1], padding[0],
-                                      at::MemoryFormat::Contiguous, groups);
+          MPSGraphConvolution2DOpDescriptor *conv2dDescriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
+          MPSGraphDepthwiseConvolution3DOpDescriptor *depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new]  autorelease];
+
+          MPSShape* weightOutputShape = mps::getMPSShape(weight_t);
+          // Depthwise conv is input feature channels = groups. So I in OIHW has to be 1.
+          bool isDepthwiseConv = ((groups > 1 && (weightOutputShape[1].intValue == 1)) &&
+                                  gradOutputShape.count >= 4 && weightOutputShape.count >= 4 && !is_channels_last);
+
+          if(isDepthwiseConv) {
+            fill_depthwise_conv_desc(depthWiseConv3dDescriptor_, stride[1], stride[0],
+                                              dilation[1], dilation[0],
+                                              padding[1], padding[0],
+                                              at::MemoryFormat::Contiguous, groups);
+          } else {
+            fill_conv_desc(conv2dDescriptor_, stride[1], stride[0],
+                                        dilation[1], dilation[0],
+                                        padding[1], padding[0],
+                                        at::MemoryFormat::Contiguous, groups);
+          }
 
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
           MPSGraphTensor* weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, weight_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
-
-          MPSGraphTensor* gradInputTensor = [mpsGraph convolution2DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
-                                                                                            weightsTensor:weightTensor
-                                                                                              outputShape:mps_input_shape
-                                                                             forwardConvolutionDescriptor:descriptor_
-                                                                                                     name:nil];
+          MPSGraphTensor* gradInputTensor;
+          if(isDepthwiseConv) {
+              MPSGraphTensor* weightTransposeTensor = [mpsGraph transposeTensor:weightTensor dimension:-3 withDimension:-4 name:nil];
+              gradInputTensor = [mpsGraph depthwiseConvolution3DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+                                                                                weightsTensor:weightTransposeTensor
+                                                                                  outputShape:mps_input_shape
+                                                                                   descriptor:depthWiseConv3dDescriptor_
+                                                                                         name:nil];
+          } else {
+              gradInputTensor = [mpsGraph convolution2DDataGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+                                                                                weightsTensor:weightTensor
+                                                                                  outputShape:mps_input_shape
+                                                                 forwardConvolutionDescriptor:conv2dDescriptor_
+                                                                                         name:nil];
+          }
 
           newCachedGraph->gradOutputTensor_ = gradOutputTensor;
           newCachedGraph->weightTensor_ = weightTensor;
@@ -318,16 +390,14 @@ Tensor mps_convolution_backward_input(
 }
 
 Tensor mps_convolution_backward_weights(
-    IntArrayRef weight_size, const Tensor& grad_output_, const Tensor& input_,
+    IntArrayRef weight_size, const Tensor& grad_output_t, const Tensor& input_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
-  auto memory_format = input_.suggest_memory_format();
+  auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);
-
-  auto grad_output_t = grad_output_.to(memory_format);
-  auto input_t = input_.to(memory_format);
 
   MPSShape* gradOutputShape = mps::getMPSShape(grad_output_t, memory_format);
 
@@ -345,7 +415,7 @@ Tensor mps_convolution_backward_weights(
                           c10::nullopt,
                           kMPS,
                           c10::nullopt,
-                          memory_format);
+                          c10::nullopt);
   TensorArg grad_weight{ grad_weight_t, "result", 0 };
 
   convolution_shape_check(c, input, grad_weight, grad_output, padding, stride, dilation, groups);
@@ -395,26 +465,48 @@ Tensor mps_convolution_backward_weights(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
-          fill_conv_desc(descriptor_, stride[1], stride[0],
-                                      dilation[1], dilation[0],
-                                      padding[1], padding[0],
-                                      at::MemoryFormat::Contiguous, groups);
+          MPSGraphConvolution2DOpDescriptor *conv2dDescriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
+          MPSGraphDepthwiseConvolution3DOpDescriptor *depthWiseConv3dDescriptor_ = [[MPSGraphDepthwiseConvolution3DOpDescriptor new]  autorelease];
+          MPSShape* inputShape = mps::getMPSShape(input_t);
+          bool isDepthwiseConv = ((groups > 1 && (mps_weight_shape[1].intValue == 1)) && inputShape.count >= 4 && mps_weight_shape.count >= 4 && !is_channels_last);
+
+          if(isDepthwiseConv) {
+            fill_depthwise_conv_desc(depthWiseConv3dDescriptor_, stride[1], stride[0],
+                                                dilation[1], dilation[0],
+                                                padding[1], padding[0],
+                                                at::MemoryFormat::Contiguous, groups);
+          } else {
+              fill_conv_desc(conv2dDescriptor_, stride[1], stride[0],
+                                                  dilation[1], dilation[0],
+                                                  padding[1], padding[0],
+                                                  at::MemoryFormat::Contiguous, groups);
+          }
 
           MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSScalarType(grad_output_t.scalar_type()), gradOutputShape);
           MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_t);
 
           MPSGraphTensor *gradOutputTensorTranspose = gradOutputTensor;
-          if (is_channels_last && grad_output_t.is_contiguous() && !grad_output_t.is_view()) {
+          if (is_channels_last) {
             gradOutputTensorTranspose = mps::convertNHWCtoNCHW(mpsGraph, gradOutputTensorTranspose);
           }
 
-          MPSGraphTensor* gradWeightTensor = [mpsGraph convolution2DWeightsGradientWithIncomingGradientTensor:gradOutputTensorTranspose
-                                                                                                 sourceTensor:inputTensor
-                                                                                                  outputShape:mps_weight_shape
-                                                                                 forwardConvolutionDescriptor:descriptor_
-                                                                                                         name:nil];
-
+          MPSGraphTensor* gradWeightTensor;
+          if(isDepthwiseConv) {
+              NSNumber* outputFeatChannelDim = mps_weight_shape[0];
+              MPSShape* weightShapeTranspose = @[@1, outputFeatChannelDim, mps_weight_shape[2], mps_weight_shape[3]];
+              MPSGraphTensor* gradWeightTensorTranspose = [mpsGraph depthwiseConvolution3DWeightsGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+                                                                                              sourceTensor:inputTensor
+                                                                                               outputShape:weightShapeTranspose
+                                                                                                descriptor:depthWiseConv3dDescriptor_
+                                                                                                      name:nil];
+              gradWeightTensor = [mpsGraph transposeTensor:gradWeightTensorTranspose dimension:-3 withDimension:-4 name:nil];
+          } else {
+              gradWeightTensor = [mpsGraph convolution2DWeightsGradientWithIncomingGradientTensor:gradOutputTensorTranspose
+                                                                                               sourceTensor:inputTensor
+                                                                                                outputShape:mps_weight_shape
+                                                                               forwardConvolutionDescriptor:conv2dDescriptor_
+                                                                                                       name:nil];
+          }
           newCachedGraph->gradOutputTensor_ = gradOutputTensor;
           newCachedGraph->inputTensor_ = inputTensor;
           newCachedGraph->gradWeightTensor_ = gradWeightTensor;
@@ -444,12 +536,9 @@ Tensor mps_convolution_backward_weights(
 }
 
 std::tuple<at::Tensor,at::Tensor,at::Tensor> mps_convolution_backward(
-    const at::Tensor& input, const at::Tensor& grad_output_t, const at::Tensor& weight,
+    const at::Tensor& input, const at::Tensor& grad_output, const at::Tensor& weight,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,3> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
   Tensor grad_input, grad_weight, grad_bias;
   if (input.numel() == 0) {
     if (output_mask[0]) {
@@ -484,6 +573,7 @@ Tensor _mps_convolution_transpose(
     const Tensor& input_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation,
     int64_t groups) {
+  TORCH_CHECK(input_t.dim() < 5, "ConvTranspose 3D is not supported on MPS");
 
   auto output_t = mps_convolution_transpose_forward(
     input_t, weight_t, padding, output_padding, stride, dilation, groups);
@@ -494,10 +584,10 @@ Tensor _mps_convolution_transpose(
 Tensor mps_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation,
-    int64_t groups)
+    int64_t groups, IntArrayRef input_shape)
 {
-  return at::_mps_convolution(
-    grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups);
+  return _mps_convolution_impl(
+    grad_output_t, weight_t, c10::nullopt, padding, stride, dilation, groups, input_shape);
 }
 
 Tensor mps_convolution_transpose_backward_weight(
@@ -513,15 +603,12 @@ Tensor mps_convolution_transpose_backward_weight(
 
 
 std::tuple<Tensor,Tensor> mps_convolution_transpose_backward(
-    const Tensor& input, const Tensor& grad_output_t, const Tensor& weight,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups,
     std::array<bool,2> output_mask) {
-
-  Tensor grad_output = grad_output_t.contiguous(input.suggest_memory_format());
-
   Tensor grad_input, grad_weight;
   if (output_mask[0]) {
-    grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups);
+    grad_input = mps_convolution_transpose_backward_input(grad_output, weight, padding, stride, dilation, groups, input.sizes());
   }
   if (output_mask[1]) {
     grad_weight = mps_convolution_transpose_backward_weight(weight.sizes(), grad_output, input, padding, stride, dilation, groups);

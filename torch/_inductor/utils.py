@@ -1,10 +1,13 @@
 import collections
 import contextlib
 import functools
+import glob
+import itertools
 import logging
 import math
 import operator
 import os
+import shutil
 import tempfile
 import textwrap
 import time
@@ -17,7 +20,7 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config, config as inductor_config
+from . import config
 from .cuda_properties import get_device_capability
 
 log = logging.getLogger(__name__)
@@ -75,8 +78,26 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
 
 
 def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
@@ -104,7 +125,7 @@ def convert_shape_to_symint(
         if isinstance(i, int)
         else int(i)
         if isinstance(i, sympy.Integer)
-        else V.graph.sizevars.shape_env.create_symintnode(i)
+        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
         for i in lst
     ]
 
@@ -235,10 +256,14 @@ def get_fused_kernel_name(node_schedule):
 def gather_origins(args, kwargs):
     import itertools
 
-    from .ir import ComputedBuffer, IRNode
+    from . import ir
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -292,14 +317,12 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
 
 
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
@@ -341,7 +364,9 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
-    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+    getter = seq.__getitem__
+    a_r = range(len(seq))
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 @functools.lru_cache(8)
@@ -480,8 +505,77 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        inductor_config.max_autotune
+        (config.max_autotune or config.search_autotune_cache)
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
         and is_big_gpu(layout.device.index or 0)
+    )
+
+
+class DebugDirManager:
+    counter = itertools.count(0)
+
+    def __init__(self):
+        self.id = next(DebugDirManager.counter)
+        self.prev_debug_name = None
+
+    def __enter__(self):
+        self.prev_debug_name = torch._dynamo.config.debug_dir_root
+        self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+        torch._dynamo.config.debug_dir_root = self.new_name
+
+    def __exit__(self, *args):
+        shutil.rmtree(self.new_name)
+        torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+def run_and_get_triton_code(fn, *args, **kwargs):
+    from torch._inductor.debug import DebugContext
+    from torch._inductor.virtualized import V
+
+    torch._dynamo.reset()
+
+    context = DebugContext()
+
+    with DebugDirManager(), mock.patch.object(
+        config.trace, "enabled", True
+    ), context, V.set_debug_handler(context):
+
+        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
+        fil = dir_name + "*inference*"
+        existing_dirs = glob.glob(fil)
+
+        fn(*args, **kwargs)
+
+        assert context._path is not None
+
+        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
+
+        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
+
+        full_name = os.path.join(dir_dbg[0], "output_code.py")
+        with open(full_name, "r") as f:
+            return f.read()
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
     )

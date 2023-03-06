@@ -149,6 +149,7 @@ torchgen/packaged/*
 *.swo
 *.swp
 *~
+.~lock.*
 
 # macOS dir files
 .DS_Store
@@ -355,3 +356,4 @@ venv/
 
 # Log files
 *.log
+sweep/

@@ -39,6 +39,8 @@ from torchgen.api.autograd import (
 )
 
 from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     DispatcherSignature,
@@ -185,6 +187,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fliplr",
     "flipud",
     "rot90",
+    "nanmean",
+    "nansum",
     "transpose",
     "permute",
     "squeeze",
@@ -245,6 +249,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "log10",
     "log1p",
     "log2",
+    "logaddexp",
     "logcumsumexp",
     "reciprocal",
     "tan",
@@ -968,10 +973,10 @@ def emit_body(
         """Find arguments that have derivative definitions"""
         if info is None or not info.has_derivatives:
             return differentiable_inputs
-        names = set(name for d in info.derivatives for name in d.var_names)
+        names = {name for d in info.derivatives for name in d.var_names}
         differentiable = [arg for arg in differentiable_inputs if arg.name in names]
         if len(differentiable) != len(names):
-            missing = names - set(arg.name for arg in differentiable)
+            missing = names - {arg.name for arg in differentiable}
             raise RuntimeError(
                 f"Missing arguments for derivatives: {missing} in {info.name}"
             )
@@ -1222,6 +1227,10 @@ def emit_body(
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
                 expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+            elif type == ArrayRefCType(
+                elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+            ):
+                expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:

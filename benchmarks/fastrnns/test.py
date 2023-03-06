@@ -12,7 +12,7 @@ def barf():
 
 
 def assertEqual(tensor, expected, threshold=0.001):
-    if isinstance(tensor, list) or isinstance(tensor, tuple):
+    if isinstance(tensor, (list, tuple)):
         for t, e in zip(tensor, expected):
             assertEqual(t, e)
     else:
@@ -128,8 +128,8 @@ if __name__ == '__main__':
     parser.add_argument('--hiddenSize', default='512', type=int)
     parser.add_argument('--miniBatch', default='64', type=int)
     parser.add_argument('--device', default='cuda', type=str)
-    parser.add_argument('--check_grad', default='True', type=bool)
-    parser.add_argument('--variable_lstms', action='store_true')
+    parser.add_argument('--check-grad', '--check_grad', default='True', type=bool)
+    parser.add_argument('--variable-lstms', '--variable_lstms', action='store_true')
     parser.add_argument('--seed', default='17', type=int)
     parser.add_argument('--verbose', action='store_true')
     parser.add_argument('--rnns', nargs='*',

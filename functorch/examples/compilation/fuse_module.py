@@ -23,7 +23,7 @@ def run(mod, input):
 
 class Foo(nn.Module):
     def __init__(self):
-        super(Foo, self).__init__()
+        super().__init__()
         self.param = nn.Parameter(torch.randn(1))
         self.register_buffer("buf", torch.randn(1))
 

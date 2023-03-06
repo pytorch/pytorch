@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 
@@ -11,7 +10,6 @@ try:
         test_modules,
         test_repros,
         test_subgraphs,
-        test_unspec,
     )
 except ImportError:
     import test_export
@@ -20,66 +18,90 @@ except ImportError:
     import test_modules
     import test_repros
     import test_subgraphs
-    import test_unspec
 
 import unittest
 
 
-def make_dynamic_cls(cls):
-    return make_test_cls_with_patches(
-        cls, "DynamicShapes", "_dynamic_shapes", (config, "dynamic_shapes", True)
+test_classes = {}
+
+ALL_DYNAMIC_XFAILS = {
+    "MiscTests": [
+        "test_autocast_sdpa",
+        "test_parsing_sdpa",
+    ],
+    "ReproTests": [
+        # aten.min.dim - couldn't find symbolic meta function/decomposition
+        "test_do_paste_mask",
+        # Could not infer dtype of torch._C.SymIntNode
+        "test_convert_boxes_to_pooler_format",
+        # Cannot call sizes() on tensor with symbolic sizes/strides
+        "test_hf_t5_forward",
+        "test_sort_out2",
+    ],
+    "SubGraphTests": [
+        "test_enumerate_not_break_graph",
+    ],
+}
+
+XFAIL_HITS = 0
+
+
+def make_dynamic_cls(cls, *, static_default=False, unspec=False):
+    suffix = "_dynamic_shapes"
+    if static_default:
+        suffix += "_static_default"
+    if unspec:
+        suffix += "_unspec"
+
+    cls_prefix = "DynamicShapes"
+    if static_default:
+        cls_prefix = f"StaticDefault{cls_prefix}"
+    if unspec:
+        cls_prefix = f"Unspec{cls_prefix}"
+
+    test_class = make_test_cls_with_patches(
+        cls,
+        cls_prefix,
+        suffix,
+        (config, "dynamic_shapes", True),
+        (config, "assume_static_by_default", static_default),
+        (config, "specialize_int", not unspec),
     )
 
+    xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)
+    if xfail_tests is not None:
+        global XFAIL_HITS
+        XFAIL_HITS += 1
+        for t in xfail_tests:
+            unittest.expectedFailure(getattr(test_class, f"{t}{suffix}"))
 
-DynamicShapesFunctionTests = make_dynamic_cls(test_functions.FunctionTests)
-DynamicShapesMiscTests = make_dynamic_cls(test_misc.MiscTests)
-DynamicShapesReproTests = make_dynamic_cls(test_repros.ReproTests)
-DynamicShapesNNModuleTests = make_dynamic_cls(test_modules.NNModuleTests)
-DynamicShapesUnspecTests = make_dynamic_cls(test_unspec.UnspecTests)
-DynamicShapesExportTests = make_dynamic_cls(test_export.ExportTests)
-DynamicShapesSubGraphTests = make_dynamic_cls(test_subgraphs.SubGraphTests)
+    test_classes[test_class.__name__] = test_class
+    # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
+    globals()[test_class.__name__] = test_class
+    return test_class
 
+
+tests = [
+    test_functions.FunctionTests,
+    test_misc.MiscTests,
+    test_repros.ReproTests,
+    test_modules.NNModuleTests,
+    test_export.ExportTests,
+    test_subgraphs.SubGraphTests,
+]
+for test in tests:
+    make_dynamic_cls(test)
+    make_dynamic_cls(test, unspec=True)
+    make_dynamic_cls(test, static_default=True)
+
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
+
+# Unspec only failures
 
 unittest.expectedFailure(
-    DynamicShapesReproTests.test_do_paste_mask_dynamic_shapes
-    # aten.min.dim - couldn't find symbolic meta function/decomposition
+    UnspecDynamicShapesMiscTests.test_slice_input_dynamic_shapes_unspec
+    # NotImplementedError: SymNodeVariable() is not a constant
 )
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_convert_boxes_to_pooler_format_dynamic_shapes
-    # Could not infer dtype of torch._C.SymIntNode
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_hf_t5_forward_dynamic_shapes
-    # Cannot call sizes() on tensor with symbolic sizes/strides
-)
-
-unittest.expectedFailure(
-    DynamicShapesReproTests.test_sort_out2_dynamic_shapes
-    # Cannot call sizes() on tensor with symbolic sizes/strides
-)
-
-# DynamicShapesExportTests
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_list_nonzero_free_function_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
-)
-unittest.expectedFailure(
-    DynamicShapesExportTests.test_export_with_constant_tuple_nonzero_dynamic_shapes
-)
-
-
-# DynamicShapesSubGraphTests
-unittest.expectedFailure(
-    DynamicShapesSubGraphTests.test_enumerate_not_break_graph_dynamic_shapes
-)
-
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

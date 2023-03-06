@@ -30,7 +30,7 @@ class GatherRecord(ModelLayer):
     """
 
     def __init__(self, model, input_record, name='gather_record', **kwargs):
-        super(GatherRecord, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         assert 'indices' in input_record
         assert 'record' in input_record

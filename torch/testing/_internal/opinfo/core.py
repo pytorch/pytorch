@@ -2011,7 +2011,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2530,7 +2530,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -2583,6 +2583,7 @@ class ForeachFuncInfo(OpInfo):
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
         supports_autograd=False,
+        supports_scalar_self_arg=False,
         **kwargs,
     ):
         super().__init__(
@@ -2594,6 +2595,7 @@ class ForeachFuncInfo(OpInfo):
             supports_autograd=supports_autograd,
             **kwargs,
         )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
 
         (
             foreach_method,
@@ -2711,5 +2713,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )

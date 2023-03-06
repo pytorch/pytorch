@@ -1,7 +1,11 @@
+import warnings
 import torch
 import torch.distributed as dist
 
 from torch.distributed._shard.sharded_tensor.api import ShardedTensor
+from torch.distributed._shard._utils import (
+    DEPRECATE_MSG,
+)
 from torch.distributed import distributed_c10d
 from torch.overrides import get_default_nowrap_functions
 
@@ -12,6 +16,8 @@ _REPLICATED_WITH_NON_TENSOR_ALLOWLIST = [
     torch.Tensor.unsqueeze,
     torch.Tensor.__getitem__,
 ]
+
+warnings.warn(DEPRECATE_MSG)
 
 class ReplicatedTensor(torch.Tensor):
     """
@@ -57,7 +63,7 @@ class ReplicatedTensor(torch.Tensor):
             return result
 
     def __repr__(self):
-        return f"ReplicatedTensor({super(ReplicatedTensor, self).__repr__()})"
+        return f"ReplicatedTensor({super().__repr__()})"
 
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):

@@ -37,13 +37,13 @@ class Gumbel(TransformedDistribution):
                                 torch.full_like(self.loc, 1 - finfo.eps))
         transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
                       ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
-        super(Gumbel, self).__init__(base_dist, transforms, validate_args=validate_args)
+        super().__init__(base_dist, transforms, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Gumbel, _instance)
         new.loc = self.loc.expand(batch_shape)
         new.scale = self.scale.expand(batch_shape)
-        return super(Gumbel, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     # Explicitly defining the log probability function for Gumbel due to precision issues
     def log_prob(self, value):

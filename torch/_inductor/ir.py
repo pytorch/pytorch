@@ -35,6 +35,7 @@ from .utils import (
     cache_on_self,
     convert_shape_to_inductor,
     convert_shape_to_symint,
+    developer_warning,
     sympy_dot,
     sympy_product,
     sympy_subs,
@@ -45,6 +46,61 @@ from .virtualized import ops, V
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
+
+""" [Note: Inductor IR]
+
+Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
+lowering is registered to a particular aten operator, and expects inputs that
+correspond to the aten schema.  However, in place of torch Tensor inputs, lowerings
+expect Inductor TensorBox inputs.
+
+TensorBox IR represents torch tensors.  Tensors are sometimes single objects owning
+storage, and sometimes views of another Tensor's storage.  Mutating tensor operations
+(such as add_()) affect the underlying storage and any associated views.  Other operations
+(such as .t_()) update metadata about the current view but don't modify the underlying storage.
+
+To model this in Inductor, the IR distinguishes between TensorBox, View, StorageBox and Buffer.
+
+TensorBox is the top level IR construct that any lowering should produce and maps to a torch.Tensor
+output from an operation.  But just as torch.Tensors take different forms, TensorBox IR can
+reference View IR or directly reference StorageBox IRs.
+
+Some Inductor lowerings produce new sets of 'Box'es, while others (such as .t() or other view ops)
+may take an existing TensorBox and point it to a new underlying View IR.
+
+Tensors that directly own storage are represented as a chain of:
+TensorBox -> StorageBox -> Buffer
+where Buffer is a simple (1D) allocation, and StorageBox introduces the concept of a Layout.
+
+If you mutate the data of such a tensor, we swing the StorageBox pointer to point to a new buffer
+(leaving the old buffer unmodified and functionalizing the operation).
+
+Tensors backed by views add one more indirection to the IR.
+TensorBox -> View -> StorageBox -> Buffer
+In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
+"""
+
+
+def validate_ir(node_or_nodes):
+    def _check_tensorbox(node):
+        # Could expand this to check deeper properties
+        # (e.g. TensorBox points to View or StorageBox)
+        assert isinstance(
+            node,
+            (
+                TensorBox,
+                RandSeedBuffer,
+                sympy.Symbol,
+                Expr,
+            ),
+        ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
+
+    # Be picky about the accepted data structure (don't use pytree here)
+    if isinstance(node_or_nodes, (List, Tuple)):
+        for node in node_or_nodes:
+            _check_tensorbox(node)
+    else:
+        _check_tensorbox(node_or_nodes)
 
 
 def inverse_reorder(order):
@@ -276,9 +332,11 @@ class IRNode:
         self.origins = set(self._current_origins)
 
     def common_repr(self):
-        return (
-            [f"origins={self.origins}"] if hasattr(self, "origins") else ["no origins?"]
-        )
+        origins = f"origins={getattr(self, 'origins', '')}"
+        if len(origins) > 64:
+            # this can get *very* long
+            origins = f"{origins[:61]}..."
+        return [origins]
 
     def str_helper(self, lines):
         lines = lines + self.common_repr()
@@ -785,7 +843,7 @@ class Reduction(Loops):
             if reduction_type in ("argmin", "argmax"):
 
                 def fn(index):
-                    return 0
+                    return ops.constant(0, dst_dtype)
 
             else:
 
@@ -1443,10 +1501,10 @@ class ReinterpretView(BaseView):
         return self.layout.dtype
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def make_loader(self):
         def loader(index):
@@ -1587,7 +1645,7 @@ class Layout(IRNode):
     ):
         self.device = device
         self.dtype = dtype
-        assert all(isinstance(s, Expr) or isinstance(s, int) for s in size)
+        assert all(isinstance(s, (Expr, int)) for s in size)
         self.size = size
         self._stride = stride
         self.offset = offset
@@ -1802,7 +1860,7 @@ class FlexibleLayout(Layout):
             strides = FlexibleLayout.fill_ordered(size, stride_order)
         else:
             strides = FlexibleLayout.contiguous_strides(size)
-        super(FlexibleLayout, self).__init__(device, dtype, size, strides)
+        super().__init__(device, dtype, size, strides)
 
 
 class AliasedLayout(Layout):
@@ -1905,10 +1963,10 @@ class Buffer(IRNode):
         return getattr(self.layout, "dtype", None)
 
     def get_size(self):
-        return self.layout.size
+        return list(self.layout.size)
 
     def get_stride(self):
-        return self.layout.stride
+        return list(self.layout.stride)
 
     def get_layout(self):
         return self.layout
@@ -2126,20 +2184,10 @@ class ComputedBuffer(Buffer):
             for reads_name in body.reads_name2expr.keys()
         ]
         priority_idx = []
-        if config.triton.convolution == "aten":
-            memory_addrs = [
-                *body.reads_name2expr.values(),
-                *body.writes_name2expr.values(),
-            ]
-        else:
-            # prioritize reads layout/loop_ordering over writes
-            if len(body.reads_name2expr.values()) > 0:
-                memory_addrs = [*body.reads_name2expr.values()]
-            else:
-                memory_addrs = [*body.writes_name2expr.values()]
-            for i, reads_buf in enumerate(reads_bufs):
-                if isinstance(reads_buf, Convolution):
-                    priority_idx.append(i)
+        memory_addrs = [
+            *body.reads_name2expr.values(),
+            *body.writes_name2expr.values(),
+        ]
         index_vars = []
         reduce_vars = []
         index_size = []
@@ -2254,7 +2302,7 @@ class ComputedBuffer(Buffer):
 
 class TemplateBuffer(Buffer):
     """
-    Represents a Triton (in the futurue other type) of template operator
+    Represents a Triton (in the future other type) of template operator
     that we can fuse an epilogue onto.
     """
 
@@ -2482,7 +2530,7 @@ class ExternKernel(InputsKernel):
                 tensor_args.append(arg)
             else:
                 if isinstance(arg, sympy.Expr):
-                    arg = V.graph.sizevars.shape_env.create_symintnode(arg)
+                    arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
                 non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
@@ -2523,7 +2571,7 @@ class ExternKernel(InputsKernel):
         """
         In order to pass this to an extern kernel we need a
         ReinterpretView not a View.  This allows us to avoid some
-        uneeded copies.
+        unneeded copies.
         """
         assert isinstance(x, BaseView)
         if isinstance(x, ReinterpretView):
@@ -2863,7 +2911,7 @@ class DeviceCopy(ExternKernelOut):
         V.graph.device_types.add(device.type)
         V.graph.device_types.add(x.get_device().type)
 
-        log.warning("DeviceCopy")
+        developer_warning("DeviceCopy in input program")
         return DeviceCopy(
             FlexibleLayout(
                 device=device,
@@ -2908,7 +2956,7 @@ class FallbackKernel(ExternKernelAlloc):
         unflatten_args,
         kwargs=None,
     ):
-        super(FallbackKernel, self).__init__(
+        super().__init__(
             layout,
             tuple(tensor_args),
             tuple(nontensor_args),
@@ -2937,7 +2985,7 @@ class FallbackKernel(ExternKernelAlloc):
         tensor_args = [Shim(x.codegen_reference()) for x in self.inputs]
         constant_args = [Shim(repr(x)) for x in self.constant_args]
         args, kwargs = self.unflatten_args(tensor_args, constant_args)
-        return list(map(repr, args)) + list(gen_kwarg(k, v) for k, v in kwargs.items())
+        return list(map(repr, args)) + [gen_kwarg(k, v) for k, v in kwargs.items()]
 
     @classmethod
     def create(cls, kernel, *args, **kwargs):
@@ -3082,12 +3130,8 @@ class Convolution(ExternKernelAlloc):
             )
             req_stride_order = get_stride_order(output.stride())
 
-        if config.triton.convolution == "aten":
-            weight = cls.require_stride_order(weight, req_stride_order)
-            x = cls.require_stride_order(x, req_stride_order)
-        else:
-            x = cls.require_stride1(cls.realize_input(x))
-            weight = cls.require_stride1(cls.realize_input(weight))
+        weight = cls.require_stride_order(weight, req_stride_order)
+        x = cls.require_stride_order(x, req_stride_order)
 
         stride = tuple(stride_)
         padding = tuple(padding_)
@@ -3105,7 +3149,7 @@ class Convolution(ExternKernelAlloc):
         _, _, *kernel_size = weight_shape
 
         # choose runtime kernel
-        config_conv = config.triton.convolution
+        config_conv = "aten"
         if (
             config_conv == "aten"
             or len(kernel_size) != 2  # triton conv only supports conv2d
@@ -3138,13 +3182,20 @@ class Convolution(ExternKernelAlloc):
             )
 
         # for conv2d or conv3d, prefer channels last format
+        transform_x_layout = False
         if kernel == "triton_ops.conv":
             output_layout_str = "torch.channels_last"
+        else:
+            output_layout_str = (
+                "torch.contiguous_format"
+                if output.is_contiguous()
+                else "torch.channels_last"
+            )
 
-        elif config.tune_layout and len(x.get_size()) == 4:
+        if config.tune_layout and len(x.get_size()) == 4:
             from .codegen.autotuner import tuned_conv_layout
 
-            output_layout_str = tuned_conv_layout(
+            faster_output_layout_str = tuned_conv_layout(
                 kernel,
                 x.get_size(),
                 weight.get_size(),
@@ -3157,13 +3208,9 @@ class Convolution(ExternKernelAlloc):
                 x.get_device(),
                 x.get_dtype(),
             )
-
-        else:
-            output_layout_str = (
-                "torch.contiguous_format"
-                if output.is_contiguous()
-                else "torch.channels_last"
-            )
+            if faster_output_layout_str != output_layout_str:
+                output_layout_str = faster_output_layout_str
+                transform_x_layout = True
 
         if output_layout_str == "torch.channels_last":
             stride_order = [0] + list(reversed(range(1, len(kernel_size) + 1)))
@@ -3175,7 +3222,7 @@ class Convolution(ExternKernelAlloc):
             stride_order = list(reversed(range(len(output_size))))
             strides = make_contiguous_strides_for(output_size)
 
-        if config.triton.convolution != "aten":
+        if transform_x_layout:
             x = cls.require_stride_order(x, stride_order)
 
         output_layout = FixedLayout(
@@ -4140,4 +4187,206 @@ class LoopBodyBlock:
             r";[^\n]*",
             "",
             code.strip().replace("def forward(", f"def {name}("),
+        )
+
+
+class Wait(ExternKernelAlloc):
+    """
+    Wait should not be used by itself.  It should always be constructed in tandem
+    with a collective op that produces a work to wait on.
+    """
+
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(layout, inputs, constant_args)
+
+    def should_allocate(self):
+        return False
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _wait_tensor"
+        )
+        (input_collective,) = [t.codegen_reference() for t in self.inputs]
+        wrapper.writeline(f"{input_collective} = _wait_tensor({input_collective})")
+
+        # wait op still needs to produce a 'buffer' that represents the tensor output.
+        # this is a symbolic gesture, and it gets handled by WrapperCodegen.
+        # codegen outputs a '# reuse' line that assigns the input buffer here ('input_collective')
+        # to a new name (`self.get_name()`) and `del`s the old name.
+        wrapper.writeline(f"{self.get_name()} = {input_collective}")
+
+    @classmethod
+    def create(cls, collective_op: "TensorBox"):
+        # TODO(whc) i'm not sure what's going on here, this probably means I missed something upstream
+        collective_op.decide_layout()
+        return Wait(
+            layout=collective_op.get_layout(),
+            inputs=[collective_op],
+        )
+
+    def get_alias_names(self):
+        # Signal to codegen that our output buffer isn't safe to reuse
+        return [self.inputs[0].codegen_reference()]
+
+
+class CollectiveKernel(ExternKernel):
+    """
+    Each CollectiveKernel should follow the patterns
+    - it writes into a given output buffer
+    - the kernel delegates into c10d processgroup, which returns a 'work' obj
+    - the work obj is registered via _register_tensor_work so it can be waited on later
+    """
+
+    def __init__(self, layout, inputs, constant_args):
+        super().__init__(None, layout, inputs, constant_args)
+        self.name = V.graph.register_buffer(self)
+
+    def should_allocate(self):
+        return True
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        # factor so the boilerplate can be handled in CollectiveKernel.codegen
+        raise NotImplementedError("Must implement")
+
+    def codegen(self, wrapper):
+        wrapper.add_import_once("import torch.distributed as dist")
+        wrapper.add_import_once(
+            "from torch.distributed._functional_collectives import _str_to_reduce_op, _register_tensor_work"
+        )
+        wrapper.add_import_once(
+            "from torch.distributed.distributed_c10d import _find_or_create_pg_by_ranks_and_tag"
+        )
+
+        # extract references to our args in string form for codegen output
+        input_names = [t.codegen_reference() for t in self.inputs]
+        output_name = self.get_name()
+        tag, ranks, group_size = self.constant_args
+
+        # TODO: avoid more than one ref of the same pg (even though they are cached inside the api)
+        wrapper.writeline(
+            f"{output_name}_pg = _find_or_create_pg_by_ranks_and_tag('{tag}', {ranks}, {group_size})"
+        )
+
+        self.codegen_collective(wrapper, output_name, input_names)
+
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
+
+class AllReduce(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, reduce_op):
+        super().__init__(layout, inputs, constant_args)
+        self.reduce_op = reduce_op
+
+    @classmethod
+    def create(
+        cls, x: "TensorBox", reduce_op: str, tag: str, ranks: List[int], group_size: int
+    ):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), x.get_size())
+
+        return AllReduce(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
+        )
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        # We must copy our input buffer sometimes, but the scheduler will help us find opportunities
+        # to reuse the input buffer.  (This requires no other users of the input buffer.)
+        if not wrapper.did_reuse(self, self.inputs[0]):
+            wrapper.writeline(f"{output_name}.copy_({input_names[0]})")
+
+        # At this point, output_name points to a buffer that is either
+        # (1) the input buffer, which we're allowed to inplace modify
+        # (2) a freshly allocated buffer, which we've copied the input into above
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_reduce("
+            f"{output_name}, async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
+        )
+
+
+class AllGatherIntoTensor(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args):
+        super().__init__(layout, inputs, constant_args)
+
+    @classmethod
+    def create(cls, x: "TensorBox", tag: str, ranks: List[int], group_size: int):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[0] *= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        # AllReduce returns a 'work' object.  But Inductor's scheduler doesn't need to know
+        # about that, and we just pretend for scheduling purposes that the work obj is a 1-elem tensor.
+        # Nobody should consume the output of AllReduce except 'Wait', which we control here.
+        return AllGatherIntoTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+        )
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor("
+            f"{output_name}, {input_names[0]}, async_op=True, group={output_name}_pg)"
+        )
+
+        # At this point, output_name points to a fresh buffer
+        wrapper.writeline(
+            f"{output_name}_work = dist.all_gather_into_tensor({output_name}, {input_names[0]}, async_op=True,"
+            f" group={output_name}_pg)"
+        )
+        wrapper.writeline(f"_register_tensor_work({output_name}, {output_name}_work)")
+
+
+class ReduceScatterTensor(CollectiveKernel):
+    def __init__(self, layout, inputs, constant_args, reduce_op, scatter_dim):
+        super().__init__(layout, inputs, constant_args)
+        self.reduce_op = reduce_op
+        # TODO support dim
+        self.scatter_dim = scatter_dim
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        reduce_op: str,
+        scatter_dim: int,
+        tag: str,
+        ranks: List[int],
+        group_size: int,
+    ):
+        x = cls.realize_input(x)
+
+        # is there a difference between literally using x.data.layout below, vs
+        # creating a new one that has the same properties?
+        new_size = x.get_size()
+        new_size[scatter_dim] /= group_size
+        new_layout = FlexibleLayout(x.get_device(), x.get_dtype(), new_size)
+
+        return ReduceScatterTensor(
+            layout=new_layout,
+            inputs=[x],
+            constant_args=[tag, ranks, group_size],
+            reduce_op=reduce_op,
+            scatter_dim=scatter_dim,
+        )
+
+    def codegen_collective(self, wrapper, output_name, input_names):
+        wrapper.writeline(
+            f"{output_name}_work = dist.reduce_scatter_tensor("
+            f"{output_name}, {input_names[0]}, "
+            f"async_op=True, group={output_name}_pg, op=_str_to_reduce_op('{str(self.reduce_op)}'))"
         )

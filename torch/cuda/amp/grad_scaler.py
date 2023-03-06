@@ -183,7 +183,7 @@ class GradScaler:
                 return val * stash[0].get(val.device)
             elif isinstance(val, abc.Iterable):
                 iterable = map(apply_scale, val)
-                if isinstance(val, list) or isinstance(val, tuple):
+                if isinstance(val, (list, tuple)):
                     return type(val)(iterable)
                 else:
                     return iterable

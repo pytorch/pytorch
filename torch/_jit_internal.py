@@ -320,7 +320,7 @@ def get_callable_argument_names(fn) -> List[str]:
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
         if not param.kind == param.POSITIONAL_OR_KEYWORD:
-            return []
+            continue
 
         argument_names.append(name)
 
@@ -342,9 +342,7 @@ def get_annotation_str(annotation):
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
-    elif isinstance(annotation, ast.Constant) or isinstance(
-        annotation, ast.NameConstant
-    ):
+    elif isinstance(annotation, (ast.Constant, ast.NameConstant)):
         return f"{annotation.value}"
 
     # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
@@ -589,7 +587,7 @@ def unused(fn):
 
             class MyModule(nn.Module):
                 def __init__(self, use_memory_efficient):
-                    super(MyModule, self).__init__()
+                    super().__init__()
                     self.use_memory_efficient = use_memory_efficient
 
                 @torch.jit.unused
@@ -1200,7 +1198,12 @@ def _try_get_dispatched_fn(fn):
     return boolean_dispatched.get(fn)
 
 
-def _get_named_tuple_properties(obj):
+def _get_named_tuple_properties(
+    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None
+):
+    if loc is None:
+        loc = fake_range()
+
     assert issubclass(obj, tuple) and hasattr(obj, "_fields")
     if hasattr(obj, "_field_defaults"):
         defaults = [
@@ -1222,9 +1225,7 @@ def _get_named_tuple_properties(obj):
     annotations = []
     for field in obj._fields:
         if field in obj_annotations:
-            the_type = torch.jit.annotations.ann_to_type(
-                obj_annotations[field], fake_range()
-            )
+            the_type = torch.jit.annotations.ann_to_type(obj_annotations[field], loc)
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())

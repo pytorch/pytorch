@@ -33,7 +33,7 @@ class FloatFunctional(torch.nn.Module):
         - mul_scalar
     """
     def __init__(self):
-        super(FloatFunctional, self).__init__()
+        super().__init__()
         self.activation_post_process = torch.nn.Identity()
 
     def forward(self, x):
@@ -154,13 +154,13 @@ class QFunctional(torch.nn.Module):
         - mul_scalar
     """
     def __init__(self):
-        super(QFunctional, self).__init__()
+        super().__init__()
         self.scale = 1.0
         self.zero_point = 0
         self.activation_post_process = torch.nn.Identity()
 
     def _save_to_state_dict(self, destination, prefix, keep_vars):
-        super(QFunctional, self)._save_to_state_dict(destination, prefix, keep_vars)
+        super()._save_to_state_dict(destination, prefix, keep_vars)
         destination[prefix + 'scale'] = torch.tensor(self.scale)
         destination[prefix + 'zero_point'] = torch.tensor(self.zero_point)
 
@@ -169,8 +169,8 @@ class QFunctional(torch.nn.Module):
 
         self.scale = float(state_dict.pop(prefix + 'scale'))
         self.zero_point = int(state_dict.pop(prefix + 'zero_point'))
-        super(QFunctional, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                       missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def _get_name(self):
         return 'QFunctional'

@@ -18,7 +18,7 @@ import numpy as np
 class BatchMSELoss(ModelLayer):
 
     def __init__(self, model, input_record, name='batch_mse_loss', **kwargs):
-        super(BatchMSELoss, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         assert schema.is_schema_subset(
             schema.Struct(

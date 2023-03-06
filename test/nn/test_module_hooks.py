@@ -393,9 +393,6 @@ class TestModuleHooks(TestCase):
             counter['backward'] += 1
 
         class TestModule(nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, dict):
                 inp = dict['x']
                 x = torch.nn.functional.softmax(inp, dim=0)
@@ -478,7 +475,7 @@ class TestStateDictHooks(TestCase):
         # Test with module instance method as hook
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
             def my_pre_load_hook(self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
@@ -543,7 +540,7 @@ class TestStateDictHooks(TestCase):
 
         class MyModule(nn.Module):
             def __init__(self):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Parameter(torch.rand(10))
 
             def my_post_load_hook(self, module, incompatible_keys):
@@ -660,7 +657,6 @@ class TestModuleGlobalHooks(TestCase):
             self.assertTrue(isinstance(h_module, module))
             self.assertEqual(grad_output[0], torch.ones(5, 5) * 2)
             counter['backwards'] += inc
-
         test_fwd = nn.modules.module.register_module_forward_hook(lambda *args: fw_hook(1, *args))
 
         module_1(input)

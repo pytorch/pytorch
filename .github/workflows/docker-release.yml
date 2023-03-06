@@ -72,6 +72,8 @@ jobs:
           QEMU_BINARY_PATH: ${{ runner.temp }}/bin
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+        with:
+          version: v0.10.0
       - name: Setup job specific variables
         run: |
           set -eou pipefail

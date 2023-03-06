@@ -2,6 +2,7 @@ import copy
 import logging
 import random
 import weakref
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -231,7 +232,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]
         else:
-            return self.node.kwargs["bias"]
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None
 
 
 class NormalizedMatmulNode:
@@ -298,15 +299,11 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
-                new_args = (
-                    [
-                        g.create_node(
-                            user.op, user.target, args=(arg,), kwargs=user.kwargs
-                        )
-                        for arg in node.args[0]
-                    ],
-                )
-                node.args = new_args
+                new_tensors = [
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    for arg in node.args[0]
+                ]
+                node.args = (new_tensors,) + node.args[1:]
                 user.replace_all_uses_with(cat_or_view)
                 g.erase_node(user)
     g.lint()
@@ -352,8 +349,10 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(weight, input.transpose(-1, -2))
     return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
 
 
@@ -446,8 +445,10 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(input.transpose(-1, -2), weight.t())
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 

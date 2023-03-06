@@ -166,6 +166,9 @@ Tensor _mps_linear_backward_input(
                                         c10::nullopt,
                                         grad_output.suggest_memory_format());
   TORCH_CHECK(output.is_mps());
+  if (grad_output.numel() == 0) {
+    return output;
+  }
 
   MPSGraphCache *cache_ = MPSGraphCache::getInstance();
 
@@ -259,6 +262,11 @@ std::tuple<Tensor, Tensor> _mps_linear_backward_weights(
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(bias.is_mps());
 
+  if (grad_output.numel() == 0) {
+    output.zero_();
+    bias.zero_();
+    return std::tuple<Tensor, Tensor>{ output, bias };
+  }
   MPSGraphCache *cache_ = MPSGraphCache::getInstance();
 
   MPSStream *stream= getCurrentMPSStream();
