@@ -6658,6 +6658,22 @@ if HAS_CPU:
             with self.assertRaises(RuntimeError):
                 torch.compile(fn)(a)
 
+        def test_ir_node_str(self):
+            @torch.compile
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin(), torch.nn.Softmax(dim=1)(x.cos())
+
+            def run_node_alt(*args, **kwargs):
+                rv = run_node(*args, **kwargs)
+                strings.append(str(rv))
+                return rv
+
+            strings = []
+            run_node = GraphLowering.run_node
+            with patch.object(GraphLowering, "run_node", run_node_alt):
+                fn(torch.randn([8, 128]))
+            self.assertGreater(len(strings), 3)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
@@ -7394,16 +7410,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(fn_opt(), fn())
 
         def test_split_op_with_sym(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
             for dynamic_shapes in [True, False]:
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-
-                def fn(x: torch.Tensor) -> torch.Tensor:
-                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
-                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
-
-                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
-                inps = torch.randn([5, 5])
-                fn_opt(inps)
+                with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                    torch._dynamo.reset()
+                    fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(
+                        fn
+                    )
+                    inps = torch.randn([5, 5])
+                    fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):
