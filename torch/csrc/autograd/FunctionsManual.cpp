@@ -77,15 +77,15 @@ Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
-  AT_ASSERT(range.second <= out.size());
-  AT_ASSERTM(
+  TORCH_CHECK(range.second <= out.size());
+  TORCH_CHECK(
       range.second - range.first == 1, "inconsistent range for Tensor output");
   out[range.first] = t;
 }
 
 void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
-  AT_ASSERT(range.second <= out.size());
-  AT_ASSERTM(
+  TORCH_CHECK(range.second <= out.size());
+  TORCH_CHECK(
       range.second - range.first == t.size(),
       "inconsistent range for TensorList output");
   std::copy(t.begin(), t.end(), out.begin() + range.first);
