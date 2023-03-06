@@ -90,6 +90,10 @@ class TestInductorDynamic(TestCase):
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
+        # HAS_CUDA also checks compute capability to skip tests
+        # on older devices
+        if self.device_type == "cuda" and not HAS_CUDA:
+            self.skipTest()
         torch._dynamo.reset()
         super(TestCase, self).setUp()
         # this should be in setUpClass, but device-generic tests
