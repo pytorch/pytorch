@@ -137,7 +137,6 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 }
 
 static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
-  TORCH_WARN("INIT STATUS", (int) status);
   ncclResult_t result = to_nccl_result(status);
   while (result == ncclInProgress) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -147,10 +146,8 @@ static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
 #endif
   }
   if (result != ncclSuccess) {
-    TORCH_WARN("NONBLOCKING FAIL");
     throw_nccl_error(from_nccl_result(result));
   }
-  TORCH_WARN("NONBLOCKING SUCCESS");
 }
 
 static inline void NCCL_CHECK_NONBLOCKING(ncclResult_t result, ncclComm_t comm) {
@@ -174,10 +171,8 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vecto
     }                                              
   }
   if (result != ncclSuccess) {
-    TORCH_WARN("NONBLOCKING FAIL");
     throw_nccl_error(from_nccl_result(result));
   }
-  TORCH_WARN("NONBLOCKING SUCCESS");
 }
 
 static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult_t result, std::vector<ncclComm_t> &comms) {
@@ -724,7 +719,8 @@ void all2all_single_equal_split(
     at::Tensor& output,
     int size,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream) {
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -740,7 +736,11 @@ void all2all_single_equal_split(
 #if defined(USE_ROCM) && ROCM_VERSION >= 50000
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
-  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclCommCount(comm, &numranks));
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
+  }
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
@@ -752,7 +752,11 @@ void all2all_single_equal_split(
           ncclRecv(recvbuff + r * rankdiff, count, type, r, comm, stream));
     }
   }
-  NCCL_CHECK(ncclGroupEnd());
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclGroupEnd());
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+  }
 #endif
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
@@ -772,7 +776,8 @@ void all2all_single_unequal_split(
     size_t size,
     c10::ScalarType _type,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream) {
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -781,7 +786,11 @@ void all2all_single_unequal_split(
   auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
   int numranks;
-  NCCL_CHECK(ncclCommCount(comm, &numranks));
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclCommCount(comm, &numranks));
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
+  }
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
@@ -805,7 +814,11 @@ void all2all_single_unequal_split(
           stream));
     }
   }
-  NCCL_CHECK(ncclGroupEnd());
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclGroupEnd());
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+  }
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -818,7 +831,8 @@ void all2all(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream) {
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -848,7 +862,11 @@ void all2all(
           stream.stream()));
     }
   }
+if (!comm_nonblocking) {
   NCCL_CHECK(ncclGroupEnd());
+} else {
+  NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+}
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -861,18 +879,29 @@ void send(
     const at::Tensor& input,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int dst) {
+    int dst,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 7)
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(ncclSend(
-      input.data_ptr(),
-      input.numel(),
-      to_nccl_data_type(input),
-      dst,
-      to_nccl_comm(comm),
-      stream.stream()));
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclSend(
+        input.data_ptr(),
+        input.numel(),
+        to_nccl_data_type(input),
+        dst,
+        to_nccl_comm(comm),
+        stream.stream()));
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclSend(
+        input.data_ptr(),
+        input.numel(),
+        to_nccl_data_type(input),
+        dst,
+        to_nccl_comm(comm),
+        stream.stream()), comm);
+  }
 #else
   AT_ERROR("Send is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -885,18 +914,29 @@ void recv(
     at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int src) {
+    int src,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && \
     (NCCL_MINOR >= 7)
   using namespace torch::cuda::nccl::detail;
-  NCCL_CHECK(ncclRecv(
-      output.data_ptr(),
-      output.numel(),
-      to_nccl_data_type(output),
-      src,
-      to_nccl_comm(comm),
-      stream.stream()));
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclRecv(
+        output.data_ptr(),
+        output.numel(),
+        to_nccl_data_type(output),
+        src,
+        to_nccl_comm(comm),
+        stream.stream()));
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclRecv(
+        output.data_ptr(),
+        output.numel(),
+        to_nccl_data_type(output),
+        src,
+        to_nccl_comm(comm),
+        stream.stream()), comm);
+  }
 #else
   AT_ERROR("Recv is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -910,7 +950,8 @@ void gather(
     std::vector<at::Tensor>& outputs,
     ncclComm_t _comm,
     at::cuda::CUDAStream& stream,
-    int32_t root) {
+    int32_t root,
+    bool comm_nonblocking) {
 #ifdef USE_NCCL
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && \
     (NCCL_MAJOR * 10 + NCCL_MINOR) >= 27
@@ -940,7 +981,11 @@ void gather(
   } else {
     NCCL_CHECK(ncclSend(sendbuff, count, type, root, comm, stream));
   }
-  NCCL_CHECK(ncclGroupEnd());
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclGroupEnd());
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+  }
 
 #else
   AT_ERROR("gather is only supported for NCCL lib version >= 2.7.0");
@@ -1002,12 +1047,9 @@ void scatter(
       ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream);
     }
   }
-  TORCH_WARN("NONBLOCKING????", comm_nonblocking);
   if (!comm_nonblocking) {
-    TORCH_WARN("?????? GROUPEND");
     NCCL_CHECK(ncclGroupEnd());
   } else {
-    TORCH_WARN("NONBLOCKING GROUPEND");
     NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
   }
 

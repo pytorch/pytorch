@@ -180,14 +180,16 @@ TORCH_CUDA_CPP_API void gather(
     std::vector<at::Tensor>& outputs,
     ncclComm_t comm,
     at::cuda::CUDAStream& stream,
-    int32_t root = 0);
+    int32_t root = 0,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void all2all_single_equal_split(
     at::Tensor& input,
     at::Tensor& output,
     int size,
     ncclComm_t comm,
-    at::cuda::CUDAStream& stream);
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void all2all_single_unequal_split(
     void* sendbuff,
@@ -199,25 +201,29 @@ TORCH_CUDA_CPP_API void all2all_single_unequal_split(
     size_t size,
     c10::ScalarType type,
     ncclComm_t comm,
-    at::cuda::CUDAStream& stream);
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void all2all(
     std::vector<at::Tensor>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     ncclComm_t _comm,
-    at::cuda::CUDAStream& stream);
+    at::cuda::CUDAStream& stream,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void send(
     const at::Tensor& input,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int dst);
+    int dst,
+    bool comm_nonblocking = false);
 
 TORCH_CUDA_CPP_API void recv(
     at::Tensor& output,
     ncclComm_t comm,
     at::cuda::CUDAStream stream,
-    int src);
+    int src,
+    bool comm_nonblocking = false);
 } // namespace nccl
 } // namespace cuda
 } // namespace torch

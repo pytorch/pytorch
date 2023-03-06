@@ -1666,8 +1666,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         tensors[i].storage().data_ptr(), ncclStream);
   }
 
+  std::vector<void *> comms_;
+  if (nccl_use_nonblocking()) {
+      for (const auto i : c10::irange(tensors.size())) {
+        comms_.push_back((void *) ncclComms[i]->getNcclComm());
+      }
+  }
   {
-    torch::cuda::nccl::AutoNcclGroup nccl_group_guard;
+    torch::cuda::nccl::AutoNcclGroup nccl_group_guard(comms_, nccl_use_nonblocking());
     for (const auto i : c10::irange(tensors.size())) {
       gpuGuard.set_index(devices[i].index());
       at::cuda::CUDAStream& ncclStream = ncclStreams_[key][i];
@@ -2469,7 +2475,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
                 output.storage().data_ptr(), stream);
           }
           torch::cuda::nccl::all2all_single_equal_split(
-              input, output, this->getSize(), comm, stream);
+              input, output, this->getSize(), comm, stream, nccl_use_nonblocking());
           return ncclSuccess;
         },
         OpType::ALLTOALL_BASE,
@@ -2527,7 +2533,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
               input.element_size(),
               input.scalar_type(),
               comm,
-              stream);
+              stream,
+              nccl_use_nonblocking());
           return ncclSuccess;
         },
         OpType::ALLTOALL_BASE,
@@ -2557,7 +2564,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
           at::Tensor& /* unused */,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
-        torch::cuda::nccl::all2all(outputTensors, inputTensors, comm, stream);
+        torch::cuda::nccl::all2all(outputTensors,
+                                   inputTensors,
+                                   comm,
+                                   stream,
+                                   nccl_use_nonblocking());
         return ncclSuccess;
       },
       [&](std::vector<at::cuda::CUDAStream>&,
@@ -2585,7 +2596,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int dst) {
-        torch::cuda::nccl::send(input, comm, stream, dst);
+        torch::cuda::nccl::send(input, comm, stream, dst, nccl_use_nonblocking());
         return ncclSuccess;
       },
       dstRank,
@@ -2605,7 +2616,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
           ncclComm_t comm,
           at::cuda::CUDAStream& stream,
           int src) {
-        torch::cuda::nccl::recv(output, comm, stream, src);
+        torch::cuda::nccl::recv(output, comm, stream, src, nccl_use_nonblocking());
         return ncclSuccess;
       },
       srcRank,
@@ -2758,7 +2769,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
             }
           }
         }
-        torch::cuda::nccl::gather(inputTensors[0], outputs, comm, stream, root);
+        torch::cuda::nccl::gather(inputTensors[0], outputs, comm, stream, root, nccl_use_nonblocking());
         return ncclSuccess;
       },
       OpType::GATHER,
