@@ -7454,18 +7454,19 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # and https://github.com/pytorch/pytorch/issues/83863
         # for bf16 accumulation in gemm ref path
         def check_correctness(fn, *args):
-                expected = fn(a, b).bfloat16()
+                expected = fn(*args).bfloat16()
                 with torch.backends.mkldnn.flags(enabled=False):
                     def test():
-                        tmp_result=fn(a.bfloat16(), b.bfloat16())
+                        bf16_args = (arg.bfloat16() for arg in args)
+                        tmp_result=fn(*bf16_args)
                         return tmp_result
                     c = test()
                     assert(torch.all(c == expected)), "Incorrect result with\n" \
                                                       f"expected: {expected}\n" \
                                                       f"got: {c}\n"
         # test matmul
-        a = torch.rand(300, 300)
-        b = torch.rand(300, 300)
+        a = torch.ones(300, 300)
+        b = torch.ones(300, 300)
         check_correctness(torch.matmul, a, b)
         # test bmm
         a = torch.ones(1, 1, 300)
@@ -7475,7 +7476,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         a = torch.ones(1, 1, 300)
         b = torch.ones(1, 300, 1)
         c = torch.ones(1, 1, 1)
-        check_correctness(torch.baddbmm, a, b, c)
+        check_correctness(torch.baddbmm, c, a, b)
         # test mv
         a = torch.rand(1, 300)
         b = torch.rand(300)
