@@ -133,7 +133,7 @@ jobs:
               echo "SCCACHE_GHA_CACHE_TO=${BUILD_ENVIRONMENT}-sccache-${GITHUB_SHA}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_CACHE_FROM=${BUILD_ENVIRONMENT}-sccache-" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
-              echo "SCCACHE_ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
+              echo "SCCACHE_GHA_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
             else
               sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
               echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
