@@ -124,7 +124,7 @@ def make_tensor(
         # Checks for error cases
         if low != low or high != high:
             raise ValueError(
-                f"`low` and `high` cannot be NaN, but got {low} and {high}"
+                f"`low` and `high` cannot be NaN, but got {low=} and {high=}"
             )
         elif low > high:
             raise ValueError(
@@ -164,7 +164,7 @@ def make_tensor(
     _complex_types = [torch.complex32, torch.complex64, torch.complex128]
     if requires_grad and dtype not in _floating_types and dtype not in _complex_types:
         raise ValueError(
-            "`requires_grad=True` is not supported for integral dtypes, but got {torch.dtype}"
+            f"`requires_grad=True` is not supported for integral dtypes, but got {dtype=}"
         )
 
     if dtype is torch.bool:
