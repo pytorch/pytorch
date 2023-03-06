@@ -100,6 +100,11 @@ compile_threads = (
         else os.cpu_count(),
     )
 )
+# be able to override compile_threads. We may want to disable async compiling by
+# setting this to 1 to make pdb happy.
+compile_threads = int(
+    os.environ.get("TORCHINDUCTOR_COMPILE_THREADS", str(compile_threads))
+)
 
 # autotuning global cache path
 if is_fbcode():
