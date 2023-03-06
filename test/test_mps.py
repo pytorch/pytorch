@@ -22,7 +22,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI,
-     TEST_WITH_UBSAN, dtype_abbrs, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -75,10 +75,10 @@ def mps_ops_grad_modifier(ops):
         'prod': [torch.float32],  # The operator 'aten::cumprod.out'
         'sgn': [torch.float16, torch.float32],
         '_segment_reduce': [torch.float16, torch.float32],
-        'unfold_copy': [torch.float16, torch.float32], # unfold_backward is not implemented
+        'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
         'unfold': [torch.float16, torch.float32],
-        'trace': [torch.float32], # missing in place aten::index_fill_.int_Tensor
-        'sparse.mmreduce': [torch.float32], # csr not supported
+        'trace': [torch.float32],  # missing in place aten::index_fill_.int_Tensor
+        'sparse.mmreduce': [torch.float32],  # csr not supported
         'unique_consecutive': [torch.float16, torch.float32],
         'special_modified_bessel_i0': [torch.float16, torch.float32],
         'scalar_tensor': [torch.float16, torch.float32],
@@ -123,14 +123,40 @@ def mps_ops_grad_modifier(ops):
         'signal.windows.hann': [torch.float32],
         'signal.windows.kaiser': [torch.float32],
         'signal.windows.nuttall': [torch.float32],
-        'empty': [torch.float16, torch.float32],
         'empty_permuted': [torch.float16, torch.float32],
         'eye': [torch.float16, torch.float32],
 
         # trunc_tensor not working properly for float16
         'divtrunc_rounding': [torch.float16],
         'fmod': [torch.float16],
+    }
 
+    MACOS_12_3_XFAILLIST_GRAD = {
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+    }
+
+    MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'masked.softmin': [torch.float32],
+        'masked.softmax': [torch.float32],
+        'masked.log_softmax': [torch.float32],
+
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+
+        # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+        # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+        # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+        # Running `msort` with stable `sort` passes.
+        'msort': [torch.float16],
+    }
+
+    XPASSLIST_GRAD = {
+        'nn.functional.pairwise_distance': [torch.float16],
+    }
+
+    MACOS_13_3_XFAILLIST_GRAD = {
         # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
         # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
@@ -156,6 +182,16 @@ def mps_ops_grad_modifier(ops):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_13_3_XFAILLIST_GRAD and (product_version >= 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_3_XFAILLIST_GRAD[key]))
         yield op
 
 def mps_ops_modifier(ops):
@@ -284,16 +320,57 @@ def mps_ops_modifier(ops):
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
-        'masked.softmin': [torch.float32],
-        'masked.softmax': [torch.float32],
-        'masked.log_softmax': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # Failure due to precision issue for fp16
+        # on both cpu and mps there are test cases that might produce inf result
+        'nn.functional.pairwise_distance': [torch.float16],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+        # Unsupported dtypes
+        'cumsum': [torch.int64],
+        'cumulative_trapezoid': [torch.int64],
+        'masked.cumsum': [torch.int64],
     }
 
     MACOS_13_3_XFAILLIST = {
+        # before macOS 13.3 it falls back to cpu and pass the forward pass
+        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+
+        # Failure due to precision issue for fp16
+        # on both cpu and mps there are test cases that might produce inf result
+        'nn.functional.pairwise_distance': [torch.float16],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+        # Unsupported dtypes
+        'cumsum': [torch.int64],
+        'cumulative_trapezoid': [torch.int64],
+        'masked.cumsum': [torch.int64],
     }
+
+    MACOS_BEFORE_13_3_XPASSLIST = {
+    }
+
 
     # Those ops are not expected to work
     UNIMPLEMENTED_XFAILLIST = {
@@ -306,7 +383,7 @@ def mps_ops_modifier(ops):
         'log_sigmoid': None,
         'log_sigmoid_forward': None,
         'nn.functional.hardsigmoid': None,
-        'nn.functional.logsigmoid':  None,
+        'nn.functional.logsigmoid': None,
         'nn.functional.multilabel_soft_margin_loss': None,
         # Fixed in https://github.com/pytorch/pytorch/pull/95045
         'trace': [torch.int8, torch.uint8, torch.int16, torch.int32],
@@ -360,7 +437,6 @@ def mps_ops_modifier(ops):
         'frexp': None,
         'gcd': None,
         'geqrf': None,
-        'grid_sampler_2d': None,            # Unsupported Border padding mode
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
         'histc': None,
@@ -566,9 +642,6 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose2d': [torch.int64],
 
         # Unsupported dtypes
-        'cumsum': [torch.int64],
-        'masked.cumsum': [torch.int64],
-        'cumulative_trapezoid': [torch.int64],
         'dot': [torch.int64],
         'index_add': [torch.int64],
         'log1p': [torch.int64],
@@ -612,9 +685,6 @@ def mps_ops_modifier(ops):
         # Top 60 operators
         # topk fails with duplicate indices
         'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
-        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
-        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
 
         # Failures due to random output that they generate using
         # Philox engine causing mismatch with CPU results
@@ -656,14 +726,6 @@ def mps_ops_modifier(ops):
         'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
                                      torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
 
-        # Argsort case using duplicate indices (undefined behaviour):
-        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
-        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
-        # Elements from index 30 and 5133 are both equal.
-        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
-        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
-
-
         # random results
         # mps vs cpu:
         # Mismatched elements: 40 / 96 (41.7%)
@@ -677,10 +739,6 @@ def mps_ops_modifier(ops):
 
         # Failures due to casting negative float to uint8 is undefined
         'byte': [torch.float16, torch.float32],
-
-        # Failure due to precision issue for fp16
-        # on both cpu and mps there are test cases that might produce inf result
-        'nn.functional.pairwise_distance': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
@@ -10082,6 +10140,7 @@ class TestConsistency(TestCaseMPS):
 
         key = op.name + op.variant_test_name
         run_grad_test = True
+
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
         cpu_samples = get_samples()
