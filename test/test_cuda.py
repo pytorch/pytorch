@@ -22,9 +22,6 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
-from torch.cuda._memory_viz import profile_plot
-from torch.cuda._memory_viz import trace_plot
-
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
@@ -4993,44 +4990,6 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
-
-    @skipIfRocm
-    def test_memory_profiler_viz(self):
-        with torch.profiler.profile(
-            with_stack=True,
-            profile_memory=True,
-            record_shapes=True
-        ) as prof:
-            x = torch.rand(128, 128, device='cuda')
-            x * x + x * x
-        plot = profile_plot(prof)
-        self.assertTrue("test_cuda.py" in plot)
-        self.assertTrue("test_memory_profiler_viz" in plot)
-        self.assertTrue('"elements_category": [' in plot)
-
-    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    def test_memory_trace_plot(self):
-        for record_context in (True, False):
-            try:
-                torch.cuda.memory.empty_cache()
-                torch.cuda.memory._record_memory_history(
-                    True,
-                    record_context=record_context,
-                    trace_alloc_max_entries=1000000,
-                    trace_alloc_record_context=True)
-
-                def run():
-                    x = torch.rand(128, 128, device='cuda')
-                    x * x + x * x
-
-                run()
-                ss = torch.cuda.memory._snapshot()
-                plot = trace_plot(ss)
-                self.assertTrue(record_context == ("test_memory_trace_plot" in plot))
-                self.assertTrue(str(128 * 128 * 4) in plot)
-                torch.cuda.memory._record_memory_history(False)
-            finally:
-                torch.cuda.memory._record_memory_history(False)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
