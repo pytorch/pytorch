@@ -256,6 +256,10 @@ test_inductor() {
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
+# For example 'dynamic_aot_eager_torchbench' TEST_CONFIG means we run
+# the benchmark script with '--dynamic-shapes --backend aot_eager --device cuda'
+# The matrix of test options is specified in .github/workflows/periodic.yml
+# and .github/workflows/inductor.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
 if [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
@@ -296,8 +300,6 @@ test_single_dynamo_benchmark() {
     partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
   fi
 
-  # Feel free to remove --device cuda if you ever decide to need to
-  # test CPU as well in CI
   if [[ "${TEST_CONFIG}" == *perf* ]]; then
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
