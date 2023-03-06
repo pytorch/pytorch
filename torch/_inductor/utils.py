@@ -225,7 +225,9 @@ def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
     @functools.wraps(fn)
-    def wrapper(self):
+    def wrapper(self, *args, **kwargs):
+        if len(args) > 0 or len(kwargs) > 0:
+            return fn(self, args, kwargs)
         if not hasattr(self, key):
             setattr(self, key, fn(self))
         return getattr(self, key)
