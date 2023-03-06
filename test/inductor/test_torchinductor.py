@@ -4046,9 +4046,7 @@ class CommonTemplate:
         out_eager = (inputs[0] + inputs[1].float()).add_(inputs[1]).mul_(inputs[1])
         self.assertTrue(same(out, out_eager))
 
-    @config.patch(
-        {"triton.ordered_kernel_names": True, "triton.descriptive_kernel_names": False}
-    )
+    @config.patch({"triton.unique_names": True, "triton.descriptive_names": False})
     def test_kernel_names(self):
         @torch._dynamo.optimize("inductor")
         def fn(x):
@@ -7442,9 +7440,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                         self.assertTrue(kernel_name in code)
 
             test_funcs(func_and_kernel_aten)
-            patch.object(config.triton, "descriptive_kernel_names", "torch")(
-                test_funcs
-            )(func_and_kernel_torch)
+            patch.object(config.triton, "descriptive_names", "torch")(test_funcs)(
+                func_and_kernel_torch
+            )
 
         def test_split_op_with_sym(self):
             for dynamic_shapes in [True, False]:
