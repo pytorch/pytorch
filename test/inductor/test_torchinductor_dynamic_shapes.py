@@ -93,7 +93,7 @@ class TestInductorDynamic(TestCase):
         # HAS_CUDA also checks compute capability to skip tests
         # on older devices
         if self.device_type == "cuda" and not HAS_CUDA:
-            self.skipTest()
+            self.skipTest("Triton not available")
         torch._dynamo.reset()
         super(TestCase, self).setUp()
         # this should be in setUpClass, but device-generic tests
