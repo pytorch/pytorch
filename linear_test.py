@@ -3,10 +3,10 @@ import torch
 from torch.ao.pruning import WeightNormSparsifier
 import torch.utils.benchmark as benchmark
 
-first_activation_dim =16
+first_activation_dim =1000
 num_batches = 1
-output_channel = 16
-input_channel = 16
+output_channel = 1024
+input_channel = 1024
 dtype = torch.float16
 
 torch.set_printoptions(precision=1, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
