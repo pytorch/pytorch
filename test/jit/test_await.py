@@ -387,18 +387,18 @@ class TestAwait(JitTestCase):
 
     def test_await_then_base(self):
         def gap(x: Tensor):
-            return torch.relu(x)
+            return x + 5
 
         def delayed(x: Tensor) -> Tensor:
             return -1 * x
 
-        def then(aw: Await[Tensor], x: Tensor) -> Tensor:
+        def continuation_fn(aw: Await[Tensor], x: Tensor) -> Tensor:
             return 5 * x
 
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
             z = gap(x)
-            torch.jit._awaitable_then(then, aw)
+            torch.jit._awaitable_then(continuation_fn, aw)
 
             y = torch.jit._awaitable_wait(aw)
             return x + y + z
@@ -408,7 +408,7 @@ class TestAwait(JitTestCase):
 
         sm = torch.jit.script(main)
         script_out = sm(inp)
-        expected = -3 * torch.eye(2)
+        expected = 5 * torch.ones(2) - 3 * torch.eye(2)
         self.assertTrue(torch.allclose(expected, script_out))
         self.assertTrue(torch.allclose(script_out, out))
 
@@ -421,15 +421,15 @@ class TestAwait(JitTestCase):
 
     def test_await_then(self):
         def gap(x: Tensor):
-            return torch.relu(x)
+            return x + 5
 
         def delayed(x: Tensor) -> Tensor:
             return -1 * x
 
-        def then(aw: Await[Tensor], x: Tensor) -> Tensor:
+        def continuation_fn(aw: Await[Tensor], x: Tensor) -> Tensor:
             return 5 * x
 
-        def then2(aw: Await[Tensor], aw_out: Tensor) -> Tensor:
+        def continuation_fn2(aw: Await[Tensor], aw_out: Tensor) -> Tensor:
             return 4 * aw_out
 
         def main(x: Tensor) -> Tensor:
@@ -437,8 +437,8 @@ class TestAwait(JitTestCase):
             l: List[Await[Tensor]] = torch.jit.annotate(List[Await[Tensor]], [])
             l.append(aw)
             z = gap(x)
-            torch.jit._awaitable_then(then, l[0])
-            torch.jit._awaitable_then(then2, l[0])
+            torch.jit._awaitable_then(continuation_fn, l[0])
+            torch.jit._awaitable_then(continuation_fn2, l[0])
 
             y = torch.jit._awaitable_wait(aw)
             return x + y + z
@@ -448,7 +448,7 @@ class TestAwait(JitTestCase):
 
         sm = torch.jit.script(main)
         script_out = sm(inp)
-        expected = -18 * torch.eye(2)
+        expected = 5 * torch.ones(2) - 18 * torch.eye(2)
         self.assertTrue(torch.allclose(expected, script_out))
         self.assertTrue(torch.allclose(script_out, out))
 
@@ -467,14 +467,14 @@ class TestAwait(JitTestCase):
             l = [x * i for i in range(5)]
             return (100 * x, l)
 
-        def then(aw: Await[Tuple[Tensor, List[Tensor]]], x: Tuple[Tensor, List[Tensor]]) -> Tuple[Tensor, List[Tensor]]:
+        def continuation_fn(aw: Await[Tuple[Tensor, List[Tensor]]], x: Tuple[Tensor, List[Tensor]]) -> Tuple[Tensor, List[Tensor]]:
             (t, l) = x
             return (t, [z * 2 for z in l])
 
         def main(x: Tensor) -> Tensor:
             aw = torch.jit._awaitable(delayed, x)
             z = gap(x)
-            torch.jit._awaitable_then(then, aw)
+            torch.jit._awaitable_then(continuation_fn, aw)
             (_, l) = torch.jit._awaitable_wait(aw)
             return l[3] + z
 

@@ -71,6 +71,38 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   Node* function = function_context_node->inputs().at(0)->node();
   Node* context = function_context_node->inputs().at(1)->node();
   auto then_graph = function->g(attr::Subgraph)->copy();
+  // Replacing ir_emitter emitted awaitableThenClosure, with awaitable_then node
+  // with 2 inputs: Await Value which graph it continues, the fake input Value
+  // which represents the future result of Await graph with previously added
+  // continuations execution. As we do not have Value for it in IR - we add
+  // no-op node awaitable_then_input to produce this Value and keep the graph
+  // valid. At runtime instead the result of Await will be placed for this
+  // Value.
+  // Before:
+  // %aw : Await(Tensor) = prim::awaitableClosure(%43)
+  // ...
+  // %1 : NoneType = prim::Closure_1()
+  // %2 : () = prim::TupleConstruct()
+  // %3 : (NoneType, ()) = prim::TupleConstruct(%1, %2)
+  // = prim::awaitableThenClosure(%3, %aw)
+  // ...
+  // with prim::Closure_1 = graph(%context : (),
+  //       %aw_ : Await(Tensor),
+  //       %aw_out : Tensor):
+  //   %4 : Function = prim::Constant[name="then"]()
+  //   %5 : Tensor = prim::CallFunction(%4, %aw_, %aw_out)
+  //   return (%5)
+  // After:
+  // %aw : Await(Tensor) = prim::awaitable_0(%0)
+  //   ...
+  //   %2 : Tensor = prim::awaitable_then_input(%aw)
+  //    = prim::awaitable_then_1(%aw, %2)
+  //
+  // with prim::awaitable_then_1 = graph(%aw_ : Await(Tensor),
+  //       %aw_out : Tensor):
+  //   %2 : Function = prim::Constant[name="then"]()
+  //   %4 : Tensor = prim::CallFunction(%2, %aw_, %aw_out)
+  //   return (%4)
   auto g = then_closure->owningGraph();
   Node* then_node = g->create(prim::awaitable_then, 0)
                         ->insertAfter(then_closure)
@@ -84,21 +116,21 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   auto fake_aw_then_input = then_input_node->output();
   then_input_node->addInput(aw);
 
-  then_node->addInput(aw);
   then_node->addInput(fake_aw_then_input);
 
   auto then_graph_context = then_graph->inputs().at(0);
   {
+    // Unpacking then graph context from tuple node to individual inputs
     if (then_graph_context->uses().size() == 1) {
-      auto fork_graph_unpack = then_graph_context->uses().at(0).user;
+      auto then_graph_unpack = then_graph_context->uses().at(0).user;
 
       for (size_t i = 0; i < context->inputs().size(); ++i) {
         auto cont_input = context->inputs().at(i);
         then_node->addInput(cont_input);
         auto inp = then_graph->addInput()->copyMetadata(cont_input);
-        fork_graph_unpack->outputs().at(i)->replaceAllUsesWith(inp);
+        then_graph_unpack->outputs().at(i)->replaceAllUsesWith(inp);
       }
-      fork_graph_unpack->destroy();
+      then_graph_unpack->destroy();
     }
   }
 

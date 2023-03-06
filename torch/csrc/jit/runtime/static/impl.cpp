@@ -927,7 +927,13 @@ void check_type(const Argument& schema_arg, const IValue& arg) {
       schema_arg.type()->kind() == c10::TypeKind::TensorType) {
     return;
   }
-  TORCH_CHECK(arg.type()->isSubtypeOf(schema_arg.type()));
+  TORCH_CHECK(
+      arg.type()->isSubtypeOf(schema_arg.type()),
+      c10::to_string(arg.type()),
+      " is not a subtype of ",
+      c10::to_string(schema_arg.type()),
+      "; schema arg name: ",
+      schema_arg.name());
 }
 } // namespace
 
