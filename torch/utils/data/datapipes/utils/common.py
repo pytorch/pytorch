@@ -80,7 +80,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     if isinstance(fn, functools.partial):
         fn_name = fn.func.__name__
     else:
-        fn_name = fn.__name__
+        fn_name = getattr(fn, "__name__", repr(fn))
 
     if len(non_default_kw_only) > 0:
         raise ValueError(
