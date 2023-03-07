@@ -1919,6 +1919,8 @@ def run(runner, args, original_dir=None):
         torch._dynamo.config.specialize_int = False
     if args.ci:
         args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
