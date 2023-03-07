@@ -1846,15 +1846,19 @@ class TestMPS(TestCaseMPS):
 
     # Test addcmul
     def test_addcmul(self):
-        def helper(shape, value):
+        def helper(shape, value, xtype=torch.float32, ytype=None, ztype=None):
+            def rand_helper(dtype):
+                if dtype.is_floating_point:
+                    return torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
+                return torch.randint(10, shape, dtype=dtype, device='cpu', requires_grad=False)
 
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_x = rand_helper(xtype)
             x = cpu_x.detach().clone().to('mps')
 
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_y = rand_helper(ytype if ytype is not None else xtype)
             y = cpu_y.detach().clone().to('mps')
 
-            cpu_z = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            cpu_z = rand_helper(ztype if ztype is not None else xtype)
             z = cpu_z.detach().clone().to('mps')
 
             y = torch.addcmul(x, y, z, value=value)
@@ -1866,6 +1870,16 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.1)
         helper((2, 3, 4, 5), 0.2)
         helper((2, 8, 4, 5), 0.2)
+        # Integral types
+        helper((2, 2), 1.0, xtype=torch.int32)
+        helper((2, 2), 2.0, xtype=torch.int16)
+
+        # Mixed types
+        helper((2, 2), 1.0, xtype=torch.float16, ytype=torch.float32)
+        helper((3, 2), 1.0, ytype=torch.float16)
+        helper((2, 3), 1.0, ztype=torch.float16)
+        helper((2, 2), 1.0, xtype=torch.int32, ytype=torch.int16, ztype=torch.uint8)
+        helper((2, 2), 1.0, ytype=torch.int16, ztype=torch.uint8)
 
     # Test addcdiv
     def test_addcdiv(self):
