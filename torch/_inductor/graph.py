@@ -116,6 +116,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
     ):
         super().__init__(gm)
+        self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -285,9 +286,13 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)
         if isinstance(example, SymTypes):
             expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
+        elif isinstance(example, int):
+            expr = sympy.Integer(example)
             self.graph_inputs[target] = expr
             return expr
         # todo(chilli): We can remove the last check once we turn buffers into
@@ -353,8 +358,9 @@ class GraphLowering(torch.fx.Interpreter):
             out = lowerings[target](*args, **kwargs)
             return out
         except Exception as e:
-            log.exception("Error from lowering")
-            raise LoweringException(e, target, args, kwargs) from e
+            raise LoweringException(e, target, args, kwargs).with_traceback(
+                e.__traceback__
+            ) from None
 
     def get_attr(self, target, args, kwargs):
         # this is a constant

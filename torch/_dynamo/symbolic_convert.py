@@ -267,7 +267,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 msg = (
                     "Skipping frame because there is a graph break in a for/while loop"
                 )
-                log.debug(msg)
+                log.info(msg)
                 raise exc.SkipFrame(msg)
 
             self.push(value)
@@ -347,7 +347,7 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
-                    log.debug(msg)
+                    log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
                 if not self.should_compile_partial_graph():
