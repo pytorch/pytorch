@@ -446,10 +446,11 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     _has_hooks: bool = False
+    _has_hooks_2: bool = False
     call_super_init: bool = False
 
     # we want _has_hooks to be updated properly by _update_has_hooks in jit ScriptModules
-    __jit_ignored_attributes__ = ["_has_hooks"]
+    __jit_ignored_attributes__ = ["_has_hooks", "_has_hooks_2"]
 
     def __init__(self, *args, **kwargs) -> None:
         """
@@ -501,6 +502,7 @@ class Module:
             or self._forward_hooks
             or self._forward_pre_hooks
         )
+        self._has_hooks_2 = self._has_hooks
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -1529,7 +1531,7 @@ class Module:
         # this function, and just call forward.  It's slow for dynamo to guard on the state
         # of all these hook dicts individually, so instead it can guard on 2 bools and we just
         # have to promise to keep them up to date when hooks are added or removed via official means.
-        if not self._has_hooks and not _has_global_hooks:
+        if not self._has_hooks and not self._has_hooks_2 and not _has_global_hooks:
             return forward_call(*args, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
