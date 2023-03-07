@@ -104,7 +104,8 @@ void ImagingResampleHorizontalConvolution8u4x(
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
-    int64_t num_channels);
+    int64_t num_channels,
+    bool is_last_input_line);
 
 void ImagingResampleHorizontalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
@@ -173,7 +174,8 @@ void ImagingResampleHorizontal(
         kk,
         ksize,
         horiz_weights_precision,
-        num_channels);
+        num_channels,
+        yy + 4 == yout);
   }
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
@@ -387,7 +389,8 @@ void ImagingResampleHorizontalConvolution8u4x(
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
-    int64_t num_channels) {
+    int64_t num_channels,
+    bool is_last_input_line) {
 
   // Define shuffling masks (low/high) for num_channels 4 and 3
   const __m256i masks_low_high_c4[2] = {
@@ -506,29 +509,20 @@ void ImagingResampleHorizontalConvolution8u4x(
       auto mmk = _mm256_set1_epi32(k[x]);
       __m256i pix;
       __m128i p0, p1;
-      if (num_channels == 3) {
-        uint8_t output0[4];
-        uint8_t output1[4];
-        std::memcpy(output0, lineIn0 + stride * (x + xmin), 3);
-        std::memcpy(output1, lineIn1 + stride * (x + xmin), 3);
-        p0 = mm_cvtepu8_epi32(output0);
-        p1 = mm_cvtepu8_epi32(output1);
-      } else {
-        p0 = mm_cvtepu8_epi32(lineIn0 + stride * (x + xmin));
-        p1 = mm_cvtepu8_epi32(lineIn1 + stride * (x + xmin));
-      }
-      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
+      // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
+      // lines 0, 1 and 2 wont go out of allocated memory bounds
+      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+          mm_cvtepu8_epi32(lineIn0 + stride * (x + xmin))),
+          mm_cvtepu8_epi32(lineIn1 + stride * (x + xmin)), 1);
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
 
-      if (num_channels == 3) {
-        uint8_t output0[4];
+      p0 = mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin));
+
+      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line)) {
         uint8_t output1[4];
-        std::memcpy(output0, lineIn2 + stride * (x + xmin), 3);
         std::memcpy(output1, lineIn3 + stride * (x + xmin), 3);
-        p0 = mm_cvtepu8_epi32(output0);
         p1 = mm_cvtepu8_epi32(output1);
       } else {
-        p0 = mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin));
         p1 = mm_cvtepu8_epi32(lineIn3 + stride * (x + xmin));
       }
       pix = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
@@ -542,19 +536,21 @@ void ImagingResampleHorizontalConvolution8u4x(
     sss0 = _mm256_packus_epi16(sss0, zero);
     sss1 = _mm256_packus_epi16(sss1, zero);
     if (num_channels == 3) {
-        sss0 = _mm256_shuffle_epi8(sss0, mask_ch);
-        sss1 = _mm256_shuffle_epi8(sss1, mask_ch);
+      // Remove data from the 4th byte: R G B X 0 0 0 0 ... -> R G B 0 0 0 0 0 ...
+      sss0 = _mm256_shuffle_epi8(sss0, mask_ch);
+      sss1 = _mm256_shuffle_epi8(sss1, mask_ch);
     }
 
-    auto o0 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 0));
+    auto o0 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss0));
     auto o1 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 1));
-    auto o2 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 0));
+    auto o2 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss1));
     auto o3 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 1));
+
     if (num_channels == 3 && C10_UNLIKELY(stride * xx + 4 >= xsize * stride)) {
-        std::memcpy(lineOut0 + stride * xx, (unsigned char *) &o0, num_channels);
-        std::memcpy(lineOut1 + stride * xx, (unsigned char *) &o1, num_channels);
-        std::memcpy(lineOut2 + stride * xx, (unsigned char *) &o2, num_channels);
-        std::memcpy(lineOut3 + stride * xx, (unsigned char *) &o3, num_channels);
+      std::memcpy(lineOut0 + stride * xx, (unsigned char *) &o0, num_channels);
+      std::memcpy(lineOut1 + stride * xx, (unsigned char *) &o1, num_channels);
+      std::memcpy(lineOut2 + stride * xx, (unsigned char *) &o2, num_channels);
+      std::memcpy(lineOut3 + stride * xx, (unsigned char *) &o3, num_channels);
     } else {
       *(uint32_t *)(lineOut0 + stride * xx) = o0;
       *(uint32_t *)(lineOut1 + stride * xx) = o1;
