@@ -3,7 +3,7 @@ from collections import defaultdict
 from warnings import warn
 
 import torch
-import torch._dynamo
+
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
 
@@ -56,6 +56,31 @@ except ImportError:
                     return func(*args, **kwargs)
 
             return wrapped
+
+def enable_dynamo_cache_lookup_profiler(enable: bool):
+    from torch._C._dynamo.eval_frame import (
+        clear_profiler_hooks,
+        set_profiler_hooks,
+    )
+    """
+    Registers a hook within dynamo eval_frame.c called before and after
+    the lookup process, which runs guards associated with each cached frame.
+
+    Clear deregisters the hooks, saving overhead.
+    """
+
+    if enable:
+
+        def _profiler_start(name):
+            return torch.ops.profiler._record_function_enter_new(name, None)
+
+        def _profiler_end(record):
+            torch.ops.profiler._record_function_exit._RecordFunction(record)
+
+        set_profiler_hooks(_profiler_start, _profiler_end)
+    else:
+        clear_profiler_hooks()
+
 
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
@@ -490,12 +515,12 @@ class record_function(_ContextDecorator):
         self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
 
     def __enter__(self):
-        torch._dynamo.eval_frame.enable_cache_lookup_profiler(True)
+        enable_dynamo_cache_lookup_profiler(True)
         self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        torch._dynamo.eval_frame.enable_cache_lookup_profiler(False)
+        enable_dynamo_cache_lookup_profiler(False)
         if not self.run_callbacks_on_exit:
             return
 

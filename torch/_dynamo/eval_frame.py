@@ -24,12 +24,10 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
-        clear_profiler_hooks,
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
         set_guard_fail_hook,
-        set_profiler_hooks,
         skip_code,
         unsupported,
     )
@@ -55,26 +53,6 @@ null_context = contextlib.nullcontext
 # See https://github.com/python/typing/pull/240
 class Unset(Enum):
     token = 0
-
-
-def enable_cache_lookup_profiler(enable: bool):
-    """
-    Registers a hook within eval_frame.c called before and after
-    the lookup process, which runs guards associated with each cached frame.
-
-    Clear deregisters the hooks, saving overhead.
-    """
-    if enable:
-
-        def _profiler_start(name):
-            return torch.ops.profiler._record_function_enter_new(name, None)
-
-        def _profiler_end(record):
-            torch.ops.profiler._record_function_exit._RecordFunction(record)
-
-        set_profiler_hooks(_profiler_start, _profiler_end)
-    else:
-        clear_profiler_hooks()
 
 
 unset = Unset.token

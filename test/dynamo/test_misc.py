@@ -21,7 +21,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
-from torch._dynamo.eval_frame import enable_cache_lookup_profiler
+from torch.autograd.profiler import enable_dynamo_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -2007,7 +2007,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with torch.autograd.profiler.profile() as prof:
             # just make sure the disable functionality works
-            enable_cache_lookup_profiler(False)
+            enable_dynamo_cache_lookup_profiler(False)
             res = opt_fn(x)
         events = list(
             filter(
