@@ -887,21 +887,10 @@ CUSTOM_HANDLERS = {
 
 PYTEST_BLOCKLIST = [
     "test_package",
-    "test_nccl",
     "inductor/test_torchinductor",
-    "test_cuda",
     "test_quantization",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
     "test_fx",
-    "test_jiterator",
-    "test_mps",
-    "test_cuda_trace",
     "profiler/test_profiler",
-    "test_jit",
-    "test_jit_legacy",
     "dynamo/test_repros",  # skip_if_pytest
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
