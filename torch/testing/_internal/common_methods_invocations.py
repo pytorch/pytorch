@@ -8172,7 +8172,7 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
 
         for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2)):
-            for zero_size in (False,):
+            for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 and ord not in (-1, -2) else (False,):
                 input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=zero_size, **_foreach_inputs_kwargs)
                 disable_fastpath = True
                 if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
