@@ -52,7 +52,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   CusparseLtLinear() = delete;
   CusparseLtLinear(const at::Tensor& weight) : weight{weight}{};
 
-  void init(const at::Tensor& res, const at::Tensor& input, const at::Tensor& bias);
+  void init(const at::Tensor& res, const at::Tensor& input, const at::Tensor& bias, const at::Tensor& zeros);
   void prune();
   void compress();
   void search_matmul_algo();
@@ -66,7 +66,8 @@ struct CusparseLtLinear : torch::CustomClassHolder {
 // this function does all the cuSPARSELt initial preparation stuff
 void CusparseLtLinear::init(const at::Tensor& res, 
                             const at::Tensor& input, 
-                            const at::Tensor& bias) {
+                            const at::Tensor& bias,
+                            const at::Tensor& zeros) {
 
   int major_cc, minor_cc;
   CHECK_CUDA( cudaDeviceGetAttribute(&major_cc,
@@ -113,7 +114,7 @@ void CusparseLtLinear::init(const at::Tensor& res,
   
   dA = weight.data_ptr<c10::Half>();
   dB = input.data_ptr<c10::Half>();
-  dC = res.data_ptr<c10::Half>();
+  dC = zeros.data_ptr<c10::Half>();
   dD = res.data_ptr<c10::Half>();
   dBias = bias.data_ptr<c10::Half>();
 

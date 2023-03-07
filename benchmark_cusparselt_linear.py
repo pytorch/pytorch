@@ -11,7 +11,7 @@ def benchmark_torch_function_in_microseconds(f, *args, **kwargs):
 
 device = "cuda"
 dtype = torch.float16
-m, n, k = 64, 64, 64
+m, n, k = 1024, 1024, 1024 
 
 class Model(nn.Module):
 
@@ -25,7 +25,6 @@ class Model(nn.Module):
 class cuSPARSELtLinear(nn.Linear):
 
     def forward(self, x):
-        print("Here")
         self.cslt.masked_mm(x)
         return self.res
 
@@ -40,21 +39,21 @@ class cuSPARSELtLinear(nn.Linear):
         cusparselt = cls(mod.in_features,
                          mod.out_features)
 
-        res = torch.empty(m, n, dtype=dtype, device=device)
+        res = torch.zeros(m, n, dtype=dtype, device=device)
+        offset = torch.zeros(m, n, dtype=dtype, device=device)
 
         cslt = torch.classes.cusparselt.CusparseLtLinear(weight_tensor)
-        cslt.init(res, input_tensor, bias_tensor)
+        cslt.init(res, input_tensor, bias_tensor, offset)
         cslt.prune()
         cslt.compress()
         cslt.search_matmul_algo()
-        cslt.masked_mm(input_tensor)
 
         cusparselt.cslt = cslt
         cusparselt.res = res
         return cusparselt
 
 
-torch.set_printoptions(precision=1, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
+torch.set_printoptions(precision=3, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
 
 print("Running benchmark ...")
 
@@ -62,36 +61,31 @@ model = Model()
 model.half()
 model.cuda()
 
-pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2)
+pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(4, 1), zeros_per_block=2)
 pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
 pruner.step()
 pruner.squash_mask()
+
+model.linear.bias.data.zero_()
 
 
 print("Creating tensors")
 
 # weight_tensor, bias_tensor = model.linear.weight.data, model.linear.bias.data
-input_tensor = torch.randn(k, n, device=device, dtype=dtype)
-
-# c2 = torch.matmul(weight_tensor, input_tensor) + bias_tensor
-# torch.testing.assert_close(c2, res, rtol=1e-3, atol=1e-3)
-# print("Pass")
-
+input_tensor = 10 * torch.randn(k, n, device=device, dtype=dtype)
 
 print("Creating module")
 cslt_linear = cuSPARSELtLinear.from_dense(model.linear, input_tensor)
 
 for i in range(5):
-    input_tensor = torch.randn(k, n, device=device, dtype=dtype)
+    input_tensor = 10 * torch.randn(k, n, device=device, dtype=dtype)
     c1 = cslt_linear(input_tensor)
-    print(c1)
-    c2 = torch.addmm(model.linear.bias.data, model.linear.weight.data, input_tensor) 
-    print(c2)
+    c2 = torch.matmul(model.linear.weight.data, input_tensor)
     torch.testing.assert_close(c2, c1, rtol=1e-3, atol=1e-3)
     print(f"Result {i} are valid")
 
 
-sparse_t = benchmark_torch_function_in_microseconds(cslt_linear, c)
-dense_t = benchmark_torch_function_in_microseconds(torch.addmm, model.linear.weight.data, c)
+sparse_t = benchmark_torch_function_in_microseconds(cslt_linear, input_tensor)
+dense_t = benchmark_torch_function_in_microseconds(torch.matmul, model.linear.weight.data, input_tensor)
 
 print(f"sparse_t: {sparse_t:.0f}us dense_t: {dense_t:.0f}us speedup: {dense_t/sparse_t:.2f}x")
