@@ -442,6 +442,13 @@ class ViewAndMutationMeta:
     # For inference only: instructs us to keep data-only input mutations directly in the graph
     keep_input_mutations: int
 
+    # These are the FakeTensor (or potential SymInt) outputs that we traced from our
+    # metadata pass of the user's forward function.
+    # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
+    # Stashing them as part of our "metadata" makes it simpler if we want to run our analysis
+    # pass once, and re-use the output throughout AOTAutograd
+    traced_tangents: List[Any]
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue
@@ -563,8 +570,8 @@ def from_fun(t):
 #       outer tensor                        inner tensor
 #
 # Returns:
-# - ViewAndMutationMeta, telling us metadata about the inputs and outputs
-# - The list of outputs from the forward, but **only** the outputs that we need
+# - ViewAndMutationMeta, telling us metadata about the inputs and outputs, and
+#   The list of outputs from the forward, but **only** the outputs that we need
 #   to pass in as tangents into the backward.
 #   Specifically, aliased outputs from the forward get regenerated, and don't participate
 #   in the compiled backward function.
@@ -572,7 +579,7 @@ def run_functionalized_fw_and_collect_metadata(
     f,
     *,
     keep_input_mutations: bool
-) -> Tuple[ViewAndMutationMeta, List[Any]]:
+) -> ViewAndMutationMeta:
     memo = {}
 
     def to_fun(t):
@@ -746,6 +753,7 @@ def run_functionalized_fw_and_collect_metadata(
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
+        traced_tangents = pytree.tree_map(from_fun, f_tangents)
 
         metadata = ViewAndMutationMeta(
             input_info=input_info,
@@ -753,8 +761,9 @@ def run_functionalized_fw_and_collect_metadata(
             output_info=output_info,
             num_intermediate_bases=len(intermediate_bases),
             keep_input_mutations=keep_input_mutations,
+            traced_tangents=traced_tangents,
         )
-        return metadata, pytree.tree_map(from_fun, f_tangents)
+        return metadata
 
     return inner
 
@@ -1284,7 +1293,7 @@ class AOTConfig:
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
-        _fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
+        _fw_metadata = run_functionalized_fw_and_collect_metadata(
             flat_fn,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
         )(
@@ -1680,7 +1689,7 @@ def aot_wrapper_dedupe(
     # or not
     try:
         with enable_python_dispatcher():
-            fw_metadata, _out = run_functionalized_fw_and_collect_metadata(
+            fw_metadata = run_functionalized_fw_and_collect_metadata(
                 flat_fn,
                 # For the purpose of checking for dupes that are mutated,
                 # we always want our metadata to correctly reflect input mutations
@@ -2059,7 +2068,7 @@ def create_runtime_wrapper(
 def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
     with enable_python_dispatcher():
-        _fw_metadata, out = run_functionalized_fw_and_collect_metadata(
+        _fw_metadata = run_functionalized_fw_and_collect_metadata(
             flat_fn,
             # Note: in the non-inference path, we are currently not passing input mutations into the graph directly.
             # This is mainly difficult due to the partitioner, but we are leaving (a bit of) perf on the table.
@@ -2072,9 +2081,9 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     # out here corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
-    out = pytree.tree_map(
+    traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        out,
+        _fw_metadata.traced_tangents,
     )
 
     # merge_view_inputs() is used again at runtime to create synthetic bases out of aliased inputs.
@@ -2103,7 +2112,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
         keep_input_mutations=False,
     )
 
-    joint_inputs = (flat_args_with_views_handled, out)
+    joint_inputs = (flat_args_with_views_handled, traced_tangents)
 
     disable_amp = torch._C._is_any_autocast_enabled()
 
