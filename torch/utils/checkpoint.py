@@ -600,7 +600,6 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
-            # TODO: figure out why some tests are failing when early stop is not enabled
             if _enable_checkpoint_early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()

@@ -54,7 +54,6 @@ TEST(MathKernelTest, NativeGroupNorm) {
 
 TEST(MathKernelTest, NativeLayerNorm) {
   const auto input = rand({20, 10, 10, 10});
-  const auto input_shape = input.sizes();
 
   double eps = 1e-05;
   for (bool undef_weight: {true, false}) {

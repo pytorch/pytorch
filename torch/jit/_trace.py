@@ -893,6 +893,8 @@ def trace(
                 example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
     return traced
 
 
@@ -1000,6 +1002,10 @@ def trace_module(
 
     if not isinstance(mod, torch.nn.Module):
         raise AttributeError("expected torch.nn.Module as the first argument")
+
+    from torch._dynamo.eval_frame import OptimizedModule
+    if isinstance(mod, OptimizedModule):
+        raise AttributeError("it is not possible to torch.jit.trace() a torch.compile() model")
 
     if not isinstance(inputs, dict):
         raise AttributeError("expected a dictionary of (method_name, input) pairs")

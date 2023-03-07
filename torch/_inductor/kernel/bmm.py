@@ -92,7 +92,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_bmm.bind((mat1, mat2), layout)]
     if use_triton_template(layout):
-        for config in mm_configs():
+        for config in mm_configs(m, n, k):
             choices.append(
                 bmm_template.generate(
                     (mat1, mat2),
@@ -112,7 +112,7 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     # options to tune from
     choices = [aten_baddbmm.bind((inp, mat1, mat2), layout, alpha=alpha, beta=beta)]
     if use_triton_template(layout):
-        for config in mm_configs():
+        for config in mm_configs(m, n, k):
             choices.append(
                 bmm_template.generate(
                     (inp, mat1, mat2),

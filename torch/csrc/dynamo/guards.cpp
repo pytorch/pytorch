@@ -44,6 +44,8 @@ class TensorCheck {
     }
   }
 
+  // See note in guards.py [Note - On Export Tensor Guards]
+  // Logic parallel to here must be maintained in python
   bool check(const LocalState& state, const at::Tensor& v) {
     if (dispatch_key_ != state.apply(v.key_set()).raw_repr() ||
         dtype_ != v.dtype().toScalarType() ||
@@ -319,8 +321,8 @@ static PyTypeObject TensorGuardsType = {
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(type(obj)) == expected`
   PyObject* obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+  unsigned long long expected;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return NULL;
   }
   if (Py_TYPE(obj) == (void*)expected) {
@@ -333,8 +335,8 @@ static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
 static PyObject* check_obj_id(PyObject* dummy, PyObject* args) {
   // faster `lambda obj, expected: id(obj) == expected`
   PyObject* obj;
-  unsigned long expected;
-  if (!PyArg_ParseTuple(args, "Ok", &obj, &expected)) {
+  unsigned long long expected;
+  if (!PyArg_ParseTuple(args, "OK", &obj, &expected)) {
     return NULL;
   }
   if (obj == (void*)expected) {
