@@ -164,9 +164,6 @@ def mps_ops_grad_modifier(ops):
         'msort': [torch.float16],
     }
 
-    MACOS_12_3_XFAILLIST_GRAD = {
-    }
-
     def addDecorator(op, d) -> None:
         op.decorators = list(op.decorators) if op.decorators is not None else []
         op.decorators.append(d)
