@@ -1249,7 +1249,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             # TODO: Please remove soon
             # https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670
             warnings.warn(
-                "Your compiler for AOTAutograd is returning a a function that doesn't take boxed arguments. "
+                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments. "
                 "Please wrap it with functorch.compile.make_boxed_func or handle the boxed arguments yourself. "
                 "See https://github.com/pytorch/pytorch/pull/83137#issuecomment-1211320670 for rationale."
             )
@@ -1272,6 +1272,7 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
+    dynamic_shapes: bool = False
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -1700,7 +1701,9 @@ def aot_wrapper_dedupe(
         ok = True
 
         for i, a in enumerate(flat_args):
-            if a not in args_set:
+            if not isinstance(a, torch.Tensor):
+                leaf_flat_args.append(a)
+            elif a not in args_set:
                 args_set.add(a)
                 leaf_flat_args.append(a)
             elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
@@ -1870,6 +1873,9 @@ def create_runtime_wrapper(
     trace_joint: bool,
     keep_input_mutations: bool,
 ):
+    if not hasattr(compiled_fn, "_boxed_call"):
+        compiled_fn = make_boxed_func(compiled_fn)
+
     def runtime_wrapper(*args):
         # Step 2: remove aliased inputs that are mutated, replace with synthetic bases
         # Only happens if our graph mutates an input that aliases another input.
@@ -2310,12 +2316,22 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
-                    # TODO - pass in fake tensors ?
-                    context = disable_autocast_manager if disable_amp else nullcontext
-                    with context(), track_graph_compiling(aot_config, "backward"):
-                        CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                            bw_module, all_args
+                    if aot_config.dynamic_shapes:
+                        all_args_list = list(all_args)
+                        CompiledFunction.compiled_bw = create_aot_dispatcher_function(
+                            bw_module, all_args_list, AOTConfig(
+                                aot_config.bw_compiler, None, None,
+                                aot_config.decompositions, 0, aot_config.aot_id,
+                                aot_config.keep_inference_input_mutations,
+                                aot_config.dynamic_shapes
+                            )
                         )
+                    else:
+                        context = disable_autocast_manager if disable_amp else nullcontext
+                        with context(), track_graph_compiling(aot_config, "backward"):
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, all_args
+                            )
 
                 ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
@@ -2440,7 +2456,7 @@ def create_aot_dispatcher_function(
             shape_env = fake_mode.shape_env
             break
     else:
-        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = (
             FakeTensorMode(shape_env=shape_env)
             if config.use_fake_tensor
@@ -2458,8 +2474,11 @@ def create_aot_dispatcher_function(
 
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
-
                 def convert(idx, x):
+                    if shape_env is not None:
+                        from torch._dynamo.source import ConstantSource
+                        if isinstance(x, int):
+                            return shape_env.create_symintnode(shape_env.create_symbol(x, ConstantSource(f"sym_{idx}")), hint=x)
                     if not isinstance(x, torch.Tensor):
                         return x
                     if isinstance(x, FakeTensor):
@@ -2536,7 +2555,10 @@ def aot_function(
     num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
-    keep_inference_input_mutations: bool = False
+    keep_inference_input_mutations: bool = False,
+    *,
+    # Whether or not to trace with dynamic shapes
+    dynamic=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2602,7 +2624,8 @@ def aot_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        keep_inference_input_mutations=keep_inference_input_mutations
+        keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic,
     )
     cached_res = None
 
@@ -2785,6 +2808,17 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
+
+    dynamic_shapes = False
+    for x in full_args:
+        if isinstance(x, FakeTensor):
+            dynamic_shapes = x.fake_mode.shape_env is not None
+            break
+
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
@@ -2793,11 +2827,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic_shapes
     )
-
-    full_args = []
-    full_args.extend(params_flat)
-    full_args.extend(args)
 
     compiled_fn = create_aot_dispatcher_function(
         functional_call,

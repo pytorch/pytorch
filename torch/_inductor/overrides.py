@@ -2,6 +2,7 @@ import copy
 import logging
 import random
 import weakref
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -231,7 +232,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]
         else:
-            return self.node.kwargs["bias"]
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None
 
 
 class NormalizedMatmulNode:
@@ -348,8 +349,10 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(weight, input.transpose(-1, -2))
     return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
 
 
@@ -442,8 +445,10 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(input.transpose(-1, -2), weight.t())
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 
