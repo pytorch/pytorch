@@ -43,7 +43,7 @@ nodes it organizes its gradients and parameters into buckets which
 reduces communication times and allows a node to broadcast a fraction of
 its gradients to other waiting nodes.
 
-Graph breaks in distributed code means you can expect dynamo and its
+Graph breaks in distributed code mean you can expect dynamo and its
 backends to optimize the compute overhead of a distributed program but
 not its communication overhead. Graph-breaks may interfere with
 compilation speedups, if the reduced graph-size robs the compiler of
@@ -231,20 +231,21 @@ generated:
 How are you speeding up my code?
 --------------------------------
 
-There are 3 major ways to accelerate PyTorch code:
+There are 4 major ways to accelerate PyTorch code:
 
-1. Kernel fusion via vertical fusions which fuse sequential operations to avoid
+1. Kernel fusion via vertical fusions: fuse sequential operations to avoid
    excessive read/writes. For example, fuse 2 subsequent cosines means you
-   can can do 1 read 1 write instead 2 reads 2 writes 2. Horizontal fusion:
-   the simplest example being batching where a single matrix is multiplied
-   with a batch of examples but the more general scenario is a grouped GEMM
+   can can do 1 read 1 write instead 2 reads 2 writes
+
+2. Horizontal fusion: the simplest example being batching where a single matrix is
+   multiplied with a batch of examples but the more general scenario is a grouped GEMM
    where a group of matrix multiplications are scheduled together
 
-2. Out of order execution: A general optimization for compilers, by looking ahead
+3. Out of order execution: A general optimization for compilers, by looking ahead
    at the exact data dependencies within a graph we can decide on the most
    opportune time to execute a node and which buffers can be reused
 
-3. Automatic work placement: Similar of the out of order execution point,
+4. Automatic work placement: Similar of the out of order execution point,
    but by matching nodes of a graph to resources like physical hardware or
    memory we can design an appropriate schedule
 
@@ -374,7 +375,7 @@ Why am I getting OOMs?
 
 Dynamo is still an alpha product so there’s a few sources of OOMs and if
 you’re seeing an OOM try disabling the following configurations in this
-order and then open an issue on Github so we can solve the root problem
+order and then open an issue on GitHub so we can solve the root problem
 1. If you’re using dynamic shapes try disabling them, we’ve disabled
 them by default: ``env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`` 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
