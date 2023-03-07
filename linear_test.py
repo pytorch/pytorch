@@ -53,18 +53,6 @@ class cuSPARSELtLinear(nn.Linear):
         return linear
 
 
-class Model(nn.Module):
-
-    def __init__(self):
-        super().__init__()
-        self.linear = nn.Linear(input_channel, output_channel)
-
-    def forward(self, x):
-        return self.linear(x)
-
-m = Model()
-m.linear.bias.data = torch.zeros_like(m.linear.bias.data)
-m.cuda()
 
 # print("weight:")
 # print(m.linear.weight)
