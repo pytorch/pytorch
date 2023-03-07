@@ -183,7 +183,6 @@ def mark_dynamic_constrain(
 
     Example usage is as follow:
 
-    ```
     x = torch.randn([7, 7, 7])
 
     def my_dyn_fn(a):
@@ -193,32 +192,27 @@ def mark_dynamic_constrain(
 
     torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
-    ```
 
     We will get a new guard, '4 <= a.size()[0] <= 10'
 
     If we run it again, with a wider constraint, by adding these 2 lines:
 
-    ```
     torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
-    ```
 
     Nothing happens - mark_dynamic_constrain is sticky unless reset, so the range is still
     at the narrowst intersection (4, 10)
 
     If we delete the field first:
 
-    ```
     torch._dynamo.clear_dynamic(x, 0)
     torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=12)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
-    ```
+
     We will recompile, and get a new guard, `3 <= a.size()[0] <= 12`
 
     Alternatively, if our directive had been counter to the guards:
 
-    ```
     x = torch.randn([7, 7, 7])
 
     def my_dyn_fn(a):
@@ -228,7 +222,6 @@ def mark_dynamic_constrain(
 
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
     torch._dynamo.mark_dynamic_constrain(x, 0, min=2, max=4)
-    ```
 
     We would raise.
 

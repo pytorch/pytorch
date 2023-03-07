@@ -504,6 +504,13 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
+            #
+            # There is finer grain control available within _dynamo_dynamic_indices - and that is for ranges.
+            # To fully understand that, please see the mark_dynamic_constrain api docs first.
+            # The way we guard on user directive ranges specified via mark_dynamic_constrain is by the same logic as
+            # above. Specifically, when X is a strict subset of Y notion around which dimensions can be valid, the same
+            # goes for the value ranges WITHIN a dimension. We specialize to the user directive range. Ranges within
+            # that range can safely reuse the same compiled frame, but wider ranges must recompile.
             static, reason = tensor_always_has_static_shape(
                 value, guard.source, is_tensor=True
             )
