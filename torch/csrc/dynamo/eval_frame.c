@@ -495,7 +495,8 @@ static void call_profiler_end_hook(PyObject* record) {
   if (record == NULL) return;
   PyObject* args = PyTuple_Pack(1, record);
   if (args == NULL) return;
-  PyObject_CallObject(profiler_end_hook, args);
+  PyObject* result = PyObject_CallObject(profiler_end_hook, args);
+  Py_XDECREF(result);
   Py_DECREF(args);
 }
 
@@ -665,8 +666,9 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("In run only mode %s", name(frame));
     PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
     PyObject* maybe_cached_code = lookup(extra, frame, NULL);
-    // TODO(whc) do i need to decref hook_record?
     call_profiler_end_hook(hook_record);
+    Py_XDECREF(hook_record);
+
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
       return NULL;
@@ -691,6 +693,7 @@ static PyObject* _custom_eval_frame(
   PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
   PyObject* maybe_cached_code = lookup(extra, frame, NULL);
   call_profiler_end_hook(hook_record);
+  Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
@@ -877,14 +880,14 @@ static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
   Py_XDECREF(profiler_start_hook);
   Py_XDECREF(profiler_end_hook);
   if (start == Py_None || end == Py_None) {
-    profiler_start_hook = NULL;
-    profiler_end_hook = NULL;
+    clear_profiler_hooks(NULL, NULL);
   } else {
     profiler_start_hook = start;
     profiler_end_hook = end;
     Py_INCREF(profiler_start_hook);
     Py_INCREF(profiler_end_hook);
   }
+  Py_XDECREF(guard_profiler_name_str);
   guard_profiler_name_str = Py_BuildValue("s", "TorchDynamo Cache Lookup");
   Py_RETURN_NONE;
 }

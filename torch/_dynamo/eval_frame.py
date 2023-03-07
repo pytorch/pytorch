@@ -57,19 +57,22 @@ class Unset(Enum):
     token = 0
 
 
-def _profiler_start(name):
-    # what is args for?
-    args = None
-    return torch.ops.profiler._record_function_enter_new(name, args)
+def enable_cache_lookup_profiler(enable: bool):
+    if enable:
 
+        def _profiler_start(name):
+            return torch.ops.profiler._record_function_enter_new(name, None)
 
-def _profiler_end(record):
-    torch.ops.profiler._record_function_exit._RecordFunction(record)
+        def _profiler_end(record):
+            torch.ops.profiler._record_function_exit._RecordFunction(record)
+
+        set_profiler_hooks(_profiler_start, _profiler_end)
+    else:
+        clear_profiler_hooks()
 
 
 # TODO can we enable by default? (check perf CI) otherwise, guard behind config
-set_profiler_hooks(_profiler_start, _profiler_end)
-# clear_profiler_hooks()
+enable_cache_lookup_profiler(config.profile_cache_lookup)
 
 unset = Unset.token
 
