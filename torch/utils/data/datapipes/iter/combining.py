@@ -71,8 +71,9 @@ class ForkerIterDataPipe(IterDataPipe):
         buffer_size: this restricts how far ahead the leading child DataPipe
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
-        copy: copy strategy to use for items yielded by each branch. Defaults
-            to no copies.
+        copy: copy strategy to use for items yielded by each branch. Supported
+            options are ``None`` for no copying, ``shallow`` for shallow object
+            copies, and ``deep`` for deep object copies. Defaults to None.
 
     Note:
         All branches of the forked pipeline return the identical object unless
@@ -159,8 +160,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
         elif copy == "deep":
             self.copy_fn = copymodule.deepcopy
         else:
-            self.copy_fn = None
-            warnings.warn(f"Unknown copy method `{copy}` reqested, will not perform copying.", UserWarning)
+            raise ValueError(f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`.")
 
         self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
@@ -206,10 +206,10 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
 
-                if self.copy_fn is not None and instance_id != 0:
-                    yield self.copy_fn(return_val)
-                else:
+                if self.copy_fn is None:
                     yield return_val
+                else:
+                    yield self.copy_fn(return_val)
         finally:
             self._child_stop[instance_id] = True
             # Cleanup _datapipe_iterator for the case that fork exits earlier
