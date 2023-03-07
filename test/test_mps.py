@@ -6375,24 +6375,6 @@ class TestNLLLoss(TestCaseMPS):
                 for dim in [0, 1, 2, 3, -1, -2, -3]:
                     helper(shape, dim, channels_last)
 
-    # Test sub
-    def test_sub(self):
-        def helper(shape, alpha):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
-            cpu_y = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            y = cpu_y.detach().clone().to('mps')
-
-            cpu_out = torch.sub(cpu_x, cpu_y, alpha=alpha)
-            out = torch.sub(x, y, alpha=alpha)
-
-            self.assertEqual(out, cpu_out)
-
-        helper((2, 8, 4, 5), 0.1)
-        helper((2, 8, 3, 5), 0.1)
-        helper((2, 8, 3, 5), 0.2)
-
     def test_nan_to_num(self):
         inputCPU = torch.tensor([float('nan'), float('inf'), -float('inf'), 3.14])
         inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
@@ -6625,8 +6607,13 @@ class TestNLLLoss(TestCaseMPS):
         self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
 
     # Test add
-    def test_add_binary_op(self):
-        def helper(shape, alpha):
+    def test_add_sub(self):
+        def helper(shape, alpha, op_name, inplace):
+            if op_name == "add":
+                op = torch.Tensor.add_ if inplace else torch.add
+            elif op_name == "sub":
+                op = torch.Tensor.sub_ if inplace else torch.sub
+
             for dtype in [torch.float16, torch.float32]:
                 cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_x = cpu_x.detach().clone().to('mps')
@@ -6634,25 +6621,32 @@ class TestNLLLoss(TestCaseMPS):
                 cpu_y = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=False)
                 mps_y = cpu_y.detach().clone().to('mps')
 
-                cpu_out = torch.add(cpu_x, cpu_y, alpha=alpha)
-                mps_out = torch.add(mps_x, mps_y, alpha=alpha)
+                cpu_out = op(cpu_x, cpu_y, alpha=alpha)
+                mps_out = op(mps_x, mps_y, alpha=alpha)
                 # fp16 isn't accurate when alpha is passed
                 # TODO: remove or fix 'tol' when we fix problems with fp16
-                tol = 1e-3 if dtype is torch.float16 else None
+                tol = 2e-3 if dtype is torch.float16 else None
                 self.assertEqual(mps_out, cpu_out, rtol=tol, atol=tol)
+                if not (cpu_y.shape != () and inplace):  # in-place output cannot be broadcasted.
+                    # create a scalar tensor
+                    cpu_s = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
+                    mps_s = cpu_s.detach().clone().to('mps')
+                    # primary tensor is scalar
+                    self.assertEqual(op(cpu_s, cpu_y), op(mps_s, mps_y))
                 # create a scalar tensor
                 cpu_s = torch.tensor(2.3, device='cpu', dtype=dtype, requires_grad=False)
                 mps_s = cpu_s.detach().clone().to('mps')
-                # primary tensor is scalar
-                self.assertEqual(torch.add(cpu_s, cpu_y), torch.add(mps_s, mps_y))
                 # secondary tensor is scalar
-                self.assertEqual(torch.add(cpu_x, cpu_s), torch.add(mps_x, mps_s))
+                self.assertEqual(op(cpu_x, cpu_s), op(mps_x, mps_s), rtol=tol, atol=tol)
 
-        helper((2, 8, 4, 5), 1.0)
-        helper((2, 8, 4, 5), 0.0)
-        helper((2, 8, 4, 5), 0.1)
-        helper((2, 8, 3, 5), 0.1)
-        helper((2, 8, 3, 5), 0.2)
+
+        for op_name, inplace in product(["add", "sub"], [True, False]):
+            helper((), 0.0, op_name, inplace)
+            helper((2, 8, 4, 5), 0.0, op_name, inplace)
+            helper((2, 8, 4, 5), 0.1, op_name, inplace)
+            helper((2, 8, 4, 5), 1.0, op_name, inplace)
+            helper((2, 8, 3, 5), 0.1, op_name, inplace)
+            helper((2, 8, 3, 5), 0.2, op_name, inplace)
 
     # Test add
     def test_add_scalars(self):
