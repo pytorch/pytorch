@@ -252,10 +252,10 @@ class _TestFxFrontendConsistency(common_utils.TestCase):
                 )
 
                 if isinstance(fx_frontend, frontend.FxFrontendUnpackKwargs):
-                    graph_module, new_args = fx_frontend(model, *args, **kwargs)
+                    graph_module, new_args = fx_frontend.trace(model, *args, **kwargs)
                     fx_outputs = graph_module(*new_args)
                 else:
-                    graph_module = fx_frontend(model, *args, **kwargs)
+                    graph_module = fx_frontend.trace(model, *args, **kwargs)
                     fx_outputs = graph_module(*args, **kwargs)
 
                 outputs = model(*args, **kwargs)
