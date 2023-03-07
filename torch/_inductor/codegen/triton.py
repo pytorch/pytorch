@@ -1537,7 +1537,8 @@ class TritonScheduling:
             try:
                 yield
             finally:
-                node_schedule.append(EnableReduction) current_loop_writes.clear()
+                node_schedule.append(EnableReduction)
+                current_loop_writes.clear()
                 is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
