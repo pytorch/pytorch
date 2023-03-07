@@ -940,7 +940,9 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         for d in range(self_t.dim()):
             if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
                 dims.append(d)
-                self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
+                self = g.op(
+                    "Constant", value_t=self_t.mean(dims, keepdim=True).to(orig_type)
+                )
 
     shape = g.op("Shape", other)
     return g.op("Expand", self, shape)
