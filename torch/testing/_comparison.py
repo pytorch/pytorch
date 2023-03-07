@@ -960,7 +960,9 @@ class TensorLikePair(Pair):
         # fail.
         actual_compressed_indices = compressed_indices_method(actual)
         expected_compressed_indices = compressed_indices_method(expected)
-        indices_dtype = torch.promote_types(actual_compressed_indices.dtype, expected_compressed_indices.dtype)
+        indices_dtype = torch.promote_types(
+            actual_compressed_indices.dtype, expected_compressed_indices.dtype
+        )
 
         self._compare_regular_values_equal(
             actual_compressed_indices.to(indices_dtype),
