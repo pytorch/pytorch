@@ -1,7 +1,6 @@
 //  Copyright © 2022 Apple Inc.
 
 #include <ATen/native/mps/OperationUtils.h>
-#include "c10/core/ScalarType.h"
 
 namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
