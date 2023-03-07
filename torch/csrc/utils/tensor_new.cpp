@@ -432,6 +432,7 @@ Tensor internal_new_from_data(
   // to dispatch to it.
   // TODO: arguably it should have an autograd implementation that noops
   at::AutoDispatchBelowADInplaceOrView guard;
+
   return at::lift_fresh(tensor);
 }
 
