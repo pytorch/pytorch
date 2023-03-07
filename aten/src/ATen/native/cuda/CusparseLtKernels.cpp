@@ -90,8 +90,10 @@ void CusparseLtLinear::init(const at::Tensor& res,
   int64_t k = weight.size(1);
   int64_t n = input.size(1);
 
+  bool isB_transposed = !input.is_contiguous();
+
   constexpr auto opA = CUSPARSE_OPERATION_NON_TRANSPOSE;
-  constexpr auto opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
+  auto opB = isB_transposed? CUSPARSE_OPERATION_TRANSPOSE: CUSPARSE_OPERATION_NON_TRANSPOSE;
   constexpr auto order = CUSPARSE_ORDER_ROW;
   constexpr auto type = CUDA_R_16F;
   constexpr auto compute_type = CUSPARSE_COMPUTE_16F;
@@ -99,7 +101,7 @@ void CusparseLtLinear::init(const at::Tensor& res,
   // TODO: may need to adjust logic if transpose is passed in
   bool is_rowmajor = (order == CUSPARSE_ORDER_ROW);
   bool isA_transposed = (opA != CUSPARSE_OPERATION_NON_TRANSPOSE);
-  bool isB_transposed = (opB != CUSPARSE_OPERATION_NON_TRANSPOSE);
+
   auto     num_A_rows     = (isA_transposed) ? k : m;
   auto     num_A_cols     = (isA_transposed) ? m : k;
   auto     num_B_rows     = (isB_transposed) ? n : k;
