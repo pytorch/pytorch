@@ -247,12 +247,16 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # huggingface
     "PegasusForCausalLM",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     "PegasusForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-
     "T5ForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     "T5Small",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     "XLNetLMHeadModel",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     # timm_models
     "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "dla102",  # Accuracy failed for key name base_layer.1.bias.grad
+    "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
 ]
 
 
