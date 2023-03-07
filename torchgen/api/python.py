@@ -284,7 +284,7 @@ class PythonArgument:
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
-            return f"{name}: {type_str}={default}"
+            return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
 
@@ -995,10 +995,18 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
     namedtuple_name = signature.name
     field_names = namedtuple_fieldnames(signature.returns.returns)
     if field_names:
-        tuple_args = [
-            f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)
-        ]
-        namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
+        namedtuple_def_lines = [f"class {namedtuple_name}(NamedTuple):"]
+        namedtuple_def_lines.extend(
+            f"    {name}: {typ}" for name, typ in zip(field_names, python_returns)
+        )
+        namedtuple_def_lines.append("")  # add an extra newline
+        namedtuple_def = "\n".join(namedtuple_def_lines)
+        # Example:
+        # namedtuple_def = (
+        #     "class max(NamedTuple):\n"
+        #     "    values: Tensor\n"
+        #     "    indices: Tensor\n"
+        # )
         return namedtuple_name, namedtuple_def
     return None
 

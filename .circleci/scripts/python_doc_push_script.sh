@@ -109,6 +109,7 @@ if [ "$is_main_doc" = true ]; then
   elif [ $undocumented -gt 0 ]; then
     echo undocumented objects found:
     cat build/coverage/python.txt
+    echo "Make sure you've updated relevant .rsts in docs/source!"
     exit 1
   fi
 else

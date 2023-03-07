@@ -115,29 +115,16 @@ def map_functionalize(interpreter, f, xs, *args):
     functional_map_fn = functionalize(f, remove=mode)
 
     with interpreter.lower():
-        fake_tensor_mode = FakeTensorMode()
-        with fake_tensor_mode as ft_mode:
+        inputs = (unwrapped_xs,) + unwrapped_args
+        if _has_potential_branch_input_mutation(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is mutating the input!"
+            )
 
-            # Returns fake inputs for a single map function call
-            def get_fake_inputs(unwrapped_xs, unwrapped_args):
-                fake_xs = ft_mode.fake_tensor_converter(ft_mode, unwrapped_xs)
-                fake_args = pytree.tree_map_only(
-                    torch.Tensor,
-                    lambda x: ft_mode.fake_tensor_converter(ft_mode, x),
-                    unwrapped_args,
-                )
-                return (fake_xs[0],) + fake_args
-
-            fake_inputs = get_fake_inputs(unwrapped_xs, unwrapped_args)
-            if _has_potential_branch_input_mutation(functional_map_fn, fake_inputs):
-                raise UnsupportedAliasMutationException(
-                    "torch.map is mutating the input!"
-                )
-
-            if _has_potential_branch_input_alias(functional_map_fn, fake_inputs):
-                raise UnsupportedAliasMutationException(
-                    "torch.map is aliasing the input!"
-                )
+        if _has_potential_branch_input_alias(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is aliasing the input!"
+            )
 
         map_return = map(functional_map_fn, unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
