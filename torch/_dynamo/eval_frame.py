@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import functools
 import inspect
@@ -10,11 +12,13 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from typing import Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
+import torch.fx
 import torch.utils._pytree as pytree
+from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -559,8 +563,15 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
-):
+    f: Callable[..., Any],
+    *args,
+    aten_graph: bool = False,
+    decomposition_table: Optional[
+        Dict[torch._ops.OpOverload, Callable[..., Any]]
+    ] = None,
+    tracing_mode: str = "real",
+    **kwargs,
+) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -635,7 +646,7 @@ def export(
 
         return matched_elements_positions
 
-    def guard_export_print(guards):
+    def guard_export_print(guards: Set[_guards.Guard]):
         nonlocal out_guards
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
