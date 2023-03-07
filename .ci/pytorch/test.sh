@@ -304,7 +304,10 @@ test_single_dynamo_benchmark() {
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
       --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
-      --no-graphs --no-update-archive --no-gh-comment
+      --training --dtypes=float32 --no-graphs --no-update-archive --no-gh-comment
+    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
+      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
+      --training --dtypes=amp --no-graphs --no-update-archive --no-gh-comment
   else
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
