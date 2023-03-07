@@ -149,6 +149,14 @@ function clone_pytorch_xla() {
   fi
 }
 
+function install_matplotlib() {
+  pip_install matplotlib
+}
+
+function install_tabulate() {
+  pip_install tabulate
+}
+
 function setup_torchdeploy_deps(){
   conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
   local CC
