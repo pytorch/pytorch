@@ -1272,15 +1272,7 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
-    # If None, defer to config
-    _dynamic_shapes: Optional[bool] = None
-
-    @property
-    def dynamic_shapes(self):
-        if self._dynamic_shapes is None:
-            return config.use_dynamic_shapes
-        else:
-            return self._dynamic_shapes
+    dynamic_shapes: bool = False
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -2331,7 +2323,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                                 aot_config.bw_compiler, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
-                                aot_config._dynamic_shapes
+                                aot_config.dynamic_shapes
                             )
                         )
                     else:
@@ -2563,7 +2555,10 @@ def aot_function(
     num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
-    keep_inference_input_mutations: bool = False
+    keep_inference_input_mutations: bool = False,
+    *,
+    # Whether or not to trace with dynamic shapes
+    dynamic=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2630,6 +2625,7 @@ def aot_function(
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic,
     )
     cached_res = None
 
@@ -2822,8 +2818,6 @@ def aot_module_simplified(
         if isinstance(x, FakeTensor):
             dynamic_shapes = x.fake_mode.shape_env is not None
             break
-    else:
-        dynamic_shapes = config.use_dynamic_shapes
 
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
@@ -2833,7 +2827,7 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        _dynamic_shapes=dynamic_shapes
+        dynamic_shapes=dynamic_shapes
     )
 
     compiled_fn = create_aot_dispatcher_function(
