@@ -560,7 +560,7 @@ def export(
     # nn.Module to FX graph. We should choose the right one after they are
     # matured.
     fx_frontend = frontend.DynamoExport(tracing_mode="real", aten_graph=True)
-    graph_module = fx_frontend(fn, *args)
+    graph_module = fx_frontend.trace(fn, *args)
     # Export FX graph to ONNX ModelProto.
     #
     # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
@@ -627,7 +627,7 @@ def export_after_normalizing_args_and_kwargs(
     fx_frontend = frontend.FxFrontendUnpackKwargs(
         frontend.DynamoOptimize(dynamic=False)
     )
-    captured_graph, bound_args = fx_frontend(wrapped_fn, *args, **kwargs)
+    captured_graph, bound_args = fx_frontend.trace(wrapped_fn, *args, **kwargs)
 
     # Export FX graph to ONNX ModelProto.
     return _export(
