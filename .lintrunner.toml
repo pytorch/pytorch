@@ -1,3 +1,5 @@
+merge_base_with = "master"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
