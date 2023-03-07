@@ -362,7 +362,7 @@ class Loops(IRNode):
             [
                 f"'{self.device.type}'",
                 str(self.dtype),
-                self.inner_fn_str(max_lines=config.debug_max_lines),
+                self.inner_fn_str(),
             ]
             + [f"{name}={getattr(self, name)}" for name in names]
         )
@@ -393,11 +393,13 @@ class Loops(IRNode):
         ]
 
     @cache_on_self
-    def inner_fn_str(self, max_lines=None):
-        index = self._index(self.ranges)
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn, index, max_lines=max_lines
-        )
+    def inner_fn_str(self):
+        formatter = V.KernelFormatterHandler(V.MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(self._index(self.ranges))
+            return formatter.getvalue(result)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -512,15 +514,16 @@ class Reduction(Loops):
         return len(self.ranges) + len(self.reduction_ranges)
 
     @cache_on_self
-    def inner_fn_str(self, max_lines=None):
-        index = (self._index(self.ranges),)
-        rindex = self._index(self.reduction_ranges, "r")
-        return V.KernelFormatterHandler.ir_to_string(
-            self.inner_fn,
-            index,
-            rindex,
-            max_lines=max_lines,
-        )
+    def inner_fn_str(self):
+        formatter = V.KernelFormatterHandler(V.MockHandler())
+        with V.set_ops_handler(formatter), patch.object(
+            FlexibleLayout, "allow_indexing", True
+        ):
+            result = self.inner_fn(
+                self._index(self.ranges),
+                self._index(self.reduction_ranges, "r"),
+            )
+            return formatter.getvalue(result)
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
