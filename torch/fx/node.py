@@ -363,9 +363,13 @@ class Node:
     def stack_trace(self) -> Optional[str]:
         """
         Return the Python stack trace that was recorded during tracing, if any.
-        This property is usually populated by `Tracer.create_proxy`. To record
-        stack traces during tracing for debug purposes, set
-        `record_stack_traces = True` on the `Tracer` instance.
+        When traced with fx.Tracer, this property is usually populated by
+        `Tracer.create_proxy`. To record stack traces during tracing for debug purposes,
+        set `record_stack_traces = True` on the `Tracer` instance.
+        When traced with dynamo, this property will be populated by default by
+        `OutputGraph.create_proxy`.
+
+        stack_trace would have the innermost frame at the end of the string.
         """
         return self.meta.get("stack_trace", None)
 

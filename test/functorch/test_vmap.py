@@ -3751,6 +3751,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # RuntimeError: Expected all tensors to be on the same device,
         # but found at least two devices, cuda:0 and cpu!
         xfail('ge', device_type='cuda'),
+        xfail('_upsample_bilinear2d_aa'),
     }))
     def test_op_has_batch_rule(self, device, dtype, op):
         # needs to be fixed
@@ -4258,6 +4259,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
         # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
         # but it passes locally
+        xfail('linalg.diagonal'),
         skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })

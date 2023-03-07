@@ -438,6 +438,10 @@ def FetchInt8BlobRealVal(name):
         np.float32) * int8_blob.scale
 
 
+def RemoveBlob(name) -> None:
+    ws = C.Workspace.current
+    _Workspace_remove_blob(ws, name)
+
 def _Workspace_fetch_int8_blob(ws, name):
     """Fetches an Int8 blob from the workspace. It shared backend implementation
     with FetchBlob but it is recommended when fetching Int8 Blobs

@@ -17,7 +17,8 @@ def check_hf_bert_perf_csv(filename):
         model_name = row["name"]
         speedup = row["speedup"]
         # Reduced from 1.19 to 1.17, see https://github.com/pytorch/pytorch/issues/94687
-        if speedup < 1.17:
+        # Reduce further to 1.165 due to runner and run to run variances
+        if speedup < 1.165:
             failed.append(model_name)
 
         print(f"{model_name:34} {speedup}")

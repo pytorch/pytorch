@@ -304,6 +304,9 @@ static PyObject* noargs = NULL; /* cached empty tuple */
 static PyObject* dotzerokey = NULL; /* ".0" */
 static PyObject* guard_fail_hook = NULL;
 static PyObject* guard_error_hook = NULL;
+static PyObject* profiler_start_hook = NULL;
+static PyObject* profiler_end_hook = NULL;
+static PyObject* guard_profiler_name_str = NULL; /* cached py str */
 
 size_t extra_index = -1;
 
@@ -476,6 +479,27 @@ static PyObject* call_guard_fail_hook(
   return result;
 }
 
+static PyObject* call_profiler_start_hook(PyObject* name_str) {
+  if (profiler_start_hook == NULL) return NULL;
+  if (name_str == NULL) return NULL;
+  PyObject* args = PyTuple_Pack(1, name_str);
+  if (args == NULL) return NULL;
+  PyObject* result = PyObject_CallObject(profiler_start_hook, args);
+  Py_DECREF(args);
+  return result;
+}
+
+static void call_profiler_end_hook(PyObject* record) {
+  // 'record' obj is the return value of calling _start_hook()
+  if (profiler_end_hook == NULL) return;
+  if (record == NULL) return;
+  PyObject* args = PyTuple_Pack(1, record);
+  if (args == NULL) return;
+  PyObject* result = PyObject_CallObject(profiler_end_hook, args);
+  Py_XDECREF(result);
+  Py_DECREF(args);
+}
+
 // Return value: borrowed reference
 // Is either Py_None or a PyCodeObject
 static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEntry* prev) {
@@ -587,7 +611,7 @@ inline static PyObject* eval_custom_code(
   }
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
-  Py_DECREF(shadow);
+  Py_DECREF(shadow_obj);
   return result;
 }
 
@@ -640,7 +664,11 @@ static PyObject* _custom_eval_frame(
   // we never compile.
   if (callback == Py_False) {
     DEBUG_TRACE("In run only mode %s", name(frame));
+    PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
     PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+    call_profiler_end_hook(hook_record);
+    Py_XDECREF(hook_record);
+
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
       return NULL;
@@ -662,7 +690,10 @@ static PyObject* _custom_eval_frame(
   // in the shim.
   eval_frame_callback_set(Py_None);
 
+  PyObject* hook_record = call_profiler_start_hook(guard_profiler_name_str);
   PyObject* maybe_cached_code = lookup(extra, frame, NULL);
+  call_profiler_end_hook(hook_record);
+  Py_XDECREF(hook_record);
   if (maybe_cached_code == NULL) {
     // Python error
     return NULL;
@@ -840,6 +871,37 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+static PyObject* clear_profiler_hooks(PyObject* dummy, PyObject* args) {
+  Py_XDECREF(profiler_start_hook);
+  profiler_start_hook = NULL;
+  Py_XDECREF(profiler_end_hook);
+  profiler_end_hook = NULL;
+  Py_XDECREF(guard_profiler_name_str);
+  guard_profiler_name_str = NULL;
+  Py_RETURN_NONE;
+}
+
+static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
+  PyObject* start = NULL;
+  PyObject* end = NULL;
+  if (!PyArg_ParseTuple(args, "OO", &start, &end)) {
+    return NULL;
+  }
+  Py_XDECREF(profiler_start_hook);
+  Py_XDECREF(profiler_end_hook);
+  if (start == Py_None || end == Py_None) {
+    clear_profiler_hooks(NULL, NULL);
+  } else {
+    profiler_start_hook = start;
+    profiler_end_hook = end;
+    Py_INCREF(profiler_start_hook);
+    Py_INCREF(profiler_end_hook);
+  }
+  Py_XDECREF(guard_profiler_name_str);
+  guard_profiler_name_str = Py_BuildValue("s", "TorchDynamo Cache Lookup");
+  Py_RETURN_NONE;
+}
+
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
     {"reset_code", reset_code, METH_VARARGS, NULL},
@@ -847,6 +909,8 @@ static PyMethodDef _methods[] = {
     {"skip_code", skip_code, METH_VARARGS, NULL},
     {"set_guard_fail_hook", set_guard_fail_hook, METH_VARARGS, NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_VARARGS, NULL},
+    {"set_profiler_hooks", set_profiler_hooks, METH_VARARGS, NULL},
+    {"clear_profiler_hooks", clear_profiler_hooks, METH_VARARGS, NULL},
     {NULL, NULL, 0, NULL}};
 
 static struct PyModuleDef _module = {

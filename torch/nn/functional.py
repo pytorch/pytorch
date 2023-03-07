@@ -2335,6 +2335,11 @@ def embedding_bag(
             "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
+    if not weight.dim() == 2:
+        raise ValueError(
+            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
+        )
+
     if input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
@@ -2358,7 +2363,7 @@ def embedding_bag(
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
     else:
-        raise ValueError("input has to be 1D or 2D Tensor," " but got Tensor of dimension {}".format(input.dim()))
+        raise ValueError(f"input has to be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}")
     if mode == "sum":
         mode_enum = 0
     elif mode == "mean":
@@ -5201,8 +5206,8 @@ def multi_head_attention_forward(
     attn_mask = _canonical_mask(
         mask=attn_mask,
         mask_name="attn_mask",
-        other_type=_none_or_dtype(key_padding_mask),
-        other_name="key_padding_mask",
+        other_type=None,
+        other_name="",
         target_type=q.dtype,
         check_other=False,
     )

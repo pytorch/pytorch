@@ -1,11 +1,10 @@
 import os
 import sys
 
+import torch
+
 # add some debug printouts
 debug = False
-
-# warnings intended for PyTorch developers, disable for point releases
-developer_warnings = True
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -49,6 +48,9 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
+# enable searching global and local cache regardless of `max_autotune`
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
@@ -78,12 +80,15 @@ unroll_reductions_threshold = 8
 
 comment_origin = False
 
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
+
 
 def is_fbcode():
-    import torch
-
     return not hasattr(torch.version, "git_version")
 
+
+# warnings intended for PyTorch developers, disable for point releases
+developer_warnings = is_fbcode() or "+" in torch.__version__
 
 compile_threads = (
     1
@@ -95,6 +100,14 @@ compile_threads = (
         else os.cpu_count(),
     )
 )
+
+# autotuning global cache path
+if is_fbcode():
+    from libfb.py import parutil
+
+    global_cache_path = parutil.get_file_path("fb/global_cache", pkg=__package__)
+else:
+    global_cache_path = None
 
 # If kernel is fused, the name is generated from the origin node op names
 # for larger kernels limit this
@@ -111,6 +124,11 @@ profiler_mark_wrapper_call = False
 
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
+
+_profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
+profile_bandwidth = _profile_var != ""
+profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
+
 
 # config specific to codegen/cpp.pp
 class cpp:
@@ -131,7 +149,7 @@ class cpp:
         # "g++-11",
         # "g++-10",
         # "clang++",
-        "g++",
+        os.environ.get("CXX", "g++"),
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
@@ -153,9 +171,6 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
-
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
@@ -171,13 +186,23 @@ class triton:
     tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
-    ordered_kernel_names = False
+    # Note: This is orthogonal to descriptive_names - this is deciding whether
+    # our triton kernel names should all be `triton_` (to maximize caching) or
+    # whether they should be unique.
+    unique_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    # False: No special names (just triton__1, triton__2, etc.)
+    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
+    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    descriptive_names = "aten"
 
     # use alternate codegen for smaller reductions
-    persistent_reductions = False
+    persistent_reductions = True
+
+    # theses are not enforced, but they are used by asserts in triton_ops/autotune.py
+    # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
+    max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 
 
 # create a directory containing lots of debug information
