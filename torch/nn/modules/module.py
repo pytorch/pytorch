@@ -1630,6 +1630,9 @@ class Module:
         if '_backward_pre_hooks' not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
 
+        # ensure self._has_hooks exists and is set to a current value
+        self._update_has_hooks()
+
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
             _parameters = self.__dict__['_parameters']
