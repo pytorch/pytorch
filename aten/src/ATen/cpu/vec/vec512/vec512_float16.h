@@ -877,9 +877,9 @@ inline void load_fp32_from_fp16(const c10::Half *data, Vectorized<float>& out) {
 }
 
 inline void load_fp32_from_fp16(const c10::Half *data, Vectorized<float>& out1, Vectorized<float>& out2) {
-  load_fp32_from_bf16(data, out1);
+  load_fp32_from_fp16(data, out1);
   data += Vectorized<float>::size();
-  load_fp32_from_bf16(data, out2);
+  load_fp32_from_fp16(data, out2);
 }
 
 #endif
