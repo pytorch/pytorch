@@ -1,11 +1,11 @@
-# Find google sanitizers
+# Find sanitizers
 #
 # This module sets the following targets:
-#  GoogleSanitizer::address
-#  GoogleSanitizer::thread
-#  GoogleSanitizer::undefined
-#  GoogleSanitizer::leak
-#  GoogleSanitizer::memory
+#  Sanitizer::address
+#  Sanitizer::thread
+#  Sanitizer::undefined
+#  Sanitizer::leak
+#  Sanitizer::memory
 include_guard(GLOBAL)
 
 option(UBSAN_FLAGS "additional UBSAN flags" OFF)
@@ -24,7 +24,7 @@ set(_source_code
 include(CMakePushCheckState)
 cmake_push_check_state(RESET)
 foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
-  if(TARGET GoogleSanitizer::${sanitizer_name})
+  if(TARGET Sanitizer::${sanitizer_name})
     continue()
   endif()
 
@@ -64,29 +64,39 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
     endif()
   endforeach()
   if(_run_res)
-    add_library(GoogleSanitizer::${sanitizer_name} INTERFACE IMPORTED GLOBAL)
+    add_library(Sanitizer::${sanitizer_name} INTERFACE IMPORTED GLOBAL)
     target_compile_options(
-      GoogleSanitizer::${sanitizer_name}
+      Sanitizer::${sanitizer_name}
       INTERFACE
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
         $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
     )
-    target_link_options(
-      GoogleSanitizer::${sanitizer_name}
-      INTERFACE
-      $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-      $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
-    )
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "MSVC" AND NOT CMAKE_C_COMPILER_ID
+                                                     STREQUAL "MSVC")
+      target_link_options(
+        Sanitizer::${sanitizer_name}
+        INTERFACE
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
+        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:${CMAKE_REQUIRED_FLAGS}>
+      )
+    else()
+      target_link_options(
+        Sanitizer::${sanitizer_name}
+        INTERFACE
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:/INCREMENTAL:NO>
+        $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>>:/INCREMENTAL:NO>
+      )
+    endif()
 
     if(sanitizer_name STREQUAL "address")
       target_compile_definitions(
-        GoogleSanitizer::${sanitizer_name}
+        Sanitizer::${sanitizer_name}
         INTERFACE
           $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_VECTOR>
           $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>>:_GLIBCXX_SANITIZE_STD_ALLOCATOR>
       )
       target_link_options(
-        GoogleSanitizer::${sanitizer_name}
+        Sanitizer::${sanitizer_name}
         INTERFACE
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>,$<CXX_COMPILER_ID:GNU>>:-lasan>
         $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>,$<C_COMPILER_ID:GNU>>:-lasan>
@@ -94,7 +104,7 @@ foreach(sanitizer_name IN ITEMS address thread undefined leak memory)
     endif()
     if(sanitizer_name STREQUAL "undefined")
       target_link_options(
-        GoogleSanitizer::${sanitizer_name}
+        Sanitizer::${sanitizer_name}
         INTERFACE
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<BOOL:$__CXX_${sanitizer_name}_res>,$<CXX_COMPILER_ID:GNU>>:-lubsan>
         $<$<AND:$<COMPILE_LANGUAGE:C>,$<BOOL:$__C_${sanitizer_name}_res>,$<C_COMPILER_ID:GNU>>:-lubsan>
