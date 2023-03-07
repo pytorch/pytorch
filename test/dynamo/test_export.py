@@ -1,13 +1,13 @@
 # Owner(s): ["module: dynamo"]
+import inspect
 import operator
 import unittest
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Sequence
 from unittest.mock import patch
 
 import torch
 import torch._dynamo
-
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
@@ -1752,8 +1752,23 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         pos0 = torch.randn(4)
         myargs = [torch.randn(4), torch.randn(4)]
 
+        expected_argument_names = [
+            "pos0",
+            "tuple0",
+            "myargs_0",
+            "myargs_1",
+            "mykw0",
+            "input0",
+            "input1",
+        ]
         self._test_export_preserving_original_signature(
-            fn_with_kwargs, pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs
+            fn_with_kwargs,
+            expected_argument_names,
+            pos0,
+            tuple0,
+            *myargs,
+            mykw0=mykw0,
+            **mykwargs,
         )
 
     def test_export_with_kwargs_and_empty_args(self):
@@ -1765,8 +1780,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
         mykw0 = torch.randn(4)
 
+        expected_argument_names = ["mykw0"] + list(mykwargs.keys())
         self._test_export_preserving_original_signature(
-            fn_with_kwargs, mykw0, **mykwargs
+            fn_with_kwargs, expected_argument_names, mykw0, **mykwargs
         )
 
     def test_export_with_args_and_empty_kwargs(self):
@@ -1782,8 +1798,9 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         pos0 = torch.randn(4)
         myargs = [torch.randn(4), torch.randn(4)]
 
+        expected_argument_names = ["pos0", "tuple0", "myargs_0", "myargs_1"]
         self._test_export_preserving_original_signature(
-            fn_with_kwargs, pos0, tuple0, *myargs
+            fn_with_kwargs, expected_argument_names, pos0, tuple0, *myargs
         )
 
     @common_utils.parametrize(
@@ -1816,7 +1833,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return out
 
         pos0 = torch.randn(4)
-        self._test_export_preserving_original_signature(fn, pos0)
+        expected_argument_names = ["pos0"]
+        self._test_export_preserving_original_signature(
+            fn, expected_argument_names, pos0
+        )
 
     @common_utils.parametrize(
         "default_value",
@@ -1855,9 +1875,44 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         args = (pos0,)
         kwargs = {"kw0": kw0, "kw2": kw2}
-        self._test_export_preserving_original_signature(fn, *args, **kwargs)
+        expected_argument_names = ["pos0", "kw0", "kw2"]
+        self._test_export_preserving_original_signature(
+            fn, expected_argument_names, *args, **kwargs
+        )
 
-    def _test_export_preserving_original_signature(self, fn, *args, **kwargs):
+    def test_export_with_wrapped_fn(self):
+        # To ensure dynamo.export is robust to wrapped functions
+        # when it cannot use `inspect` to retrieve original signature
+        # info.
+        def _fn(pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+            out = pos0
+            out += pos1
+            out += kw0
+            out += kw1
+            for arg in args:
+                out += arg
+            for kwarg in kwargs.values():
+                out += kwarg
+            return out
+
+        def wrapped_fn(*args, **kwargs):
+            return _fn(*args, **kwargs)
+
+        pos0 = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, torch.randn(4), torch.randn(4))
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4)}
+        expected_argument_names = [f"args_{i}" for i in range(len(args))] + list(
+            kwargs.keys()
+        )
+
+        self._test_export_preserving_original_signature(
+            wrapped_fn, expected_argument_names, *args, **kwargs
+        )
+
+    def _test_export_preserving_original_signature(
+        self, fn, expected_argument_names: Sequence[str], *args, **kwargs
+    ):
         torch._dynamo.reset()
         exported = torch._dynamo.export(
             fn,
@@ -1870,6 +1925,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = out_graph(*args, **kwargs)
         real_result = fn(*args, **kwargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+        # Check that the exported graph preserves same argument names.
+        self.assertEqual(
+            inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
+        )
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):

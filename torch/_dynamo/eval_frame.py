@@ -12,7 +12,7 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
@@ -754,19 +754,50 @@ def export(
     ).transform()
 
     # Make dynamo graph to have same input/output spec as user code
-    if isinstance(f, torch.nn.Module):
-        inspect_fn = f.forward
-    else:
-        inspect_fn = f
-    arg_names = list(inspect.signature(inspect_fn).parameters.keys())
-    if len(arg_names) != len(args):
-        # *args mess this up
-        input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
-    else:
-        input_strs = [arg_names[i] for i in range(len(args))] + list(kwargs.keys())
+    def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
+        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+        fullargspec = inspect.getfullargspec(call_to_inspect)
+        if inspect.ismethod(call_to_inspect):
+            fullargspec.args.pop(0)
+
+        # 1. Map `args` 1-to-1 to positional arguments in original signature.
+        input_strs = fullargspec.args[: len(args)]
+
+        if len(args) > len(fullargspec.args):
+            # 2. If there are more arguments left in `args`, they map to varargs in original
+            # signature. Assign names as {varargs}_0, {varargs}_1, ...
+            assert fullargspec.varargs is not None, "More arguments than expected"
+            input_strs += [
+                f"{fullargspec.varargs}_{i}"
+                for i in range(0, len(args) - len(input_strs))
+            ]
+        elif len(args) < len(fullargspec.args):
+            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+            # it implies these are arguments either with default values, or provided in
+            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+            # export them as part of the function signature. The latter will be handled
+            # in the next step.
+            for unprovided_arg in fullargspec.args[
+                len(args) : -len(fullargspec.defaults or [])
+            ]:
+                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+        # 4. Keyword arguments provided in `kwargs`.
+        input_strs += list(kwargs.keys())
+
+        # 5. Keyword-only arguments with default values if not provided are not exported
+        # as part of the function signature.
+        for kwonly_arg in fullargspec.kwonlyargs:
+            kwonlydefaults = fullargspec.kwonlydefaults or {}
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
+
+        return input_strs
+
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            input_strs,
+            argument_names(f, *args, **kwargs),
             in_spec,
             out_spec_traced,
         )
