@@ -756,9 +756,9 @@ def signature_from_schema(
     args.extend(func.arguments.post_tensor_options_kwarg_only)
     args.extend(func.arguments.out)
 
-    input_arg_set = set(a.name for a in func.arguments.flat_positional)
-    kwarg_only_set = set(a.name for a in func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in func.arguments.out)
+    input_arg_set = {a.name for a in func.arguments.flat_positional}
+    kwarg_only_set = {a.name for a in func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in func.arguments.out}
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(
@@ -1072,7 +1072,7 @@ def dispatch_lambda_args(
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
-    out_args: Set[str] = set(a.name for a in schema.arguments.out)
+    out_args: Set[str] = {a.name for a in schema.arguments.out}
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: Binding) -> DispatchLambdaArgument:

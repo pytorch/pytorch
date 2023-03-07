@@ -42,7 +42,7 @@ class Adamax(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(Adamax, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)

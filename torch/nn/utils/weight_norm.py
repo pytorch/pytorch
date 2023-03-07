@@ -8,7 +8,7 @@ from ..modules import Module
 
 __all__ = ['WeightNorm', 'weight_norm', 'remove_weight_norm']
 
-class WeightNorm(object):
+class WeightNorm:
     name: str
     dim: int
 

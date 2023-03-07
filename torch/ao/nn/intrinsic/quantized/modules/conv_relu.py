@@ -31,7 +31,7 @@ class ConvReLU1d(nnq.Conv1d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -62,7 +62,7 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU1d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU1d, \
             "BatchNorm1d should be fused into Conv1d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
@@ -81,7 +81,7 @@ class ConvReLU2d(nnq.Conv2d):
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
-        super(ConvReLU2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -111,7 +111,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU2d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU2d, \
             "BatchNorm2d should be fused into Conv2d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
@@ -131,7 +131,7 @@ class ConvReLU3d(nnq.Conv3d):
                  padding=0, dilation=1, groups=1, bias=True,
                  padding_mode='zeros', device=None, dtype=None):
         assert padding_mode != 'reflect', "Conv3d does not support reflection padding"
-        super(ConvReLU3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride=stride,
             padding=padding, dilation=dilation, groups=groups, bias=bias,
             padding_mode=padding_mode, device=device, dtype=dtype)
@@ -167,6 +167,6 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        assert type(ref_qconv) != torch.nn.intrinsic.ConvBnReLU3d, \
+        assert type(ref_qconv) != torch.ao.nn.intrinsic.ConvBnReLU3d, \
             "BatchNorm3d should be fused into Conv3d before converting to reference module"
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)

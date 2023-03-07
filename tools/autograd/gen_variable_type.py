@@ -185,6 +185,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fliplr",
     "flipud",
     "rot90",
+    "nanmean",
+    "nansum",
     "transpose",
     "permute",
     "squeeze",
@@ -968,10 +970,10 @@ def emit_body(
         """Find arguments that have derivative definitions"""
         if info is None or not info.has_derivatives:
             return differentiable_inputs
-        names = set(name for d in info.derivatives for name in d.var_names)
+        names = {name for d in info.derivatives for name in d.var_names}
         differentiable = [arg for arg in differentiable_inputs if arg.name in names]
         if len(differentiable) != len(names):
-            missing = names - set(arg.name for arg in differentiable)
+            missing = names - {arg.name for arg in differentiable}
             raise RuntimeError(
                 f"Missing arguments for derivatives: {missing} in {info.name}"
             )

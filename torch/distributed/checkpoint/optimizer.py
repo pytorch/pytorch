@@ -206,7 +206,6 @@ def load_sharded_optimizer_state_dict(
     This is the current recommended way to checkpoint is FSDP
     >>> # xdoctest: +SKIP
     >>> import torch.distributed.checkpoint as dist_cp
-    >>> import spmd.checkpoint as sp_cp
     >>> # Save
     >>> model: torch.nn.Model
     >>> optim_params = model.parameters()
@@ -220,7 +219,7 @@ def load_sharded_optimizer_state_dict(
     >>>     dist_cp.save_state_dict(
     >>>         state_dict=optim_state,
     >>>         storage_writer=dist_cp.FileSystemWriter("checkpoint"),
-    >>>         planner=sp_cp.AdvLoadPlanner()
+    >>>         planner=dist_cp.DefaultSavePlanner(),
     >>>     )
     >>>
     >>> # Load
@@ -232,7 +231,7 @@ def load_sharded_optimizer_state_dict(
     >>>     dist_cp.load_state_dict(
     >>>         state_dict=checkpoint,
     >>>         storage_reader=dist_cp.FileSystemReader(checkpoint_file),
-    >>>         planner=sp_cp.AdvLoadPlanner()
+    >>>         planner=dist_cp.DefaultLoadPlanner(),
     >>>     )
     >>>     model.load_state_dict(checkpoint["model_state"])
     >>>

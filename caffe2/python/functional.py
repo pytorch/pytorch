@@ -26,7 +26,7 @@ def namedtupledict(typename, field_names, *args, **kwargs):
     return data
 
 
-class _Functional(object):
+class _Functional:
     def __getattribute__(self, op_type):
         def op_func(*inputs, **args):
             ws = Workspace()

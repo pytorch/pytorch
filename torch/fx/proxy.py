@@ -20,7 +20,7 @@ __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
 
 
 @compatibility(is_backward_compatible=False)
-class Scope(object):
+class Scope:
     """ Scope object that records the module path and the module type
     of a module. Scope is used to track the information of the module
     that contains a Node in a Graph of GraphModule. For example::
@@ -51,7 +51,7 @@ class Scope(object):
 
 
 @compatibility(is_backward_compatible=False)
-class ScopeContextManager(object):
+class ScopeContextManager:
     """ A context manager to track the Scope of Node during symbolic tracing.
     When entering a forward function of a Module, we'll update the scope information of
     the current module, and when we exit, we'll restore the previous scope information.

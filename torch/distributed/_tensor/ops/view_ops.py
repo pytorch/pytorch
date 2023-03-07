@@ -370,7 +370,7 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     dim2 = normalize_dim(dim2, ndim)
     assert dim1 < ndim
     assert dim2 < ndim
-    dimmap = list(InputDim(i) for i in range(ndim))
+    dimmap = [InputDim(i) for i in range(ndim)]
     swapdim = dimmap[dim1]
     dimmap[dim1] = dimmap[dim2]
     dimmap[dim2] = swapdim
@@ -480,7 +480,7 @@ def propagate_shape_and_sharding(
       if the leftmost split size is divisible by the mesh dimension
     """
     assert len(in_shard) == len(mesh_sizes)
-    sharded_in_dims: Set[int] = set(s.dim for s in in_shard if isinstance(s, Shard))
+    sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, Shard)}
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
     shardable_dims: torch.Tensor = torch.ones(
         (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool

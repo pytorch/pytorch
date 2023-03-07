@@ -2803,6 +2803,42 @@ TEST_F(VulkanAPITest, select_3d_depth_large) {
   test_select({100, 1, 144}, 0, 50);
 }
 
+TEST_F(VulkanAPITest, select_3d_height_small) {
+  test_select({1, 1, 1}, 1, 0);
+}
+
+TEST_F(VulkanAPITest, select_3d_height_medium) {
+  test_select({3, 5, 2}, 1, 2);
+}
+
+TEST_F(VulkanAPITest, select_3d_height_medium1) {
+  test_select({16, 16, 5}, 1, 6);
+}
+
+TEST_F(VulkanAPITest, select_3d_height_medium2) {
+  test_select({17, 17, 5}, 1, 6);
+}
+
+TEST_F(VulkanAPITest, select_3d_height_large) {
+  test_select({100, 144, 5}, 1, 50);
+}
+
+TEST_F(VulkanAPITest, select_3d_width_small) {
+  test_select({1, 1, 1}, 2, 0);
+}
+
+TEST_F(VulkanAPITest, select_3d_width_medium) {
+  test_select({3, 5, 3}, 2, 2);
+}
+
+TEST_F(VulkanAPITest, select_3d_width_medium2) {
+  test_select({17, 17, 8}, 2, 6);
+}
+
+TEST_F(VulkanAPITest, select_3d_width_large) {
+  test_select({100, 3, 144}, 2, 50);
+}
+
 TEST_F(VulkanAPITest, sigmoid) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();

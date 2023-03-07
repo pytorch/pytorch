@@ -32,7 +32,7 @@ FunctionCount = NamedTuple("FunctionCount", [("count", int), ("function", str)])
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
-class FunctionCounts(object):
+class FunctionCounts:
     """Container for manipulating Callgrind results.
 
     It supports:
@@ -52,8 +52,7 @@ class FunctionCounts(object):
     _linewidth: Optional[int] = None
 
     def __iter__(self) -> Generator[FunctionCount, None, None]:
-        for i in self._data:
-            yield i
+        yield from self._data
 
     def __len__(self) -> int:
         return len(self._data)
@@ -157,7 +156,7 @@ class FunctionCounts(object):
 
 
 @dataclasses.dataclass(repr=False, eq=False, frozen=True)
-class CallgrindStats(object):
+class CallgrindStats:
     """Top level container for Callgrind results collected by Timer.
 
     Manipulation is generally done using the FunctionCounts class, which is
@@ -471,7 +470,7 @@ class GlobalsBridge:
         return "\n".join(load_lines)
 
 
-class _ValgrindWrapper(object):
+class _ValgrindWrapper:
     def __init__(self) -> None:
         self._bindings_module: Optional[CallgrindModuleType] = None
         valgrind_symbols = (
@@ -494,8 +493,7 @@ class _ValgrindWrapper(object):
             for cmd in ("valgrind", "callgrind_control", "callgrind_annotate"):
                 self._commands_available[cmd] = not subprocess.run(
                     ["which", cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    capture_output=True,
                 ).returncode
 
         self._build_type: Optional[str] = None
@@ -636,9 +634,9 @@ class _ValgrindWrapper(object):
                 run_loop_cmd = [
                     run_loop_exec,
                     "--number", str(number),
-                    "--number_warmup", str(min(number, 10)),
+                    "--number-warmup", str(min(number, 10)),
                     "--repeats", str(repeats),
-                    "--number_threads", str(task_spec.num_threads),
+                    "--number-threads", str(task_spec.num_threads),
                 ]
 
             valgrind_invocation, valgrind_invocation_output = run([

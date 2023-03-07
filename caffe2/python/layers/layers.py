@@ -119,7 +119,7 @@ def set_request_only(field):
         )
 
 
-class InstantiationContext(object):
+class InstantiationContext:
     """
     List of contexts where layer could be instantitated
     """
@@ -157,7 +157,7 @@ def create_layer(layer_name, *args, **kwargs):
 LayerPsParam = namedtuple("LayerPsParam", ["sparse_key", "average_length"])
 
 
-class LayerParameter(object):
+class LayerParameter:
     def __init__(
         self,
         parameter=None,
@@ -248,7 +248,7 @@ def is_request_only_scalar(scalar):
 # `ids`: A set of feature IDs that are accessed in the model layer
 AccessedFeatures = namedtuple("AccessedFeatures", ["type", "ids"])
 
-class ModelLayer(object):
+class ModelLayer:
     def __init__(
         self,
         model,

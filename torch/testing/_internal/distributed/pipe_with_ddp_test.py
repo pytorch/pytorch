@@ -90,7 +90,7 @@ class PipeWithDDPTest(RpcAgentTestFixture):
 
         class MyModule(nn.Module):
             def __init__(self, device):
-                super(MyModule, self).__init__()
+                super().__init__()
                 self.fc2 = nn.Linear(8, 4, bias=False).cuda(device)
                 self.fc3 = nn.Linear(4, 2, bias=False).cuda(device)
 

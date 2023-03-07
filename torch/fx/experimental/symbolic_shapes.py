@@ -1,6 +1,7 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
 import sys
+import builtins
 import itertools
 import operator
 import math
@@ -14,7 +15,7 @@ import textwrap
 import logging
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_int, sym_max, sym_min  # noqa: F401
+from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
 from torch._guards import ShapeGuard, Source
 
 SymTypes = (SymInt, SymFloat, SymBool)
@@ -24,21 +25,16 @@ log = logging.getLogger(__name__)
 class GuardOnDataDependentSymNode(RuntimeError):
     pass
 
-try:
-    import sympy  # type: ignore[import]
-    from sympy.printing.precedence import precedence  # type: ignore[import] # noqa: F401
-    from sympy.printing.str import StrPrinter  # type: ignore[import]
-    from sympy.core.logic import fuzzy_and, fuzzy_or  # type: ignore[import]
-    HAS_SYMPY = True
-except ImportError:
-    HAS_SYMPY = False
+import sympy
+from sympy.printing.str import StrPrinter
+from sympy.core.logic import fuzzy_and, fuzzy_or
 
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
     "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
-    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "wrap_node",
-    "method_to_operator",
+    "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
+    "method_to_operator", "hint_int", "SYMPY_INTERP",
 ]
 
 SYM_FUNCTION_MODE = None
@@ -104,22 +100,38 @@ def _handle_sym_dispatch(func, args, kwargs):
     finally:
         SYM_FUNCTION_MODE = mode
 
+def hint_int(a):
+    if isinstance(a, torch.SymInt):
+        return a.node.require_hint()
+    assert type(a) is int, a
+    return a
+
+def guard_scalar(a):
+    if isinstance(a, (SymBool, bool)):
+        return guard_bool(a)
+    elif isinstance(a, (SymInt, int)):
+        return guard_int(a)
+    elif isinstance(a, (SymFloat, float)):
+        return guard_float(a)
+    else:
+        raise AssertionError(f"unrecognized scalar {a}")
+
 def guard_bool(a):
     if isinstance(a, SymBool):
         return a.node.guard_bool("", 0)  # NB: uses Python backtrace
-    assert type(a) is bool
+    assert type(a) is bool, a
     return a
 
 def guard_int(a):
     if isinstance(a, SymInt):
         return a.node.guard_int("", 0)  # NB: uses Python backtrace
-    assert type(a) is int
+    assert type(a) is int, a
     return a
 
 def guard_float(a):
     if isinstance(a, SymFloat):
         return a.node.guard_float("", 0)  # NB: uses Python backtrace
-    assert isinstance(a, float)
+    assert isinstance(a, float), a
     return a
 
 # Drop in replacement for math.sqrt
@@ -146,6 +158,9 @@ def to_node(self, num):
 def fx_placeholder_vals(gm):
     return [n.meta['val'] for n in gm.graph.nodes if n.op == "placeholder"]
 
+def fx_placeholder_targets(gm):
+    return [n.target for n in gm.graph.nodes if n.op == "placeholder"]
+
 # Given a GraphModule and arguments to run it with, evaluate that the guards
 # for its associated ShapeEnv are satisfied by the passed arguments.  This
 # WILL check for duck sizing.
@@ -163,16 +178,69 @@ class SymNode:
     This is a type erased SymInt/SymFloat which we use to do actual operations.
     End users don't touch this.  Magic methods are NOT defined on this object.
     """
-    def __init__(self, expr, shape_env, pytype, constant=None):
+    def __init__(self, expr, shape_env, pytype, hint: Optional[Union[int, float]], constant=None):
         self._expr = expr
         self.shape_env = shape_env
         self.pytype = pytype
-        self.constant = constant
+        # What's the difference between hint and constant?
+        #
+        # - A constant is known to be invariant across invocations of the model;
+        #   it will always be this value.  We only really know this when we
+        #   encounter an honest-to-goodness literal (when wrapping it into
+        #   a SymNode, we set constant.)  Most of the time, constant is None
+        #
+        # - A hint is a *particular* value from the particular run we are
+        #   tracing, but it may vary the next time around.  It's useful to
+        #   keep this around, as if we need a concrete value from a SymNode,
+        #   we will return the hint and guard on the expression that produced
+        #   it giving the same hint next time around.  The hint is not
+        #   guaranteed to be set either: if you have an unbacked SymNode,
+        #   there won't be any hint; it was the result of some tensor-dependent
+        #   computation, but we don't know what it actually is because we
+        #   haven't actually run the tensor computation.
+        #
+        # hint_expr is only set if we don't have a hint.  When it is set, it
+        # contains the expression which contains the unbacked symnodes that,
+        # if constrained, would allow this expression to be hinted again.
+        if hint is None:
+            self._hint_expr = self.expr.xreplace(shape_env.var_to_val)
+            self._hint = None
+            self._update_hint()  # check if the replacement actually was enough
+        else:
+            self._hint_expr = None
+            self._hint = hint
+        self.constant: Optional[Union[int, float, bool]] = constant
 
     @property
     def expr(self):
         self._update_expr()
         return self._expr
+
+    # Check if we have replacements hint_expr that would allow us to
+    # simplify it into a hint
+    def _update_hint(self):
+        if self._hint_expr.free_symbols <= self.shape_env.replacements.keys():
+            self._hint = self.pytype(self.shape_env.replace(self._hint_expr))
+            self._hint_expr = None
+
+    @property
+    def hint(self):
+        if self._hint is None:
+            self._update_hint()
+        return self._hint
+
+    def has_hint(self):
+        return self._hint is not None
+
+    def require_hint(self):
+        if self._hint is None:
+            self._update_hint()
+            if self._hint is None:
+                raise self.shape_env._make_data_dependent_error(self._hint_expr)
+            else:
+                return self._hint
+        else:
+            return self._hint
 
     def _update_expr(self):
         self._expr = self.shape_env.replace(self._expr)
@@ -188,15 +256,15 @@ class SymNode:
 
     def wrap_int(self, num):
         assert type(num) is int
-        return SymNode(sympy.Integer(num), self.shape_env, int, constant=num)
+        return SymNode(sympy.Integer(num), self.shape_env, int, num, constant=num)
 
     def wrap_float(self, num):
         assert type(num) is float
-        return SymNode(sympy.Float(num), self.shape_env, float, constant=num)
+        return SymNode(sympy.Float(num), self.shape_env, float, num, constant=num)
 
     def wrap_bool(self, num):
         assert type(num) is bool
-        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, constant=num)
+        return SymNode(sympy.true if num else sympy.false, self.shape_env, bool, num, constant=num)
 
     def clone(self):
         return self
@@ -210,25 +278,107 @@ class SymNode:
     def __repr__(self):
         return self.str()
 
-    # These methods are metaprogrammed in below
-    def sym_int(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    # These methods call the metaprogrammed methods, they're hand written
+    # here so we get good stack traces
+    def add(self, other) -> "SymNode":  # noqa: F811
+        return self._add(other)  # type: ignore[attr-defined]
 
-    def sym_float(self) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def sub(self, other) -> "SymNode":  # noqa: F811
+        return self._sub(other)  # type: ignore[attr-defined]
 
-    def or_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+    def mul(self, other) -> "SymNode":  # noqa: F811
+        return self._mul(other)  # type: ignore[attr-defined]
+
+    def mod(self, other) -> "SymNode":  # noqa: F811
+        return self._mod(other)  # type: ignore[attr-defined]
+
+    def pow(self, other) -> "SymNode":  # noqa: F811
+        return self._pow(other)  # type: ignore[attr-defined]
 
     def and_(self, other) -> "SymNode":  # noqa: F811
-        raise AssertionError("should have been overridden")
+        return self._and_(other)  # type: ignore[attr-defined]
+
+    def or_(self, other) -> "SymNode":  # noqa: F811
+        return self._or_(other)  # type: ignore[attr-defined]
+
+    def truediv(self, other) -> "SymNode":  # noqa: F811
+        return self._truediv(other)  # type: ignore[attr-defined]
+
+    def floordiv(self, other) -> "SymNode":  # noqa: F811
+        return self._floordiv(other)  # type: ignore[attr-defined]
+
+    def sym_not(self) -> "SymNode":  # noqa: F811
+        return self._sym_not()  # type: ignore[attr-defined]
+
+    def eq(self, other) -> "SymNode":  # noqa: F811
+        return self._eq(other)  # type: ignore[attr-defined]
+
+    def ne(self, other) -> "SymNode":  # noqa: F811
+        return self._ne(other)  # type: ignore[attr-defined]
+
+    def gt(self, other) -> "SymNode":  # noqa: F811
+        return self._gt(other)  # type: ignore[attr-defined]
+
+    def lt(self, other) -> "SymNode":  # noqa: F811
+        return self._lt(other)  # type: ignore[attr-defined]
+
+    def le(self, other) -> "SymNode":  # noqa: F811
+        return self._le(other)  # type: ignore[attr-defined]
+
+    def ge(self, other) -> "SymNode":  # noqa: F811
+        return self._ge(other)  # type: ignore[attr-defined]
+
+    def floor(self) -> "SymNode":  # noqa: F811
+        return self._floor()  # type: ignore[attr-defined]
+
+    def sym_float(self) -> "SymNode":  # noqa: F811
+        return self._sym_float()  # type: ignore[attr-defined]
+
+    def sym_int(self) -> "SymNode":  # noqa: F811
+        return self._sym_int()  # type: ignore[attr-defined]
+
+    def ceil(self) -> "SymNode":  # noqa: F811
+        return self._ceil()  # type: ignore[attr-defined]
+
+    def neg(self) -> "SymNode":  # noqa: F811
+        return self._neg()  # type: ignore[attr-defined]
+
+    def sym_min(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_min(other)  # type: ignore[attr-defined]
+
+    def sym_max(self, other) -> "SymNode":  # noqa: F811
+        return self._sym_max(other)  # type: ignore[attr-defined]
+
+    def sym_sqrt(self) -> "SymNode":  # noqa: F811
+        return self._sym_sqrt()  # type: ignore[attr-defined]
+
+    def is_contiguous(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_contiguous(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_contiguous_2d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_contiguous_2d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_contiguous_3d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_contiguous_3d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_strides_2d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_strides_2d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_channels_last_strides_3d(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_channels_last_strides_3d(sizes, strides)  # type: ignore[attr-defined]
+
+    def is_non_overlapping_and_dense_indicator(self, sizes, strides) -> "SymNode":  # noqa: F811
+        return self._is_non_overlapping_and_dense_indicator(sizes, strides)  # type: ignore[attr-defined]
 
     # Make C++ happy
-    def sym_or(self, other):
+    def sym_or(self, other):  # noqa: F811
         return self.or_(other)
 
-    def sym_and(self, other):
+    def sym_and(self, other):  # noqa: F811
         return self.and_(other)
+
+    def is_non_overlapping_and_dense(self, sizes, strides):
+        return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
 
     # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
@@ -240,39 +390,38 @@ class SymNode:
     def guard_int(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint)
         try:
             return int(r)
         except Exception:
-            log.warn(f"Failed to convert to int: {r}")
+            log.warning(f"Failed to convert to int: {r}")
             raise
 
     def guard_float(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        r = self.shape_env.evaluate_expr(self.expr)
+        r = self.shape_env.evaluate_expr(self.expr, self.hint)
         try:
             return float(r)
         except Exception:
-            log.warn(f"Failed to convert to float: {r}")
+            log.warning(f"Failed to convert to float: {r}")
             raise
 
     def guard_bool(self, file, line):
         # TODO: use the file/line for some useful diagnostic on why a
         # guard occurred
-        # TODO: why is the replace needed here?
-        r = self.shape_env.evaluate_expr(self.shape_env.replace(self.expr))
+        r = self.shape_env.evaluate_expr(self.expr, self.hint)
         try:
             return bool(r)
         except Exception:
-            log.warn(f"Failed to convert to bool: {r}")
+            log.warning(f"Failed to convert to bool: {r}")
             raise
 
     def bool_(self):
         return self.guard_bool("", 0)
 
 
-if HAS_SYMPY:
+if True:  # TODO: unindent
     # Overloaded to be compatible with regular Python.
     # https://github.com/pytorch/pytorch/issues/90900
     class Pow(sympy.Function):
@@ -372,21 +521,34 @@ if HAS_SYMPY:
                     sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
                 )
 
+    # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
+    # Because we do not have the ability to guard on the stride permutation
+    # at the moment, it is hard to make further inferences when this is true,
+    # as although we know the tensor is contiguous in *some* layout, we don't
+    # know which one (however, you could, for example, make the inference that
+    # reshaping this to a 1D tensor can be guard-free.)
     class IsNonOverlappingAndDenseIndicator(sympy.Function):
         is_integer = True
 
         @classmethod
         def eval(cls, *args):
             assert len(args) % 2 == 0
+            dim = len(args) // 2
+            # TODO: it is possible to make progress evaluating this guard
+            # even if not all of the inputs are known.  For example, a 2D
+            # tensor with non-0/1 sizes but strides (0, 1) is definitely
+            # false, because we know its numel > 1 but it's broadcasted
+            # in dim 0.
             if all(isinstance(a, sympy.Integer) for a in args):
-                dim = len(args) // 2
-                sizes = args[0:dim]
-                strides = args[dim:]
-                return int(eval_is_non_overlapping_and_dense(
-                    [int(s) for s in sizes],
-                    [int(s) for s in strides]
-                ))
+                size_args = args[0:dim]
+                stride_args = args[dim:]
+                return eval_is_non_overlapping_and_dense(
+                    [int(a) for a in size_args],
+                    [int(a) for a in stride_args]
+                )
             return None
+
+    IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 @lru_cache(256)
 def safe_expand(r):
@@ -412,6 +574,28 @@ reflectable_magic_methods = {
     'floordiv': lambda a, b: FloorDiv(a, b),
 }
 
+
+def error():
+    raise AssertionError("shouldn't be hit")
+
+def floor_ceil_helper(a, fn):
+    if isinstance(a, sympy.Mul):
+        aa = a.args
+        if len(aa) == 2 and isinstance(aa[0], sympy.Float) and aa[1].is_integer:
+            coef = sympy.Integer(aa[0])
+            if aa[0] == coef:  # structural equality test
+                return coef * aa[1]
+    if isinstance(a, sympy.Float) and a == sympy.Integer(a) or isinstance(a, sympy.Integer):
+        return sympy.Integer(a)
+    return fn(a)
+
+def floor_impl(a):
+    return floor_ceil_helper(a, sympy.floor)
+
+def ceil_impl(a):
+    return floor_ceil_helper(a, sympy.ceiling)
+
+
 magic_methods = {
     **reflectable_magic_methods,
     'sym_not': lambda a: ~a,
@@ -421,9 +605,9 @@ magic_methods = {
     'lt': lambda a, b: sympy.Lt(a, b),
     'le': lambda a, b: sympy.Le(a, b),
     'ge': lambda a, b: sympy.Ge(a, b),
-    'floor': lambda a: sympy.floor(a),
+    'floor': floor_impl,
     'sym_float': lambda a: a,  # Cannot use sympy.Float(a) here, coz it expects python literals
-    'ceil': lambda a: sympy.ceiling(a),
+    'ceil': ceil_impl,
     'neg': lambda a: -a,
     'sym_min': lambda a, b: sympy.Min(a, b),
     'sym_max': lambda a, b: sympy.Max(a, b),
@@ -431,11 +615,97 @@ magic_methods = {
 }
 
 sizes_strides_methods = {
-    'is_non_overlapping_and_dense': lambda *args: IsNonOverlappingAndDenseIndicator(*args),
+    # TODO: These could also be done with indicators, maybe it is better
+    # for reasoning to do it that way
+    'is_contiguous': lambda sizes, strides: sympy_is_contiguous(sizes, strides),
+    'is_channels_last_contiguous_2d': lambda sizes, strides: sympy_is_channels_last_contiguous_2d(sizes, strides),
+    'is_channels_last_contiguous_3d': lambda sizes, strides: sympy_is_channels_last_contiguous_3d(sizes, strides),
+    'is_channels_last_strides_2d': lambda sizes, strides: sympy_is_channels_last_strides_2d(sizes, strides),
+    'is_channels_last_strides_3d': lambda sizes, strides: sympy_is_channels_last_strides_3d(sizes, strides),
+    'is_non_overlapping_and_dense_indicator': lambda sizes, strides: IsNonOverlappingAndDenseIndicator(*sizes, *strides),
 }
+
+alternate_impl_if_hinted_methods = {
+    "sym_min": builtins.min,
+    "sym_max": builtins.max,
+}
+
+def sympy_is_contiguous_generic(sizes, strides, dim_order):
+    dim = len(sizes)
+
+    if len(dim_order) != dim:
+        return sympy.false
+
+    is_contiguous = sympy.true
+    z = sympy.Integer(1)
+    # Contiguous if the strides make sense (or the dim is size 1)
+    for d in dim_order:
+        is_contiguous &= sympy.Eq(sizes[d], sympy.Integer(1)) | sympy.Eq(strides[d], z)
+        z *= sizes[d]
+    # OR if any size is zero
+    for d in range(dim):
+        is_contiguous |= sympy.Eq(sizes[d], sympy.Integer(0))
+    return is_contiguous
+
+def sympy_is_contiguous(sizes, strides):
+    dim = len(sizes)
+    return sympy_is_contiguous_generic(sizes, strides, list(range(dim - 1, -1, -1)))
+
+# NB: There is a TODO in C++ to allow omitting the batch dim.  If that
+# happens you will need to refactor this
+
+def sympy_is_channels_last_contiguous_2d(sizes, strides):
+    return sympy_is_contiguous_generic(sizes, strides, [1, 3, 2, 0])
+
+def sympy_is_channels_last_contiguous_3d(sizes, strides):
+    return sympy_is_contiguous_generic(sizes, strides, [1, 4, 3, 2, 0])
+
+def sympy_is_channels_last_strides_generic(sizes, strides, dim_order):
+    dim = len(sizes)
+
+    if dim != len(dim_order):
+        return sympy.false
+
+    m = sympy.Integer(0)
+    r = sympy.true
+
+    # special case for trivial C dimension. default to NCHW
+    r &= sympy.Ne(strides[1], 0)
+
+    for d in dim_order:
+        r &= sympy.Ne(sizes[d], 0) & (strides[d] >= m)
+        # Fallback to NCHW as default layout for ambiguous cases
+        # This is the flaw of implicit memory_format from strides.
+        # N111 tensor with identical strides for size 1 dimension;
+        # Two cases could lead us here:
+        # a. N111 contiguous Tensor ([N,1,1,1]@[1,1,1,1])
+        # b. N11W contiguous Tensor sliced on the W-dimension.
+        # ([N,1,1,1]@[W,W,W,W])
+        if d == 0:
+            r &= sympy.Ne(m, strides[1])
+        # This is necessary to:
+        # 1. distinguish the memory_format of N1H1;
+        #     [H, 1, 1, 1] channels_last stride
+        #     [H, H, 1, 1] contiguous stride
+        # 2. permutation of 1C1W:
+        #     [1, C, 1, H]@[HC, H, H, 1] transpose(1, 3)
+        #     [1, H, 1, C]@[HC, 1, H, H] shouldn't be identified as
+        #     channels_last
+        m = strides[d] * sympy.Max(sizes[d], 1)
+
+    return r
+
+def sympy_is_channels_last_strides_2d(sizes, strides):
+    return sympy_is_channels_last_strides_generic(sizes, strides, [1, 3, 2, 0])
+
+def sympy_is_channels_last_strides_3d(sizes, strides):
+    return sympy_is_channels_last_strides_generic(sizes, strides, [1, 4, 3, 2, 0])
 
 # TODO: Deduplicate this with torch/_prims_common/__init__.py
 def eval_is_non_overlapping_and_dense(sizes, strides):
+    return int(guard_bool(_eval_is_non_overlapping_and_dense(sizes, strides)))
+
+def _eval_is_non_overlapping_and_dense(sizes, strides):
     dim = len(sizes)
 
     # Short-circuits for tensors of rank one, which are
@@ -447,7 +717,7 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
     lengths_and_strides = sorted(
-        tuple(zip(sizes, strides)), key=operator.itemgetter(1)
+        zip(sizes, strides), key=operator.itemgetter(1)
     )
 
     # Unlike the C++ code, we don't move the 0/1 size dimensions to the
@@ -464,19 +734,6 @@ def eval_is_non_overlapping_and_dense(sizes, strides):
         expected_stride *= length
 
     return True
-
-def is_non_overlapping_and_dense(sizes, strides):
-    base = None
-    for s in itertools.chain(sizes, strides):
-        if isinstance(s, SymInt):
-            base = s
-            break
-
-    assert base is not None
-    return wrap_node(base.node.is_non_overlapping_and_dense(
-        [to_node(base.node, s) for s in sizes],
-        [to_node(base.node, s) for s in strides],
-    ))
 
 unary_magic_methods = {
     'sym_float',
@@ -506,6 +763,23 @@ def method_to_operator(method):
         op = getattr(operator, method_attr)
     return op
 
+SYMPY_INTERP = {
+    'Eq': operator.eq,
+    'Ne': operator.ne,
+    'Gt': operator.gt,
+    'Lt': operator.lt,
+    'Le': operator.le,
+    'Ge': operator.ge,
+    'Min': min,
+    'Max': max,
+    'Mod': operator.mod,
+    'FloorDiv': operator.floordiv,
+    'TrueDiv': operator.truediv,
+    'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
+    'floor': math.floor,
+    'ceiling': math.ceil,
+}
+
 always_float_magic_methods = {"truediv", "sym_float", "sym_sqrt", "pow"}
 always_int_magic_methods = {"ceil", "floor"}
 always_bool_magic_methods = {"eq", "ne", "gt", "lt", "le", "ge", "and", "or", "sym_not", "is_non_overlapping_and_dense"}
@@ -533,10 +807,17 @@ def _make_node_magic(method, func):
 
     def binary_magic_impl(self, other):
         op = method_to_operator(method)
+
+        out_hint = None
+        if self.hint is not None and other.hint is not None:
+            out_hint = op(self.hint, other.hint)
+
+        alternate_impl = alternate_impl_if_hinted_methods.get(method)
+        if alternate_impl and out_hint is not None:
+            return to_node(self, alternate_impl(wrap_node(self), wrap_node(other)))
+
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self), wrap_node(other)), {}))
         assert isinstance(other, SymNode)
         other_expr = other.expr
         # TODO: consider constant prop here
@@ -565,21 +846,24 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, self.shape_env, pytype, out_hint)
 
     def unary_magic_impl(self):
+        op = method_to_operator(method)
         if SYM_FUNCTION_MODE:
-            op = method_to_operator(method)
-            r = _handle_sym_dispatch(op, (wrap_node(self),), {})
-            assert isinstance(r, SymTypes), type(r)
-            return r.node
+            return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
+
         try:
             out = func(expr)
         except Exception:
             log.warning(f"failed to eval {method}({expr})")
             raise
+
+        out_hint = None
+        if self.hint is not None:
+            out_hint = op(self.hint)
         out = safe_expand(out)
         pytype: Type
         if method in always_int_magic_methods:
@@ -589,12 +873,12 @@ def _make_node_magic(method, func):
         else:
             pytype = self.pytype
 
-        return SymNode(out, self.shape_env, pytype)
+        return SymNode(out, self.shape_env, pytype, out_hint)
 
     if method in unary_magic_methods:
-        setattr(SymNode, method_attr, unary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", unary_magic_impl)
     else:
-        setattr(SymNode, method_attr, binary_magic_impl)
+        setattr(SymNode, f"_{method_attr}", binary_magic_impl)
 
 def _make_node_sizes_strides(method, func):
     # NB: don't LRU cache, lots of arguments
@@ -602,20 +886,70 @@ def _make_node_sizes_strides(method, func):
     def sizes_strides_impl(self, sizes, strides):
         op = getattr(sys.modules[__name__], method)
         if SYM_FUNCTION_MODE:
-            r = _handle_sym_dispatch(op, ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]), {})
-            assert isinstance(r, SymBool), type(r)
-            return r.node
+            return to_node(
+                self,
+                _handle_sym_dispatch(
+                    op,
+                    ([wrap_node(s) for s in sizes], [wrap_node(s) for s in strides]),
+                    {}
+                )
+            )
         size_exprs = [s.expr for s in sizes]
         stride_exprs = [s.expr for s in strides]
         try:
-            out = func(*size_exprs, *stride_exprs)
+            out = func(size_exprs, stride_exprs)
         except Exception:
-            log.warning(f"failed to eval {method}(*{size_exprs}, *{stride_exprs})")
+            log.warning(f"failed to eval {method}({size_exprs}, {stride_exprs})")
             raise
         # bool is never expandable
-        return SymNode(sympy.Eq(out, 1), self.shape_env, bool)
 
-    setattr(SymNode, method, sizes_strides_impl)
+        size_hints = []
+        out_hint = None
+        for s in sizes:
+            if s.hint is None:
+                break
+            size_hints.append(s.hint)
+        else:
+            stride_hints = []
+            for s in strides:
+                if s.hint is None:
+                    break
+                stride_hints.append(s.hint)
+            else:
+                out_hint = op(size_hints, stride_hints)
+
+        # NB: This is the indicator function, not the actual bool!
+        pytype: Type
+        if method.endswith("_indicator"):
+            pytype = int
+        else:
+            pytype = bool
+        return SymNode(out, self.shape_env, pytype, out_hint)
+
+    setattr(SymNode, f"_{method}", sizes_strides_impl)
+
+    # TODO: This is technically hotpath, but in the ideal end state
+    # guards on this will resolve at a higher level so you never
+    # spend time in this code
+    def sizes_strides_user(sizes, strides):
+        for a in itertools.chain(sizes, strides):
+            if isinstance(a, SymInt):
+                return wrap_node(getattr(a.node, method)(
+                    [to_node(a.node, b) for b in sizes],
+                    [to_node(a.node, b) for b in strides],
+                ))
+        if method == "is_non_overlapping_and_dense_indicator":
+            return eval_is_non_overlapping_and_dense(sizes, strides)
+        else:
+            # TODO: this is an awful implementation
+            return bool(func(
+                [sympy.sympify(a) for a in sizes],
+                [sympy.sympify(a) for a in strides],
+            ))
+
+    # Skip for is_non_overlapping_and_dense_indicator
+    if not hasattr(sys.modules[__name__], method):
+        setattr(sys.modules[__name__], method, sizes_strides_user)
 
 for method, func in magic_methods.items():
     _make_node_magic(method, func)
@@ -689,7 +1023,7 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-if HAS_SYMPY:
+if True:  # TODO: unindent
     # This stub exists so we can easily add metadata to sympy symbols
     # NB: This inherits from Dummy, not Symbol, because Symbols with the same
     # name get interned.  This is bad for us as we want the metadata
@@ -728,8 +1062,10 @@ if HAS_SYMPY:
 TLS = threading.local()
 
 
-class ShapeEnv(object):
-    def __init__(self):
+class ShapeEnv:
+    def __init__(self, allow_scalar_outputs=True, strict_mark_dyn=False, assume_static_by_default=False):
+        # Not directly used by ShapeEnv; indirectly used by FakeTensor
+        self.allow_scalar_outputs = allow_scalar_outputs
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -744,6 +1080,20 @@ class ShapeEnv(object):
         self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
+        # A bunch of facts involving unbacked symints that we can
+        # attempt replacements with.  This is very dumb and should
+        # be replaced with a proper entailment mechanism.
+        #
+        # The dictionary is indexed in the following way.  Suppose you have
+        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
+        # the source expression and place this substitution in the list of
+        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
+        # substitution if s0 is present in the guard we're attempting to
+        # evaluate.  The choice of key is arbitrary, since we will check
+        # for both s0 and s1 substitutions if s0 + s1 is in the key.
+        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
+        self.strict_mark_dyn = strict_mark_dyn
+        self.assume_static_by_default = assume_static_by_default
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -763,6 +1113,19 @@ class ShapeEnv(object):
         """
         return (len(self.replacements), len(self.divisible))
 
+    def _produce_dyn_sizes(self, ex: torch.Tensor, source: Source) -> List[sympy.Expr]:
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
+        size = []
+        for i, val in enumerate(ex.size()):
+            is_dynamic = _is_dim_dynamic(ex, i)
+            if _should_allocate(is_dynamic, self.assume_static_by_default):
+                size.append(self.create_symbol(
+                    val, TensorPropertySource(source, TensorProperty.SIZE, i), is_dynamic
+                ))
+            else:
+                size.append(sympy.Integer(val))
+        return size
+
     def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
@@ -770,12 +1133,7 @@ class ShapeEnv(object):
         introduce new symbolic variables.
         """
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-
-        size = [
-            self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i)
-            ) for i, val in enumerate(ex.size())
-        ]
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -808,58 +1166,62 @@ class ShapeEnv(object):
                     TensorPropertySource(source, TensorProperty.STRIDE, i)
                 )
         assert all(x is not None for x in stride)
-        sym_size = [self.create_symintnode(i) for i in size]
+        sym_size = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
-            sym_stride.append(self.create_symintnode(stride_expr))
+            sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
-        ))
+        ), hint=ex.storage_offset())
         return sym_size, sym_stride, sym_storage_offset
 
-    def create_symintnode(self, sym: "sympy.Expr"):
-        return SymInt(SymNode(sym, self, int))
+    # If you know what the current hint value of the SymInt to be created
+    # is, pass it into hint.  Otherwise, pass None and we will make our best
+    # guess
+    def create_symintnode(self, sym: "sympy.Expr", *, hint: Optional[int]):
+        return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
         symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        return SymFloat(SymNode(symbol, self, float))
+        return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
         symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        return SymInt(SymNode(symbol, self, int))
+        return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, dyn=False) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
-
-        if not HAS_SYMPY:
-            raise RuntimeError("Need sympy installed to create symbolic shapes")
 
         if val < 0:
             from torch._dynamo.source import NegateSource
-            return -self.create_symbol(-val, NegateSource(source))
+            return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        # Now attempt to duck size this value
-        # TODO: Use site has to duck size
-        # TODO: Do this duck sizing lazily later
-
-        # Create a duck sized int if necessary
-        if val not in self.val_to_var:
+        if dyn or (val not in self.val_to_var):
+            # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
-            self.val_to_var[val] = sympy_expr
 
-        # This implements duck-shaping: input sizes that match are assigned
-        # the same symint
-        r = self.duck_int(val)
+            if not dyn:
+                # Only non dynamic goes here
+                self.val_to_var[val] = sympy_expr
+
+        if not dyn:
+            # This implements duck-shaping: input sizes that match are assigned
+            # the same symint
+            r = self.duck_int(val)
+        else:
+            r = sympy_expr
+
         if isinstance(r, Symbol):
             r.sources.append(source)
         return r
@@ -885,8 +1247,18 @@ class ShapeEnv(object):
     # on if the guards in the list evaluated to True or not.  Primarily used by Dynamo,
     # but this is also helpful for manual testing of guards (see
     # evaluate_guards_for_args)
+    #
+    # For convenience in testing, a source is allowed to be a str,
+    # in which case we will assume it is a LocalSource
+    #
+    # simplified lets you omit duck sizing, equality and 0/1 guards.
+    # This is useful for testing when you don't care about the boilerplate
+    # guards, and it may be helpful for user output too (be careful though;
+    # some equality guards are nontrivial!  It would be nice to get simplified
+    # output to print them too).  It's private because it's not
+    # intended for normal use
     def produce_guards(self, placeholders, sources,
-                       source_ref=lambda n: n.name()) -> List[str]:
+                       source_ref=lambda n: n.name(), *, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -953,6 +1325,7 @@ class ShapeEnv(object):
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
+        dynamic_sources = []
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -973,12 +1346,28 @@ class ShapeEnv(object):
                     symbol_to_source[s].append(source)
                 elif isinstance(-s, sympy.Symbol):
                     symbol_to_source[-s].append(NegateSource(source))
-
                 input_guards.append((source, s))
             else:
                 input_guards.append((source, sympy.Integer(val)))
 
+        def _verify(expr, potential_expr):
+            # An expression of > 1 symbols is a relationship,
+            # and relationships can be ignored due to the nature of the
+            # constraint api explicitly not supporting relationships.
+            #
+            # In a future where we want to extend the constraint API to include
+            # user directives about relationships, we can remove this check from
+            # verification.
+            if len(expr.free_symbols) == 1:
+                srcs = symbol_to_source[expr.free_symbols.pop()]
+                for src in srcs:
+                    if src in dynamic_sources:
+                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's mark_dynamic")
+
         for t, source in zip(placeholders, sources):
+            if isinstance(source, str):
+                from torch._dynamo.source import LocalSource
+                source = LocalSource(source)
             assert isinstance(source, Source)
             if t is None:
                 continue
@@ -986,10 +1375,17 @@ class ShapeEnv(object):
                 track_symint(source, t)
                 continue
             assert isinstance(t, torch.Tensor)
-            for i, s in enumerate(t.size()):
-                track_symint(TensorPropertySource(source, TensorProperty.SIZE, i), s)
-            for i, s in enumerate(t.stride()):
-                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), s)
+            for i, ss in enumerate(t.size()):
+                property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
+                track_symint(property_source, ss)
+                if _is_dim_dynamic(t, i):
+                    # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
+                    # constrained to an integer.
+                    if _is_int(ss):
+                        raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
+                    dynamic_sources.append(property_source)
+            for i, ss in enumerate(t.stride()):
+                track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
 
         # 1. Every input must equal the final simplified symbolic expression
@@ -997,16 +1393,17 @@ class ShapeEnv(object):
         #    if we have an input (2, 3), we must show s0*2 == 2 and s1 == 3.
         #    This does a lot of work: it covers duck sizing and equality guards.
         exprs = []
-        for source, expr in input_guards:
-            # Small optimization
-            if (
-                isinstance(expr, Symbol) and
-                expr in symbol_to_source and
-                source == symbol_to_source[expr][0]
-            ):
-                continue
-            sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
-            exprs.append(f"{source_ref(source)} == {sexpr}")
+        if not _simplified:
+            for source, expr in input_guards:
+                # Small optimization
+                if (
+                    isinstance(expr, Symbol) and
+                    expr in symbol_to_source and
+                    source == symbol_to_source[expr][0]
+                ):
+                    continue
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1015,17 +1412,21 @@ class ShapeEnv(object):
                 continue
             g = self.simplify(g)
             try:
-                exprs.append(ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g))
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g)
+                exprs.append(guard_expr)
+                if self.strict_mark_dyn:
+                    _verify(g, guard_expr)
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
         # 3. Every symbol must not be equal to 0/1
-        for sources in symbol_to_source.values():
-            assert sources
-            # We must assert that each symbol is not zero or one, as we make
-            # negative inferences on shape variables
-            exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+        if not _simplified:
+            for sources in symbol_to_source.values():
+                assert sources
+                # We must assert that each symbol is not zero or one, as we make
+                # negative inferences on shape variables
+                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
 
         return exprs
 
@@ -1035,7 +1436,7 @@ class ShapeEnv(object):
         guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
         if guards:
             code = " and ".join(guards)
-            return eval(code, {}, dict(zip(arg_names, args)))
+            return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
         return True
 
     def bind_symbols(self, placeholders, args):
@@ -1123,6 +1524,13 @@ class ShapeEnv(object):
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
+
+        # Attempt expr_subs on the original expression
+        for s in new_expr.free_symbols:
+            new_expr = new_expr.subs(self.expr_subs[s])
+        if len(list(new_expr.free_symbols)) == 0:
+            return new_expr
+
         return None
 
     @_lru_cache
@@ -1163,6 +1571,10 @@ class ShapeEnv(object):
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
+            for s in result_expr.free_symbols:
+                result_expr = result_expr.subs(self.expr_subs[s])
+            if len(list(result_expr.free_symbols)) == 0:
+                return result_expr
             raise self._make_data_dependent_error(result_expr)
         return result_expr
 
@@ -1201,12 +1613,12 @@ class ShapeEnv(object):
         return self.replacements[a]
 
     @lru_cache(256)
-    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"]) -> None:
+    def _maybe_guard_eq(self, expr: Union["sympy.Eq", "sympy.Ne"], concrete_bool: bool) -> None:
         """
         Evaluates the result of an eq call. If true, uses information to
         simplify shapes (i.e. a == b or a % 5 == 0)
         """
-        concrete_bool = bool(self.size_hint(expr))
+        assert type(concrete_bool) is bool
         if isinstance(expr, sympy.Eq):
             if not concrete_bool:
                 return
@@ -1250,7 +1662,7 @@ class ShapeEnv(object):
         return
 
     @lru_cache(256)
-    def evaluate_expr(self, expr: "sympy.Expr"):
+    def evaluate_expr(self, expr: "sympy.Expr", hint=None):
         """
         Given an expression, evaluates it, adding guards if necessary
         """
@@ -1261,13 +1673,17 @@ class ShapeEnv(object):
         if static_expr is not None:
             return static_expr
 
+        if hint is None:
+            concrete_val = self.size_hint(expr)
+        else:
+            concrete_val = sympy.sympify(hint)
+
         if isinstance(expr, (sympy.Eq, sympy.Ne)):
-            self._maybe_guard_eq(expr)
+            self._maybe_guard_eq(expr, bool(concrete_val))
             # TODO: If we successfully eliminate a symbol via equality, it
             # is not actually necessary to save a guard for the equality,
             # as we will implicitly generate a guard when we match that
             # input against the symbol
-        concrete_val = self.size_hint(expr)
 
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
@@ -1282,3 +1698,24 @@ class ShapeEnv(object):
                 self.guards.append(
                     ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
         return concrete_val
+
+def _should_allocate(user_marked_dynamic, assume_static_by_default):
+    """
+    Mainly here for readability, repurposes the flag name for the context
+    of shape_env, which cares about allocation.
+    """
+    if user_marked_dynamic:
+        return True
+    # If we got here, the user did *NOT* mark this dim as dynamic,
+    # but BC behavior is to allocate a symbol anyway.
+    return not assume_static_by_default
+
+def _is_dim_dynamic(t, d):
+    return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+def _is_int(expr):
+    if not isinstance(expr, SymInt):
+        return False
+    if len(expr.node.expr.free_symbols) > 0:
+        return False
+    return True

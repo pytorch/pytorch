@@ -134,7 +134,7 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
 
     class SimpleModel(nn.Module):
         def __init__(self):
-            super(SimpleModel, self).__init__()
+            super().__init__()
             self.fc1 = nn.Linear(24,24)
             self.relu = nn.ReLU()
             self.fc2 = nn.Linear(24,12)

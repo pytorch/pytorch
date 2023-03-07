@@ -320,6 +320,23 @@ Tensor& where_self_out_mps(const Tensor& condition,
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
+  MPSDataType conditionDataType = getMPSScalarType(condition.scalar_type());
+  MPSDataType selfDataType = getMPSScalarType(self.scalar_type());
+  MPSDataType otherDataType = getMPSScalarType(other.scalar_type());
+  // Workaround for `selectWithPredicateTensor` on macOS Monterey where bool data type may cause a hang
+  // The issue is fixed in macOS Ventura (13.0)
+  if (!is_macos_13_or_newer()) {
+     if (condition.scalar_type() == kBool) {
+      conditionDataType = MPSDataTypeInt8;
+     }
+     if (self.scalar_type() == kBool) {
+      selfDataType = MPSDataTypeInt8;
+     }
+     if (other.scalar_type() == kBool) {
+      otherDataType = MPSDataTypeInt8;
+     }
+  }
+
   @autoreleasepool {
 
     string key = "where_self_out_mps:" + getTensorsStringKey({cond_bool, self, other});
@@ -335,9 +352,9 @@ Tensor& where_self_out_mps(const Tensor& condition,
                 MPSGraph* mpsGraph = make_mps_graph();
                 newCachedGraph = new CachedGraph(mpsGraph);
 
-                MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, cond_bool);
-                MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
-                MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
+                MPSGraphTensor* conditionTensor = mpsGraphRankedPlaceHolder(mpsGraph, conditionDataType, getMPSShape(cond_bool));
+                MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, selfDataType, getMPSShape(self));
+                MPSGraphTensor* otherTensor = mpsGraphRankedPlaceHolder(mpsGraph, otherDataType, getMPSShape(other));
 
                 MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor:conditionTensor
                                                                truePredicateTensor:selfTensor
@@ -354,9 +371,12 @@ Tensor& where_self_out_mps(const Tensor& condition,
         cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    Placeholder conditionPlaceholder = Placeholder(cachedGraph->conditionTensor_, cond_bool);
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
-    Placeholder otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
+    Placeholder conditionPlaceholder = Placeholder(
+        cachedGraph->conditionTensor_, cond_bool, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, conditionDataType);
+    Placeholder selfPlaceholder = Placeholder(
+        cachedGraph->selfTensor_, self, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, selfDataType);
+    Placeholder otherPlaceholder = Placeholder(
+        cachedGraph->otherTensor_, other, /*mpsShape=*/nullptr, /*gatherTensorData=*/true, otherDataType);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, out);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
@@ -465,9 +485,16 @@ Tensor& nan_to_num_out_mps(const Tensor& self,
           MPSGraphTensor* subZeroTensor = [mpsGraph lessThanWithPrimaryTensor: nanFreeTensor
                                                               secondaryTensor: [mpsGraph constantWithScalar: 0.0 dataType: self_dtype]
                                                                          name: nil];
-          // the cast is a workaround for the issue #103149520 (crash when bool and fp16 passed to binary ops)
-          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor: [mpsGraph castTensor: subZeroTensor toType: self_dtype name: @"castTensor"]
-                                                                 secondaryTensor: [mpsGraph isInfiniteWithTensor: nanFreeTensor name:nil]
+          MPSGraphTensor* isInfTensor = [mpsGraph isInfiniteWithTensor: nanFreeTensor name:nil];
+          // workaround for Monterey; On Ventura the output of lessThan() is always Boolean
+          if (subZeroTensor.dataType != MPSDataTypeBool) {
+            subZeroTensor = castMPSTensor(mpsGraph, subZeroTensor, kBool);
+          }
+          if (isInfTensor.dataType != MPSDataTypeBool) {
+            isInfTensor = castMPSTensor(mpsGraph, isInfTensor, kBool);
+          }
+          MPSGraphTensor* isNegInfTensor = [mpsGraph logicalANDWithPrimaryTensor: subZeroTensor
+                                                                 secondaryTensor: isInfTensor
                                                                             name: nil];
           MPSGraphTensor* negInfFreeTensor = [mpsGraph selectWithPredicateTensor: isNegInfTensor
                                                              truePredicateTensor: newCachedGraph->negInfReplacementTensor

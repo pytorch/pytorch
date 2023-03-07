@@ -12,7 +12,7 @@ VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.sizes().vec()),
+      size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false) {}
 
@@ -23,7 +23,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
-    return at::zeros(
+    return at::zeros_symint(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
   }
 }

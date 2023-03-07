@@ -1155,7 +1155,7 @@ class TestTensorCreation(TestCase):
     # TODO: update to work on CUDA, too?
     @onlyCPU
     def test_tensor_from_sequence(self, device):
-        class MockSequence(object):
+        class MockSequence:
             def __init__(self, lst):
                 self.lst = lst
 

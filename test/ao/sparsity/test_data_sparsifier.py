@@ -533,8 +533,8 @@ class TestQuantizationUtils(TestCase):
                                       select_embeddings=select_embeddings,
                                       **sparse_config)
 
-        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
-        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         assert type(model.emb_seq[0] == nn.Embedding)
         assert type(model.emb_seq[1] == nn.EmbeddingBag)
         assert type(model.linear1) == nn.Linear
@@ -568,10 +568,10 @@ class TestQuantizationUtils(TestCase):
         sparse_config = {'sparsity_level': 0.8, 'sparse_block_shape': (1, 1)}
         post_training_sparse_quantize(model, DataNormSparsifier, sparsify_first=False, **sparse_config)
 
-        assert type(model.emb1) == torch.nn.quantized.modules.embedding_ops.Embedding
-        assert type(model.embbag1) == torch.nn.quantized.modules.embedding_ops.EmbeddingBag
-        assert type(model.emb_seq[0] == torch.nn.quantized.modules.embedding_ops.Embedding)
-        assert type(model.emb_seq[1] == torch.nn.quantized.modules.embedding_ops.EmbeddingBag)
+        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.embbag1) == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert type(model.emb_seq[0] == torch.ao.nn.quantized.modules.embedding_ops.Embedding)
+        assert type(model.emb_seq[1] == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag)
         assert type(model.linear1) == nn.Linear  # not quantized
         assert type(model.linear2) == nn.Linear  # not quantized
 

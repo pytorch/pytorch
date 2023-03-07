@@ -662,7 +662,7 @@ def test_named_children(setup_rpc):
     model = nn.Sequential(OrderedDict([("a", a), ("b", b)]))
     model = Pipe(model)
 
-    names = set(n for n, _ in model.named_modules())
+    names = {n for n, _ in model.named_modules()}
     assert "partitions.0.0" in names
     assert "partitions.1.0" in names
 

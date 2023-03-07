@@ -121,7 +121,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
         original_ref_m.conv.weight = torch.nn.Parameter(original_m.conv.weight.detach())
         original_ref_m.conv.bias = torch.nn.Parameter(original_m.conv.bias.detach())
 
-        original_m.qconfig = torch.quantization.default_qconfig
+        original_m.qconfig = torch.ao.quantization.default_qconfig
 
         m = prepare(original_m)
         # calibration
@@ -135,7 +135,7 @@ class TestQuantizeEagerOps(QuantizationTestCase):
 
         # quantize the reference model
         original_ref_m.eval()
-        original_ref_m.qconfig = torch.quantization.default_qconfig
+        original_ref_m.qconfig = torch.ao.quantization.default_qconfig
 
         ref_m = prepare(original_ref_m)
         ref_m(data)
@@ -365,10 +365,10 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
                 # test one line API - out of place version
                 base = AnnotatedSingleLayerLinearModel(qengine)
                 base.qconfig = qconfig
-                keys_before = set(list(base.state_dict().keys()))
+                keys_before = set(base.state_dict().keys())
                 model = quantize(base, test_only_eval_fn, [self.calib_data])
                 checkQuantized(model)
-                keys_after = set(list(base.state_dict().keys()))
+                keys_after = set(base.state_dict().keys())
                 self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
                 # in-place version
@@ -1077,9 +1077,9 @@ class TestQuantizeEagerPTQStatic(QuantizationTestCase):
         qengine = torch.backends.quantized.engine
         for batch_first in [True, False]:
             model = TransformerDecoderLayer(512, 8, batch_first)
-            quantization_config = torch.quantization.get_default_qconfig(qengine)
+            quantization_config = torch.ao.quantization.get_default_qconfig(qengine)
             model.qconfig = quantization_config
-            prepared_model = torch.quantization.prepare(model, inplace=False)
+            prepared_model = torch.ao.quantization.prepare(model, inplace=False)
             self.assertTrue(prepared_model.self_attn.batch_first == model.self_attn.batch_first)
 
 @skipIfNoFBGEMM
@@ -1107,10 +1107,10 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # test one line API - out of place version
             base = SingleLayerLinearDynamicModel()
-            keys_before = set(list(base.state_dict().keys()))
+            keys_before = set(base.state_dict().keys())
             model = quantize_dynamic(base, qconfig_dict)
             checkQuantized(model)
-            keys_after = set(list(base.state_dict().keys()))
+            keys_after = set(base.state_dict().keys())
             self.assertEqual(keys_before, keys_after)  # simple check that nothing changed
 
             # in-place version
@@ -1120,7 +1120,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             # Test set qconfig
             model = SingleLayerLinearDynamicModel()
-            quantize_dynamic(model, set([nn.Linear]), inplace=True, dtype=dtype)
+            quantize_dynamic(model, {nn.Linear}, inplace=True, dtype=dtype)
             checkQuantized(model)
 
     def test_two_layers(self):
@@ -1362,7 +1362,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedLSTM(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedLSTM, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, Tuple[torch.Tensor, torch.Tensor]]:
@@ -1370,7 +1370,7 @@ class TestQuantizeEagerPTQDynamic(QuantizationTestCase):
 
             class ScriptWrapperPackedGRU(torch.nn.Module):
                 def __init__(self, cell):
-                    super(ScriptWrapperPackedGRU, self).__init__()
+                    super().__init__()
                     self.cell = cell
 
                 def forward(self, x: PackedSequence) -> Tuple[PackedSequence, torch.Tensor]:

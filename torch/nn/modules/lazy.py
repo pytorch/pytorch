@@ -1,6 +1,6 @@
 import itertools
-from typing_extensions import Protocol
 import warnings
+from typing import Protocol
 
 import torch
 from ..parameter import is_lazy

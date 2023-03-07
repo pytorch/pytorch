@@ -25,7 +25,7 @@ class FCWithoutBias(SamplingTrainableMixin, ModelLayer):
         uniform_weight_init_scale_numerator=1.0,
         **kwargs
     ):
-        super(FCWithoutBias, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Scalar), "Incorrect input type"
         assert len(input_record.field_types()[0].shape) > 0, (
             "FCWithoutBias expects limited dimensions of the input tensor"

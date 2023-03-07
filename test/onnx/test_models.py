@@ -13,7 +13,7 @@ from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
 from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
-from torch import quantization
+from torch.ao import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
 from torch.testing._internal import common_utils

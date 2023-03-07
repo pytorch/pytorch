@@ -125,15 +125,15 @@ at::Tensor pow_backward_exponent(
     const at::Tensor& exponent,
     at::Tensor result);
 at::Tensor angle_backward(at::Tensor grad, const at::Tensor& self);
-at::Tensor mul_tensor_backward(Tensor grad, Tensor other, ScalarType self_st);
-at::Tensor div_tensor_self_backward(
-    Tensor grad,
-    Tensor other,
-    ScalarType self_st);
+template <typename T>
+at::Tensor mul_tensor_backward(Tensor grad, T other, ScalarType self_st);
+template <typename T>
+at::Tensor div_tensor_self_backward(Tensor grad, T other, ScalarType self_st);
 at::Tensor div_tensor_other_backward(Tensor grad, Tensor self, Tensor other);
+template <typename T>
 at::Tensor div_tensor_self_backward(
     Tensor grad,
-    Tensor other,
+    T other,
     ScalarType self_st,
     const c10::optional<c10::string_view>& rounding_mode);
 at::Tensor div_tensor_other_backward(

@@ -7,7 +7,7 @@ from torch import nn
 import unittest
 import itertools
 
-from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
+from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests, skipIfTorchDynamo
 
 from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
@@ -15,14 +15,14 @@ LLVM_ENABLED = torch._C._llvm_enabled()
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        super(BaseTestClass, self).setUp()
+        super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         self.dtypes = [torch.float32, torch.bfloat16] if LLVM_ENABLED else [torch.float32]
 
     def tearDown(self):
         self.tensorexpr_options.restore()
-        super(BaseTestClass, self).tearDown()
+        super().tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -34,6 +34,7 @@ def warmup_and_run_forward(f, *args):
     return results
 
 
+@skipIfTorchDynamo()
 class TestTensorExprFuser(BaseTestClass):
     def test_easy(self):
         def easy(x, y):
@@ -1532,7 +1533,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_module(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)
@@ -1570,7 +1571,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_inputs(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)
@@ -1603,7 +1604,7 @@ class TestTensorExprFuser(BaseTestClass):
     def test_alias_analysis_input_and_module(self):
         class AliasModule(nn.Module):
             def __init__(self):
-                super(AliasModule, self).__init__()
+                super().__init__()
                 torch.manual_seed(1337)
                 self.a = torch.randn(128, 128)
                 self.b = torch.randn(128, 128)

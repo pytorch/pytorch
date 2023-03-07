@@ -169,7 +169,7 @@ def refresh_model_names():
 
 class TimmRunnner(BenchmarkRunner):
     def __init__(self):
-        super(TimmRunnner, self).__init__()
+        super().__init__()
         self.suite_name = "timm_models"
 
     def load_model(
@@ -337,7 +337,11 @@ class TimmRunnner(BenchmarkRunner):
         return None
 
 
-if __name__ == "__main__":
+def timm_main():
     logging.basicConfig(level=logging.WARNING)
     warnings.filterwarnings("ignore")
     main(TimmRunnner())
+
+
+if __name__ == "__main__":
+    timm_main()

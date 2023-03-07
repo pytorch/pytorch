@@ -11,6 +11,14 @@ SymNode SymFloat::toSymNodeImpl() const {
   return SymNode::reclaim_copy(toSymNodeImplUnowned());
 }
 
+SymNode SymFloat::wrap_node(const SymNode& base) const {
+  if (is_symbolic()) {
+    return toSymNodeImpl();
+  } else {
+    return base->wrap_float(as_float_unchecked());
+  }
+}
+
 static std::array<SymNode, 2> normalize_symfloats(
     const SymFloat& a_,
     const SymFloat& b_) {
@@ -86,6 +94,13 @@ double SymFloat::guard_float(const char* file, int64_t line) const {
   }
   SymNode a = toSymNodeImpl();
   return a->guard_float(file, line);
+}
+
+bool SymFloat::has_hint() const {
+  if (!is_symbolic()) {
+    return true;
+  }
+  return toSymNodeImpl()->has_hint();
 }
 
 } // namespace c10

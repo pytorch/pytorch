@@ -5,7 +5,7 @@ import warnings
 
 import torch
 from torch import _VF
-from torch import sym_float as _sym_float, sym_int as _sym_int
+from torch import sym_int as _sym_int
 from torch._C import _infer_size, _add_docstr
 from torch._torch_docs import reproducibility_notes, tf32_notes, sparse_support_notes
 # A workaround to support both TorchScript and MyPy:
@@ -2335,6 +2335,11 @@ def embedding_bag(
             "then it must have the same shape as the input ({})".format(per_sample_weights.shape, input.shape)
         )
 
+    if not weight.dim() == 2:
+        raise ValueError(
+            f"weight has to be a 2D Tensor, but got Tensor of dimension {weight.dim()}"
+        )
+
     if input.dim() == 2:
         if offsets is not None:
             type_str = "<unknown>"
@@ -2358,7 +2363,7 @@ def embedding_bag(
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
     else:
-        raise ValueError("input has to be 1D or 2D Tensor," " but got Tensor of dimension {}".format(input.dim()))
+        raise ValueError(f"input has to be 1D or 2D Tensor, but got Tensor of dimension {input.dim()}")
     if mode == "sum":
         mode_enum = 0
     elif mode == "mean":
@@ -3917,7 +3922,7 @@ def interpolate(input: Tensor, size: Optional[int] = None, scale_factor: Optiona
                            for i in range(dim)]
         else:
             output_size = [
-                _sym_int(math.floor(_sym_float(input.size(i + 2)) * scale_factors[i]))
+                _sym_int(input.size(i + 2) * scale_factors[i])
                 for i in range(dim)
             ]
         scale_factors = None
@@ -4841,28 +4846,94 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
+
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
 greater than 0.0 is specified.
 
+.. code-block:: python
+
+    # Efficient implementation equivalent to the following:
+    attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
+    attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p)
+    return attn_weight @ V
+
+.. warning:: This function is beta and subject to change.
+
+Note:
+
+    There are currently three supported implementations of scaled dot product attention:
+
+        - `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_
+        - `Memory-Efficient Attention`_
+        - A PyTorch implementation defined in C++ matching the above formulation
+
+    The function may call optimized kernels for improved performance when using the CUDA backend.
+    For all other backends, the PyTorch implementation will be used.
+
+    All implementations are enabled by default. Scaled dot product attention attempts to automatically select the
+    most optimal implementation based on the inputs. In order to provide more fine-grained control over what implementation
+    is used, the following functions are provided for enabling and disabling implementations.
+    The context manager is the preferred mechanism:
+
+        - :func:`torch.backends.cuda.sdp_kernel`: A context manager used to enable/disable any of the implementations.
+        - :func:`torch.backends.cuda.enable_flash_sdp`: Enables or Disables FlashAttention.
+        - :func:`torch.backends.cuda.enable_mem_efficient_sdp`: Enables or Disables Memory-Efficient Attention.
+        - :func:`torch.backends.cuda.enable_math_sdp`: Enables or Disables the PyTorch C++ implementation.
+
+    Each of the fused kernels has specific input limitations. If the user requires the use of a specific fused implementation,
+    disable the PyTorch C++ implementation using :func:`torch.backends.cuda.sdp_kernel`.
+    In the event that a fused implementation is not available, an error will be raised with the
+    reasons why the fused implementation cannot run.
+
+    Due to the nature of fusing floating point operations, the output of this function may be different
+    depending on what backend kernel is chosen.
+    The c++ implementation supports torch.float64 and can be used when higher precision is required.
+    For more information please see :doc:`/notes/numerical_accuracy`
+
+Note:
+    {cudnn_reproducibility_note}
+""".format(**reproducibility_notes)
+    + r"""
+
 Args:
-     query (Tensor): Query tensor; shape (N, ..., L, E)
-     key (Tensor): Key tensor; shape (N, ..., S, E)
-     value (Tensor): Value tensor; shape (N, ..., S, E)
-     attn_mask (optional Tensor): Attention mask; shape (N, ..., L, S) or (L, S). Currently, only a boolean mask
-         is supported, where a value of True indicates that the element *should* take part in attention.
-     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-     is_causal (bool): If true, assumes causal attention masking and ignores attn_mask.
+    query (Tensor): Query tensor; shape :math:`(N, ..., L, E)`.
+    key (Tensor): Key tensor; shape :math:`(N, ..., S, E)`.
+    value (Tensor): Value tensor; shape :math:`(N, ..., S, Ev)`.
+    attn_mask (optional Tensor): Attention mask; shape :math:`(N, ..., L, S)`. Two types of masks are supported.
+        A boolean mask where a value of True indicates that the element *should* take part in attention.
+        A float mask of the same type as query, key, value that is added to the attention score.
+    dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
+    is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
+        are set.
 
 
-Returns a tuple containing:
-    output (Tensor): Attention output; shape (N, ..., L, E)
+Returns:
+    output (Tensor): Attention output; shape :math:`(N, ..., L, Ev)`.
 
 Shape legend:
-    N: Batch size
-    ...: Any number of other batch dimensions (optional)
-    S: Source sequence length
-    L: Target sequence lengthE: Embedding dimension
+    - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+    - :math:`S: \text{Source sequence length}`
+    - :math:`L: \text{Target sequence length}`
+    - :math:`E: \text{Embedding dimension of the query and key}`
+    - :math:`Ev: \text{Embedding dimension of the value}`
+
+Examples::
+
+    >>> # Optionally use the context manager to ensure one of the fused kerenels is run
+    >>> query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+    >>> with torch.backends.cuda.sdp_kernel(enable_math=False):
+    >>>     F.scaled_dot_product_attention(query,key,value)
+
+.. _FlashAttention\: Fast and Memory-Efficient Exact Attention with IO-Awareness:
+    https://arxiv.org/abs/2205.14135
+.. _Memory-Efficient Attention:
+    https://github.com/facebookresearch/xformers
 
 """)
 

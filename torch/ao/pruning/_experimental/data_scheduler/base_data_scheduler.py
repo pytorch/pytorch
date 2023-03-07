@@ -8,7 +8,7 @@ from ..data_sparsifier import BaseDataSparsifier
 __all__ = ['BaseDataScheduler']
 
 
-class BaseDataScheduler(object):
+class BaseDataScheduler:
     r"""
     The BaseDataScheduler is the abstract scheduler class specifically for the
     BaseDataSparsifier class. This class controls a specific hyperparameter of

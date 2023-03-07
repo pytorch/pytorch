@@ -2,7 +2,7 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.quantized as nniq
 import torch.ao.nn.quantized.reference as nnqr
 import torch.ao.quantization
@@ -395,15 +395,15 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             qconv_module, [example_input_q],
             check_save_load=True)
 
-        class _FusedModule_two_input_args(torch.nn.intrinsic._FusedModule):
-            # Help Module for ConvAdd2d since torch.nn.intrinsic._FusedModule only support one input arg
+        class _FusedModule_two_input_args(torch.ao.nn.intrinsic._FusedModule):
+            # Help Module for ConvAdd2d since torch.ao.nn.intrinsic._FusedModule only support one input arg
             def forward(self, x1, x2):
                 input = self[0](x1, x2)
                 return input
 
         # Test from_float
         fused_conv_module = _FusedModule_two_input_args(conv_module) \
-            if post_op in ["add", "add_relu"] else torch.nn.intrinsic._FusedModule(conv_module)
+            if post_op in ["add", "add_relu"] else torch.ao.nn.intrinsic._FusedModule(conv_module)
 
         fused_conv_module.qconfig = torch.ao.quantization.default_qconfig
         torch.ao.quantization.prepare(fused_conv_module, inplace=True)
@@ -940,7 +940,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         ref1 = mq1(data2)
 
         m2 = get_model()
-        m2.qconfig = torch.quantization.default_qconfig
+        m2.qconfig = torch.ao.quantization.default_qconfig
         mp2 = torch.ao.quantization.prepare(m2)
         mq2 = torch.ao.quantization.convert(mp2)
 
@@ -1009,7 +1009,7 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         ref1 = mq1(data2)
 
         m2 = get_model()
-        m2.qconfig = torch.quantization.default_qconfig
+        m2.qconfig = torch.ao.quantization.default_qconfig
         mp2 = torch.ao.quantization.prepare(m2)
         mq2 = torch.ao.quantization.convert(mp2)
 

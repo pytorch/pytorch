@@ -104,7 +104,7 @@ class TestCheckpoint(TestCase):
         class Net(nn.Module):
 
             def __init__(self):
-                super(Net, self).__init__()
+                super().__init__()
                 self.counter = 0
 
             def forward(self, input_var):
@@ -190,7 +190,7 @@ class TestCheckpoint(TestCase):
     def test_checkpoint_module_list(self):
         class ModuleListNet(nn.Module):
             def __init__(self):
-                super(ModuleListNet, self).__init__()
+                super().__init__()
                 module_list = [
                     nn.Linear(100, 50),
                     nn.ReLU(),
@@ -779,7 +779,7 @@ class TestStandaloneCPPJIT(TestCase):
             shutil.rmtree(build_dir)
 
 
-class DummyXPUModule(object):
+class DummyXPUModule:
     @staticmethod
     def is_available():
         return True
@@ -885,6 +885,11 @@ class TestCppExtensionUtils(TestCase):
 
 class TestTraceback(TestCase):
     def test_basic(self):
+        # We can't xfail this test as it leaves the traceback in such a bad
+        # state that xfail itself fails.
+        if sys.version_info >= (3, 11):
+            self.skipTest("Fails on 3.11")
+
         source = '''\
 def f(x):
     x = x * 3

@@ -73,6 +73,9 @@ if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
+elif [[ "$image" == *linter* ]]; then
+  # Use a separate Dockerfile for linter to keep a small image size
+  DOCKERFILE="linter/Dockerfile"
 fi
 
 # CMake 3.18 is needed to support CUDA17 language variant
@@ -233,6 +236,13 @@ case "$image" in
     PROTOBUF=yes
     DB=yes
     VISION=yes
+    ;;
+  pytorch-linux-focal-linter)
+    # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
+    # We will need to update mypy version eventually, but that's for another day. The task
+    # would be to upgrade mypy to 1.0.0 with Python 3.11
+    ANACONDA_PYTHON_VERSION=3.9
+    CONDA_CMAKE=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.

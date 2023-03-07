@@ -27,6 +27,7 @@ from torch.ao.quantization.utils import (
     activation_is_statically_quantized,
 )
 from torch.ao.quantization.observer import _is_activation_post_process
+from torch.ao.quantization.qconfig_mapping import QConfigMapping
 
 from torch.fx import GraphModule, map_arg
 
@@ -39,6 +40,7 @@ from .custom_config import PrepareCustomConfig
 from ._decomposed import quantized_decomposed_lib  # noqa: F401
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
+from dataclasses import dataclass
 from collections import namedtuple
 import operator
 import warnings
@@ -66,9 +68,23 @@ __all__ = [
     "NON_OBSERVABLE_ARG_DICT",
     "NON_QUANTIZABLE_WEIGHT_OPS",
     "return_arg_list",
+    "ObservedGraphModuleAttrs",
 ]
 
 NON_QUANTIZABLE_WEIGHT_OPS = {torch.nn.functional.layer_norm, torch.nn.functional.group_norm, torch.nn.functional.instance_norm}
+
+@dataclass
+class ObservedGraphModuleAttrs:
+    node_name_to_qconfig: Dict[str, QConfigAny]
+    node_name_to_scope: Dict[str, Tuple[str, type]]
+    prepare_custom_config: PrepareCustomConfig
+    equalization_node_name_to_qconfig: Dict[str, Any]
+    qconfig_mapping: QConfigMapping
+    is_qat: bool
+    observed_node_names: Set[str]
+    is_observed_standalone_module: bool = False
+    standalone_module_input_quantized_idxs: Optional[List[int]] = None
+    standalone_module_output_quantized_idxs: Optional[List[int]] = None
 
 def node_arg_is_weight(node: Node, arg: Any, backend_config: BackendConfig) -> bool:
     """Returns if node arg is weight"""

@@ -74,12 +74,12 @@ template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 
 } // namespace detail
 
-template <typename scalar_t, typename index_t, typename combine_t>
+template <typename scalar_t, typename index_t>
 struct WelfordData {
   scalar_t mean;
   scalar_t m2;
   index_t n;
-  combine_t nf;
+  scalar_t nf;
 
   C10_HOST_DEVICE WelfordData() : mean(0), m2(0), n(0), nf(0) {}
 
@@ -87,28 +87,30 @@ struct WelfordData {
       scalar_t mean,
       scalar_t m2,
       index_t n,
-      combine_t nf)
+      scalar_t nf)
       : mean(mean), m2(m2), n(n), nf(nf) {}
 };
 
 
-template <typename scalar_t, typename acc_scalar_t, typename index_t, typename combine_t, typename res_t>
+template <typename scalar_t, typename acc_scalar_t, typename index_t, typename res_t>
 struct WelfordOps {
   index_t correction;
   bool take_sqrt;
  public:
-  using acc_t = WelfordData<acc_scalar_t, index_t, combine_t>;
+  using acc_t = WelfordData<acc_scalar_t, index_t>;
   inline C10_DEVICE acc_t reduce(acc_t acc, scalar_t data, index_t /*idx*/) const {
+    // We accumulate n in index_t to avoid cumulative rounding error, but still
+    // need nf for use in combine where int32 may overflow.
+    index_t new_n = acc.n + 1;
+    acc_scalar_t new_nf = static_cast<acc_scalar_t>(new_n);
     acc_scalar_t delta = data - acc.mean;
-    // using acc.nf(combine_t) here, as acc.n(index_t) would still be converted
-    // accumulation in reduce is done through index_T
-    acc_scalar_t new_mean = acc.mean + delta / (acc.nf + 1);
+    acc_scalar_t new_mean = acc.mean + delta / new_nf;
     acc_scalar_t new_delta = data - new_mean;
     return {
       new_mean,
       acc.m2 + delta * new_delta,
-      acc.n + 1,
-      combine_t(acc.n + 1), // accumulate for combine_t uses index_t
+      new_n,
+      new_nf,
     };
   }
   inline C10_DEVICE acc_t combine(acc_t a, acc_t b) const {
@@ -119,7 +121,7 @@ struct WelfordOps {
       return a;
     }
     acc_scalar_t delta = b.mean - a.mean;
-    combine_t new_count = a.nf + b.nf;
+    acc_scalar_t new_count = a.nf + b.nf;
     acc_scalar_t nb_over_n = b.nf / new_count;
     return {
       a.mean + delta * nb_over_n,
@@ -132,7 +134,7 @@ struct WelfordOps {
   }
   inline C10_DEVICE res_t project(acc_t acc) const __ubsan_ignore_float_divide_by_zero__ {
     const auto mean = static_cast<scalar_t>(acc.mean);
-    const combine_t divisor = acc.nf > correction ? acc.nf - correction : 0;
+    const auto divisor = acc.nf > correction ? acc.nf - correction : 0;
     const auto var = acc.m2 / divisor;
     res_t results(take_sqrt ? device_sqrt(var) : var, mean);
     return results;

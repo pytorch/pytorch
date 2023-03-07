@@ -150,7 +150,7 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             yield _create_test(new_op, test_attrs, tags, OperatorTestCase, run_backward, input_name)
 
 
-class BenchmarkRunner(object):
+class BenchmarkRunner:
     """BenchmarkRunner is responsible for benchmarking all the registered
     benchmark test groups.
 
