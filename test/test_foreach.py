@@ -649,7 +649,10 @@ class TestForeach(TestCase):
         # tensors1: ['cuda', 'cpu]
         # tensors2: ['cuda', 'cpu]
         # tensors3: ['cuda', 'cpu]
-        _cuda_tensors = list(op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True))[0].input
+        # first tensorlist is zero-size when float32
+        _cuda_tensors = list(
+            op.sample_inputs(device, dtype, num_input_tensors=[3], same_size=True)
+        )[int(dtype == torch.float32)].input
         _cpu_tensors = list(op.sample_inputs("cpu", dtype, num_input_tensors=[3], same_size=True))[0].input
         tensors1, tensors2, tensors3 = list(zip(_cuda_tensors, _cpu_tensors))
 

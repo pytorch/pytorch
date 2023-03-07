@@ -8126,43 +8126,58 @@ class foreach_inputs_sample_func:
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
 
-        _size0_tensors_test_done = False
-        for num_tensors_, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
-            for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 else (False,):
-                skip_test = False
-                if zero_size:
-                    if not _size0_tensors_test_done:
-                        _size0_tensors_test_done = True
-                    else:
-                        skip_test = True
-                if skip_test:
-                    continue
-                _foreach_inputs_kwargs["zero_size"] = zero_size
-                num_tensors = NUM_SIZE0_TENSORS if zero_size else num_tensors_
-                input = sample_inputs_foreach(
-                    None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+        # zero_size tensor
+        if dtype == torch.float32 and ("cuda" in device):
+            rightmost_arg_type = self._rightmost_arg_types[0]
+            zero_size_foreach_inputs_kwargs = copy.deepcopy(_foreach_inputs_kwargs)
+            zero_size_foreach_inputs_kwargs["zero_size"] = True
+            input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
+            if self.arity > 1:
+                args = [
+                    sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, **zero_size_foreach_inputs_kwargs)
+                    for _ in range(self.arity - 2)
+                ]
+                args.append(
+                    self._sample_rightmost_arg(
+                        opinfo, ForeachRightmostArgType.TensorList, device, dtype, NUM_SIZE0_TENSORS,
+                        **zero_size_foreach_inputs_kwargs)[0])
+                kwargs = self._sample_kwargs(
+                    opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype, zero_size=True)
+            else:
                 args = []
-                if self.arity > 1:
-                    args = [
-                        sample_inputs_foreach(
-                            None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
-                        for _ in range(self.arity - 2)
-                    ]
-                    rightmost_arg_list = self._sample_rightmost_arg(
-                        opinfo, rightmost_arg_type, device, dtype, num_tensors,
-                        **_foreach_inputs_kwargs)
-                    for rightmost_arg in rightmost_arg_list:
-                        args.append(rightmost_arg)
-                        kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype, zero_size)
-                        yield SampleInput(input, *args, **kwargs)
-                        args.pop()
+                kwargs = {"zero_size": True}
+                if opinfo.ref in (torch.abs, torch.neg):
+                    kwargs["disable_fastpath"] = False
                 else:
-                    kwargs = {"zero_size": zero_size}
-                    if opinfo.ref in (torch.abs, torch.neg):
-                        kwargs["disable_fastpath"] = False
-                    else:
-                        kwargs["disable_fastpath"] = dtype in integral_types_and(torch.bool)
+                    kwargs["disable_fastpath"] = dtype in integral_types_and(torch.bool)
+            yield SampleInput(input, *args, **kwargs)
+
+        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
+            _foreach_inputs_kwargs["zero_size"] = False
+            input = sample_inputs_foreach(
+                None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+            args = []
+            if self.arity > 1:
+                args = [
+                    sample_inputs_foreach(
+                        None, device, dtype, num_tensors, **_foreach_inputs_kwargs)
+                    for _ in range(self.arity - 2)
+                ]
+                rightmost_arg_list = self._sample_rightmost_arg(
+                    opinfo, rightmost_arg_type, device, dtype, num_tensors,
+                    **_foreach_inputs_kwargs)
+                for rightmost_arg in rightmost_arg_list:
+                    args.append(rightmost_arg)
+                    kwargs = self._sample_kwargs(opinfo, rightmost_arg, rightmost_arg_type, dtype, zero_size=False)
                     yield SampleInput(input, *args, **kwargs)
+                    args.pop()
+            else:
+                kwargs = {"zero_size": False}
+                if opinfo.ref in (torch.abs, torch.neg):
+                    kwargs["disable_fastpath"] = False
+                else:
+                    kwargs["disable_fastpath"] = dtype in integral_types_and(torch.bool)
+                yield SampleInput(input, *args, **kwargs)
 
 
 class foreach_norm_sample_func(foreach_inputs_sample_func):
@@ -8217,39 +8232,39 @@ class foreach_pointwise_sample_func(foreach_inputs_sample_func):
         assert isinstance(num_input_tensors, list)
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
 
-        _size0_tensors_test_done = False
-        for num_tensors_, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
-            for zero_size in (False, True) if "cuda" in device and dtype == torch.float32 else (False,):
-                skip_test = False
-                if zero_size:
-                    if not _size0_tensors_test_done:
-                        _size0_tensors_test_done = True
-                    else:
-                        skip_test = True
-                if skip_test:
-                    continue
-                num_tensors = NUM_SIZE0_TENSORS if zero_size else num_tensors_
-                input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=zero_size, **_foreach_inputs_kwargs)
-                args = [
-                    sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=zero_size, **_foreach_inputs_kwargs)
-                    for _ in range(2 - int(rightmost_arg_type == ForeachRightmostArgType.TensorList))
-                ]
-                rightmost_arg_list = self._sample_rightmost_arg(
-                    opinfo, rightmost_arg_type, device, dtype, num_tensors, zero_size=zero_size, **_foreach_inputs_kwargs)
-                for rightmost_arg in rightmost_arg_list:
-                    kwargs = {}
-                    if rightmost_arg_type == ForeachRightmostArgType.TensorList:
-                        args.append(rightmost_arg)
-                        kwargs["values"] = None
-                    else:
-                        kwargs["values"] = rightmost_arg
-                    kwargs.update(
-                        self._sample_kwargs(
-                            opinfo, kwargs["values"] or rightmost_arg, rightmost_arg_type, dtype, zero_size=zero_size)
-                    )
-                    assert hasattr(kwargs, "values")
-                    assert len(args) == 2
-                    yield SampleInput(input, *args, **kwargs)
+        # zero_size tensor
+        if dtype == torch.float32 and ("cuda" in device):
+            input = sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
+            args = [
+                sample_inputs_foreach(None, device, dtype, NUM_SIZE0_TENSORS, zero_size=True, **_foreach_inputs_kwargs)
+                for _ in range(2)
+            ]
+            kwargs["values"] = None
+            kwargs.update(self._sample_kwargs(opinfo, args[-1], ForeachRightmostArgType.TensorList, dtype, zero_size=True))
+            yield SampleInput(input, *args, **kwargs)
+
+        for num_tensors, rightmost_arg_type in itertools.product(num_input_tensors, self._rightmost_arg_types):
+            input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
+            args = [
+                sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
+                for _ in range(2 - int(rightmost_arg_type == ForeachRightmostArgType.TensorList))
+            ]
+            rightmost_arg_list = self._sample_rightmost_arg(
+                opinfo, rightmost_arg_type, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
+            for rightmost_arg in rightmost_arg_list:
+                kwargs = {}
+                if rightmost_arg_type == ForeachRightmostArgType.TensorList:
+                    args.append(rightmost_arg)
+                    kwargs["values"] = None
+                else:
+                    kwargs["values"] = rightmost_arg
+                kwargs.update(
+                    self._sample_kwargs(
+                        opinfo, kwargs["values"] or rightmost_arg, rightmost_arg_type, dtype, zero_size=False)
+                )
+                assert hasattr(kwargs, "values")
+                assert len(args) == 2
+                yield SampleInput(input, *args, **kwargs)
 
 
 foreach_unary_op_db: List[OpInfo] = [
