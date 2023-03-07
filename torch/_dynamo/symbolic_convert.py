@@ -76,7 +76,6 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
-    GradModeVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -268,7 +267,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 msg = (
                     "Skipping frame because there is a graph break in a for/while loop"
                 )
-                log.debug(msg)
+                log.info(msg)
                 raise exc.SkipFrame(msg)
 
             self.push(value)
@@ -286,9 +285,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if_jump = self.create_call_resume_at(inst.target)
 
             self.output.add_output_instructions(
-                [(create_instruction(inst.opname, target=if_jump[0]))]
-                + if_next
-                + if_jump
+                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
             )
         elif isinstance(value, NNModuleVariable):
             # Equivalent of "self.nn_module is not None"
@@ -350,7 +347,7 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
-                    log.debug(msg)
+                    log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
                 if not self.should_compile_partial_graph():
@@ -376,35 +373,6 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
-            self.output.compile_subgraph(self, reason=reason)
-            if sys.version_info >= (3, 11) and inst.opname == "CALL":
-                # stack effect for PRECALL + CALL is split between the two instructions
-                stack_effect = dis.stack_effect(
-                    dis.opmap["PRECALL"], inst.arg
-                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
-            else:
-                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
-            self.popn(push - stack_effect)
-
-            for _ in range(push):
-                self.push(UnknownVariable())
-
-            resume_call_insts = self.create_call_resume_at(self.next_instruction)
-            # Check if there is a block stack entry with GradModeVariable. And
-            # wrap the instruction causing the graph break inside a try..finally
-            # block. See more details at
-            # https://github.com/pytorch/torchdynamo/issues/207
-            cleanup = []
-            if len(self.block_stack) == 1 and isinstance(
-                self.block_stack[0].with_context, GradModeVariable
-            ):
-                ctx_variable = self.block_stack[0].with_context
-
-                cg = PyCodegen(self)
-                setup_finally, cleanup = ctx_variable.reconstruct(
-                    cg, resume_call_insts[0]
-                )
-                self.output.add_output_instructions(setup_finally)
 
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
@@ -417,17 +385,26 @@ def break_graph_if_unsupported(*, push):
                             ),
                         ]
                     )
+            self.output.compile_subgraph(self, reason=reason)
+            cg = PyCodegen(self)
+            cleanup: List[Instruction] = []
+            # Reconstruct the context variables in the block stack
+            for b in self.block_stack:
                 self.output.add_output_instructions(
-                    create_call_function(inst.arg, False)
+                    [
+                        *b.with_context.reconstruct(cg),
+                        *b.resume_fn().try_except(cg.code_options, cleanup),
+                    ]
                 )
-                # no need to reset self.kw_names since self should not continue to run
-            else:
-                self.output.add_output_instructions([inst])
-
-            # Add the cleanup instructions from try..finally block
+            self.output.add_output_instructions([inst])
             self.output.add_output_instructions(cleanup)
+
+            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+
+            for _ in range(push):
+                self.push(UnknownVariable())
             self.output.add_output_instructions(
-                resume_call_insts,
+                self.create_call_resume_at(self.next_instruction)
             )
 
         return wrapper
@@ -1955,11 +1932,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
-    def inline_call_(parent, func, args, kwargs):
-        assert isinstance(
-            func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
-        )
+    def check_inlineable(func):
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -1979,6 +1952,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
+    @staticmethod
+    def inline_call_(
+        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    ):
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
+        InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -1995,7 +1977,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
+        suffix = ""
+        if config.output_code:
+            suffix = f"\n{dis.Bytecode(code).dis()}"
+        log.debug(f"INLINING {code}{suffix}")
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
