@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
+// The index is a TensorList containing kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -1842,19 +1842,14 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
 
   c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
@@ -1880,7 +1875,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+      .set_check_mem_overlap(false)  // result is intentionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -1899,12 +1894,12 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
-  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
+  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better performance.
   // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+    .set_check_mem_overlap(false)  // result is intentionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
