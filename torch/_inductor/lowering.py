@@ -509,6 +509,11 @@ def squeeze(x, dim=None):
     return view(x, new_shape) if new_shape != x.get_size() else x
 
 
+@register_lowering(aten.squeeze_copy, type_promotion_kind=None)
+def squeeze_copy(x, dim=None):
+    return clone(squeeze(x, dim))
+
+
 @register_lowering([aten.squeeze_])
 def squeeze_(x, dim=None):
     val = squeeze(x, dim)
@@ -842,6 +847,12 @@ def glu(x, dim=-1):
 
 def register_onednn_fusion_ops():
     if torch._C.has_mkldnn:
+        cpu_needs_realized_inputs = [
+            torch.ops.mkldnn._convolution_pointwise,
+            torch.ops.mkldnn._convolution_pointwise_,
+            torch.ops.mkldnn._convolution_transpose_pointwise,
+            torch.ops.mkldnn._linear_pointwise,
+        ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
         def convolution_unary(
@@ -982,6 +993,7 @@ def register_onednn_fusion_ops():
             )
 
         if torch._C.has_mkl:
+            cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
             @register_lowering(torch.ops.mkl._mkl_linear)
             def mkl_packed_linear(
@@ -998,6 +1010,7 @@ def register_onednn_fusion_ops():
                     result = add(result, b)
                 return result
 
+        add_needs_realized_inputs(cpu_needs_realized_inputs)
     else:
         pass
 
@@ -1250,7 +1263,6 @@ make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv)
-make_fallback(aten.aminmax)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1262,13 +1274,10 @@ make_fallback(aten.deg2rad)
 make_fallback(aten.diagonal_copy, warn=False)
 make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
-make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.erfc, warn=False)
 make_fallback(aten.erfinv, warn=False)
-make_fallback(aten.fmax, warn=False)
-make_fallback(aten.fmin, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1309,8 +1318,6 @@ make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
 make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
-make_fallback(aten.nansum)
-make_fallback(aten.narrow_copy, warn=False)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
@@ -1357,7 +1364,6 @@ make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
 make_fallback(aten.view_as_complex)
-make_fallback(aten.view_copy)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -1378,7 +1384,6 @@ make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.smooth_l1_loss_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.softshrink_backward, warn=False)
-make_fallback(aten.squeeze_copy)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
@@ -1393,7 +1398,6 @@ make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
 make_fallback(aten.to_sparse)
 make_fallback(aten.triangular_solve)
-make_fallback(aten.expand_copy)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
