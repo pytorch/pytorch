@@ -318,6 +318,7 @@ CI_SERIAL_LIST = [
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    '_nvfuser/test_torchscript',  # OOM on test_issue_1785
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -672,6 +673,7 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
+    exclude_module_list = []
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests
@@ -686,6 +688,7 @@ def run_doctests(test_module, test_directory, options):
         'autograd_profiler': 0,
         'cpp_ext': 0,
         'monitor': 0,
+        "onnx": "auto",
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -709,6 +712,17 @@ def run_doctests(test_module, test_directory, options):
         else:
             enabled['qengine'] = True
 
+    if enabled["onnx"] == "auto":
+        try:
+            import onnx  # NOQA
+            import onnxscript  # NOQA
+            import onnxruntime  # NOQA
+        except ImportError:
+            exclude_module_list.append("torch.onnx._internal.fx.*")
+            enabled["onnx"] = False
+        else:
+            enabled["onnx"] = True
+
     # Set doctest environment variables
     if enabled['cuda']:
         os.environ['TORCH_DOCTEST_CUDA'] = '1'
@@ -731,6 +745,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['monitor']:
         os.environ['TORCH_DOCTEST_MONITOR'] = '1'
 
+    if enabled["onnx"]:
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+
     if 0:
         # TODO: could try to enable some of these
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
@@ -738,7 +755,6 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
         os.environ['TORCH_DOCTEST_HUB'] = '1'
         os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
-        os.environ['TORCH_DOCTEST_ONNX'] = '1'
         os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
@@ -756,7 +772,8 @@ def run_doctests(test_module, test_directory, options):
     xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
-        command=options.xdoctest_command, argv=[])
+        command=options.xdoctest_command, argv=[],
+        exclude=exclude_module_list)
     result = 1 if run_summary.get('n_failed', 0) else 0
     return result
 
@@ -882,6 +899,19 @@ CUSTOM_HANDLERS = {
     # run_test_ops is good at parallelizing things
     "test_decomp": run_test_ops,
 }
+
+
+PYTEST_BLOCKLIST = [
+    "test_package",
+    "inductor/test_torchinductor",
+    "test_quantization",
+    "test_fx",
+    "profiler/test_profiler",
+    "dynamo/test_repros",  # skip_if_pytest
+    "dynamo/test_optimizers",  # skip_if_pytest
+    "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
+    "dynamo/test_unspec",  # imports repros
+] + list(CUSTOM_HANDLERS.keys())
 
 
 def parse_test_module(test):
@@ -1342,7 +1372,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1360,7 +1390,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:

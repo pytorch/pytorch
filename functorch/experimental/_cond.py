@@ -157,14 +157,14 @@ def cond_python_dispatcher(*args):
     return cond(*args)
 
 
-def _has_potential_branch_input_mutation(branch, fake_inputs):
+def _has_potential_branch_input_mutation(branch, inputs):
     """
-    Dispatch-trace the branch with fake inputs and check if
+    Dispatch-trace the branch with inputs and check if
     producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*fake_inputs)
+        gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -185,14 +185,14 @@ def _has_potential_branch_input_mutation(branch, fake_inputs):
 
     return False
 
-def _has_potential_branch_input_alias(branch, fake_inputs):
+def _has_potential_branch_input_alias(branch, inputs):
     """
-    Dispatch-trace the branch with fake inputs and check if
+    Dispatch-trace the branch with inputs and check if
     producing graph has output aliasing the branch input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*fake_inputs)
+        gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -204,11 +204,11 @@ def _has_potential_branch_input_alias(branch, fake_inputs):
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
-
-    outs, _ = pytree.tree_flatten(gm(*fake_inputs))
-    for out in outs:
-        if isinstance(out, torch.Tensor) and StorageWeakRef(out._typed_storage()) in input_storages:
-            return True
+        if node.op == "output":
+            for out in node.args:
+                out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
+                if out_storage in input_storages:
+                    return True
 
     return False
 
@@ -231,22 +231,14 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
     functional_false_fn = functionalize(false_fn, remove=mode)
 
     with interpreter.lower():
-        fake_tensor_mode = FakeTensorMode()
-        with fake_tensor_mode as ft_mode:
-            for branch in [functional_true_fn, functional_false_fn]:
-                def convert(x):
-                    return ft_mode.fake_tensor_converter(ft_mode, x)
-                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
-                if _has_potential_branch_input_mutation(branch, fake_inputs):
-                    raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                            "might be modifying the input!")
-            for branch in [true_fn, false_fn]:
-                def convert(x):
-                    return ft_mode.fake_tensor_converter(ft_mode, x)
-                fake_inputs = pytree.tree_map_only(torch.Tensor, convert, unwrapped_inputs)
-                if _has_potential_branch_input_alias(branch, fake_inputs):
-                    raise UnsupportedAliasMutationException("One of torch.cond branch "
-                                                            "might be aliasing the input!")
+        for branch in [functional_true_fn, functional_false_fn]:
+            if _has_potential_branch_input_mutation(branch, unwrapped_inputs):
+                raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                        "might be modifying the input!")
+        for branch in [true_fn, false_fn]:
+            if _has_potential_branch_input_alias(branch, unwrapped_inputs):
+                raise UnsupportedAliasMutationException("One of torch.cond branch "
+                                                        "might be aliasing the input!")
 
         cond_return = cond(unwrapped_pred, functional_true_fn, functional_false_fn, unwrapped_inputs)
         return _wrap_all_tensors_to_functional(cond_return, level=interpreter.level())

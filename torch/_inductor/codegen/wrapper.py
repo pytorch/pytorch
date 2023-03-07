@@ -12,7 +12,13 @@ from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
-from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
+from ..utils import (
+    cache_on_self,
+    get_benchmark_name,
+    has_triton,
+    sympy_dot,
+    sympy_product,
+)
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
@@ -269,33 +275,6 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
-
-        self.set_header()
-        self.write_prefix()
-
-        for name, value in V.graph.constants.items():
-            # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
-
-        self.allocated = set()
-        self.freed = set()
-
-        # maps from reusing buffer to reused buffer
-        self.reuses = dict()
-
-        self.write_get_cuda_stream = functools.lru_cache(None)(
-            self.write_get_cuda_stream
-        )
-
-        @functools.lru_cache(None)
-        def add_import_once(line):
-            self.header.writeline(line)
-
-        self.add_import_once = add_import_once
-        self._metas = {}
-
-    def set_header(self):
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -322,6 +301,30 @@ class WrapperCodeGen(CodeGen):
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
+
+        self.write_prefix()
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
+
+        self.allocated = set()
+        self.freed = set()
+
+        # maps from reusing buffer to reused buffer
+        self.reuses = dict()
+
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -552,13 +555,7 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvalue()
 
-    def add_benchmark_harness(self, output):
-        """
-        Append a benchmark harness to generated code for debugging
-        """
-        if not config.benchmark_harness:
-            return
-
+    def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
@@ -570,7 +567,7 @@ class WrapperCodeGen(CodeGen):
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
-        output.writelines(["", "", 'if __name__ == "__main__":'])
+        output.writelines(["", "", "def benchmark_compiled_module():"])
         with output.indent():
             output.splice(
                 """
@@ -598,6 +595,35 @@ class WrapperCodeGen(CodeGen):
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
+
+    def add_benchmark_harness(self, output):
+        """
+        Append a benchmark harness to generated code for debugging
+        """
+        if not config.benchmark_harness:
+            return
+
+        self.benchmark_compiled_module(output)
+
+        output.writelines(["", "", 'if __name__ == "__main__":'])
+        with output.indent():
+            output.writelines(
+                [
+                    "import argparse",
+                    "from torch._inductor.utils import benchmark_all_kernels",
+                    "",
+                    "parser = argparse.ArgumentParser()",
+                    'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
+                    "args = parser.parse_args()",
+                    "",
+                    "if args.benchmark_kernels:",
+                ]
+            )
+            with output.indent():
+                output.writeline(f"benchmark_all_kernels('{get_benchmark_name()}')")
+            output.writeline("else:")
+            with output.indent():
+                output.writeline("benchmark_compiled_module()")
 
     def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
         kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
@@ -632,7 +658,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     call_func_id = count()
-    decl_str = None
 
     def __init__(self):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
@@ -652,7 +677,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             for x in V.graph.graph_outputs
         ]
 
-    def write_prefix_header(self):
+    def write_prefix(self):
         self.prefix.splice(
             """
             async_compile.wait(globals())
@@ -674,30 +699,21 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             """
         )
-
-    def call_func_name(self):
-        return f"call_{self._call_func_id}"
-
-    def write_prefix(self):
-        self.write_prefix_header()
-
-        inputs_len = len(V.graph.graph_inputs.keys())
-        output_refs = self.get_output_refs()
-        if output_refs:
-            if len(output_refs) == 1:
-                output_types = "at::Tensor"
-            else:
-                output_types = "std::vector<at::Tensor>"
-        else:
-            output_types = "void"
-
-        inputs_types = "std::vector<at::Tensor>"
-
-        CppWrapperCodeGen.decl_str = (
-            f"{output_types} {self.call_func_name()}({inputs_types} args)"
-        )
-        self.prefix.splice(f"{CppWrapperCodeGen.decl_str} {{")
         with self.wrapper_call.indent():
+            inputs_len = len(V.graph.graph_inputs.keys())
+            output_refs = self.get_output_refs()
+            if output_refs:
+                if len(output_refs) == 1:
+                    output_types = "at::Tensor"
+                else:
+                    output_types = "std::vector<at::Tensor>"
+            else:
+                output_types = "void"
+
+            inputs_types = "std::vector<at::Tensor>"
+            self.wrapper_call.writeline(
+                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
+            )
             if inputs_len != 0:
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
@@ -759,24 +775,18 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
 
-    def return_end_str(self):
-        return "\n}\n'''\n)"
-
     def generate_return(self, output_refs):
         if output_refs:
             if len(output_refs) == 1:
-                self.wrapper_call.writeline(
-                    f"return {output_refs[0]};{self.return_end_str()}"
-                )
+                self.wrapper_call.writeline("return " + output_refs[0] + "; }''' )")
             else:
                 self.wrapper_call.writeline(
                     "return std::vector<at::Tensor>({"
                     + ", ".join(output_refs)
-                    + "});"
-                    + self.return_end_str()
+                    + "}); }''' )"
                 )
         else:
-            self.wrapper_call.writeline(f"return;{self.return_end_str()}")
+            self.wrapper_call.writeline("return; }''' )")
 
     def generate_end(self, result):
         shared = codecache.get_shared()
@@ -826,36 +836,3 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
-
-
-class CppAotWrapperCodeGen(CppWrapperCodeGen):
-    """
-    The AOT-version outer wrapper that calls the kernels in C++
-    """
-
-    def set_header(self):
-        return
-
-    def write_prefix_header(self):
-        return
-
-    def call_func_name(self):
-        return "aot_inductor_entry"
-
-    def define_kernel(self, name: str, kernel: str):
-        self.header.splice(f"\n{kernel}\n")
-
-    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
-        return
-
-    def wrap_kernel_call(self, name, call_args):
-        return f"{name}({', '.join(call_args)});"
-
-    def return_end_str(self):
-        return "\n}"
-
-    def generate_end(self, result):
-        return
-
-    def add_benchmark_harness(self, output):
-        return
