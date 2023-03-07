@@ -224,6 +224,15 @@ TORCH_API void replace_(
 TORCH_API void commit_update(const Tensor& functional_tensor);
 TORCH_API void commit_update(ITensorListRef functional_tensor);
 
+// These two methods are XLA-specific logic and are no-ops
+// for the normal functionalization flow.
+TORCH_API void propagate_xla_data(
+    const Tensor& functional_tensor,
+    const Tensor& other);
+TORCH_API void propagate_xla_data(
+    const ITensorListRef functional_tensor,
+    ITensorListRef other);
+
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
     const Tensor& base,

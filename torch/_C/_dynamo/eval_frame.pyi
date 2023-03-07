@@ -1,5 +1,5 @@
 import types
-from typing import Union
+
 from torch._dynamo.types import DynamoCallback, DynamoGuardHook
 
 def set_eval_frame(callback: DynamoCallback) -> DynamoCallback: ...
