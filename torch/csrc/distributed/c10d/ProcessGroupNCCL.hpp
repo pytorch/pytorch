@@ -136,7 +136,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     void synchronizeStreams();
 
     // Helper function used in CUDA Stream callbacks to complete WorkNCCL
-    // objects and throw exceptions when neeeded.
+    // objects and throw exceptions when needed.
     void handleNCCLGuard(ErrorHandlingMode asyncErrorHandling);
 
     // Helper function that checks if the NCCL kernels have finished
@@ -497,7 +497,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Helper that encapsulates work shared across point-to-point communication
   // primitives. It is the same structure as the helper used for collective
-  // communicaiton primitives.
+  // communication primitives.
   template <typename Fn>
   c10::intrusive_ptr<Work> pointToPoint(
       std::vector<at::Tensor>& tensor,
