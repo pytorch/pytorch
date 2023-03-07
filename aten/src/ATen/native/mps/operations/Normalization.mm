@@ -68,8 +68,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                     Tensor& save_mean,
                     Tensor& save_var) {
 
-  namespace native_mps = at::native::mps;
-  struct CachedGraph : public native_mps::MPSCachedGraph
+  using namespace at::native::mps;
+  struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* inputTensor_ = nil;
@@ -84,7 +84,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
     MPSGraphTensor* runningVarInplaceUpdate_ = nil;
   };
 
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+  auto* cache_ = MPSGraphCache::getInstance();
 
   auto stream = at::mps::getCurrentMPSStream();
 
@@ -135,9 +135,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                       + std::to_string(has_running_mean) + ":"
                       + std::to_string(has_weight) + ":" + std::to_string(has_bias) + ":"
                       + [ns_shape_key UTF8String] + ":"
-                      + native_mps::getTensorsStringKey({
+                      + getTensorsStringKey({
                         self, weight_opt.value_or(Tensor()), bias_opt.value_or(Tensor()), running_mean_opt.value_or(Tensor()), running_var_opt.value_or(Tensor())});
-    auto input_mps_dtype = native_mps::getMPSDataType(self.scalar_type());
+    auto input_mps_dtype = getMPSDataType(self.scalar_type());
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     // Dim where channels are located
@@ -154,27 +154,27 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
     }
 
     if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
+          MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
 
-            MPSGraphTensor* inputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
+            MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
             MPSGraphTensor* weightTensor = nil;
             // Should have shape of mean
             if(has_weight)
-              weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
+              weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
             MPSGraphTensor* biasTensor = nil;
             if(has_bias)
-              biasTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(bias_opt.value().scalar_type()), new_mean_shape);
+              biasTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(bias_opt.value().scalar_type()), new_mean_shape);
             MPSGraphTensor* runningMeanTensor = nil;
             MPSGraphTensor* runningVarTensor = nil;
             if(has_running_mean) {
-              runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
-              runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
+              runningMeanTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
+              runningVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
             }
 
             // Mean and inv std tensors to be saved and returned
@@ -234,7 +234,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                 MPSGraphTensor* scaledBatchMean = [mpsGraph multiplicationWithPrimaryTensor:batchMeanTensor
                                                                             secondaryTensor:momentumTensor
                                                                                        name:nil];
-                MPSGraphTensor* scaledRunningMean = [mpsGraph multiplicationWithPrimaryTensor:runningMeanTensor
+                MPSGraphTensor* scaledRunningMean = [mpsGraph multiplicationWithPrimaryTensor:castMPSTensor(mpsGraph, runningMeanTensor, input_mps_dtype)
                                                                               secondaryTensor:oneMinusMomentum
                                                                                          name:nil];
                 updatedRunningMeanTensor = [mpsGraph additionWithPrimaryTensor:scaledBatchMean
@@ -244,7 +244,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                 MPSGraphTensor* scaledCorrectedBatchVar = [mpsGraph multiplicationWithPrimaryTensor:unbiasedVarianceTensor
                                                                                     secondaryTensor:momentumTensor
                                                                                                name:nil];
-                MPSGraphTensor* scaledRunningVar = [mpsGraph multiplicationWithPrimaryTensor:runningVarTensor
+                MPSGraphTensor* scaledRunningVar = [mpsGraph multiplicationWithPrimaryTensor:castMPSTensor(mpsGraph, runningVarTensor, input_mps_dtype)
                                                                              secondaryTensor:oneMinusMomentum
                                                                                         name:nil];
                 updatedRunningVarTensor = [mpsGraph additionWithPrimaryTensor:scaledCorrectedBatchVar
@@ -254,7 +254,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
             // Update saved mean and inverse std tensor
             MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(double)epsilon
                                                                    shape:@[@1]
-                                                                dataType:MPSDataTypeFloat32];
+                                                                dataType:[batchVarianceTensor dataType]];
 
             MPSGraphTensor *varianceEps = [mpsGraph additionWithPrimaryTensor:batchVarianceTensor
                                                               secondaryTensor:epsilonTensor
@@ -262,8 +262,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
 
             MPSGraphTensor *sqrtVariance = [mpsGraph squareRootWithTensor:varianceEps
                                                                      name:@"sqrtVariance"];
-            float primary = 1.0f;
-            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:primary dataType:MPSDataTypeFloat32];
+            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:1.0 dataType:[sqrtVariance dataType]];
 
             scaledInverseSqrtVariance = [mpsGraph divisionWithPrimaryTensor:primaryTensor
                                                             secondaryTensor:sqrtVariance
@@ -282,13 +281,14 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
           }
 
           // Compute output of batch norm
-          MPSGraphTensor* outputTensor = [mpsGraph normalizationWithTensor:inputTensor
-                                                                meanTensor:saveMeanTensor
-                                                            varianceTensor:varTensor
-                                                               gammaTensor:weightTensor
-                                                                betaTensor:biasTensor
-                                                                   epsilon:(float)epsilon
-                                                                      name:nil];
+          const auto inputTensorType = [inputTensor dataType];
+          MPSGraphTensor* outputTensor = [mpsGraph normalizationWithTensor: inputTensor
+                                                                meanTensor: castMPSTensor(mpsGraph, saveMeanTensor, inputTensorType)
+                                                            varianceTensor: castMPSTensor(mpsGraph, varTensor, inputTensorType)
+                                                               gammaTensor: castMPSTensor(mpsGraph, weightTensor, inputTensorType)
+                                                                betaTensor: castMPSTensor(mpsGraph, biasTensor, inputTensorType)
+                                                                   epsilon: (float)epsilon
+                                                                      name: nil];
 
           // Reshape saved mean and var to fit output
           saveMeanTensor = [mpsGraph reshapeTensor:saveMeanTensor
@@ -324,31 +324,31 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, self, input_shape, executeGatherOp);
-    auto weightPlaceholder = native_mps::Placeholder();
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, self, input_shape, executeGatherOp);
+    auto weightPlaceholder = Placeholder();
     if(has_weight)
-      weightPlaceholder = native_mps::Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
-    auto biasPlaceholder = native_mps::Placeholder();
+      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
+    auto biasPlaceholder = Placeholder();
     if(has_bias)
-      biasPlaceholder = native_mps::Placeholder(cachedGraph->biasTensor_, bias_opt.value(), new_mean_shape);
-    auto runningMeanPlaceholder = native_mps::Placeholder();
-    auto runningVarPlaceholder = native_mps::Placeholder();
+      biasPlaceholder = Placeholder(cachedGraph->biasTensor_, bias_opt.value(), new_mean_shape);
+    auto runningMeanPlaceholder = Placeholder();
+    auto runningVarPlaceholder = Placeholder();
     if(has_running_mean) {
-      runningMeanPlaceholder = native_mps::Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value(), new_mean_shape);
-      runningVarPlaceholder = native_mps::Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value(), new_mean_shape);
+      runningMeanPlaceholder = Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value(), new_mean_shape);
+      runningVarPlaceholder = Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value(), new_mean_shape);
     }
 
-    auto runningMeanInplaceUpdatePlaceholder = native_mps::Placeholder();
-    auto runningVarInplaceUpdatePlaceholder = native_mps::Placeholder();
+    auto runningMeanInplaceUpdatePlaceholder = Placeholder();
+    auto runningVarInplaceUpdatePlaceholder = Placeholder();
 
     if(train && has_running_mean) {
-      runningMeanInplaceUpdatePlaceholder = native_mps::Placeholder(cachedGraph->runningMeanInplaceUpdate_, running_mean_opt.value());
-      runningVarInplaceUpdatePlaceholder = native_mps::Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
+      runningMeanInplaceUpdatePlaceholder = Placeholder(cachedGraph->runningMeanInplaceUpdate_, running_mean_opt.value());
+      runningVarInplaceUpdatePlaceholder = Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
     }
 
-    auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, output, input_shape, false);
-    auto saveMeanPlaceholder = native_mps::Placeholder(cachedGraph->saveMeanTensor_, save_mean);
-    auto saveVarPlaceholder = native_mps::Placeholder(cachedGraph->saveVarTensor_, save_var);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, input_shape, false);
+    auto saveMeanPlaceholder = Placeholder(cachedGraph->saveMeanTensor_, save_mean);
+    auto saveVarPlaceholder = Placeholder(cachedGraph->saveVarTensor_, save_var);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
@@ -372,7 +372,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
       results[runningVarInplaceUpdatePlaceholder.getMPSGraphTensor()] = runningVarInplaceUpdatePlaceholder.getMPSGraphTensorData();
     }
 
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
 
   }
 
@@ -548,10 +548,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                                       at::MemoryFormat::Contiguous);
   }
 
-  namespace native_mps = at::native::mps;
+  using namespace at::native::mps;
 
   // Derive from MPSCachedGraph
-  struct CachedGraph : public native_mps::MPSCachedGraph
+  struct CachedGraph : public MPSCachedGraph
   {
     CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* gradOutputTensor_ = nil;
@@ -566,7 +566,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
     MPSGraphTensor* gradBiasTensor_ = nil;
   };
 
-  native_mps::MPSGraphCache* cache_ = native_mps::MPSGraphCache::getInstance();
+  auto* cache_ = MPSGraphCache::getInstance();
 
   auto stream = at::mps::getCurrentMPSStream();
 
@@ -613,41 +613,41 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                       + std::to_string(train) + ":"
                       + std::to_string(has_running_mean) + ":"
                       + std::to_string(has_weight) + ":"
-                      + [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input.scalar_type());
-    auto input_mps_dtype = native_mps::getMPSDataType(input.scalar_type());
+                      + [ns_shape_key UTF8String] + ":" + getMPSTypeString(input.scalar_type());
+    auto input_mps_dtype = getMPSDataType(input.scalar_type());
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
-      native_mps::MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ native_mps::MPSCachedGraph * () {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
 
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
-          MPSGraph* mpsGraph = native_mps::make_mps_graph();
+          MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
           // NCHW - Channels dim is 1
           int channelsDim = 1;
 
-          MPSGraphTensor* inputTensorOriginal = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
+          MPSGraphTensor* inputTensorOriginal = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
           // Shape is the ORIGINAL NCHW shape
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(grad_out.scalar_type()), input_shape_readonly);
+          MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_out.scalar_type()), input_shape_readonly);
           MPSGraphTensor* weightTensor = nil;
           if(has_weight)
-            weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
+            weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
           MPSGraphTensor* runningMeanTensor = nil;
           MPSGraphTensor* runningVarTensor = nil;
           if(has_running_mean) {
-            runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
-            runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
+            runningMeanTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
+            runningVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
           }
 
           // Mean and inv std tensors to be saved and returned
           MPSGraphTensor* saveMeanTensor = nil;
           MPSGraphTensor* saveVarTensor = nil;
           if(has_save_mean) {
-            saveMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_mean_opt.value().scalar_type()), new_mean_shape);
-            saveVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_var_opt.value().scalar_type()), new_mean_shape);
+            saveMeanTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(save_mean_opt.value().scalar_type()), new_mean_shape);
+            saveVarTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(save_var_opt.value().scalar_type()), new_mean_shape);
           }
 
           MPSGraphTensor* gradInputTensor = nil;
@@ -679,8 +679,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
           if(train) {
             // Use save_mean and save_var
             float primary = 1.0f;
-            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:primary dataType:MPSDataTypeFloat32];
-            MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(float)epsilon dataType:MPSDataTypeFloat32];
+            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:primary dataType:input_mps_dtype];
+            MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(float)epsilon dataType:input_mps_dtype];
             MPSGraphTensor *revertSaveVarTensor = saveVarTensor;
             revertSaveVarTensor = [mpsGraph divisionWithPrimaryTensor: primaryTensor
                                                       secondaryTensor: revertSaveVarTensor
@@ -711,7 +711,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                                                                              sourceTensor:inputTensor
                                                                                meanTensor:saveMeanTensor
                                                                            varianceTensor:revertSaveVarTensor
-                                                                              gammaTensor:weightTensor
+                                                                              gammaTensor:castMPSTensor(mpsGraph, weightTensor, input_mps_dtype)
                                                                       gammaGradientTensor:gradWeightTensor
                                                                        betaGradientTensor:gradBiasTensor
                                                                             reductionAxes:axes
@@ -728,9 +728,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                                                      shape:@[@1]
                                                   dataType:input_mps_dtype];
               MPSGraphTensor* xMinusMean = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                                  secondaryTensor:runningMeanTensor
+                                                                  secondaryTensor: castMPSTensor(mpsGraph, runningMeanTensor, input_mps_dtype)
                                                                              name:nil];
-              MPSGraphTensor* varianceEpsTensor = [mpsGraph additionWithPrimaryTensor:runningVarTensor
+              MPSGraphTensor* varianceEpsTensor = [mpsGraph additionWithPrimaryTensor:castMPSTensor(mpsGraph, runningVarTensor, input_mps_dtype)
                                                                       secondaryTensor:epsilonTensor
                                                                                  name:nil];
               rsqrtTensor = [mpsGraph reverseSquareRootWithTensor:varianceEpsTensor
@@ -761,7 +761,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                                                        shape:@[@1]
                                                     dataType:input_mps_dtype];
               if(!rsqrtTensor) {
-                MPSGraphTensor* varianceEpsTensor = [mpsGraph additionWithPrimaryTensor:runningVarTensor
+                MPSGraphTensor* varianceEpsTensor = [mpsGraph additionWithPrimaryTensor:castMPSTensor(mpsGraph, runningVarTensor, input_mps_dtype)
                                                                       secondaryTensor:epsilonTensor
                                                                                  name:nil];
                 rsqrtTensor = [mpsGraph reverseSquareRootWithTensor:varianceEpsTensor
@@ -773,7 +773,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                                                                      name:nil];
               if(has_weight)
                 gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:gradInputTensor
-                                                            secondaryTensor:weightTensor
+                                                            secondaryTensor:castMPSTensor(mpsGraph, weightTensor, [gradInputTensor dataType])
                                                                        name:nil];
               gradInputTensor = [mpsGraph multiplicationWithPrimaryTensor:gradInputTensor
                                                           secondaryTensor:gradOutputTensor
@@ -831,33 +831,33 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
       cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
     }
 
-    auto inputPlaceholder = native_mps::Placeholder(cachedGraph->inputTensor_, input, input_shape);
-    auto gradOutputPlaceholder = native_mps::Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
-    auto weightPlaceholder = native_mps::Placeholder();
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
+    auto weightPlaceholder = Placeholder();
     if(has_weight)
-      weightPlaceholder = native_mps::Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
-    auto runningMeanPlaceholder = native_mps::Placeholder();
-    auto runningVarPlaceholder = native_mps::Placeholder();
+      weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
+    auto runningMeanPlaceholder = Placeholder();
+    auto runningVarPlaceholder = Placeholder();
     if(has_running_mean) {
-      runningMeanPlaceholder = native_mps::Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value(), new_mean_shape);
-      runningVarPlaceholder = native_mps::Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value(), new_mean_shape);
+      runningMeanPlaceholder = Placeholder(cachedGraph->runningMeanTensor_, running_mean_opt.value(), new_mean_shape);
+      runningVarPlaceholder = Placeholder(cachedGraph->runningVarTensor_, running_var_opt.value(), new_mean_shape);
     }
-    auto saveMeanPlaceholder = native_mps::Placeholder();
-    auto saveVarPlaceholder = native_mps::Placeholder();
+    auto saveMeanPlaceholder = Placeholder();
+    auto saveVarPlaceholder = Placeholder();
     if(has_save_mean) {
-      saveMeanPlaceholder = native_mps::Placeholder(cachedGraph->saveMeanTensor_, save_mean_opt.value(), new_mean_shape);
-      saveVarPlaceholder = native_mps::Placeholder(cachedGraph->saveVarTensor_, save_var_opt.value(), new_mean_shape);
+      saveMeanPlaceholder = Placeholder(cachedGraph->saveMeanTensor_, save_mean_opt.value(), new_mean_shape);
+      saveVarPlaceholder = Placeholder(cachedGraph->saveVarTensor_, save_var_opt.value(), new_mean_shape);
     }
 
-    auto gradInputPlaceholder = native_mps::Placeholder();
+    auto gradInputPlaceholder = Placeholder();
     if(grad_input_mask[0])
-      gradInputPlaceholder = native_mps::Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
-    auto gradWeightPlaceholder = native_mps::Placeholder();
+      gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input, input_shape);
+    auto gradWeightPlaceholder = Placeholder();
     if(grad_input_mask[1])
-      gradWeightPlaceholder = native_mps::Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
-    auto gradBiasPlaceholder = native_mps::Placeholder();;
+      gradWeightPlaceholder = Placeholder(cachedGraph->gradWeightTensor_, grad_weight);
+    auto gradBiasPlaceholder = Placeholder();;
     if(grad_input_mask[2])
-      gradBiasPlaceholder = native_mps::Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
+      gradBiasPlaceholder = Placeholder(cachedGraph->gradBiasTensor_, grad_bias);
 
     NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
@@ -881,7 +881,7 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
     if(grad_input_mask[2])
       results[gradBiasPlaceholder.getMPSGraphTensor()] = gradBiasPlaceholder.getMPSGraphTensorData();
 
-    native_mps::runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
 
   }
 

@@ -1189,7 +1189,7 @@ class TestMPS(TestCaseMPS):
     # Test forward batch norm
     def test_batch_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, training=False, channels_last=False,
-                   track_running_stats=True, test_module=False):
+                   track_running_stats=True, test_module=False, use_float16=False):
 
             import numpy as np
             np.random.seed(332)
@@ -1198,7 +1198,8 @@ class TestMPS(TestCaseMPS):
             if (channels_last):
                 cpu_x = cpu_x.to(memory_format=torch.channels_last)
                 cpu_x.retain_grad()
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+            x = cpu_x.detach().clone().to(dtype=torch.float16 if use_float16 else torch.float32, device='mps').requires_grad_()
+            atol, rtol = (0.1, 2e-3) if use_float16 else (None, None)
 
             mean_shape = [shape[1]]
             cpu_running_mean = None
@@ -1297,56 +1298,56 @@ class TestMPS(TestCaseMPS):
                 ref_y = batchnorm_op(cpu_x)
                 y = mps_batchnorm_op(x)
 
-            self.assertEqual(y, ref_y)
+            self.assertEqual(y, ref_y, exact_dtype=not use_float16, atol=atol, rtol=rtol)
             if (not test_module):
-                self.assertEqual(running_mean, cpu_running_mean)
-                self.assertEqual(running_var, cpu_running_var)
+                self.assertEqual(running_mean, cpu_running_mean, atol=atol, rtol=rtol)
+                self.assertEqual(running_var, cpu_running_var, atol=atol, rtol=rtol)
             else:
-                self.assertEqual(mps_batchnorm_op.running_mean, batchnorm_op.running_mean)
-                self.assertEqual(mps_batchnorm_op.running_var, batchnorm_op.running_var)
+                self.assertEqual(mps_batchnorm_op.running_mean, batchnorm_op.running_mean, atol=atol, rtol=rtol)
+                self.assertEqual(mps_batchnorm_op.running_var, batchnorm_op.running_var, atol=atol, rtol=rtol)
 
             cpu_grad = torch.randn(ref_y.shape)
             grad = cpu_grad.to('mps')
             ref_y.backward(gradient=cpu_grad)
             y.backward(gradient=grad)
 
-            self.assertEqual(x.grad, cpu_x.grad)
+            self.assertEqual(x.grad, cpu_x.grad, exact_dtype=not use_float16, atol=atol, rtol=rtol)
             if (wts):
                 if (not test_module):
-                    self.assertEqual(weight.grad, cpu_weight.grad)
-                    self.assertEqual(bias.grad, cpu_bias.grad)
+                    self.assertEqual(weight.grad, cpu_weight.grad, atol=atol, rtol=rtol)
+                    self.assertEqual(bias.grad, cpu_bias.grad, atol=atol, rtol=rtol)
                 else:
-                    self.assertEqual(mps_batchnorm_op.weight.grad, batchnorm_op.weight.grad)
-                    self.assertEqual(mps_batchnorm_op.bias.grad, batchnorm_op.bias.grad)
+                    self.assertEqual(mps_batchnorm_op.weight.grad, batchnorm_op.weight.grad, atol=atol, rtol=rtol)
+                    self.assertEqual(mps_batchnorm_op.bias.grad, batchnorm_op.bias.grad, atol=atol, rtol=rtol)
 
         for shape in [(2, 3, 2, 2), (2, 3, 2, 2, 2), (2, 3, 2)]:
             for test_module in [False, True]:
                 for track_running_stats in [True, False]:
-                    for channels_last in [False]:
+                    for channels_last, use_float16 in product([False], [False, True]):
                         if (channels_last and len(shape) != 4):
                             continue
                         # Running stats must be tracked in eval mode
                         if (track_running_stats):
                             helper(shape, eps=0, momentum=1, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                             helper(shape, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                             helper(shape, eps=1e-05, momentum=0.1, wts=False, training=False, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                             helper(shape, eps=0, momentum=1.0, wts=False, training=False, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                             helper(shape, eps=1, momentum=1, wts=True, training=False, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                             helper(shape, eps=3, momentum=0.67, wts=True, training=False, channels_last=channels_last,
-                                   track_running_stats=track_running_stats, test_module=test_module)
+                                   track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                         helper(shape, eps=1e-05, momentum=0.1, wts=False, training=True, channels_last=channels_last,
-                               track_running_stats=track_running_stats, test_module=test_module)
+                               track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                         helper(shape, eps=0, momentum=1.0, wts=False, training=True, channels_last=channels_last,
-                               track_running_stats=track_running_stats, test_module=test_module)
+                               track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                         helper(shape, eps=1, momentum=1, wts=True, training=True, channels_last=channels_last,
-                               track_running_stats=track_running_stats, test_module=test_module)
+                               track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
-                               track_running_stats=track_running_stats, test_module=test_module)
+                               track_running_stats=track_running_stats, test_module=test_module, use_float16=use_float16)
 
     def test_norm(self):
         a = torch.arange(9, dtype=torch.float, device="mps") - 4
@@ -1435,6 +1436,8 @@ class TestMPS(TestCaseMPS):
             helper((2, 2, 2, 2), (2, 2), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
+        # Regression test for https://github.com/pytorch/pytorch/issues/96113
+        torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
 
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
