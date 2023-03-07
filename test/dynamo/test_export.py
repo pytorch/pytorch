@@ -1706,6 +1706,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
 
         inp = torch.randn(6, 7)
+        breakpoint()
         self.assertEqual(gm(inp), f(inp))
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
@@ -2189,8 +2190,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+    def test_export_with_aten_graph_symbolic(self):
+        class BasicModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_lin = torch.nn.Linear(3, 4, bias=True)
 
-common_utils.instantiate_parametrized_tests(ExportTests)
+            def forward(self, x):
+                return self.my_lin(x)
+
+        mod, input_tensor = BasicModule().to(dtype=torch.float16), torch.randn(2, 3).to(
+            dtype=torch.float16
+        )
+        gm, guard = torch._dynamo.export(
+            mod, input_tensor, aten_graph=True, tracing_mode="symbolic"
+        )
+
+        common_utils.instantiate_parametrized_tests(ExportTests)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

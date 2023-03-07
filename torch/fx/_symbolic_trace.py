@@ -658,6 +658,7 @@ class Tracer(TracerBase):
                 return out_args
 
             return flatten_fn, flat_args
+
         return root_fn, args
 
     @compatibility(is_backward_compatible=True)
