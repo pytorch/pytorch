@@ -62,7 +62,7 @@ except ImportError:
 # class TestClassFoo(TestCase):
 #
 #   # A template test that can be specialized with a device
-#   # NOTE: this test case is not runnably by unittest or pytest because it
+#   # NOTE: this test case is not runnable by unittest or pytest because it
 #   #   accepts an extra positional argument, "device", they do not understand
 #   def test_bar(self, device):
 #     pass
