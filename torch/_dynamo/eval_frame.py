@@ -58,6 +58,12 @@ class Unset(Enum):
 
 
 def enable_cache_lookup_profiler(enable: bool):
+    """
+    Registers a hook within eval_frame.c called before and after
+    the lookup process, which runs guards associated with each cached frame.
+
+    Clear deregisters the hooks, saving overhead.
+    """
     if enable:
 
         def _profiler_start(name):
@@ -70,9 +76,6 @@ def enable_cache_lookup_profiler(enable: bool):
     else:
         clear_profiler_hooks()
 
-
-# TODO can we enable by default? (check perf CI) otherwise, guard behind config
-enable_cache_lookup_profiler(config.profile_cache_lookup)
 
 unset = Unset.token
 

@@ -489,10 +489,12 @@ class record_function(_ContextDecorator):
         self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
 
     def __enter__(self):
+        torch._dynamo.eval_frame.enable_cache_lookup_profiler(True)
         self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
+        torch._dynamo.eval_frame.enable_cache_lookup_profiler(False)
         if not self.run_callbacks_on_exit:
             return
 

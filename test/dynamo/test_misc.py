@@ -1990,7 +1990,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # warmup
         opt_fn(x)
 
-        enable_cache_lookup_profiler(True)
+        # whenver we enter the profiler context, hooks are automatically registered
         with torch.autograd.profiler.profile() as prof:
             res = opt_fn(x)
         events = list(
@@ -2005,8 +2005,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
         )
 
-        enable_cache_lookup_profiler(False)
         with torch.autograd.profiler.profile() as prof:
+            # just make sure the disable functionality works
+            enable_cache_lookup_profiler(False)
             res = opt_fn(x)
         events = list(
             filter(
