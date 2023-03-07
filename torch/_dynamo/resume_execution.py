@@ -6,10 +6,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .bytecode_transformation import (
     create_call_function,
+    create_call_method,
+    create_dup_top,
     create_instruction,
     create_jump_absolute,
     Instruction,
+    instruction_size,
+    offset_exception_table,
     transform_code_object,
+    unique_id,
 )
 from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
@@ -31,6 +36,94 @@ CO_ASYNC_GENERATOR = 0x0200
 class ReenterWith:
     stack_index: int = None
     target_values: Optional[Tuple] = None
+
+    # If we do not want to destroy the stack, we can do the same thing as a
+    # `SETUP_WITH` block, only that we store the context manager in a local_symbol
+    def try_except(self, code_options, cleanup: List[Instruction]):
+        load_args = []
+        if self.target_values:
+            for val in self.target_values:
+                PyCodegen.maybe_upd_consts(code_options, val)
+            load_args = [
+                create_instruction("LOAD_CONST", val)
+                for val in self.target_values
+            ]
+        ctx_name = unique_id(f"___context_manager_{self.stack_index}")
+        if ctx_name not in code_options["co_varnames"]:
+            code_options["co_varnames"] += (ctx_name,)
+        for name in ["__enter__", "__exit__"]:
+            if name not in code_options["co_names"]:
+                code_options["co_names"] += (name,)
+
+        except_jump_target = create_instruction("NOP")
+        cleanup_complete_jump_target = create_instruction("NOP")
+
+        setup_finally = [
+            *load_args,
+            *create_call_function(len(load_args), True),
+            create_instruction(
+                "STORE_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction(
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction("LOAD_METHOD", "__enter__"),
+            *create_call_method(0),
+            create_instruction("POP_TOP"),
+        ]
+        if sys.version_info < (3, 11):
+            setup_finally.append(
+                # NOTE: SETUP_FINALLY is not present in 3.11, but we will
+                # later replace with it with a NOP and update the exception table.
+                create_instruction("SETUP_FINALLY", target=except_jump_target)
+            )
+
+        PyCodegen.maybe_upd_consts(code_options, None)
+        reset = [
+            create_instruction(
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction("LOAD_METHOD", "__exit__"),
+            create_instruction("LOAD_CONST", None),
+            create_dup_top(),
+            create_dup_top(),
+            *create_call_method(3),
+            create_instruction("POP_TOP"),
+        ]
+        if sys.version_info < (3, 9):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                create_instruction("BEGIN_FINALLY"),
+                except_jump_target,
+                *reset,
+                create_instruction("END_FINALLY"),
+            ]
+        elif sys.version_info < (3, 11):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                *reset,
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                *reset,
+                create_instruction("RERAISE"),
+                cleanup_complete_jump_target,
+            ]
+        else:
+            epilogue = [
+                *reset,
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                create_instruction("PUSH_EXC_INFO"),
+                *reset,
+                create_instruction("RERAISE", 0),
+                create_instruction("COPY", 3),
+                create_instruction("POP_EXCEPT"),
+                create_instruction("RERAISE", 1),
+                cleanup_complete_jump_target,
+            ]
+
+        cleanup[:] = epilogue + cleanup
+        return setup_finally
 
     def __call__(self, code_options, cleanup):
         load_args = []
@@ -91,7 +184,6 @@ class ReenterWith:
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
-
         else:
             pop_top_after_with_except_start = create_instruction("POP_TOP")
             cleanup_complete_jump_target = create_instruction("NOP")
@@ -162,7 +254,6 @@ class ContinueExecutionCache:
         argnames: List[str],
         setup_fns: List[ReenterWith],
         null_idxes: List[int],
-        prefix_insts: List[Instruction],
     ):
         assert offset is not None
         assert not (
@@ -172,7 +263,7 @@ class ContinueExecutionCache:
         assert code.co_flags & CO_OPTIMIZED
         if code in ContinueExecutionCache.generated_code_metadata:
             return cls.generate_based_on_original_code_object(
-                code, lineno, offset, nstack, argnames, setup_fns, null_idxes, prefix_insts
+                code, lineno, offset, nstack, argnames, setup_fns, null_idxes,
             )
 
         meta = ResumeFunctionMetadata(code)
@@ -185,7 +276,7 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            code_options["co_name"] = f"<resume in {code_options['co_name']}>"
             if sys.version_info >= (3, 11):
                 code_options[
                     "co_qualname"
@@ -202,12 +293,13 @@ class ContinueExecutionCache:
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
             )
-            # TODO probably need to update co_exceptiontable for python 3.11
             (target,) = [i for i in instructions if i.offset == offset]
 
-            if sys.version_info < (3, 11):
-                assert len(prefix_insts) == 0
-            prefix = list(prefix_insts)
+            prefix = []
+            if sys.version_info >= (3, 11):
+                if freevars:
+                    prefix.append(create_instruction("COPY_FREE_VARS", len(freevars)))
+                prefix.append(create_instruction("RESUME", 0))
 
             cleanup = []
             hooks = {fn.stack_index: fn for fn in setup_fns}
@@ -239,6 +331,16 @@ class ContinueExecutionCache:
 
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
+
+            # update exception table for Python 3.11
+            if sys.version_info >= (3, 11):
+                prefix_size = 0
+                for inst in prefix:
+                    prefix_size += instruction_size(inst)
+                # code_options["co_exceptiontable"] = offset_exception_table(
+                #     code_options["co_exceptiontable"], prefix_size
+                # )
+
 
         new_code = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta

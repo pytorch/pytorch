@@ -3,7 +3,7 @@ import dis
 import itertools
 import sys
 import types
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from .bytecode_analysis import (
     propagate_line_nums,
@@ -176,13 +176,13 @@ def lnotab_writer(lineno, byteno=0):
     return lnotab, update
 
 
-def linetable_writer(first_lineno):
+def linetable_310_writer(first_lineno):
     """
     Used to create typing.CodeType.co_linetable
     See https://github.com/python/cpython/blob/main/Objects/lnotab_notes.txt
-    This is the internal format of the line number table if Python >= 3.10
+    This is the internal format of the line number table for Python 3.10
     """
-    assert sys.version_info >= (3, 10)
+    assert sys.version_info >= (3, 10) and sys.version_info < (3, 11)
     linetable = []
     lineno = first_lineno
     lineno_delta = 0
@@ -210,13 +210,11 @@ def linetable_writer(first_lineno):
 
     return linetable, update, end
 
-
-def parse_exception_table(code):
-    if sys.version_info >= (3, 11):
-        return dis.parse_exception_table(code)
-    raise RuntimeError("Cannot parse for exception table in Python < 3.11")
-
-def _assemble_varint(n):
+def encode_varint(n):
+    """
+    6-bit chunk encoding of an unsigned integer
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    """
     assert n >= 0
     b = [n & 63]
     n >>= 6
@@ -224,31 +222,138 @@ def _assemble_varint(n):
         b[-1] |= 64
         b.append(n & 63)
         n >>= 6
+    return b
+
+def decode_varint(bytes_iter):
+    b = next(bytes_iter)
+    val = b & 63
+    while b & 64:
+        val <<= 6
+        b = next(bytes_iter)
+        val |= b & 63
+    return val
+
+def linetable_311_writer(first_lineno):
+    """
+    Used to create typing.CodeType.co_linetable
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    This is the internal format of the line number table for Python 3.11
+    """
+    assert sys.version_info >= (3, 11)
+    linetable = []
+    lineno = first_lineno
+
+    def update(lineno_new, inst_size):
+        nonlocal lineno
+        def _update(delta, size):
+            assert 0 < size <= 8
+            # first byte - always use no column info code (13)
+            linetable.append(0b11101000 + size - 1)
+            # encode signed int
+            if delta < 0:
+                delta = ((-delta)<<1) | 1
+            else:
+                delta <<= 1
+            # encode unsigned int
+            linetable.extend(encode_varint(delta))
+
+        if lineno_new is None:
+            lineno_delta = 0
+        else:
+            lineno_delta = lineno_new - lineno
+            lineno = lineno_new
+        while inst_size > 8:
+            _update(lineno_delta, 8)
+            inst_size -= 8
+        _update(lineno_delta, inst_size)
+
+    return linetable, update
+
+@dataclasses.dataclass
+class ExceptionTableEntry:
+    start: int
+    end: int
+    target: int
+    depth: int
+    lasti: bool
+
+def parse_exception_table(exntab: bytes):
+    """
+    Parse the exception table according to
+    https://github.com/python/cpython/blob/3.11/Objects/exception_handling_notes.txt
+    """
+    if sys.version_info >= (3, 11):
+        exntab_iter = iter(exntab)
+        tab = []
+        try:
+            while True:
+                start = decode_varint(exntab_iter) * 2
+                length = decode_varint(exntab_iter) * 2
+                end = start + length - 2
+                target = decode_varint(exntab_iter) * 2
+                dl = decode_varint(exntab_iter)
+                depth = dl >> 1
+                lasti = bool(dl & 1)
+                tab.append(ExceptionTableEntry(start, end, target, depth, lasti))
+        except StopIteration:
+            return tab
+    raise RuntimeError("Cannot parse for exception table in Python < 3.11")
+
+def assemble_exception_table(tab: List[ExceptionTableEntry]):
+    b = []
+    for entry in tab:
+        b.extend(encode_varint(entry.start // 2))
+        length = entry.end - entry.start + 2
+        b.extend(encode_varint(length // 2))
+        b.extend(encode_varint(entry.target // 2))
+        dl = entry.depth << 1 + entry.lasti
+        b.extend(encode_varint(dl))
     return bytes(b)
 
-def assemble_exception_table(tab):
-    pass
-
+def offset_exception_table(exntab: bytes, offset: int):
+    """
+    Offsets each position entry in `exntab` by `offset`.
+    """
+    tab = parse_exception_table(exntab)
+    for entry in tab:
+        entry.start += offset
+        entry.end += offset
+        entry.target += offset
+    return assemble_exception_table(tab)
 
 def assemble(instructions: List[Instruction], firstlineno):
     """Do the opposite of dis.get_instructions()"""
     code = []
-    if sys.version_info < (3, 10):
-        lnotab, update_lineno = lnotab_writer(firstlineno)
-    else:
-        lnotab, update_lineno, end = linetable_writer(firstlineno)
-
-    for inst in instructions:
-        if inst.starts_line is not None:
-            update_lineno(inst.starts_line, len(code))
-        arg = inst.arg or 0
-        code.extend((inst.opcode, arg & 0xFF))
-        if sys.version_info >= (3, 11):
+    if sys.version_info >= (3, 11):
+        lnotab, update_lineno = linetable_311_writer(firstlineno)
+        num_ext = 0
+        for inst in instructions:
+            if inst.opname == "EXTENDED_ARG":
+                inst_size = 1
+                num_ext += 1
+            else:
+                inst_size = instruction_size(inst) // 2 + num_ext
+                num_ext = 0
+            update_lineno(inst.starts_line, inst_size)
+            num_ext = 0
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
             for _ in range(instruction_size(inst) // 2 - 1):
                 code.extend((0, 0))
+    else:
+        if sys.version_info < (3, 10):
+            lnotab, update_lineno = lnotab_writer(firstlineno)
+        else:
+            lnotab, update_lineno, end = linetable_310_writer(firstlineno)
 
-    if sys.version_info >= (3, 10):
-        end(len(code))
+        for inst in instructions:
+            if inst.starts_line is not None:
+                update_lineno(inst.starts_line, len(code))
+            arg = inst.arg or 0
+            code.extend((inst.opcode, arg & 0xFF))
+
+        if sys.version_info >= (3, 10):
+            end(len(code))
 
     return bytes(code), bytes(lnotab)
 
@@ -344,7 +449,7 @@ def remove_load_call_method(instructions: List[Instruction]):
 
 
 def explicit_super(code: types.CodeType, instructions: List[Instruction]):
-    """convert super() with no args into explict arg form"""
+    """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
     output = []
     for idx, inst in enumerate(instructions):
@@ -522,7 +627,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             instructions[i].arg = (instructions[i].arg << shift) + push_null
 
 
-def transform_code_object(code, transformations, safe=False):
+def get_code_keys():
     # Python 3.11 changes to code keys are not fully documented.
     # See https://github.com/python/cpython/blob/3.11/Objects/clinic/codeobject.c.h#L24
     # for new format.
@@ -558,6 +663,10 @@ def transform_code_object(code, transformations, safe=False):
             "co_cellvars",
         ]
     )
+    return keys
+
+def transform_code_object(code, transformations, safe=False):
+    keys = get_code_keys()
     code_options = {k: getattr(code, k) for k in keys}
     assert len(code_options["co_varnames"]) == code_options["co_nlocals"]
 
@@ -600,10 +709,11 @@ def clean_and_assemble_instructions(
         "co_posonlyargcount"
     }
     if sys.version_info >= (3, 11):
-        # generated code doesn't contain exceptions, so leave exception table empty
-        # TODO: generated code might look very similar to the original function,
+        # TODO: wrong to assume exception table is always empty.
+        # Generated code might look very similar to the original function,
         # I think in the case where there is a graph break with 0 ops. In this case,
         # exception table needs to be modified.
+        # Context manager reconstructions can also codegen code that requires an exception table.
         code_options["co_exceptiontable"] = b""
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 

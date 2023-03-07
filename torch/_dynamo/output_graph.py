@@ -139,7 +139,6 @@ class WrapperBackend:
         return clone_inputs(self.original_example_inputs)
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-
         self.restore = checkpoint_params(gm)
         self.gm = gm
         copy_gm = copy.deepcopy(self.gm)
@@ -187,11 +186,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         super().__init__()
         self.graph = torch.fx.Graph()
         self.graphargs: List[GraphArg] = []
+        self.export = export
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 strict_mark_dyn=export,
                 assume_static_by_default=config.assume_static_by_default,
             )
@@ -357,34 +358,33 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             var = f"___{name}_{i}"
             if var not in existing:
-                self.code_options["co_varnames"] = self.code_options["co_varnames"] + (
-                    var,
-                )
+                self.code_options["co_varnames"] += (var,)
                 return var
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""
         if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
+            self.code_options["co_names"] += (name,)
 
     @staticmethod
-    def module_has_hooks(mod):
-        return any(
-            len(getattr(mod, x)) > 0
-            for x in [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-                "_forward_pre_hooks",
-                "_forward_hooks",
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-            if hasattr(mod, x)
-        )
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
     def register_attr_or_module(
         self,
@@ -413,7 +413,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target):
+            if self.module_has_hooks(target, only_check_unsupported=True):
                 log.warning(
                     "nn.Module hooks are not fully supported, they may be ignored"
                 )
@@ -456,7 +456,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
         name = re.sub(r"[^a-zA-Z0-9]", "_", name)
@@ -489,25 +489,25 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         if not all(block.can_restore() for block in tx.block_stack):
             unimplemented("compile_subgraph with block_depth != 0")
 
+        prefix_insts = []
         if sys.version_info >= (3, 11):
             # prefix instructions (Python 3.11+)
             for inst in tx.prefix_insts:
                 if inst.opname == "MAKE_CELL":
-                    self.add_output_instructions(
-                        [create_instruction("MAKE_CELL", inst.argval)]
+                    prefix_insts.append(
+                        create_instruction("MAKE_CELL", inst.argval)
                     )
                 elif inst.opname == "COPY_FREE_VARS":
-                    self.add_output_instructions(
-                        [
-                            create_instruction(
-                                "COPY_FREE_VARS", len(tx.code_options["co_freevars"])
-                            )
-                        ]
+                    prefix_insts.append(
+                        create_instruction(
+                            "COPY_FREE_VARS", len(tx.code_options["co_freevars"])
+                        )
                     )
-                elif inst.opname in ("RETURN_GENERATOR", "RESUME"):
-                    self.add_output_instructions([inst])
                 else:
-                    raise RuntimeError(f"unsupported prefix instruction {inst}")
+                    prefix_insts.append(inst)
+        def append_prefix_insts():
+            self.add_output_instructions(prefix_insts)
+            prefix_insts.clear()
 
         for block in reversed(tx.block_stack):
             block.exit(tx)
@@ -536,6 +536,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # to handle random calls
         if len(tx.random_calls) > 0:
+            append_prefix_insts()
             random_calls_instructions = []
             self.random_values_var = self.new_var("random_values")
             rand_fn_name = unique_id("__gen_rand_values")
@@ -568,7 +569,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             and len(set(stack_values)) == len(stack_values)
             and self.side_effects.is_empty()
         ):
-
+            append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
@@ -602,6 +603,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     output.append(pass2.create_store(graph_output_var))
                 else:
                     output.append(create_instruction("POP_TOP"))
+            append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
         # restore all the live local vars
@@ -837,10 +839,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
+        # Reverse the frame_summaries, such that the innermost frame is at the last
+        frame_summaries.reverse()
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = " | ".join(msgs)
+        rv.node.stack_trace = "".join(msgs)
 
         return rv
 

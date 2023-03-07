@@ -76,7 +76,6 @@ from .variables.misc import (
     ClosureVariable,
     ContextWrappingVariable,
     GetAttrVariable,
-    GradModeVariable,
     NullVariable,
     PythonModuleVariable,
     UnknownVariable,
@@ -231,6 +230,17 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+def jump_check_none(check_is_none: bool):
+    def inner(self: "InstructionTranslatorBase", inst: Instruction):
+        value: VariableTracker = self.pop()
+        is_none = False
+        if value.is_python_constant():
+            is_none = value.as_python_constant() is None
+        if is_none ^ (not check_is_none):
+            self.jump(inst)
+    return inner
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -286,12 +296,10 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             if_jump = self.create_call_resume_at(inst.target)
 
             self.output.add_output_instructions(
-                [(create_instruction(inst.opname, target=if_jump[0]))]
-                + if_next
-                + if_jump
+                [create_instruction(inst.opname, target=if_jump[0])] + if_next + if_jump
             )
         elif isinstance(value, NNModuleVariable):
-            # Equivant of "self.nn_module is not None"
+            # Equivalent of "self.nn_module is not None"
             if truth_fn(value):
                 push and self.push(value)
                 self.jump(inst)
@@ -376,36 +384,18 @@ def break_graph_if_unsupported(*, push):
                 excp.add_to_stats("graph_break")
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
+
             self.output.compile_subgraph(self, reason=reason)
-            if sys.version_info >= (3, 11) and inst.opname == "CALL":
-                # stack effect for PRECALL + CALL is split between the two instructions
-                stack_effect = dis.stack_effect(
-                    dis.opmap["PRECALL"], inst.arg
-                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
-            else:
-                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
-            self.popn(push - stack_effect)
-
-            for _ in range(push):
-                self.push(UnknownVariable())
-
-            resume_call_insts = self.create_call_resume_at(self.next_instruction)
-            # Check if there is a block stack entry with GradModeVariable. And
-            # wrap the instruction causing the graph break inside a try..finally
-            # block. See more details at
-            # https://github.com/pytorch/torchdynamo/issues/207
-            cleanup = []
-            if len(self.block_stack) == 1 and isinstance(
-                self.block_stack[0].with_context, GradModeVariable
-            ):
-                ctx_variable = self.block_stack[0].with_context
-
-                cg = PyCodegen(self)
-                setup_finally, cleanup = ctx_variable.reconstruct(
-                    cg, resume_call_insts[0]
+            cg = PyCodegen(self)
+            cleanup: List[Instruction] = []
+            # Reconstruct the context variables in the block stack
+            for b in self.block_stack:
+                self.output.add_output_instructions(
+                    [
+                        *b.with_context.reconstruct(cg),
+                        *b.resume_fn().try_except(cg.code_options, cleanup),
+                    ]
                 )
-                self.output.add_output_instructions(setup_finally)
-
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
@@ -423,24 +413,26 @@ def break_graph_if_unsupported(*, push):
                 # no need to reset self.kw_names since self should not continue to run
             else:
                 self.output.add_output_instructions([inst])
-
-            # Add the cleanup instructions from try..finally block
             self.output.add_output_instructions(cleanup)
+
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                # stack effect for PRECALL + CALL is split between the two instructions
+                stack_effect = dis.stack_effect(
+                    dis.opmap["PRECALL"], inst.arg
+                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
+            else:
+                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+            self.popn(push - stack_effect)
+
+            for _ in range(push):
+                self.push(UnknownVariable())
             self.output.add_output_instructions(
-                resume_call_insts,
+                self.create_call_resume_at(self.next_instruction)
             )
 
         return wrapper
 
     return decorator
-
-
-def is_none(x):
-    return x is None
-
-
-def is_not_none(x):
-    return x is not None
 
 
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
@@ -1026,6 +1018,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
+        if sys.version_info >= (3, 11):
+            null = self.pop()
+            assert isinstance(null, NullVariable)
         self.output.guards.update(argsvars.guards)
         self.output.guards.update(kwargsvars.guards)
 
@@ -1599,10 +1594,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     POP_JUMP_FORWARD_IF_FALSE = generic_jump(operator.not_, False)
     POP_JUMP_BACKWARD_IF_FALSE = generic_jump(operator.not_, False)
 
-    POP_JUMP_FORWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_BACKWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_FORWARD_IF_NONE = generic_jump(is_none, False)
-    POP_JUMP_BACKWARD_IF_NONE = generic_jump(is_none, False)
+    POP_JUMP_FORWARD_IF_NOT_NONE = jump_check_none(False)
+    POP_JUMP_BACKWARD_IF_NOT_NONE = jump_check_none(False)
+    POP_JUMP_FORWARD_IF_NONE = jump_check_none(True)
+    POP_JUMP_BACKWARD_IF_NONE = jump_check_none(True)
 
     def CACHE(self, inst):
         pass
@@ -1942,7 +1937,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             argnames,
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
-            tuple(self.prefix_insts),
         )
 
         if new_code.co_freevars:
@@ -1959,7 +1953,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         return cg.get_instructions()
 
     def RETURN_VALUE(self, inst):
-        if self.output.count_calls() == 0:
+        if self.output.count_calls() == 0 and not self.export:
             raise exc.SkipFrame("because no content in function call")
         self.instruction_pointer = None
         _step_logger()(
@@ -1984,11 +1978,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             return cls.inline_call_(parent, func, args, kwargs)
 
     @staticmethod
-    def inline_call_(parent, func, args, kwargs):
-        assert isinstance(
-            func,
-            (UserFunctionVariable, NestedUserFunctionVariable),
-        )
+    def check_inlineable(func):
         if func.has_self():
             unimplemented("inline with __self__")
 
@@ -2008,6 +1998,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 f"inline in skipfiles: {func.fn.__qualname__}  | {func.get_name()} {func.get_filename()}"
             )
 
+    @staticmethod
+    def inline_call_(
+        parent, func: VariableTracker, args: List[VariableTracker], kwargs
+    ):
+        assert isinstance(
+            func,
+            (UserFunctionVariable, NestedUserFunctionVariable),
+        )
+        InliningInstructionTranslator.check_inlineable(func)
         try:
             sub_locals, closure_cells = func.bind_args(parent, args, kwargs)
         except TypeError as e:
@@ -2024,7 +2023,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
+        suffix = ""
+        if config.output_code:
+            suffix = f"\n{dis.Bytecode(code).dis()}"
+        log.debug(f"INLINING {code}{suffix}")
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
