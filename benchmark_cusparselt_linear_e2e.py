@@ -21,53 +21,63 @@ class cuSPARSELtLinear(nn.Linear):
         return self.res.T
 
     @classmethod
-    def from_dense(cls, mod, sample_input):
+    def from_dense(cls, mod):
         """
         convert from nn.Linear
         """
-        sample_input = sample_input.T
-        weight_tensor = mod.weight.data
-        bias_tensor = mod.bias.data.T
+        if getattr(mod, "sample_input", None) is not None:
+            print("converting")
+            sample_input = mod.sample_input
+            weight_tensor = mod.weight.data
+            bias_tensor = mod.bias.data.T.contiguous()
 
-        cusparselt = cls(mod.in_features,
-                         mod.out_features)
+            cusparselt = cls(mod.in_features,
+                             mod.out_features)
 
-        # need to be separate otherwise numeric issues
-        res = torch.zeros(mod.out_features, sample_input.size(1), dtype=dtype, device=device)
-        offset = torch.zeros(mod.out_features, sample_input.size(1), dtype=dtype, device=device)
+            # need to be separate otherwise numeric issues
+            res = torch.zeros(mod.out_features, sample_input.size(1), dtype=dtype, device=device)
+            offset = torch.zeros(mod.out_features, sample_input.size(1), dtype=dtype, device=device)
 
-        # set up cusparselt
-        cslt = torch.classes.cusparselt.CusparseLtLinear(weight_tensor)
-        cslt.init(res, sample_input, bias_tensor, offset)
-        cslt.prune()
-        cslt.compress()
-        cslt.search_matmul_algo()
+            # set up cusparselt
+            cslt = torch.classes.cusparselt.CusparseLtLinear(weight_tensor)
+            cslt.init(res, sample_input, bias_tensor, offset)
+            cslt.prune()
+            cslt.compress()
+            cslt.search_matmul_algo()
 
-        cusparselt.cslt = cslt
-        cusparselt.res = res
-        return cusparselt
+            cusparselt.cslt = cslt
+            cusparselt.res = res
+            return cusparselt
+        else:
+            raise ValueError("No attribute sample_input set")
 
 def get_linear(m, k, n):
     model = Model(m, k)
     model.half()
     model.cuda()
 
-    pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(1, 4), zeros_per_block=2)
+    pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(4, 1), zeros_per_block=2)
     pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
     pruner.step()
-    pruner.squash_mask()
 
     input_tensor = torch.randn(n, k, device=device, dtype=dtype)
-    sparse_linear = cuSPARSELtLinear.from_dense(model.linear, input_tensor)
+    model.linear.sample_input = input_tensor.T
+
+    # converted_model = pruner.convert(model, mapping={nn.Linear: cuSPARSELtLinear})
+    # sparse_linear = converted_model
+    # dense_linear = model
+
+    sparse_linear = cuSPARSELtLinear.from_dense(model.linear)
     dense_linear = model.linear
 
     for i in range(5):
         input_tensor = torch.randn(n, k, device=device, dtype=dtype)
-        sparse_output = sparse_linear(input_tensor)
         dense_output = dense_linear(input_tensor)
+        sparse_output = sparse_linear(input_tensor)
+        print(dense_output, sparse_output)
         assert torch.allclose(sparse_output, dense_output, rtol=1e-3, atol=1e-3)
 
-    return input_tensor, sparse_linear, dense_linear
+    return input_tensor, pruner, sparse_linear, dense_linear
 
 
 
@@ -113,33 +123,39 @@ batch_sizes = [1] # [1, 4, 16, 64, 256]
 for batch_size, (m, k, n) in product(batch_sizes, shapes):
     # label and sub_label are the rows
     # description is the column
-    label = 'cuSPARSELt Linear vs. nn.Linear'
+    label = 'nn.ParameterizedLinear vs. nn.Linear vs. cuSPARSELt Linear'
     sub_label = f'batch_size: {batch_size:2d} | m:{m:6d} | k:{k:6d} | n:{n:6d}'
 
-    try: 
-        input_tensor, sparse_linear, dense_linear = get_linear(m, k, n)
+    input_tensor, pruner, sparse_linear, dense_linear = get_linear(m, k, n)
 
-        result = benchmark.Timer(
-            stmt='sparse_linear(input_tensor)',
-            globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
-            label=label,
-            sub_label=sub_label,
-            description='sparse latency',
-        )
-        results.append(result.blocked_autorange(min_run_time=1))
+    # result = benchmark.Timer(
+        # stmt='param_linear(input_tensor)',
+        # globals={'input_tensor': input_tensor, 'param_linear': dense_linear},
+        # label=label,
+        # sub_label=sub_label,
+        # description='prepare latency',
+    # )
+    # results.append(result.blocked_autorange(min_run_time=1))
 
-        result = benchmark.Timer(
-            stmt='dense_linear(input_tensor)',
-            globals={'input_tensor': input_tensor, 'dense_linear': dense_linear},
-            label=label,
-            sub_label=sub_label,
-            description='dense latency',
-        )
-        results.append(result.blocked_autorange(min_run_time=1))
+    pruner.squash_mask()
 
-    except Exception as e:
-        print(sub_label)
-        print(e)
+    result = benchmark.Timer(
+        stmt='dense_linear(input_tensor)',
+        globals={'input_tensor': input_tensor, 'dense_linear': dense_linear},
+        label=label,
+        sub_label=sub_label,
+        description='dense latency',
+    )
+    results.append(result.blocked_autorange(min_run_time=1))
+
+    result = benchmark.Timer(
+        stmt='sparse_linear(input_tensor)',
+        globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
+        label=label,
+        sub_label=sub_label,
+        description='sparse latency',
+    )
+    results.append(result.blocked_autorange(min_run_time=1))
 
 compare = benchmark.Compare(results)
 compare.colorize(rowwise=True)
