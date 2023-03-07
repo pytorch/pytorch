@@ -71,15 +71,18 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   Node* function = function_context_node->inputs().at(0)->node();
   Node* context = function_context_node->inputs().at(1)->node();
   auto then_graph = function->g(attr::Subgraph)->copy();
-  // Replacing ir_emitter emitted awaitableThenClosure, with awaitable_then node
-  // with 2 inputs: Await Value which graph it continues, the fake input Value
-  // which represents the future result of Await graph with previously added
-  // continuations execution. As we do not have Value for it in IR - we add
-  // no-op node awaitable_then_input to produce this Value and keep the graph
-  // valid. At runtime instead the result of Await will be placed for this
-  // Value.
-  // Before:
-  // %aw : Await(Tensor) = prim::awaitableClosure(%43)
+  //  ir_emitter produces IR with prim::awaitableThenClosure; but just like the
+  //  inlineForkedClosure method above, we need to modify it before running it.
+  // We replace the prim::Closure with a prim::awaitable_then, which is a
+  // callable. Note that a prim::awaitable_then function takes arguments (%x:
+  // Await(T), %y: T). In the calling graph, we will have %x: Await(T)
+  // available; it's the awaitable that the ops are operating on. However, we
+  // won't have second argument %y: T. (At execution time, %y, the input to the
+  // function we're calling as part of our awaitable_then call, will be the
+  // output of the previous function queued in the Awaitable object). As a
+  // workaround, we use prim::awaitable_then_input to create a dummy argument in
+  // the calling graph that we pass into the awaitable_then, which makes the
+  // graph valid. Before: %aw : Await(Tensor) = prim::awaitableClosure(%43)
   // ...
   // %1 : NoneType = prim::Closure_1()
   // %2 : () = prim::TupleConstruct()
@@ -89,7 +92,7 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   // with prim::Closure_1 = graph(%context : (),
   //       %aw_ : Await(Tensor),
   //       %aw_out : Tensor):
-  //   %4 : Function = prim::Constant[name="then"]()
+  //   %4 : Function = prim::Constant[name="continuation_fn"]()
   //   %5 : Tensor = prim::CallFunction(%4, %aw_, %aw_out)
   //   return (%5)
   // After:
@@ -100,7 +103,7 @@ void inlineAwaitableThenClosure(Node* then_closure) {
   //
   // with prim::awaitable_then_1 = graph(%aw_ : Await(Tensor),
   //       %aw_out : Tensor):
-  //   %2 : Function = prim::Constant[name="then"]()
+  //   %2 : Function = prim::Constant[name="continuation_fn"]()
   //   %4 : Tensor = prim::CallFunction(%2, %aw_, %aw_out)
   //   return (%4)
   auto g = then_closure->owningGraph();

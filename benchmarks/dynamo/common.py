@@ -208,11 +208,16 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    # timm_models
+    "botnet26t_256",  # sympy RecursionError
+    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -221,7 +226,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
+    "fastNLP_Bert",  # AssertionError: 1900: <class 'torch.Tensor'>, 256: <class 'int'>
+    "speech_transformer",  # AssertionError: 2040: <class 'torch.Tensor'>, 256: <class 'int'>
+    "yolov3",  # AssertionError: 2304: <class 'torch.Tensor'>, 32: <class 'int'>
     # timm_models
+    "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # ceiling is not defined
     "volo_d1_224",  # ceiling is not defined
 ]
@@ -1353,8 +1362,8 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception as e:
-                log.exception(f"Failed for {mode} {e}")
+            except Exception:
+                log.exception(f"Backend {mode} failed in warmup()")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
