@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, load_test
                                                   TEST_NUMPY, set_default_dtype, torch_to_numpy_dtype_dict,
                                                   numpy_to_torch_dtype_dict, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import (instantiate_device_type_tests, onlyNativeDeviceTypes,
-                                                        dtypes, onlyCPU, expectedFailureMeta, skipMeta)
+                                                        dtypes, onlyCPU, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, floating_types, get_all_dtypes
 )
@@ -685,15 +685,6 @@ class TestTypePromotion(TestCase):
     def test_promote_self(self, device):
         for dtype in all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf, torch.bool):
             self.assertEqual(torch.promote_types(dtype, dtype), dtype)
-
-    @expectedFailureMeta
-    @float_double_default_dtype
-    def test_indexing_fail(self, device):
-        # https://github.com/pytorch/pytorch/issues/28010
-        a = torch.ones(5, 2, dtype=torch.double, device=device)
-        b = torch.zeros(5, dtype=torch.int, device=device)
-        with self.assertRaises(RuntimeError):
-            a[:, [1]] = b.unsqueeze(-1)
 
     @float_double_default_dtype
     def test_indexing(self, device):

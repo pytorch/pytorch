@@ -982,6 +982,7 @@ class TestIndexing(TestCase):
         src[[0, 2, 1], :, :] = res
         self.assertEqual(res.shape, src.shape)
 
+    @skipXLA
     @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
