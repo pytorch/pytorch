@@ -25,9 +25,11 @@ def dl_open_guard():
     if _SET_GLOBAL_FLAGS:
         old_flags = sys.getdlopenflags()
         sys.setdlopenflags(old_flags | ctypes.RTLD_GLOBAL)
-    yield
-    if _SET_GLOBAL_FLAGS:
-        sys.setdlopenflags(old_flags)
+    try:
+        yield
+    finally:
+        if _SET_GLOBAL_FLAGS:
+            sys.setdlopenflags(old_flags)
 
 
 def has_key(op, k):

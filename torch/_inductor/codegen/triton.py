@@ -696,11 +696,13 @@ class TritonKernel(Kernel):
                 # and write out a reduction loop
                 self.codegen_body()
             self.inside_reduction = False
-            yield
-            if not self.persistent_reduction:
-                # flush out any code before opening the next loop
-                self.codegen_body()
-            self.inside_reduction = True
+            try:
+                yield
+            finally:
+                if not self.persistent_reduction:
+                    # flush out any code before opening the next loop
+                    self.codegen_body()
+                self.inside_reduction = True
 
         return ctx()
 
@@ -957,10 +959,12 @@ class TritonKernel(Kernel):
             mask = self.cse.generate(self.compute, f"{mask} & {prior}")
 
         self._load_mask = mask
-        with self.swap_buffers(self.compute, self.compute):
-            # TODO(jansel): do we need a reshape here?
-            yield mask
-        self._load_mask = prior
+        try:
+            with self.swap_buffers(self.compute, self.compute):
+                # TODO(jansel): do we need a reshape here?
+                yield mask
+        finally:
+            self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1530,10 +1534,11 @@ class TritonScheduling:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
-            yield
-            node_schedule.append(EnableReduction)
-            current_loop_writes.clear()
-            is_current_reductions.clear()
+            try:
+                yield
+            finally:
+                node_schedule.append(EnableReduction) current_loop_writes.clear()
+                is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
             if node in done:
