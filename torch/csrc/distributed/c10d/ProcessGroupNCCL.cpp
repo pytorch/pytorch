@@ -499,7 +499,7 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
         // So explicitly abort ncclComms here before throwing this timed out
         // exception to users, after this, ncclCommWatchdog can detect nccl
         // communicators are aborted and clean up devNCCLCommMap_ accordingly.
-        // if throwing timed out excepiton without aborting nccl communicators
+        // if throwing timed out exception without aborting nccl communicators
         // here, it was observed that CUDA GPU will have 100% utilization and
         // can not run new events successfully.
 
