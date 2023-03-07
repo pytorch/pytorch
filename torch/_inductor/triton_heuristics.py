@@ -21,9 +21,9 @@ from .utils import (
     ceildiv,
     conditional_product,
     do_bench,
+    get_num_bytes,
     has_triton,
     next_power_of_2,
-    get_num_bytes,
 )
 
 
