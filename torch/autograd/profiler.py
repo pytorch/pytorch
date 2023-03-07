@@ -3,6 +3,7 @@ from collections import defaultdict
 from warnings import warn
 
 import torch
+import torch._dynamo
 import torch.cuda
 from torch._C._profiler import _ExperimentalConfig
 
