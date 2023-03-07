@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/AccumulateType.h>
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
@@ -1542,7 +1541,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   auto m0 = mat2.accessor<scalar_t, 3>();
 
   int64_t grain_size = std::min(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
         auto r1 = r0[b];
@@ -1552,8 +1551,10 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
           auto r2 = r1[i];
           auto s2 = s1[i];
           for (const auto j : c10::irange(js)) {
-            accscalar_t acc_value = 0;
+            opmath_t acc_value = r2[j];
+            scalar_t& r = r2[j];
             if (is_bmm) {
+              acc_value = 0;
               for (const auto k : c10::irange(ks)) {
                 acc_value += s2[k] * m1[k][j];
               }
@@ -1563,7 +1564,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
                 acc_value += alpha * s2[k] * m1[k][j];
               }
             }
-            r2[j] = static_cast<scalar_t>(acc_value);
+            r = acc_value;
           }
         }
       }

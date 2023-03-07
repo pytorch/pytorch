@@ -66,17 +66,17 @@ void gemm_notrans_or_transb(
     opmath_t beta,
     scalar_t* c,
     int64_t ldc) {
-  // c *= beta
-  scale_(m, n, beta, c, ldc);
-
-  // c += alpha * (a @ b)
   for (const auto i : c10::irange(m)) {
     for (const auto j : c10::irange(n)) {
       const auto dot = sum(k, [&](int64_t l) -> opmath_t {
-        return static_cast<opmath_t>(a[i * lda + l]) *
+        return static_cast<opmath_t>(a[l * lda + i]) *
             static_cast<opmath_t>(b[j * ldb + l]);
       });
-      c[j * ldc + i] = alpha * dot;
+      if (beta == opmath_t(0)) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
     }
   }
 }

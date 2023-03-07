@@ -7454,16 +7454,16 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # and https://github.com/pytorch/pytorch/issues/83863
         # for bf16 accumulation in gemm ref path
         def check_correctness(fn, *args):
-                expected = fn(*args).bfloat16()
-                with torch.backends.mkldnn.flags(enabled=False):
-                    def test():
-                        bf16_args = (arg.bfloat16() for arg in args)
-                        tmp_result=fn(*bf16_args)
-                        return tmp_result
-                    c = test()
-                    assert(torch.all(c == expected)), "Incorrect result with\n" \
-                                                      f"expected: {expected}\n" \
-                                                      f"got: {c}\n"
+            expected = fn(*args).bfloat16()
+            with torch.backends.mkldnn.flags(enabled=False):
+                def test():
+                    bf16_args = (arg.bfloat16() for arg in args)
+                    tmp_result = fn(*bf16_args)
+                    return tmp_result
+                c = test()
+                assert (torch.all(c == expected)), "Incorrect result with\n" \
+                                                   f"expected: {expected}\n" \
+                                                   f"got: {c}\n"
         # test matmul
         for transa in [True, False]:
             for transb in [True, False]:
@@ -7486,11 +7486,11 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         # test mv
         a = torch.rand(1, 300)
         b = torch.rand(300)
-        check_correctness(torch.mv, a, b)        
+        check_correctness(torch.mv, a, b)
         # test dot
         a = torch.rand(300)
         b = torch.rand(300)
-        check_correctness(torch.dot, a, b)        
+        check_correctness(torch.dot, a, b)
 
 instantiate_device_type_tests(TestLinalg, globals())
 

@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/AccumulateType.h>
 #include <ATen/Config.h>
+#include <ATen/OpMathType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/complex.h>
@@ -181,22 +181,19 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     return;
   }
 
-  using accscalar_t = at::acc_type<scalar_t, false>;
+  using opmath_t = at::opmath_type<scalar_t>;
   if ((trans == 'T') || (trans == 't')) {
     for (const auto i : c10::irange(n)) {
-      accscalar_t sum = 0;
-      accscalar_t y_sum = 0;
+      opmath_t sum = 0;
       scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
         sum += x[j * incx] * row_[j];
       }
       if (beta == scalar_t(0)) {
-        y_sum = static_cast<accscalar_t>(alpha) * sum;
+        y[i * incy] = alpha * sum;
       } else {
-        y_sum = static_cast<accscalar_t>(beta) * y_sum +
-            static_cast<accscalar_t>(alpha) * sum;
+        y[i * incy] = beta * y[i * incy] + alpha * sum;
       }
-      y[i * incy] = y_sum;
     }
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
@@ -268,10 +265,10 @@ scalar_t dot_naive(
     Functor op) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i;
-  using accscalar_t = at::acc_type<scalar_t, false>;
-  accscalar_t sum = 0;
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t sum = 0;
   for (i = 0; i < n; i++) {
-    sum += static_cast<accscalar_t>(op(x[i * incx], y[i * incy]));
+    sum += static_cast<opmath_t>(op(x[i * incx], y[i * incy]));
   }
   return static_cast<scalar_t>(sum);
 }
