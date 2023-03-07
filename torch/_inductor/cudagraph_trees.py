@@ -728,7 +728,10 @@ class CUDAGraphTreeManager:
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
 
-        # the most recently invoked cudagraph wrapping of a function
+        # the most recently invoked cudagraph wrapping of a function. Will be None
+        # when there is no output from a previous recording or execution whose memory
+        # we need to respect in the cuda caching allocator, which includes if that
+        # memory is from a separate generation.
         self.current_node: Optional[CUDAGraphNode] = None
 
         # current generation of cudagraph invocations. when torch.compile is run
