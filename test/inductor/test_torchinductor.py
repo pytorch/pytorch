@@ -1009,6 +1009,7 @@ class CommonTemplate:
                 x.argmax(-1),
                 x.amin(-1),
                 x.amax(-1),
+                x.aminmax(),
             )
 
         with config.patch(unroll_reductions_threshold=8):
@@ -1043,9 +1044,35 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
+            return (
+                (a + b).max(),
+                (a + b).min(),
+                torch.amax(a + 1, keepdim=True),
+                torch.amin(b + 1, keepdim=True),
+            )
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+            self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
+
+    def test_fmin_fmax(self):
+        def fn(a, b):
+            return (
+                torch.fmin(a, b),
+                torch.fmax(a, b),
+                torch.fmax(a + 1, torch.tensor(0.0)),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor(
+                    [-10.0, 10.0, float("nan"), float("nan"), float("nan"), 3, 4]
+                ),
+                torch.tensor(
+                    [float("nan"), float("nan"), -10.0, 10.0, float("nan"), 4, 3]
+                ),
+            ),
+        )
 
     def test_sum_int(self):
         def fn(x):
@@ -2175,6 +2202,7 @@ class CommonTemplate:
                 (v,),
             )
 
+    @slow()
     def test_conv_transpose2d_unary(self):
         if self.device == "cuda":
             raise unittest.SkipTest("only support cpu conv_transpose2d unary test")
@@ -4453,7 +4481,11 @@ class CommonTemplate:
 
     def test_narrow(self):
         def fn(x):
-            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+            return (
+                aten.narrow(x, 1, 10, 16),
+                aten.narrow(x + 2, 0, 10, 16) + 1,
+                aten.narrow_copy(x, 1, 10, 16),
+            )
 
         self.common(fn, [torch.randn(64, 64)])
 
@@ -6626,6 +6658,22 @@ if HAS_CPU:
             with self.assertRaises(RuntimeError):
                 torch.compile(fn)(a)
 
+        def test_ir_node_str(self):
+            @torch.compile
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin(), torch.nn.Softmax(dim=1)(x.cos())
+
+            def run_node_alt(*args, **kwargs):
+                rv = run_node(*args, **kwargs)
+                strings.append(str(rv))
+                return rv
+
+            strings = []
+            run_node = GraphLowering.run_node
+            with patch.object(GraphLowering, "run_node", run_node_alt):
+                fn(torch.randn([8, 128]))
+            self.assertGreater(len(strings), 3)
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
     import triton
@@ -7362,16 +7410,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(fn_opt(), fn())
 
         def test_split_op_with_sym(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
             for dynamic_shapes in [True, False]:
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-
-                def fn(x: torch.Tensor) -> torch.Tensor:
-                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
-                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
-
-                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
-                inps = torch.randn([5, 5])
-                fn_opt(inps)
+                with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                    torch._dynamo.reset()
+                    fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(
+                        fn
+                    )
+                    inps = torch.randn([5, 5])
+                    fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):
