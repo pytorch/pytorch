@@ -2315,7 +2315,7 @@ def run(runner, args, original_dir=None):
                 timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
-                subprocess.check_call(
+                subprocess.check_output(
                     [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
                 )
             except subprocess.TimeoutExpired:
