@@ -698,11 +698,11 @@ class TritonKernel(Kernel):
             self.inside_reduction = False
             try:
                 yield
+                if not self.persistent_reduction:
+                    # flush out any code before opening the next loop
+                    self.codegen_body()
             finally:
                 self.inside_reduction = True
-            if not self.persistent_reduction:
-                # flush out any code before opening the next loop
-                self.codegen_body()
 
         return ctx()
 
