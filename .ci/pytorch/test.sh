@@ -297,10 +297,17 @@ test_single_dynamo_benchmark() {
 
   local partition_flags=()
   if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
-    partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
+    partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
   fi
 
-  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    python "benchmarks/dynamo/$suite.py" \
+      --ci --training --performance \
+      --disable-cudagraphs --amp \
+      "${DYNAMO_BENCHMARK_FLAGS[@]}" \
+      "$@" "${partition_flags[@]}" \
+      --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+  elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
       --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
