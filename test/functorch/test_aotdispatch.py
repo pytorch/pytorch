@@ -1331,6 +1331,31 @@ def forward(self, primals_1, primals_2):
     return [t, as_strided_2, view_1, t_1, unsqueeze, add]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_dynamic_shape_output_not_in_bw_graph(self):
+        def f(x):
+            return [x + 1, x.shape[0]]
+        inp = torch.ones(5, requires_grad=True)
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            decompositions={},
+            keep_inference_input_mutations=False,
+            dynamic=True,
+        )
+        out = compiled_f(inp)
+        out[0].sum().backward()
+        # The important bit: the forward fn returns 2 outputs,
+        # but one of them is a symint so we should only see
+        # 1 grad_output as an input to the backward graph.
+        # (Otherwise, autograd will plumb a None as the value of the grad_output,
+        # which causes inductor to complain).
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, arg0_1):
+    return (arg0_1,)""")
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
         def f(a, b):
             return a.cos(), b.cos(), a * b
