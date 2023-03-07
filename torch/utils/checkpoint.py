@@ -1,12 +1,16 @@
 import torch
 import warnings
 import weakref
-from typing import Any, Iterable, List, Tuple
+from weakref import ReferenceType
+from typing import Any, Iterable, List, Tuple, Dict, Optional, DefaultDict
+from collections import defaultdict
+import uuid
+import contextlib
 
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states",
+    "set_device_states", "set_checkpoint_early_stop"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -335,7 +339,333 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         )
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
-def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kwargs):
+# NOTE [ Nestable Checkpoint ]
+#
+# The semantics of nested checkpoint can be defined by two basic rules.
+# Following the two rules leads to an important implication that is central
+# to motivating the design.
+#
+# Rule 1. Saved tensors are managed by inner-most checkpoint only and hidden
+#         from any outer layers of checkpoint.
+#
+# Rule 2. The inputs of inner checkpoints are treated as tensors saved to its
+#         parent checkpoint.
+#
+# Implication: To recompute any given saved tensor, we need to recompute all of
+#              the checkpoints wrapping it.
+#
+# Why is this implied? To unpack a saved tensor X during backward we need to
+# recompute the inner-most checkpoint (#1), and in order to recompute that
+# checkpoint I need to have its inputs, which are managed by that checkpoint's
+# parent (#2), which thus also needs to be recomputed first. Continue this line
+# of reasoning and we realize that in order to unpack X, all checkpoints that
+# were active at the time X was saved need to be recomputed. (unless we have
+# already done so in that backward for some other saved tensor).
+#
+# In practice, we use a noop autograd Function to save inputs as saved tensors.
+# During unpack calling ctx.saved_tensor triggers the parent checkpoint to
+# recompute.
+#
+# Rule 3. We should start recomputation as if there are no checkpoints currently
+#         active. Checkpoints encountered during recomputation are still
+#         respected.
+#
+# When we start recomputation, we push the saved variable hook meant for
+# recomputation on the stack. See examples in Rule 6 for more context.
+#
+#                                * PART 2 *
+#
+# Beyond the basic semantics specific to nested checkpoint, we impose several
+# more constraints that may apply to checkpointing in general.
+#
+# Rule 4. Lifetime of recomputed tensors
+#
+#         Recomputed tensors are considered specific to particular invocations
+#         of backward and are always cleared immediately as they are unpacked
+#         Particularly, we require this to happen even if retain_graph=True.
+#
+# [ Implementation details of Rule 4 ]
+#
+# If we were okay with recomputed tensors staying alive after backward is run
+# with retain_graph=True, we would store recomputed variables as the values of a
+# WeakKeyDictionary and pack strong references to the keys, so that as we
+# backward, those packed keys would be cleared as long as retain_graph=False.
+# Clearing the packed key clears the corresonding entry in the WKD.
+#
+# If we wish recomputed variables to be immediately cleared as we unpack them in
+# the retain_graph=True case, we cannot rely on the packed keys to be cleared by
+# backward automatically. Instead of packing the strong reference to the key
+# directly, we pack a container object, which we manually clear as we unpack.
+#
+# An important detail is that if a second backward happens, the second
+# recomputation needs to reset the container with a newly created key.
+#
+# Rule 5. Stop recomputation as soon as we've recomputed the saved tensors we
+#         know we need.
+#
+# [ Implementation details of Rule 5 ]
+#
+# During recomputation, raise an exception if the number of recomputed tensors
+# matches the number of tensors that we expected to recompute. We wrap the
+# recomputation call with a try-catch to catch this specific exception. See
+# Rule #5 below for some examples.
+#
+# Rule 6. We support doing backward inside checkpoint context
+#
+# This section is just a bunch of random examples that we'd like to support,
+# and comments on how that forced us to make certain design decisions.
+#
+# [ Basic case ]
+#
+# def fn(x):
+#   y = x.sin()
+#   z = y.cos()
+#   gx, = torch.autograd.grad(z, x, retains_grad=True)
+#   return gx, z
+#
+# out = checkpoint(fn)(inp)
+#
+# Because z is saved by cos while checkpoint is enabled, it would not be
+# actually saved, and so the .grad() call inside must trigger a recomputation.
+#
+# During recomputation the "inner pack hook" has two responsibilities:
+#
+# 1) As usual, populating the WeakKeyDictionary storing recomputed tensors
+# 2) Pack the tensor as-is so that one may perform backward on the recomputed
+#    graph. The tensors saved to this graph will live until the end of
+#    recomputation, or earlier if someone performs backward with
+#    retain_graph=False or something.
+#
+# [ Multiple backwards ]
+#
+# The example below shows what happens if during recomputation we find that some
+# of the tensors we are trying to recompute have already been cleared.
+#
+# Spoiler: we don't do anything special, we just skip over them!
+#
+# def fn(x):
+#   y = x.sin()                           # (1)
+#   z = y.cos()                           # (2)
+#   gx, = torch.autograd.grad(z, x)       # (3)
+#   w = x.sin()                           # (4)
+#   v = w.cos()                           # (5)
+#   gx2, = torch.autograd.grad(v, x)      # (6)
+#   return x * gx * gx2
+#
+# out = checkpoint(fn)(inp)
+#
+# In the code above fn is computed 4 times in total.
+#   1. Don't save x and y since we are inside a checkpoint.
+#   2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
+#   3. If early stop is enabled, stop at (2)
+#   4. Continue original forward at (4), not saving x and w.
+#   5. (5) triggers a recompute of fn
+#   6. During recompute, we see that in the original graph, gx has already
+#      cleared x and y since backward is run at (3) without retain_graph=True
+#      We save x and w, however.
+#   7. Continue with returning
+#
+# [ backward within nested checkpoint ]
+#
+# Another case to consider is when we do backward within checkpoint, but we are
+# also in a nested checkpoint. Properly handling this case has implications for
+# how inputs are saved.
+#
+# def f(x):
+#   y = x.sin()
+#   z = y.cos()
+#   gx, = torch.autograd.grad(z, x)       # (1)
+#   return z
+#
+# def g(x):
+#   return checkpoint(f)(x)
+#
+# out = checkpoint(g)(inp)
+#
+# In the above example, when we recompute for the outer checkpoint (the one
+# wrapping g), we are recomputing checkpointed f.
+#
+# When checkpointed f was original computed in forward, there was already a
+# checkpoint active when we entered f's checkpoint, which means that f's
+# checkpoint is nested. However, during the recomputation of g, we enter
+# into a checkpoint wrapping f yet again, but this time there is no longer a
+# checkpoint active. How should we save f's inputs in this situation?
+#
+# Recall that we should save f's inputs onto the parent checkpoint if we are
+# nested, or directly onto the checkpoint otherwise, so on the surface it sounds
+# like we should save directly onto the checkpoint.
+#
+# Strangely, the answer here is actually both!
+#
+# In addition to saving our inputs onto the frame directly, we also save f's
+# inputs onto the parent checkpoint. We do this for two reasons:
+#
+# 1) First, if we did not save f's inputs directly onto its own frame we would
+#    not be able to recompute f during recomputation for - see line marked (1)
+#    above in the example.
+# 2) Second, since f's checkpoint was originally saved its inputs as if it were
+#    nested, it must also save its inputs as if it were nested so that the
+#    indices of the recomputed variables match.
+#
+
+# NB: This is temporary and should be removed in a follow up PR. Early stopping
+#     is currently disabled by default. Since some nested test cases require
+#     ealry stopping to pass, _set_checkpoint_early_stop can be used to enable.
+_enable_checkpoint_early_stop = False
+
+@contextlib.contextmanager
+def set_checkpoint_early_stop(enable):
+    global _enable_checkpoint_early_stop
+    try:
+        prev = _enable_checkpoint_early_stop
+        _enable_checkpoint_early_stop = enable
+        yield
+    finally:
+        _enable_checkpoint_early_stop = prev
+
+# See NOTE [ Nestable Checkpoint ] Rule #4
+class _Handle():
+    pass
+
+class _Holder():
+    def __init__(self):
+        self.handles: Dict[int, Optional[_Handle]] = dict()
+
+# Reimplementation of torch.distributed.utils.{_pack,_unpack}_kwargs to avoid a import cycle
+def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
+    kwarg_keys: List[str] = []
+    flat_args: List[Any] = list(args)
+    for k, v in kwargs.items():
+        kwarg_keys.append(k)
+        flat_args.append(v)
+
+    return tuple(flat_args), tuple(kwarg_keys)
+
+def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
+    if len(kwarg_keys) == 0:
+        return flat_args, {}
+    args = flat_args[: -len(kwarg_keys)]
+    kwargs = {k: v for k, v in zip(kwarg_keys, flat_args[-len(kwarg_keys) :])}
+    return args, kwargs
+
+class _NoopSaveInputs(torch.autograd.Function):
+    # Autograd Function that saves inputs and returns them as-is
+    # This is not used directly, see _applyAutogradFunctionToSaveInputs below.
+    @staticmethod
+    def forward(*args):
+        return torch.empty((0,))
+
+    @staticmethod
+    def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
+        ctx.save_for_backward(*inputs)
+
+    @staticmethod
+    def backward(ctx, *grad_outputs):
+        raise AssertionError("Did not expect to backward on this graph")
+
+class _CheckpointFrame():
+    def __init__(self, recompute_fn):
+        self.recompute_fn = recompute_fn
+        self.input_saver = None
+
+        self.weak_holders: List[ReferenceType] = []
+
+        self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
+            defaultdict(weakref.WeakKeyDictionary)
+        self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
+        self.is_recomputed: DefaultDict[int, bool] = defaultdict(bool)
+
+# See Rule 5
+class _StopRecomputationError(Exception):
+    pass
+
+class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
+    def __init__(self, target_frame_ref: ReferenceType, gid: int):
+        def pack_hook(x):
+            target_frame = target_frame_ref()
+            assert target_frame is not None
+            recomp_idx = target_frame.recomp_counter[gid]
+            target_frame.recomp_counter[gid] += 1
+
+            if recomp_idx >= len(target_frame.weak_holders):
+                # We run into this case when early stop is not enabled and do
+                # grad within checkpoint.
+                return x.detach()
+            holder = target_frame.weak_holders[recomp_idx]()
+
+            if holder is not None:
+                # See Rule 6: [ Multiple backwards ] above
+                if holder.handles.get(gid, None) is None:
+                    holder.handles[gid] = _Handle()
+                target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
+
+            if _enable_checkpoint_early_stop and \
+               target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
+                raise _StopRecomputationError()
+            # See Rule 6: [ Basic case ] above
+            return x.detach()
+
+        def unpack_hook(x):
+            return x
+
+        super().__init__(pack_hook, unpack_hook)
+
+class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
+    def __init__(self, frame):
+        def pack_hook(_unused_x):
+            # See Rule 4 above
+            holder = _Holder()
+            frame.weak_holders.append(weakref.ref(holder))
+            return holder
+
+        def unpack_hook(holder):
+            def do_checks(handle: _Handle, wkd: weakref.WeakKeyDictionary) -> None:
+                if handle is None:
+                    raise RuntimeError(
+                        "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
+                        "Otherwise please open an issue with details on your use case."
+                    )
+                if handle not in wkd:
+                    raise RuntimeError(
+                        "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+                        " recomputation being triggered in between, this is not currently supported. Please"
+                        " open an issue with details on your use case."
+                    )
+
+            gid = torch._C._current_graph_task_id()
+            if gid == -1:
+                # generate a temporary id if we trigger unpack outside of a backward call
+                gid = int(uuid.uuid4())
+
+            if frame.is_recomputed[gid]:
+                do_checks(holder.handles[gid], frame.recomputed[gid])
+                ret = frame.recomputed[gid][holder.handles[gid]]
+                holder.handles[gid] = None
+                return ret
+
+            args = frame.input_saver.grad_fn.saved_tensors
+
+            try:
+                # pass gid in in case we do reentrant backward
+                with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
+                    frame.recompute_fn(*args)
+                    if _enable_checkpoint_early_stop:
+                        raise AssertionError("if early stop is enabled, we don't expect to reach here")
+            except _StopRecomputationError as e:
+                pass
+            frame.is_recomputed[gid] = True
+
+            do_checks(holder.handles[gid], frame.recomputed[gid])
+            ret = frame.recomputed[gid][holder.handles[gid]]
+            holder.handles[gid] = None
+            return ret
+
+        super().__init__(pack_hook, unpack_hook)
+
+# NB: this helper wraps fn before calling checkpoint_impl. kwargs and
+#     saving/restoring of global state is handled here.
+def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
     """Checkpointining without re-entrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
@@ -364,72 +694,16 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    # Custom class to be able to take weak references
-    class Holder():
-        pass
-    # The Holder object for each of the saved object is saved directly on the
-    # SavedVariable and is cleared when reset_data() is called on it. We MUST make
-    # sure that this is the only object having an owning reference to ensure that
-    # the Tensor stored in storage is deleted as soon as the corresponding SavedVariable
-    # data is cleared.
-    storage: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-    weak_holder_list = []
+    # From checkpoint_wrapper.
+    # We should modify to handle non-tensor, kwargs
+    flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
 
-    def pack(x):
-        # TODO(varal7): Instead of returning abstract object, we can return things metadata (such as
-        # size, device, ...) to catch certain cases of undeterministic behavior of the forward
-        res = Holder()
-        weak_holder_list.append(weakref.ref(res))
-        return res
-
-
-    def unpack(x):
-        unpack_counter = 0
-        if len(storage) == 0:
-            def inner_pack(inner):
-                nonlocal unpack_counter
-                unpack_counter += 1
-                # If the holder went out of scope, the SavedVariable is dead and so
-                # the value will never be read from the storage. Skip filling it.
-                if weak_holder_list[unpack_counter - 1]() is None:
-                    return
-                # Use detach here to ensure we don't keep the temporary autograd
-                # graph created during the second forward
-                storage[weak_holder_list[unpack_counter - 1]()] = inner.detach()
-                return
-
-            def inner_unpack(packed):
-                raise RuntimeError("You are calling backwards on a tensor that is never exposed. Please open an issue.")
-
-            # Stash the surrounding rng state, and mimic the state that was
-            # present at this time during forward.  Restore the surrounding state
-            # when we're done.
-            rng_devices = []
-            if preserve_rng_state and had_cuda_in_fwd:
-                rng_devices = fwd_gpu_devices
-            with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
-                if preserve_rng_state:
-                    torch.set_rng_state(fwd_cpu_state)
-                    if had_cuda_in_fwd:
-                        set_device_states(fwd_gpu_devices, fwd_gpu_states)
-
-                with torch.enable_grad(), \
-                     torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-                     torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
-                     torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
-                    _unused = function(*args, **kwargs)
-
-        if x not in storage:
-            raise RuntimeError(
-                "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                " recomputation being triggered in between, this is not currently supported. Please"
-                " open an issue with details on your use case so that we can prioritize adding this."
-            )
-
-        return storage[x]
-
-    with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
-        output = function(*args, **kwargs)
+    def new_fn(*inputs):
+        # This function should be called immediately by checkpoint_impl
+        unpacked_args, unpacked_kwargs = _unpack_kwargs(
+            inputs, kwarg_keys
+        )
+        out = fn(*unpacked_args, **unpacked_kwargs)
         if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
             # Cuda was not initialized before running the forward, so we didn't
             # stash the CUDA state.
@@ -437,5 +711,35 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args, **kw
                 "PyTorch's CUDA state was initialized in the forward pass "
                 "of a Checkpoint, which is not allowed. Please open an issue "
                 "if you need this feature.")
+        return out
 
-    return output
+    def recompute_fn(*inputs):
+        # This will be called later during recomputation. This wrapping enables
+        # the necessary global state to be captured.
+        unpacked_args, unpacked_kwargs = _unpack_kwargs(
+            inputs, kwarg_keys
+        )
+
+        rng_devices = []
+        if preserve_rng_state and had_cuda_in_fwd:
+            rng_devices = fwd_gpu_devices
+        with torch.random.fork_rng(devices=rng_devices, enabled=preserve_rng_state):
+            if preserve_rng_state:
+                torch.set_rng_state(fwd_cpu_state)
+                if had_cuda_in_fwd:
+                    set_device_states(fwd_gpu_devices, fwd_gpu_states)
+
+            with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
+                 torch.cpu.amp.autocast(**cpu_autocast_kwargs):
+                fn(*unpacked_args, **unpacked_kwargs)
+
+    return _checkpoint_impl(new_fn, recompute_fn, *flat_args)
+
+def _checkpoint_impl(fn, recompute_fn, *args):
+    new_frame = _CheckpointFrame(recompute_fn)
+    new_frame.input_saver = _NoopSaveInputs.apply(*args)
+
+    with _checkpoint_hook(new_frame):
+        ret = fn(*args)
+
+    return ret
