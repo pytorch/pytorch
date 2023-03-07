@@ -37,8 +37,8 @@ class ConstDictVariable(VariableTracker):
         if self.user_cls is collections.OrderedDict:
             codegen.extend_output(
                 [
-                    codegen.create_load_python_module(collections),
-                    create_instruction("LOAD_METHOD", "OrderedDict"),
+                    codegen.create_load_python_module(collections, True),
+                    codegen.create_load_attr("OrderedDict"),
                 ]
             )
         # instructions to build the dict keys and values
@@ -55,7 +55,7 @@ class ConstDictVariable(VariableTracker):
         if self.user_cls is collections.OrderedDict:
             return [
                 create_instruction("BUILD_MAP", len(self.items)),
-                create_instruction("CALL_METHOD", 1),
+                *create_call_function(1, False),
             ]
         # BUILD_MAP only if user_cls is dict
         else:

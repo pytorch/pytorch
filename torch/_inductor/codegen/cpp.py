@@ -69,6 +69,10 @@ RTYPE_TO_CPP = {
 
 
 def reduction_init(reduction_type, dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
@@ -139,20 +143,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     return prefix
 
 
-def float16_reduction_prefix(rtype):
-    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
-    # errors, float32 accumulation should be used instead.
-    assert rtype in (
-        "sum",
-        "any",
-    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
-    prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
-        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
-    ]
-    return prefix
-
-
 def parallel_num_threads():
     threads = config.cpp.threads
     if threads < 1:
@@ -186,6 +176,25 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
+
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            return f"{expr.p}"
+        return f"{expr.p}.0/{expr.q}.0"
 
 
 cexpr = CppPrinter().doprint
@@ -397,6 +406,14 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.asin()"
 
     @staticmethod
+    def cosh(x):
+        return f"{x}.cosh()"
+
+    @staticmethod
+    def sinh(x):
+        return f"{x}.sinh()"
+
+    @staticmethod
     def log10(x):
         return f"{x}.log10()"
 
@@ -495,7 +512,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def square(a):
-        return f"{a}.pow(2)"
+        return f"{a} * {a}"
 
     @staticmethod
     def where(a, b, c):
@@ -692,6 +709,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def acosh(x):
         return f"std::acosh({x})"
+
+    @staticmethod
+    def cosh(x):
+        return f"std::cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"std::sinh({x})"
 
     @staticmethod
     def asin(x):
@@ -907,13 +932,14 @@ class CppKernel(Kernel):
                 ],
             )
         else:
-            if dtype == torch.float16:
-                self.reduction_prefix.writelines(
-                    float16_reduction_prefix(reduction_type)
+            if dtype in (torch.float16, torch.bfloat16):
+                self.reduction_prefix.writeline(
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
-            self.reduction_prefix.writeline(
-                f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-            )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
