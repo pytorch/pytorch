@@ -679,6 +679,10 @@ def mps_ops_modifier(ops):
         'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
     }
 
+    XFAILLIST = {
+
+    }
+
     UNDEFINED_XFAILLIST = {
         # Top 60 operators
         # topk fails with duplicate indices
@@ -745,7 +749,7 @@ def mps_ops_modifier(ops):
 
     for op in ops:
         key = op.name + op.variant_test_name
-        for xfaillist in [UNIMPLEMENTED_XFAILLIST, XFAILLIST, UNDEFINED_XFAILLIST]:
+        for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
             if key in xfaillist:
                 addDecorator(op, DecorateInfo(
                              unittest.expectedFailure,
