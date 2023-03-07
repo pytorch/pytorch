@@ -1950,7 +1950,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
                  const c10::optional<std::string>& abortReason) {
                 return self->abort(abortReason);
               },
-              py::arg("abort_reason") = c10::optional<std::string>(),
+              py::arg("abort_reason") = py::none(),
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)

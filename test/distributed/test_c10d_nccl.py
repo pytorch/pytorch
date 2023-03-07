@@ -1060,10 +1060,13 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
             # Schedule thread before we get stuck to abort pg.
-            threading.Thread(target=abortpg).start()
+            thread = threading.Thread(target=abortpg)
+            thread.start()
 
             # We would get stuck here due to d2h if we didn't abort.
             t_cpu = t.cpu()
+
+            thread.join()
 
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
