@@ -1,10 +1,16 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Tuple, Union
+from typing import Tuple, Union, Sequence, cast
 
 import torch
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor import DTensor as DT
 from torch.distributed._tensor.ops.utils import prod
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 def _view_with_sharding_dim_change(
@@ -23,6 +29,28 @@ def _view_with_sharding_dim_change(
         return _ViewAndRedistribute.apply(tensor, sharding_dim, shape)
     else:
         return tensor.view(shape)
+
+def _infer_dtensor_stride(
+    local_tensor: torch.Tensor, mesh: DeviceMesh, placements: Sequence[Placement]
+) -> Tuple[int, ...]:
+    """
+    infer the dtensor stride from a local tensor
+    """
+    tensor_stride = list(local_tensor.stride())
+    for idx, placement in enumerate(placements):
+        if placement.is_shard():
+            shard_dim = cast(Shard, placement).dim
+            # recover tensor stride by modifying the stride that larger than
+            # the current stride on the shard_dim
+            for i in range(len(tensor_stride)):
+                if i != shard_dim and tensor_stride[i] >= tensor_stride[shard_dim]:
+                    # rescale the stride by the shard size
+                    tensor_stride[i] = tensor_stride[i] * mesh.size(idx)
+
+        elif not isinstance(placement, (Replicate, _Partial)):
+            raise RuntimeError(f"placement type {type(placement)} not supported!")
+
+    return tuple(tensor_stride)
 
 
 class _ViewAndRedistribute(torch.autograd.Function):
@@ -85,8 +113,10 @@ class _ViewAndRedistribute(torch.autograd.Function):
                 new_local_tensor,
                 device_mesh,
                 new_sharding_placement,
-                size=torch.Size(shape),
+                shape=torch.Size(shape),
+                dtype=new_local_tensor.dtype,
                 requires_grad=new_local_tensor.requires_grad,
+                stride=_infer_dtensor_stride(new_local_tensor, device_mesh, new_sharding_placement),
             )
 
     @staticmethod
@@ -95,13 +125,17 @@ class _ViewAndRedistribute(torch.autograd.Function):
         previous_device_mesh = ctx.previous_device_mesh
         previous_local_tensor_size = ctx.previous_local_shape
         previous_global_shape = ctx.previous_global_shape
+
+        new_local_tensor = grad_output.to_local().view(*previous_local_tensor_size)
         return (
             DT(
-                grad_output.to_local().view(*previous_local_tensor_size),
+                new_local_tensor,
                 previous_device_mesh,
                 previous_placement,
-                size=previous_global_shape,
+                shape=previous_global_shape,
+                dtype=grad_output.dtype,
                 requires_grad=grad_output.requires_grad,
+                stride=_infer_dtensor_stride(new_local_tensor, previous_device_mesh, previous_placement),
             ),
             None,
             None,

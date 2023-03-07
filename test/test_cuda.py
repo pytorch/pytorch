@@ -22,6 +22,9 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch.cuda._memory_viz import profile_plot
+from torch.cuda._memory_viz import trace_plot
+
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
@@ -52,6 +55,7 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_GRAPH = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
+TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
@@ -4990,6 +4994,44 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
 
+    @skipIfRocm
+    def test_memory_profiler_viz(self):
+        with torch.profiler.profile(
+            with_stack=True,
+            profile_memory=True,
+            record_shapes=True
+        ) as prof:
+            x = torch.rand(128, 128, device='cuda')
+            x * x + x * x
+        plot = profile_plot(prof)
+        self.assertTrue("test_cuda.py" in plot)
+        self.assertTrue("test_memory_profiler_viz" in plot)
+        self.assertTrue('"elements_category": [' in plot)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_trace_plot(self):
+        for record_context in (True, False):
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(
+                    True,
+                    record_context=record_context,
+                    trace_alloc_max_entries=1000000,
+                    trace_alloc_record_context=True)
+
+                def run():
+                    x = torch.rand(128, 128, device='cuda')
+                    x * x + x * x
+
+                run()
+                ss = torch.cuda.memory._snapshot()
+                plot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_trace_plot" in plot))
+                self.assertTrue(str(128 * 128 * 4) in plot)
+                torch.cuda.memory._record_memory_history(False)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -5121,6 +5163,22 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_nvml_get_handler(self):
+        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_temperature(self):
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_power_draw(self):
+        self.assertTrue(torch.cuda.power_draw() >= 0)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
 
 
 instantiate_parametrized_tests(TestCuda)

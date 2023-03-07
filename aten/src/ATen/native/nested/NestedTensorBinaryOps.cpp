@@ -99,19 +99,31 @@ Tensor NestedTensor_elementwise_Tensor(
       self_impl->get_storage_offsets()
     );
   }
-  // special case when other is dense
-  if (self.is_nested() && !other.is_nested()) {
-    // check for the [B, *, D], [B, 1, D] esuhm case
-    // TODO: this if statement is ugly and hopefully we will remove this in the near future
+  // special case when other is dense (CUDA only for now)
+  if (self.is_nested() && !other.is_nested() && self.is_cuda() && other.is_cuda()) {
     auto self_ptr = get_nested_tensor_impl(self);
-    if (self_ptr->dim() == 3 &&
+    auto other_ = other;
+    // check for the [B, *, D], [B, 1, D] case -> use custom kernel
+    // TODO: this if statement is ugly and hopefully we will remove this in the near future
+    bool is_broadcastable_3d = (
+        self_ptr->dim() == 3 &&
         other.dim() == 3 &&
         self_ptr->size(0) == other.size(0) &&
         other.size(1) == 1 &&
         self_ptr->opt_size(2).has_value() &&
-        self_ptr->opt_size(2).value() == other.size(2) &&
-        self.is_cuda() &&
-        other.is_cuda()) {
+        self_ptr->opt_size(2).value() == other.size(2));
+    // check for the [B, *], [B, 1] case -> treat as 3D with [B, *, 1], [B, 1, 1]
+    bool is_broadcastable_2d = (
+        self_ptr->dim() == 2 &&
+        other.dim() == 2 &&
+        self_ptr->size(0) == other.size(0) &&
+        other.size(1) == 1);
+    if(is_broadcastable_2d) {
+        other_ = other.unsqueeze(-1);
+        is_broadcastable_3d = true;
+    }
+
+    if (is_broadcastable_3d) {
       if (!nested_tensor_impl_is_contiguous(self_ptr)) {
         self_ptr = get_nested_tensor_impl(self.contiguous());
       }
@@ -120,9 +132,9 @@ Tensor NestedTensor_elementwise_Tensor(
       auto result_buffer = at::empty_like(self_buffer);
       auto result = wrap_buffer(result_buffer, self_sizes);
       if (op_name == "add") {
-        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::ADD);
+        nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::ADD);
       } else if (op_name == "mul") {
-        nested_dense_elementwise_stub(self.device().type(), result, self, other, NESTED_DENSE_OP::MUL);
+        nested_dense_elementwise_stub(self.device().type(), result, self, other_, NESTED_DENSE_OP::MUL);
       } else {
         TORCH_CHECK(false, "Unsupported nested dense elementwise op");
       }
