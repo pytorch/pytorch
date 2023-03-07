@@ -166,7 +166,7 @@ class triton:
     cudagraphs = False
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
-    cudagraph_trees = True
+    cudagraph_trees = False
 
     debug_cudagraph_trees = True
 
