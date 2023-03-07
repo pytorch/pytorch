@@ -126,10 +126,7 @@ jobs:
           retry_wait_seconds: 90
           command: |
             if [[ "${SCCACHE_USE_GHA}" == "true" ]]; then
-              sudo curl --retry 3 --retry-all-errors -OL https://github.com/mozilla/sccache/releases/download/v0.4.0-pre.7/sccache-v0.4.0-pre.7-x86_64-apple-darwin.tar.gz
-              tar -xvf sccache-v0.4.0-pre.7-x86_64-apple-darwin.tar.gz
-              cp sccache-v0.4.0-pre.7-x86_64-apple-darwin/sccache /usr/local/bin/
-              rm -rf sccache-v0.4.0-pre.7-x86_64-apple-darwin*
+              sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v0.4.0-pre.7 --output /usr/local/bin/sccache
               echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
               echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
