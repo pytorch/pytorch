@@ -229,11 +229,13 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true
+    export ASAN_OPTIONS=detect_leaks=1:symbolize=1:detect_stack_use_after_return=true:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0:check_initialization_order=true:debug=true:fast_unwind_on_malloc=1:print_suppressions=0
     if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
         export ASAN_OPTIONS="${ASAN_OPTIONS}:protect_shadow_gap=0"
     fi
     export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PWD/ubsan.supp
+    # Suppress some hard to solve indirect leaks
+    export LSAN_OPTIONS="suppressions=$PWD/lsan.supp"
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
