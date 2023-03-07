@@ -1856,7 +1856,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=3, max=6)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=3, max=6)
         torch._dynamo.export(my_dyn_fn, y)
 
     @config.patch(dynamic_shapes=True)
@@ -1869,7 +1869,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=3)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=3)
         torch._dynamo.export(my_dyn_fn, y)
 
     @config.patch(dynamic_shapes=True)
@@ -1882,7 +1882,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, max=5)
+        torch._dynamo.mark_dynamic_constrain(y, 0, max=5)
         torch._dynamo.export(my_dyn_fn, y)
 
     @config.patch(dynamic_shapes=True)
@@ -1895,7 +1895,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.export(my_dyn_fn, y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=2, max=3)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=2, max=3)
         with self.assertRaises(
             torch._dynamo.exc.InternalTorchDynamoError,
         ):

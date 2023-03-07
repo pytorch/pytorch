@@ -211,7 +211,7 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_di
     In this way, it is a one directional api - it can only constrain ranges for a shape further.
 
     The user_directive flag is used for recording a constrain_range that comes from a manually
-    user specified constrain_range. In the dynamo case, this means it is downstream of mark_dynamic_constrained.
+    user specified constrain_range. In the dynamo case, this means it is downstream of mark_dynamic_constrain.
 
     Setting this flag records the range into the user_constrained field on shape_env. See the docs on that field
     for more information.

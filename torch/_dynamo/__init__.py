@@ -41,7 +41,8 @@ __all__ = [
     "is_compiling",
     "register_backend",
     "list_backends",
-    "mark_dynamic_constrained",
+    "mark_dynamic_constrain",
+    "clear_dynamic",
 ]
 
 
@@ -162,20 +163,20 @@ def mark_dynamic(t, index):
     before torch.compile.
 
     """
-    mark_dynamic_constrained(t, index, min=None, max=None)
+    mark_dynamic_constrain(t, index, min=None, max=None)
 
 
 @forbid_in_graph
-def mark_dynamic_constrained(
+def mark_dynamic_constrain(
     t, index, *, min: Optional[int] = None, max: Optional[int] = None
 ):
     """
     To fully understand this API, please read [Note - on the state of mark_dynamic] first,
     as this API is an enrichment over that API.
 
-    In its current state, mark_dynamic_constrained fully subsumes mark_dynamic.
+    In its current state, mark_dynamic_constrain fully subsumes mark_dynamic.
 
-    mark_dynamic_constrained allows users to provide a directive that the dimension will fall
+    mark_dynamic_constrain allows users to provide a directive that the dimension will fall
     within a given range. A range can be unbounded on either min, or max. Multiple calls to this API for
     the same dimension will take the most conservative intersection of all ranges. At guard accumulation
     time, we verify that the dimension fell within the specified range, and raise if it does not.
@@ -190,7 +191,7 @@ def mark_dynamic_constrained(
             return a.cos()
         return a.sin()
 
-    torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+    torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
     ```
 
@@ -199,18 +200,18 @@ def mark_dynamic_constrained(
     If we run it again, with a wider constraint, by adding these 2 lines:
 
     ```
-    torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+    torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
     ```
 
-    Nothing happens - mark_dynamic_constrained is sticky unless reset, so the range is still
+    Nothing happens - mark_dynamic_constrain is sticky unless reset, so the range is still
     at the narrowst intersection (4, 10)
 
     If we delete the field first:
 
     ```
     torch._dynamo.clear_dynamic(x, 0)
-    torch._dynamo.mark_dynamic_constrained(x, 0, min=3, max=12)
+    torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=12)
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
     ```
     We will recompile, and get a new guard, `3 <= a.size()[0] <= 12`
@@ -226,7 +227,7 @@ def mark_dynamic_constrained(
         return a.sin()
 
     torch._dynamo.optimize("eager")(my_dyn_fn)(x)
-    torch._dynamo.mark_dynamic_constrained(x, 0, min=2, max=4)
+    torch._dynamo.mark_dynamic_constrain(x, 0, min=2, max=4)
     ```
 
     We would raise.
@@ -246,7 +247,7 @@ def mark_dynamic_constrained(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic_constrained(t, i, min=min, max=max)
+        mark_dynamic_constrain(t, i, min=min, max=max)
 
 
 @forbid_in_graph
@@ -255,7 +256,7 @@ def clear_dynamic(t, index):
         assert hasattr(
             t, "_dynamo_dynamic_indices"
         ), "Illegal call to clear without dynamic dims"
-        delattr(t, "_dynamo_dynamic_indices")
+        del t._dynamo_dynamic_indices[index]
         return
 
     assert isinstance(index, (list, tuple))

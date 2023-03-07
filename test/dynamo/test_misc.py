@@ -4503,7 +4503,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
         torch._dynamo.reset()
         with self.assertRaises(
             torch._dynamo.exc.InternalTorchDynamoError,
@@ -4520,27 +4520,27 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
         torch._dynamo.reset()
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_illegal_constraint_range(self):
         y = torch.randn([5, 3, 3])
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=5, max=7)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
         with self.assertRaisesRegex(
             AssertionError, "Illegal intersection produced! 5 < 4"
         ):
-            torch._dynamo.mark_dynamic_constrained(y, 0, min=2, max=4)
+            torch._dynamo.mark_dynamic_constrain(y, 0, min=2, max=4)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_raise_illegal_constraint_range_min_max_only(self):
         y = torch.randn([5, 3, 3])
-        torch._dynamo.mark_dynamic_constrained(y, 0, min=5)
+        torch._dynamo.mark_dynamic_constrain(y, 0, min=5)
         with self.assertRaisesRegex(
             AssertionError, "Illegal intersection produced! 5 < 4"
         ):
-            torch._dynamo.mark_dynamic_constrained(y, 0, max=4)
+            torch._dynamo.mark_dynamic_constrain(y, 0, max=4)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint_across_break(self):
@@ -4687,7 +4687,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # Run with dynamic
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 1)
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 0)
 
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         # Run without dynamic, no recompile
@@ -4710,7 +4710,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # Reset counter
         counter = CompileCounter()
         # Clear dynamic
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 1)
 
         # Run with dynamic 1
         torch._dynamo.mark_dynamic(x, 1)
@@ -4718,14 +4718,14 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 1)
 
         # Clear dynamic
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 1)
         # Run with dynamic 0, not subset
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 2)
 
         # Clear dynamic
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 0)
         # Run with dynamic 0, 1, 2, not subset
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
@@ -4734,7 +4734,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(counter.frame_count, 3)
 
         # Clear dynamic
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 0)
+        torch._dynamo.clear_dynamic(x, 1)
+        torch._dynamo.clear_dynamic(x, 2)
         # Run with dynamic 0, 2, subset!
         torch._dynamo.mark_dynamic(x, 2)
         torch._dynamo.mark_dynamic(x, 0)
@@ -4750,18 +4752,18 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return a.cos()
             return a.sin()
 
-        torch._dynamo.mark_dynamic_constrained(x, 0, min=4, max=10)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
         counter = CompileCounter()
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         # First compile
         self.assertEqual(counter.frame_count, 1)
         # Constrain, narrowing, should not recompile
-        torch._dynamo.mark_dynamic_constrained(x, 0, min=5, max=8)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=5, max=8)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 1)
-        delattr(x, "_dynamo_dynamic_indices")
+        torch._dynamo.clear_dynamic(x, 0)
         # Constrain, widening, should recompile
-        torch._dynamo.mark_dynamic_constrained(x, 0, min=3, max=10)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=10)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 2)
 
