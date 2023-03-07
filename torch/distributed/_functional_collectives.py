@@ -9,7 +9,6 @@ import torch.distributed as dist
 
 import torch.distributed.distributed_c10d as c10d
 
-from torch._C import _disabled_torch_function_impl
 from torch.utils._pytree import tree_map_only
 
 """
