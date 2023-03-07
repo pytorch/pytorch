@@ -678,17 +678,22 @@ Tensor & _index_put_impl_(Tensor & self, const torch::List<c10::optional<Tensor>
       "Please clone() the tensor before performing this operation. "
       "This also applies to advanced indexing e.g. tensor[indices] = tensor");
   }
+  auto value_ = value;
+  if (value.scalar_type() != self.scalar_type()) {
+    value_ = value.to(self.scalar_type());
+  }
+
   if (!accumulate) {
-    auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value);
+    auto masked_fill_dispatch = canDispatchToMaskedFill(self, indices, value_);
     if (std::get<0>(masked_fill_dispatch)) {
-      return self.masked_fill_(std::get<1>(masked_fill_dispatch), value.item());
+      return self.masked_fill_(std::get<1>(masked_fill_dispatch), value_.item());
     }
   }
-  auto value_ = value;
-  if (value.device() != self.device() && value.numel() == 1 && value.dim() == 0) {
-    value_ = value.to(self.device());
+
+  if (value_.device() != self.device() && value_.numel() == 1 && value_.dim() == 0) {
+    value_ = value_.to(self.device());
   }
-  at::assert_no_overlap(self, value);
+  at::assert_no_overlap(self, value_);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
   for (const c10::optional<Tensor>& index: indices) {
     if (index.has_value()) {

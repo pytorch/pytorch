@@ -6,6 +6,7 @@ from torch import tensor
 import unittest
 import warnings
 import random
+import itertools
 from functools import reduce
 
 import numpy as np
@@ -980,6 +981,22 @@ class TestIndexing(TestCase):
         # test index_put, no accum
         src[[0, 2, 1], :, :] = res
         self.assertEqual(res.shape, src.shape)
+
+    @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
+    @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
+    def test_index_put_mixed_dtype(self, device, dtype):
+        src = torch.ones(3, 2, 4, device=device, dtype=dtype)
+        indices = (torch.tensor([0, 2, 1]),)
+        val_dtypes = [torch.float, torch.long, torch.bfloat16, torch.bool]
+        if device == 'cuda':
+            val_dtypes.append(torch.half)
+        options = itertools.product(val_dtypes, [True, False])
+        for val_dtype, accumulate in options:
+            vals = torch.ones(3, 2, 4, device=device, dtype=val_dtype)
+            res = src.index_put(indices, vals, accumulate=accumulate)
+            ref = src.index_put(indices, vals.to(dtype), accumulate=accumulate)
+            self.assertEqual(res, ref)
 
     def test_int_indices2d(self, device):
         # From the NumPy indexing example
