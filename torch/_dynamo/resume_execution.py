@@ -337,9 +337,10 @@ class ContinueExecutionCache:
                 prefix_size = 0
                 for inst in prefix:
                     prefix_size += instruction_size(inst)
-                # code_options["co_exceptiontable"] = offset_exception_table(
-                #     code_options["co_exceptiontable"], prefix_size
-                # )
+                # TODO transform_code_object deletes this
+                code_options["co_exceptiontable"] = offset_exception_table(
+                    code_options["co_exceptiontable"], prefix_size
+                )
 
 
         new_code = transform_code_object(code, update)
