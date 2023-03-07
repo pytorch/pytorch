@@ -7465,9 +7465,15 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                                                       f"expected: {expected}\n" \
                                                       f"got: {c}\n"
         # test matmul
-        a = torch.ones(300, 300)
-        b = torch.ones(300, 300)
-        check_correctness(torch.matmul, a, b)
+        for transa in [True, False]:
+            for transb in [True, False]:
+                a = torch.ones(300, 300)
+                b = torch.ones(300, 300)
+                if transa:
+                    a = a.transpose(0, 1).contiguous().transpose(0, 1)
+                if transb:
+                    b = b.transpose(0, 1).contiguous().transpose(0, 1)
+                check_correctness(torch.matmul, a, b)
         # test bmm
         a = torch.ones(1, 1, 300)
         b = torch.ones(1, 300, 1)
