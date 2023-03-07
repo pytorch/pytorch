@@ -448,6 +448,11 @@ class TORCH_API TensorBase {
     return impl_->is_hpu();
   }
 
+  /// Returns if a `Tensor` has PrivateUse1 backend.
+  bool is_privateuse1() const {
+    return impl_->is_privateuse1();
+  }
+
   /// Returns if a `Tensor` has Lazy backend.
   bool is_lazy() const {
     return impl_->is_lazy();

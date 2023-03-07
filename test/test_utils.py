@@ -806,6 +806,21 @@ class TestExtensionUtils(TestCase):
         with self.assertRaisesRegex(RuntimeError, "The runtime module of"):
             torch._register_device_module('xpu', DummyXPUModule)
 
+    def test_external_module_and_backend_register(self):
+        torch.utils.rename_privateuse1_backend('foo')
+        with self.assertRaisesRegex(RuntimeError, "has already been set"):
+            torch.utils.rename_privateuse1_backend('dummmy')
+
+        custom_backend_name = torch._C._get_privateuse1_backend_name()
+        self.assertEqual(custom_backend_name, 'foo')
+
+        with self.assertRaises(AttributeError):
+            eval('torch.{}.is_available()'.format(custom_backend_name))
+
+        torch._register_device_module('foo', DummyXPUModule)
+
+        eval('torch.{}.is_available()'.format(custom_backend_name))
+
 
 class TestDeviceUtils(TestCase):
     def test_basic(self):

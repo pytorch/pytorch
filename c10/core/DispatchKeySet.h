@@ -643,6 +643,7 @@ constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutocastCUDA,
     DispatchKey::AutocastXPU,
     DispatchKey::AutocastHPU,
+    DispatchKey::AutocastPrivateUse1,
 });
 
 // See Note [TLS Initialization]
@@ -839,6 +840,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
   constexpr auto autocast_xpu_ks = DispatchKeySet(DispatchKey::AutocastXPU);
   constexpr auto autocast_hpu_ks = DispatchKeySet(DispatchKey::AutocastHPU);
   constexpr auto autocast_cuda_ks = DispatchKeySet(DispatchKey::AutocastCUDA);
+  constexpr auto autocast_privateuse1_ks =
+      DispatchKeySet(DispatchKey::AutocastPrivateUse1);
   switch (t) {
     case BackendComponent::CPUBit:
       return autocast_cpu_ks;
@@ -849,6 +852,8 @@ inline DispatchKeySet getAutocastRelatedKeySetFromBackend(BackendComponent t) {
     case BackendComponent::CUDABit:
     case BackendComponent::XLABit:
       return autocast_cuda_ks;
+    case BackendComponent::PrivateUse1Bit:
+      return autocast_privateuse1_ks;
     default:
       return DispatchKeySet();
   }
