@@ -69,6 +69,10 @@ RTYPE_TO_CPP = {
 
 
 def reduction_init(reduction_type, dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
@@ -136,20 +140,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
                 f"\tinitializer(omp_priv = {{0, {reduction_init(reduction_type, src_dtype)}}})",
             ]
         )
-    return prefix
-
-
-def float16_reduction_prefix(rtype):
-    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
-    # errors, float32 accumulation should be used instead.
-    assert rtype in (
-        "sum",
-        "any",
-    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
-    prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
-        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
-    ]
     return prefix
 
 
@@ -926,13 +916,14 @@ class CppKernel(Kernel):
                 ],
             )
         else:
-            if dtype == torch.float16:
-                self.reduction_prefix.writelines(
-                    float16_reduction_prefix(reduction_type)
+            if dtype in (torch.float16, torch.bfloat16):
+                self.reduction_prefix.writeline(
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
-            self.reduction_prefix.writeline(
-                f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-            )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
