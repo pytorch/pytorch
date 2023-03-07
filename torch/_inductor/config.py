@@ -12,6 +12,12 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
