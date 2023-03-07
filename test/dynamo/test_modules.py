@@ -1,7 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
 import types
-import unittest
 from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
@@ -17,14 +16,6 @@ from torch._dynamo.testing import same
 from torch.nn import functional as F
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
-
-try:
-    from torchvision import models as torchvision_models
-
-    HAS_TORCHVISION = True
-except ImportError:
-    HAS_TORCHVISION = False
-skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 try:
     from . import test_functions
@@ -692,15 +683,20 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
-class RegNet(torch.nn.Module):
+class ModuleGuardNameIsValid(torch.nn.ModuleDict):
+    # Guard names should be valid python identifier as we use eval() to get
+    # corresponding guard value. Some guard names come from source(module path)
+    # where special symbols are valid. But they are not valid python identifier,
+    # we should identify these pattern and rewrite them with getattr.
     def __init__(self):
         super().__init__()
-        model = torchvision_models.regnet_y_400mf()
-        modules = list(model.children())
-        self.model = torch.nn.Sequential(modules[0], *modules[1][:2])
+        for i in range(2):
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
 
     def forward(self, x):
-        return self.model(x)
+        for _, layer in self.items():
+            x = layer(x)
+        return x
 
 
 class ModulePatch1(torch.nn.Module):
@@ -767,17 +763,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
-
-    @skipIfNoTorchVision
-    def test_module_guard_names_are_valid(self):
-        # Guard names should be valid python identifier as we use eval()
-        # to get corresponding guard value.
-        m = RegNet()
-        x = torch.rand([4, 3, 64, 64])
-        ref = m(x)
-        opt_m = torch._dynamo.optimize("eager")(m)
-        res = opt_m(x)
-        self.assertTrue(torch.allclose(ref, res))
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
