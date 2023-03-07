@@ -519,6 +519,12 @@ TORCH_LIBRARY_IMPL(_, AutocastXLA, m) {
 
 TORCH_LIBRARY_IMPL(aten, AutocastXLA, m) {
   // lower_precision_fp cast policy
+  KERNEL_XLA(conv1d, lower_precision_fp)
+  KERNEL_XLA2(conv1d, padding, lower_precision_fp)
+  KERNEL_XLA(conv2d, lower_precision_fp)
+  KERNEL_XLA2(conv2d, padding, lower_precision_fp)
+  KERNEL_XLA(conv3d, lower_precision_fp)
+  KERNEL_XLA2(conv3d, padding, lower_precision_fp)
   KERNEL_XLA(matmul, lower_precision_fp)
 }
 
