@@ -369,6 +369,56 @@ def make_pointwise(
     return inner
 
 
+@register_lowering(aten.mm.default)
+def _mm(a: TensorBox, b: TensorBox):
+    assert isinstance(a, TensorBox)
+    assert isinstance(b, TensorBox)
+    a.realize_hint()
+    b.realize_hint()
+
+    m, k = a.get_size()
+    _k, n = b.get_size()
+    assert k == _k
+    reduced_sizes = [k]
+    new_size = [m, n]
+
+    m = V.graph.sizevars.guard_static_shape(m)
+    n = V.graph.sizevars.guard_static_shape(n)
+    k = V.graph.sizevars.guard_static_shape(k)
+
+    _a_loader = a.make_loader()
+    _b_loader = b.make_loader()
+
+    def a_loader(idx, reduction_idx):
+        m, _ = idx
+        k, = reduction_idx
+        return _a_loader([m, k])
+
+    def b_loader(idx, reduction_idx):
+        _, n = idx
+        k, = reduction_idx
+        return _b_loader([k, n])
+
+    def fn(idx, reduction_idx):
+        return ops.mul(a_loader(idx, reduction_idx), b_loader(idx, reduction_idx))
+
+    result = Reduction.create(
+        device=a.get_device(),
+        dst_dtype=a.get_dtype(),
+        src_dtype=a.get_dtype(),
+        inner_fn=fn,
+        ranges=new_size,
+        reduction_ranges=reduced_sizes,
+        reduction_type="sum",
+    )
+
+    if isinstance(
+        result.data.data, Reduction
+    ):  # Only realize if reduction isn't unrolled
+        result.realize()
+
+    return result
+
 @register_lowering(prims.convert_element_type, type_promotion_kind=None)
 def to_dtype(x: TensorBox, dtype: torch.dtype):
     if x.get_dtype() == dtype:

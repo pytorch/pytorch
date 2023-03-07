@@ -6284,6 +6284,17 @@ if HAS_CPU:
                     )
                     self.assertFalse(vec_checker.simd_vec)
 
+
+        def test_vec_mm(self):
+            def fn(x: torch.Tensor, y: torch.Tensor):
+                return torch.matmul(torch.softmax(x / 10 + 10, -1), y)
+
+            x = torch.randn(64, 128)
+            y = torch.randn(128, 256).as_strided([128, 256], [1, 128])
+            compiled_fn = torch.compile(fn)
+            compiled_fn(x, y)
+
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
