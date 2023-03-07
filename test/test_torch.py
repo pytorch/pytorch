@@ -3750,7 +3750,7 @@ else:
                 self.assertEqual(out_dc, expected, atol=0, rtol=0)
 
     # FIXME: find a test suite for the masked fill operator
-    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16), (torch.uint8, torch.bool)))
+    @dtypes(*product(all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16), (torch.uint8, torch.bool, torch.float)))
     def test_masked_fill(self, device, dtypes):
         dtype = dtypes[0]
         mask_dtype = dtypes[1]
@@ -3759,7 +3759,12 @@ else:
 
             num_dest = 10
             dst = torch.zeros(num_dest, dtype=dtype)
-            mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
+            if mask_dtype == torch.float:
+                mask = torch.rand((num_dest,), dtype=mask_dtype)
+                # test false conditions with some 0 values
+                mask[mask > 0.5] = 0
+            else:
+                mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
             val = random.random()
             dst2 = dst.clone()
 
