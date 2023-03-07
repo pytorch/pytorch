@@ -1099,7 +1099,8 @@ class CppVecKernel(CppKernel):
         self.reduction_omp_dec: Dict[str, str] = {}
         self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
-        self.vec_itervar_idx = -1  # XXX: hack to make tile work
+        # TODO(jgong5): hack to make tile work, will be cleaned up later
+        self.vec_itervar_idx = -1
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1213,10 +1214,9 @@ class CppVecKernel(CppKernel):
 class TileMeta:
     """
     Metadata describing an N-dim tile variable of fixed sizes.
-    Tile variables are valid within the scope of CppTileKernel and their
-    sizes are defined by CppTileKernel.tile_sizes. The tile variable defines
-    the dim mapping with `indices` attribute to the kernel itervars on which
-    tiling is applied.
+    Tile variables are valid within the scope of CppTileKernel. The tile
+    variable defines the dim mapping from `indices` attribute to the
+    `CppTileKernel.tile_loop_indices` indicating the kernel itervars to apply tiling.
     """
 
     dtype: torch.dtype = torch.float32
@@ -1405,7 +1405,7 @@ class CppTile2DOverrides:
         self = V.kernel
         # indirect indexing, do scalar load, otherwise check vectorizable
         if "tmp" not in f"{index}":
-            # vectorize on most inner loop of the tile if the load is contiguous or invariant
+            # contiguous at the outer loop level but non-contiguous from the most inner loop.
             indices: set = self.get_indices_from_index(index)
             current_indices: set = indices - self.current_compute_at
             if len(current_indices) == 2:
@@ -1488,7 +1488,7 @@ class CppTile2DOverrides:
 
 
 class CppTileFallbackOverrides:
-    """`rank` ops handler implemented with a loop around implementation with `rank-1` ops handler"""
+    """ops handler for tiles with `rank` implemented with a loop around implementation with `rank-1` ops handler"""
 
     @staticmethod
     def __getattr__(name):
@@ -1625,7 +1625,7 @@ class CppTileOverrides:
 
 @dataclasses.dataclass
 class CppTileCodeOrLine:
-    # name of the buffers to store, tile buffer or in/out buffer
+    # name of the buffers to store, tile buffer besides in/out buffer
     name: str = None
 
     # a set of indices into the inner tile loops
@@ -1706,7 +1706,7 @@ class CppTileKernel(CppKernel):
         # the line can be removed if the tile buffer is not used
         self.current_slice_store_name = None
 
-        # TODO(jgong5): following attributes are removed after we move CppVecKernel
+        # TODO(jgong5): following attributes will be removed after we move CppVecKernel
         # code into 1D tile ops handler. Currently 1D tile ops handle invokes CppVeckernel
         # directly and they are here to get CppVecKernel work.
         self.tiling_factor = tile_sizes[0]

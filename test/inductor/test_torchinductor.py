@@ -6471,7 +6471,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count >= 1
+                assert metrics.generated_cpp_vec_kernel_count == 2
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -6480,7 +6480,7 @@ if HAS_CPU:
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
                 assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count >= 1
+                assert metrics.generated_cpp_vec_kernel_count == 2
 
                 torch._dynamo.reset()
                 metrics.reset()
@@ -6536,7 +6536,7 @@ if HAS_CPU:
                     opt_fn = torch._dynamo.optimize("inductor")(channel_shuffle)
                     same(channel_shuffle(x, 2), opt_fn(x, 2))
                     if simdlen != 1:
-                        assert metrics.generated_cpp_vec_kernel_count >= 1
+                        assert metrics.generated_cpp_vec_kernel_count == 2
 
         @slow()
         @unittest.skipIf(
@@ -6603,7 +6603,7 @@ if HAS_CPU:
                         opt_fn = torch._dynamo.optimize("inductor")(fn)
                         same(fn(x), opt_fn(x))
                         if simdlen != 1:
-                            assert metrics.generated_cpp_vec_kernel_count >= 1
+                            assert metrics.generated_cpp_vec_kernel_count == 2
 
         def test_transpose_non_contiguous(self):
             def fn(a):
