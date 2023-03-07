@@ -16,7 +16,7 @@ def unwrap_schema(e: object) -> object:
     return e._spec if isinstance(e, dtensor.DTensor) else e
 
 
-class ShardingPropagator(object):
+class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: Dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
 

@@ -276,6 +276,19 @@ void recordThreadInfo() {
 #endif // USE_KINETO
 }
 
+void logInvariantViolation(
+    const std::string& assertion,
+    const std::string& error,
+    const std::string& profile_id,
+    const std::string& group_profile_id) {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().logInvariantViolation(
+        profile_id, assertion, error, group_profile_id);
+  }
+#endif // USE_KINETO
+}
+
 } // namespace kineto
 } // namespace impl
 } // namespace profiler

@@ -48,9 +48,6 @@ class TestVerify(common_utils.TestCase):
 
     def test_jumbled_params(self):
         class MyModel(Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 y = x * x
                 self.param = Parameter(torch.tensor([2.0]))

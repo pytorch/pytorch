@@ -26,6 +26,7 @@ import torch
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
 from . import config, cuda_properties, exc
+from .utils import developer_warning
 
 LOCK_TIMEOUT = 600
 
@@ -59,6 +60,17 @@ def cache_dir():
         "TORCHINDUCTOR_CACHE_DIR",
         f"{tempfile.gettempdir()}/torchinductor_{getpass.getuser()}",
     )
+
+
+def remove_cache_dir():
+    """
+    Removes the directory added automatically by inductor during compilation.
+    Uses the cache_dir function above.
+
+    No op if the directory does not exist.
+    """
+    if os.path.isdir(cache_dir()):
+        shutil.rmtree(cache_dir())
 
 
 class DiskCache:
@@ -108,7 +120,7 @@ def code_hash(code):
 
 
 def get_code_path(source_code, ext, extra):
-    basename = code_hash(source_code + extra)
+    basename = extra + code_hash(source_code)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
     return basename, subdir, path
@@ -196,7 +208,7 @@ def is_gcc():
     return re.search(r"(gcc|g\+\+)", cpp_compiler())
 
 
-class VecISA(object):
+class VecISA:
     _bit_width: int
     _macro: str
     _arch_flags: str
@@ -252,7 +264,7 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self):
-        key, input_path = write(VecISA._avx_code, "cpp", extra="")
+        key, input_path = write(VecISA._avx_code, "cpp")
         from filelock import FileLock
 
         lock_dir = get_lock_dir()
@@ -487,7 +499,7 @@ class CppCodeCache:
         key, input_path = write(
             source_code,
             "cpp",
-            extra=cpp_compile_command("i", "o", vec_isa=picked_vec_isa),
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
         )
         if key not in cls.cache:
             from filelock import FileLock
@@ -516,8 +528,8 @@ class PyCodeCache:
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code):
-        key, path = write(source_code, "py")
+    def load(cls, source_code, extra=""):
+        key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
                 code = compile(f.read(), path, "exec")
@@ -574,10 +586,10 @@ class TritonFuture:
         latency = time() - t0
         if latency > 50:
             name = _load_kernel_name(self.source_code)
-            log.warning(
+            developer_warning(
                 f"Detected long compilation time of {latency} seconds for kernel name {name}"
             )
-            log.warning(self.source_code)
+            developer_warning(self.source_code)
         del self.source_code, self.future
         return kernel
 

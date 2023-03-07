@@ -26,7 +26,7 @@ import numpy as np
 import time
 
 
-class Reader(object):
+class Reader:
     """
     Reader is an abstract class to be implemented in order to provide
     operations capable of iterating through a dataset or stream of data.
@@ -143,7 +143,7 @@ class Reader(object):
         return (read_step, fields)
 
 
-class Writer(object):
+class Writer:
     """
     Writer is an abstract class to be implemented in order to provide
     operations capable of feeding a data stream or a dataset.
@@ -207,7 +207,7 @@ class Writer(object):
         pass
 
 
-class ReaderBuilder(object):
+class ReaderBuilder:
     """ Allow usage of a reader in distributed fashion. """
     def schema(self):
         raise NotImplementedError()
@@ -256,7 +256,7 @@ class PipedReaderBuilder(ReaderBuilder):
         return output if isinstance(output, Reader) else output.reader()
 
 
-class Pipe(object):
+class Pipe:
     def __init__(self, schema=None, obj_key=None):
         self._num_writers = 0
         self._num_readers = 0
@@ -424,7 +424,7 @@ class ReaderWithLimit(ReaderWithLimitBase):
                 produces a data_finished blob as a side effect to indicate
                 whether the input stream is exhausted.
         """
-        super(ReaderWithLimit, self).__init__(reader)
+        super().__init__(reader)
         self.counter = None
         self.num_iter = num_iter
         if self.num_iter is not None:
@@ -466,7 +466,7 @@ class ReaderWithTimeLimit(ReaderWithLimitBase):
                 produces a data_finished blob as a side effect to indicate
                 whether the input stream is exhausted.
         """
-        super(ReaderWithTimeLimit, self).__init__(reader)
+        super().__init__(reader)
 
         self.timer = None
         self.duration = duration
@@ -528,7 +528,7 @@ class CompositeReader(Reader):
             readers: list[Reader] Reader instances, must have schema
         """
         assert len(names) == len(readers)
-        super(CompositeReader, self).__init__(schema=Struct(*[
+        super().__init__(schema=Struct(*[
             (name, reader.schema()) for name, reader in zip(names, readers)
         ]))
         self._names = names
@@ -584,7 +584,7 @@ class CompositeReaderBuilder(ReaderBuilder):
             reader_builders: list[ReaderBuilder] ReaderBuilder instances;
                 must have schema
         """
-        super(CompositeReaderBuilder, self).__init__()
+        super().__init__()
         self._names = names
         self._reader_builders = reader_builders
         self._schema = Struct(*[

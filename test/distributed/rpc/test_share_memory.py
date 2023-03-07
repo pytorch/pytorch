@@ -53,9 +53,6 @@ def worker_fn(m):
     pass
 
 class TestRPCPickler(TestCase):
-    def setUp(self):
-        super().setUp()
-
     def test_case(self):
         os.environ['MASTER_ADDR'] = 'localhost'
         os.environ['MASTER_PORT'] = '29500'

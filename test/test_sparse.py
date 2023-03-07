@@ -61,7 +61,7 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 
 class CrossRefSparseFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
-        super(CrossRefSparseFakeMode, self).__init__(
+        super().__init__(
             self.ignore_op, check_strides=False,
             check_aliasing=False,
         )  # TODO: enable stride/alias checking
@@ -264,7 +264,7 @@ class TestSparse(TestSparseBase):
                 else:
                     value_map[idx_tup] = val.clone() if isinstance(val, torch.Tensor) else val
 
-            new_indices = sorted(list(value_map.keys()))
+            new_indices = sorted(value_map.keys())
             _new_values = [value_map[idx] for idx in new_indices]
             if t._values().ndimension() < 2:
                 new_values = t._values().new(_new_values)
@@ -290,6 +290,7 @@ class TestSparse(TestSparseBase):
             _test_coalesce(t)  # this tests correctness
 
     @dtypes(torch.double)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
         # Test coalesce doesn't create autograd graph cycles (gh-52253)
 
@@ -1965,6 +1966,11 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(9, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [], dtype, device, coalesced)
+
+        # check repetitions and matchings in the intersection
+        lhs = torch.randint(0, 5, (100,), device=device)
+        rhs = torch.randint(0, 5, (100,), device=device).to_sparse()
+        self.assertEqual(lhs.to_sparse().sparse_mask(rhs), lhs.sparse_mask(rhs))
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -4351,16 +4357,13 @@ class TestSparseAny(TestCase):
 
             # TODO: The following exception cases all correspond to
             # not implemented conversions
-            if from_layout is torch.sparse_csr and to_layout in {torch.sparse_bsr} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
+            if from_layout in {
+                    torch.sparse_csr, torch.sparse_csc} and to_layout in {torch.sparse_bsr, torch.sparse_bsc} and is_batch:
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
                     t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csr to Bsr for batched inputs is not implemented"):
-                    explicit_to_sparse(t)
-                continue
-            elif from_layout is torch.sparse_csc and to_layout in {torch.sparse_bsc} and is_batch:
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
-                    t.to_sparse(layout=to_layout, blocksize=blocksize)
-                with self.assertRaisesRegex(RuntimeError, "conversion from Csc to Bsc for batched inputs is not implemented"):
+                with self.assertRaisesRegex(RuntimeError,
+                                            r"conversion from (Csr|Csc) to (Bsr|Bsc) for batched inputs is not implemented"):
                     explicit_to_sparse(t)
                 continue
             elif from_layout is torch.sparse_coo and to_layout in {
@@ -4382,9 +4385,7 @@ class TestSparseAny(TestCase):
                     explicit_to_sparse(t)
                 continue
             elif (from_layout, to_layout) in {(torch.sparse_bsc, torch.sparse_csr), (torch.sparse_bsc, torch.sparse_csc),
-                                              (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc),
-                                              (torch.sparse_csc, torch.sparse_bsr),
-                                              (torch.sparse_csr, torch.sparse_bsc)}:
+                                              (torch.sparse_bsr, torch.sparse_csr), (torch.sparse_bsr, torch.sparse_csc)}:
                 with self.assertRaisesRegex(
                         RuntimeError,
                         r"sparse_compressed_to_sparse_(csr|csc|bsr|bsc) expected\s*(Sparse(Csc|Csr)[,]|)\s*Sparse(Csr|Bsr)"

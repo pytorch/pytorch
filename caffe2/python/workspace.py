@@ -526,7 +526,7 @@ def GetNameScope():
     return scope.CurrentNameScope()
 
 
-class _BlobDict(object):
+class _BlobDict:
     """Provides python dict compatible way to do fetching and feeding"""
 
     def __getitem__(self, key):

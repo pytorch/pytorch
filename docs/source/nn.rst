@@ -442,6 +442,8 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+    nn.utils.rnn.unpack_sequence
+    nn.utils.rnn.unpad_sequence
 
 .. autosummary::
     :toctree: generated

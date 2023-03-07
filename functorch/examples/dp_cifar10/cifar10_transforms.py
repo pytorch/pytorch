@@ -472,6 +472,7 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--clip-per-layer",
         "--clip_per_layer",
         action="store_true",
         default=False,

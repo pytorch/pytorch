@@ -122,7 +122,7 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
     def test_call_fn_with_non_const_inputs_aot_safe(self):
         class ModuleSpecialFwd(torch.nn.Module):
             def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
+                super().__init__()
                 self.conv = torch.nn.Conv2d(
                     in_channels=3, out_channels=20, kernel_size=(5, 5)
                 )
@@ -151,9 +151,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_unsafe(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
-
             def _some_bad_fwd(self, param, y):
                 prev_grad = torch.is_grad_enabled()
                 try:
@@ -190,9 +187,6 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
     def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
         class ModuleSpecialFwd(torch.nn.Module):
-            def __init__(self):
-                super(ModuleSpecialFwd, self).__init__()
-
             def _some_bad_fwd(self, param, y):
                 if y[0][0] < 3:
                     return y + param

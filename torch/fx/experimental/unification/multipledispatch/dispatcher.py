@@ -92,7 +92,7 @@ def variadic_signature_matches(types, full_signature):
     return all(variadic_signature_matches_iter(types, full_signature))
 
 
-class Dispatcher(object):
+class Dispatcher:
     """ Dispatch methods based on type signature
     Use ``dispatch`` to add implementations
     Examples

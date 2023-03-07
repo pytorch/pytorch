@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-# import torch.nn.quantized as nnq
+# import torch.ao.nn.quantized as nnq
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
@@ -25,7 +25,7 @@ class TestQuantizationDocs(QuantizationTestCase):
 
     def run(self, result=None):
         with override_quantized_engine("qnnpack") if IS_ARM64 else contextlib.nullcontext():
-            super(TestQuantizationDocs, self).run(result)
+            super().run(result)
 
     def _get_code(
         self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
@@ -140,7 +140,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"
 
-        global_inputs = {"nnq": torch.nn.quantized}
+        global_inputs = {"nnq": torch.ao.nn.quantized}
 
         code = self._get_code(path_from_pytorch, unique_identifier)
         self._test_code(code, global_inputs)

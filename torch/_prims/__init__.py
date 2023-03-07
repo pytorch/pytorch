@@ -1932,8 +1932,7 @@ reshape = _make_prim(
 
 def _rev_meta(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     utils.validate_dimension_indices(a.ndim, dims)
-    out = torch.empty_like(a, memory_format=torch.preserve_format)
-    return TensorMeta(out)
+    return torch.empty_like(a, memory_format=torch.preserve_format)
 
 
 _rev_doc = """

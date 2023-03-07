@@ -1413,6 +1413,12 @@ def gradcheck(
         This check will likely fail if :attr:`input` is of less precision, e.g.,
         ``FloatTensor``.
 
+    .. note::
+        Gradcheck may fail when evaluated on non-differentiable points
+        because the numerically computed gradients via finite differencing may differ
+        those computed analytically (not necessarily because either is incorrect).
+        For more context, see :ref:`non-differentiable-func-grad`.
+
     .. warning::
        If any checked tensor in :attr:`input` has overlapping memory, i.e.,
        different indices pointing to the same memory address (e.g., from
@@ -1609,8 +1615,8 @@ def gradgradcheck(
 
     # NB: We need to save the requires_grad information about the inputs here because gradcheck detaches inputs
     #     before running forward mode AD
-    diff_input_args_indices = set(i for i, x in enumerate(tupled_inputs) if is_tensor_like(x) and x.requires_grad)
-    diff_grad_output_indices = set(i for i, x in enumerate(tupled_grad_outputs) if x.requires_grad)
+    diff_input_args_indices = {i for i, x in enumerate(tupled_inputs) if is_tensor_like(x) and x.requires_grad}
+    diff_grad_output_indices = {i for i, x in enumerate(tupled_grad_outputs) if x.requires_grad}
 
     def new_func(*args):
         # Restore the requires_grad information

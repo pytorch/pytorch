@@ -326,13 +326,11 @@ code:
    # GPU Hardware Info:
    # NVIDIA A100-SXM4-40GB : 8
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            _foobar = torch.ops.aten._foobar.default(add);  add = None
@@ -407,13 +405,11 @@ the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
    from math import inf
    from torch._dynamo.debug_utils import run_fwd_maybe_bwd
 
-
    from torch.nn import *
+
    class Repro(torch.nn.Module):
        def __init__(self):
            super().__init__()
-
-
 
        def forward(self, add):
            relu = torch.relu(add);  add = None

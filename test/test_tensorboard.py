@@ -53,6 +53,7 @@ def tensor_N(shape, dtype=float):
 class BaseTestCase(TestCase):
     """ Base class used for all TensorBoard tests """
     def setUp(self):
+        super().setUp()
         if not TEST_TENSORBOARD:
             return self.skipTest("Skip the test since TensorBoard is not installed")
         if TEST_WITH_CROSSREF:
@@ -67,7 +68,7 @@ class BaseTestCase(TestCase):
         return SummaryWriter(temp_dir)
 
     def tearDown(self):
-        super(BaseTestCase, self).tearDown()
+        super().tearDown()
         # Remove directories created by SummaryWriter
         for temp_dir in self.temp_dirs:
             if os.path.exists(temp_dir):
@@ -562,7 +563,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
 
         class myLinear(torch.nn.Module):
             def __init__(self):
-                super(myLinear, self).__init__()
+                super().__init__()
                 self.l = torch.nn.Linear(3, 5)
 
             def forward(self, x):
@@ -682,7 +683,7 @@ class TestTensorBoardPytorchGraph(BaseTestCase):
         # the add_graph call and still continue.
         class myMLP(torch.nn.Module):
             def __init__(self):
-                super(myMLP, self).__init__()
+                super().__init__()
                 self.input_len = 1 * 28 * 28
                 self.fc1 = torch.nn.Linear(self.input_len, 1200)
                 self.fc2 = torch.nn.Linear(1200, 1200)

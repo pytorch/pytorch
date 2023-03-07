@@ -75,6 +75,8 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nested_tensor_offsets",  # returns a vector of ints
     "_chunk_grad_outputs_efficient_attention",  # returns a bool
     "_fused_sdp_choice",  # returns an int
+    # "cusparselt_spmma",  # return a float
+    # "cusparselt_spmma2",  # return a float
 ]
 
 INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -319,14 +321,14 @@ def generate_function(
             )
         }
     }
-    tags = set(["generated"]) | set(f.tags & {"nondeterministic_seeded", "view_copy"})
+    tags = {"generated"} | set(f.tags & {"nondeterministic_seeded", "view_copy"})
 
     return (
         NativeFunction(
             func=func,
             use_const_ref_for_mutable_tensors=f.use_const_ref_for_mutable_tensors,
             # These generated fn's aren't meant to be user friendly- don't generate methods.
-            variants=set([Variant.function]),
+            variants={Variant.function},
             structured=False,
             structured_delegate=None,
             structured_inherits=None,

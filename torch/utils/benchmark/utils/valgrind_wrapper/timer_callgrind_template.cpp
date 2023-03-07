@@ -28,13 +28,17 @@ int main(int argc, char* argv[]) {
   TORCH_CHECK(std::string(argv[1]) == "--number");
   auto number = std::stoi(argv[2]);
 
-  TORCH_CHECK(std::string(argv[3]) == "--number_warmup");
+  TORCH_CHECK(
+      std::string(argv[3]) == "--number-warmup" ||
+      std::string(argv[3]) == "--number_warmup");
   auto number_warmup = std::stoi(argv[4]);
 
   TORCH_CHECK(std::string(argv[5]) == "--repeats");
   auto repeats = std::stoi(argv[6]);
 
-  TORCH_CHECK(std::string(argv[7]) == "--number_threads");
+  TORCH_CHECK(
+      std::string(argv[7]) == "--number-threads" ||
+      std::string(argv[7]) == "--number_threads");
   auto number_threads = std::stoi(argv[8]);
   torch::set_num_threads(number_threads);
 

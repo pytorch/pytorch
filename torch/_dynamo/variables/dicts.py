@@ -17,9 +17,7 @@ from .tensor import TensorVariable
 
 class ConstDictVariable(VariableTracker):
     def __init__(self, items, user_cls, recursively_contains=None, **kwargs):
-        super(ConstDictVariable, self).__init__(
-            recursively_contains=recursively_contains, **kwargs
-        )
+        super().__init__(recursively_contains=recursively_contains, **kwargs)
 
         self.guards.update(VariableTracker.propagate(items.values())["guards"])
         self.items = items
@@ -221,7 +219,7 @@ class ConstDictVariable(VariableTracker):
 
 class DefaultDictVariable(ConstDictVariable):
     def __init__(self, items, user_cls, default_factory=None, **kwargs):
-        super(DefaultDictVariable, self).__init__(items, user_cls, **kwargs)
+        super().__init__(items, user_cls, **kwargs)
         assert user_cls is collections.defaultdict
         self.default_factory = default_factory
 
@@ -358,7 +356,7 @@ class DataClassVariable(ConstDictVariable):
         )
 
     def __init__(self, items, user_cls, **options):
-        super(DataClassVariable, self).__init__(items, user_cls, **options)
+        super().__init__(items, user_cls, **options)
         assert self.is_matching_cls(user_cls)
 
     def as_proxy(self):
@@ -398,7 +396,7 @@ class DataClassVariable(ConstDictVariable):
             return variables.TupleVariable(list(self.items.values()), **options)
         elif name == "__setattr__":
             name = "__setitem__"
-        return super(DataClassVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         if name in self.items:
@@ -410,7 +408,7 @@ class DataClassVariable(ConstDictVariable):
             if name in defaults:
                 assert variables.ConstantVariable.is_literal(defaults[name])
                 return variables.ConstantVariable(defaults[name]).add_options(self)
-        super(DataClassVariable, self).var_getattr(tx, name)
+        super().var_getattr(tx, name)
 
 
 class HFPretrainedConfigVariable(VariableTracker):
@@ -432,7 +430,7 @@ class HFPretrainedConfigVariable(VariableTracker):
         return cls.is_matching_cls(type(obj))
 
     def __init__(self, obj, **kwargs):
-        super(HFPretrainedConfigVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.obj = obj
         assert self.is_matching_cls(type(obj))
 

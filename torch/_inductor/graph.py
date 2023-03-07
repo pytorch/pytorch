@@ -72,7 +72,19 @@ class GraphLowering(torch.fx.Interpreter):
                 ex.stride()
             )
         else:
-            size, stride = self._shape_env.create_symbolic_sizes_strides(ex)
+            from torch._dynamo.source import ConstantSource
+
+            # TODO: this should not be needed once #93059 lands
+            # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
+            # TODO: make a dedicated UnknownSource for this?
+            source = ConstantSource(
+                f"__unknown_tensor_{len(self._shape_env.var_to_val)}"
+            )
+            (
+                size,
+                stride,
+                _,
+            ) = self._shape_env.create_symbolic_sizes_strides_storage_offset(ex, source)
 
         size = [i.node.expr if isinstance(i, torch.SymInt) else i for i in size]
         stride = [i.node.expr if isinstance(i, torch.SymInt) else i for i in stride]
@@ -366,8 +378,6 @@ class GraphLowering(torch.fx.Interpreter):
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
-            if isinstance(value, ir.ReinterpretView):
-                continue
             assert isinstance(value, ir.StorageBox)
             value_storage_box = value
             value = value.data
@@ -521,17 +531,17 @@ class GraphLowering(torch.fx.Interpreter):
         def get_read_write_buffers_sizes(node):
             if isinstance(node, NopKernelSchedulerNode):
                 return 0
-            reads = set(dep.name for dep in node.read_writes.reads)
-            writes = set(dep.name for dep in node.read_writes.writes)
+            reads = {dep.name for dep in node.read_writes.reads}
+            writes = {dep.name for dep in node.read_writes.writes}
 
             def is_materialized(buf):
-                buf_uses = set(
-                    [user.node for user in scheduler.name_to_node[buf].users]
-                )
+                buf_uses = {user.node for user in scheduler.name_to_node[buf].users}
                 return len(buf_uses - set(node.snodes)) > 0
 
             if isinstance(node, FusedSchedulerNode):
-                writes = set([dep for dep in writes if is_materialized(dep)])
+                removed_buffers = {dep for dep in writes if not is_materialized(dep)}
+                writes = writes - removed_buffers
+                reads = reads - removed_buffers
             node_bytes = 0
             for buf in reads | writes:
                 if buf in self.name_to_buffer:

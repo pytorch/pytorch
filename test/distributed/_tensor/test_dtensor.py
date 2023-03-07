@@ -18,7 +18,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class DummyMLP(torch.nn.Module):
     def __init__(self, device):
-        super(DummyMLP, self).__init__()
+        super().__init__()
         self.net1 = torch.nn.Linear(5, 1024, device=device)
         self.relu = torch.nn.ReLU()
         self.net2 = torch.nn.Linear(1024, 4, device=device)

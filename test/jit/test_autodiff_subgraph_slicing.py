@@ -86,7 +86,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
             class M(torch.nn.Module):
                 def __init__(self, has_bias):
-                    super(M, self).__init__()
+                    super().__init__()
                     self.ll = torch.nn.Linear(10, 10, has_bias)
 
                 def forward(self, x, y):

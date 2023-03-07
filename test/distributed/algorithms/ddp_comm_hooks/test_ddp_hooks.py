@@ -43,7 +43,7 @@ def gpus_for_rank(world_size):
 
 class Task(nn.Module):
     def __init__(self):
-        super(Task, self).__init__()
+        super().__init__()
         torch.manual_seed(0)
         self.p = nn.Parameter(torch.randn(40, 20))
 
@@ -62,7 +62,7 @@ class TestDdpCommHook(nn.Module):
 
 class DistributedDataParallelCommHookTest(MultiProcessTestCase):
     def setUp(self):
-        super(DistributedDataParallelCommHookTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):

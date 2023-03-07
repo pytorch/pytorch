@@ -13,10 +13,10 @@ This command will generate the commands for the default compilers (see DEFAULTS
 below) for inference, run them and visualize the logs.
 
 If you want to just print the commands, you could use the following command
--> python benchmarks/runner.py --print_run_commands --suites=torchbench --inference
+-> python benchmarks/runner.py --print-run-commands --suites=torchbench --inference
 
 Similarly, if you want to just visualize the already finished logs
--> python benchmarks/runner.py --visualize_logs --suites=torchbench --inference
+-> python benchmarks/runner.py --visualize-logs --suites=torchbench --inference
 
 If you want to test float16
 -> python benchmarks/runner.py --suites=torchbench --inference --dtypes=float16
@@ -178,11 +178,13 @@ def parse_args():
     # Choose either generation of commands, pretty parsing or e2e runs
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
+        "--print-run-commands",
         "--print_run_commands",
         action="store_true",
         help="Generate commands and saves them to run.sh",
     )
     group.add_argument(
+        "--visualize-logs",
         "--visualize_logs",
         action="store_true",
         help="Pretty print the log files and draw graphs",
@@ -265,7 +267,11 @@ def parse_args():
         help="Github CLI path",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=None, help="batch size for benchmarking"
+        "--batch-size",
+        "--batch_size",
+        type=int,
+        default=None,
+        help="batch size for benchmarking",
     )
     parser.add_argument(
         "--threads",
@@ -276,12 +282,14 @@ def parse_args():
     )
     launcher_group = parser.add_argument_group("CPU Launcher Parameters")
     launcher_group.add_argument(
+        "--enable-cpu-launcher",
         "--enable_cpu_launcher",
         action="store_true",
         default=False,
         help="Use torch.backends.xeon.run_cpu to get the peak performance on Intel(R) Xeon(R) Scalable Processors.",
     )
     launcher_group.add_argument(
+        "--cpu-launcher-args",
         "--cpu_launcher_args",
         type=str,
         default="",
@@ -370,10 +378,10 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         "inductor",
                         "inductor_no_cudagraphs",
                     ):
-                        cmd = f"{cmd} --cold_start_latency"
+                        cmd = f"{cmd} --cold-start-latency"
 
                     if args.batch_size is not None:
-                        cmd = f"{cmd} --batch_size {args.batch_size}"
+                        cmd = f"{cmd} --batch-size {args.batch_size}"
 
                     if args.threads is not None:
                         cmd = f"{cmd} --threads {args.threads}"

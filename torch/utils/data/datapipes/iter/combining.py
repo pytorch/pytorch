@@ -586,8 +586,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
-        for data in zip(*iterators):
-            yield data
+        yield from zip(*iterators)
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):

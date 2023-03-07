@@ -25,8 +25,10 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
                             const c10::optional<Tensor>& grad_output_opt,
                             IntArrayRef kernel_size, IntArrayRef stride,
                             IntArrayRef padding, IntArrayRef dilation,
-                            bool ceil_mode, const c10::optional<float> divisor,
-                            PoolingOpBlock poolingBlock, const c10::string& op_name) {
+                            bool ceil_mode, bool count_include_pad,
+                            const c10::optional<int64_t> divisor_override,
+                            PoolingOpBlock poolingBlock, const c10::string& op_name)
+{
   if (input.numel() == 0) {
     return;
   }
@@ -39,7 +41,7 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
   const bool is_backward_pass = grad_output.defined();
   const bool has_indices = indices.defined();
-  const bool has_divisor = divisor.has_value();
+  const bool has_divisor = divisor_override.has_value() && divisor_override.value() != 0;
   const auto suggested_memory_format = input.suggest_memory_format();
   // for max_pool2d_with_indices() we cannot pass ChannelsLast (i.e., NHWC) to 'desc.dataLayout' in MPSGraph.
   // Because the returned indices will be selected based on NHWC memory layout which will
@@ -63,12 +65,12 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
     AT_ERROR("Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 
+  int padH = safe_downcast<int, int64_t>(padding[0]);
+  int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
   const int kH = safe_downcast<int, int64_t>(kernel_size[0]);
   const int kW = kernel_size.size() == 1 ? kH : safe_downcast<int, int64_t>(kernel_size[1]);
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
   const int dW = stride.empty() ? kW : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
-  const int padH = safe_downcast<int, int64_t>(padding[0]);
-  const int padW = padding.size() == 1 ? padH : safe_downcast<int, int64_t>(padding[1]);
   const int dilationH = safe_downcast<int, int64_t>(dilation[0]);
   const int dilationW = dilation.size() == 1 ? dilationH : safe_downcast<int, int64_t>(dilation[1]);
   const int64_t nbatch = ndims == 4 ? input.size(-4) : 1;
@@ -81,6 +83,7 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
   pool2d_shape_check(input, kH, kW, dH, dW, padH, padW, dilationH, dilationW,
                      nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth, memory_format);
 
+  auto output_memory_format = output.suggest_memory_format();
   // the output and indices are 'empty', so we could avoid unnecessary gatherView on empty tensors
   // by simply restriding them (instead of calling the costly Contiguous()).
   if (indices.suggest_memory_format() == MemoryFormat::ChannelsLast) {
@@ -92,12 +95,18 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
       outputSizes.insert(outputSizes.begin(), nbatch);
     }
     output.resize_(outputSizes);
-  } else if (output.suggest_memory_format() == MemoryFormat::ChannelsLast) {
+  } else if (output_memory_format == MemoryFormat::ChannelsLast) {
     output.unsafeGetTensorImpl()->empty_tensor_restride(MemoryFormat::Contiguous);
+    output_memory_format = MemoryFormat::Contiguous;
   }
 
   if (output.numel() == 0 || (is_backward_pass && grad_output.numel() == 0)) {
     return;
+  }
+  // workaround for issue #103039644: mismatching MPS vs. CPU results
+  // when both ceil_mode and count_include_pad are True
+  if (count_include_pad && ceil_mode) {
+    padH = padW = 0;
   }
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -105,7 +114,9 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
     string key = op_name + getTensorsStringKey({input, indices, grad_output}) + ":K[" +
                  getArrayRefString(kernel_size) + "]:S[" + getArrayRefString(stride) + "]:P[" +
                  getArrayRefString(padding) + "]:D[" + getArrayRefString(dilation) + "]" +
-                 (ceil_mode ? ":ceil" : "") + ":" + (suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+                 (ceil_mode ? ":ceil" : "") + (count_include_pad ? ":include_pad" : "") +
+                 (has_divisor ? ":divisor" : "") + ":" +
+                 (suggested_memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
 
     MPSShape* inputShape = getMPSShape(input, memory_format);
     MPSShape* gradOutputShape = is_backward_pass ? getMPSShape(grad_output, memory_format) : nullptr;
@@ -144,7 +155,7 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
             newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(grad_output.scalar_type()), gradOutputShape);
           }
           if (has_divisor) {
-            newCachedGraph->divisorTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(output.scalar_type()), @[@1]);
+            newCachedGraph->divisorTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeFloat32, @[@1]);
           }
           MPSGraphTensor* outputTensor = poolingBlock(*newCachedGraph, desc);
           // with desc.dataLayout = NHWC (i.e., ChannelsLast), the results need to be converted back to NCHW
@@ -181,17 +192,123 @@ static void pool2d_template(const Tensor& input, const Tensor& output,
     }
     MPSScalar divisor_scalar;
     if (cachedGraph->divisorTensor) {
-      divisor_scalar = getMPSScalar(divisor.value(), output.scalar_type());
+      const float divisor = float(kH * kW) / (float) divisor_override.value();
+      divisor_scalar = getMPSScalar(divisor, ScalarType::Float);
       feeds[cachedGraph->divisorTensor] = getMPSGraphTensorFromScalar(mpsStream, divisor_scalar);
     }
 
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+
+    if (output_memory_format != suggested_memory_format) {
+      const_cast<Tensor&>(output) = output.to(suggested_memory_format);
+    }
   }
+}
+
+static void avg_pool2d_template(const Tensor& input, const Tensor& output,
+                                const c10::optional<Tensor>& grad_output_opt,
+                                IntArrayRef kernel_size, IntArrayRef stride,
+                                IntArrayRef padding, IntArrayRef dilation,
+                                bool ceil_mode, bool count_include_pad,
+                                const c10::optional<int64_t> divisor_override,
+                                const c10::string& op_name)
+{
+  const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
+  const bool is_backward_pass = grad_output.defined();
+  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
+
+  // custom divisor isn't supported natively in avgPooling2DWithSourceTensor().
+  // For Float input type, we work around it by multiplying divisor after avgPooling2D.
+  // However, for Long type, the accumulated error when multiplying the divisor
+  // would produce results that mismatch CPU results.
+  if (use_divisor && input.scalar_type() == ScalarType::Long) {
+    TORCH_WARN_ONCE("MPS: passing divisor to Average Pooling op with int64 input is ",
+                    "not supported on MPS backend. ",
+                    "Falling back on CPU. This may have performance implications.");
+    if (!is_backward_pass) {
+      const_cast<Tensor&>(output) = at::avg_pool2d(input.to("cpu"), kernel_size, stride, padding, ceil_mode,
+                                       count_include_pad, divisor_override).clone().to("mps");
+    } else {
+      const_cast<Tensor&>(output) = at::avg_pool2d_backward(grad_output.to("cpu"), input.to("cpu"),
+                                       kernel_size, stride, padding, ceil_mode, count_include_pad,
+                                       divisor_override).clone().to("mps");
+    }
+    return;
+  }
+
+  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
+    MPSGraph* mpsGraph = cachedGraph.graph();
+    const int64_t ndims = input.ndimension();
+    MPSShape *paddingShape = nil;
+    MPSGraphTensor* paddedTensor = cachedGraph.inputTensor;
+
+    // workaround for issue #103039644: mismatching MPS vs. CPU results
+    // when both ceilMode and includeZeroPadToAverage are True
+    const bool explicit_padding = count_include_pad && ceil_mode;
+    if (explicit_padding) {
+      std::vector<NSNumber*> padVec(ndims, @(0));
+      padVec[ndims - 1] = @(padding.size() == 1 ? padding[0] : padding[1]);
+      padVec[ndims - 2] = @(ndims > 3 ? padding[0] : 0);
+      paddingShape = [NSArray arrayWithObjects: padVec.data() count:ndims];
+      paddedTensor = [mpsGraph padTensor: cachedGraph.inputTensor
+                         withPaddingMode: MPSGraphPaddingModeZero
+                             leftPadding: paddingShape
+                            rightPadding: paddingShape
+                           constantValue: 0.0
+                                    name: nil];
+      paddedTensor = [mpsGraph identityWithTensor: paddedTensor name: nil];
+    } else {
+      desc.includeZeroPadToAverage = count_include_pad;
+    }
+    if (use_divisor) {
+      desc.includeZeroPadToAverage = YES;
+    }
+
+    if (!is_backward_pass) {
+      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor: paddedTensor
+                                                                  descriptor: desc
+                                                                        name: nil];
+      if (cachedGraph.divisorTensor) {
+        // workaround: custom divisor isn't supported by MPS backend, so we scale manually
+        return [mpsGraph multiplicationWithPrimaryTensor: avgPoolTensor
+                                         secondaryTensor: cachedGraph.divisorTensor
+                                                    name: nil];
+      } else {
+        return avgPoolTensor;
+      }
+    } else { // backward pass
+      MPSGraphTensor* scaledGradTensor = cachedGraph.gradOutputTensor;
+      if (cachedGraph.divisorTensor) {
+        scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor: cachedGraph.gradOutputTensor
+                                                     secondaryTensor: cachedGraph.divisorTensor
+                                                                name: nil];
+      }
+      MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DGradientWithGradientTensor: scaledGradTensor
+                                                                          sourceTensor: paddedTensor
+                                                                            descriptor: desc
+                                                                                  name: nil];
+      if (explicit_padding) {
+        return [mpsGraph padGradientWithIncomingGradientTensor: avgPoolTensor
+                                                  sourceTensor: cachedGraph.inputTensor
+                                                   paddingMode: MPSGraphPaddingModeZero
+                                                   leftPadding: paddingShape
+                                                  rightPadding: paddingShape
+                                                          name: nil];
+
+      } else {
+        return avgPoolTensor;
+      }
+    }
+  };
+
+  pool2d_template(input, output, c10::nullopt, grad_output_opt, kernel_size, stride,
+                  padding, {1, 1}, ceil_mode, count_include_pad, divisor_override,
+                  pooling_op_block, op_name);
 }
 
 } // namespace mps
 
-Tensor _mps_max_pool2d(
+Tensor mps_max_pool2d(
     const Tensor& input,
     IntArrayRef kernel_size,
     IntArrayRef stride,
@@ -207,7 +324,7 @@ Tensor _mps_max_pool2d(
                                              name: nil];
   };
   mps::pool2d_template(input, output, c10::nullopt, c10::nullopt, kernel_size, stride,
-                       padding, dilation, ceil_mode, c10::nullopt, pooling_op_block, "max_pool2d");
+                       padding, dilation, ceil_mode, false, c10::nullopt, pooling_op_block, "max_pool2d");
 
   return output;
 }
@@ -230,7 +347,7 @@ Tensor mps_max_pool2d_backward(
                                                        name: nil];
   };
   mps::pool2d_template(input, grad_input, c10::nullopt, grad_output, kernel_size, stride,
-                       padding, dilation, ceil_mode, c10::nullopt, pooling_op_block, "max_pool2d_backward");
+                       padding, dilation, ceil_mode, false, c10::nullopt, pooling_op_block, "max_pool2d_backward");
 
   return grad_input;
 }
@@ -245,6 +362,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
     const Tensor& output,
     const Tensor& indices) {
 
+  auto indices_memory_format = indices.suggest_memory_format();
+
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     NSArray<MPSGraphTensor*>* poolOutputs = [mpsGraph maxPooling2DReturnIndicesWithSourceTensor: cachedGraph.inputTensor
@@ -254,7 +373,11 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)(
     return poolOutputs[0];
   };
   mps::pool2d_template(input, output, indices, c10::nullopt, kernel_size, stride,
-                       padding, dilation, ceil_mode, c10::nullopt, pooling_op_block, "max_pool2d_indices");
+                       padding, dilation, ceil_mode, false, c10::nullopt, pooling_op_block, "max_pool2d_indices");
+
+  if (indices_memory_format == MemoryFormat::ChannelsLast) {
+    const_cast<Tensor&>(indices) = indices.to(MemoryFormat::ChannelsLast);
+  }
 }
 
 TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)(
@@ -276,40 +399,24 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)(
                                                        name: nil];
   };
   mps::pool2d_template(input, grad_input, indices, grad_output, kernel_size, stride,
-                       padding, dilation, ceil_mode, c10::nullopt, pooling_op_block, "max_pool2d_indices_backward");
+                       padding, dilation, ceil_mode, false, c10::nullopt, pooling_op_block, "max_pool2d_indices_backward");
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_out_mps) (
-   const Tensor& input,
-   int64_t kH,
-   int64_t kW,
-   int64_t dH,
-   int64_t dW,
-   int64_t padH,
-   int64_t padW,
-   bool ceil_mode,
-   bool count_include_pad,
-   c10::optional<int64_t> divisor_override,
+    const Tensor& input,
+    int64_t kH,
+    int64_t kW,
+    int64_t dH,
+    int64_t dW,
+    int64_t padH,
+    int64_t padW,
+    bool ceil_mode,
+    bool count_include_pad,
+    c10::optional<int64_t> divisor_override,
    const Tensor& output) {
 
-  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-  float divisor = use_divisor ? float(kH * kW) / (float) divisor_override.value() : 1.0f;
-  count_include_pad = use_divisor ? use_divisor : count_include_pad;
-
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    desc.includeZeroPadToAverage = count_include_pad;
-    MPSGraphTensor* avgPoolTensor = [mpsGraph avgPooling2DWithSourceTensor: cachedGraph.inputTensor
-                                                                descriptor: desc
-                                                                      name: nil];
-    // workaround: custom divisor isn't supported by MPS backend, so we scale manually
-    return [mpsGraph multiplicationWithPrimaryTensor: avgPoolTensor
-                                     secondaryTensor: cachedGraph.divisorTensor
-                                                name: nil];
-  };
-  mps::pool2d_template(input, output, c10::nullopt, c10::nullopt, {kH, kW}, {dH, dW},
-                       {padH, padW}, {1, 1}, ceil_mode, divisor, pooling_op_block,
-                       std::string("avg_pool2d") + (count_include_pad ? "_include_pad" : ""));
+  mps::avg_pool2d_template(input, output, c10::nullopt, {kH, kW}, {dH, dW}, {padH, padW},
+                           {1, 1}, ceil_mode, count_include_pad, divisor_override, "avg_pool2d");
 }
 
 TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
@@ -323,25 +430,8 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_mps) (
     c10::optional<int64_t> divisor_override,
     const Tensor& gradInput) {
 
-  const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
-  float divisor = use_divisor ? float(kernel_size[0] * kernel_size[1]) / (float) divisor_override.value() : 1.0f;
-  count_include_pad = use_divisor ? use_divisor : count_include_pad;
-
-  mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
-    MPSGraph* mpsGraph = cachedGraph.graph();
-    desc.includeZeroPadToAverage = count_include_pad;
-    // workaround: custom divisor isn't supported by MPS backend, so we scale manually
-    MPSGraphTensor* scaledGradTensor = [mpsGraph multiplicationWithPrimaryTensor: cachedGraph.gradOutputTensor
-                                                                 secondaryTensor: cachedGraph.divisorTensor
-                                                                            name: nil];
-    return [mpsGraph avgPooling2DGradientWithGradientTensor: scaledGradTensor
-                                               sourceTensor: cachedGraph.inputTensor
-                                                 descriptor: desc
-                                                       name: nil];
-  };
-  mps::pool2d_template(input, gradInput, c10::nullopt, gradOutput, kernel_size, stride,
-                       padding, {1, 1}, ceil_mode, divisor, pooling_op_block,
-                       std::string("avg_pool2d_backward") + (count_include_pad ? "_include_pad" : ""));
+  mps::avg_pool2d_template(input, gradInput, gradOutput, kernel_size, stride, padding,
+                           {1, 1}, ceil_mode, count_include_pad, divisor_override, "avg_pool2d_backward");
 }
 
 } // namespace at::native

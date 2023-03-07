@@ -40,7 +40,7 @@ class ExpRelaxedCategorical(Distribution):
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
+        super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ExpRelaxedCategorical, _instance)
@@ -112,13 +112,11 @@ class RelaxedOneHotCategorical(TransformedDistribution):
 
     def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         base_dist = ExpRelaxedCategorical(temperature, probs, logits, validate_args=validate_args)
-        super(RelaxedOneHotCategorical, self).__init__(base_dist,
-                                                       ExpTransform(),
-                                                       validate_args=validate_args)
+        super().__init__(base_dist, ExpTransform(), validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RelaxedOneHotCategorical, _instance)
-        return super(RelaxedOneHotCategorical, self).expand(batch_shape, _instance=new)
+        return super().expand(batch_shape, _instance=new)
 
     @property
     def temperature(self):

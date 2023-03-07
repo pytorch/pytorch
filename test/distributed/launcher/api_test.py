@@ -92,7 +92,7 @@ def elastic_launch_wrapper(
             rdzv_endpoint, min_nodes, max_nodes, nproc_per_node, run_id
         ),
         sys.executable,
-    )("-u", path("bin/test_script.py"), f"--touch_file_dir={test_dir}")
+    )("-u", path("bin/test_script.py"), f"--touch-file-dir={test_dir}")
 
 
 def _dist_sum(wait=0):
@@ -163,7 +163,7 @@ class ElasticLaunchTest(unittest.TestCase):
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         # make sure all the workers ran.
         # each worker touches a file with its global rank as the name.
@@ -178,7 +178,7 @@ class ElasticLaunchTest(unittest.TestCase):
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, nnodes, nnodes, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         # make sure all the workers ran.
         # each worker touches a file with its global rank as the name.
@@ -248,7 +248,7 @@ class ElasticLaunchTest(unittest.TestCase):
         elastic_launch(
             get_test_launch_config(self._etcd_endpoint, 1, 2, nproc_per_node),
             sys.executable,
-        )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+        )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
         world_size = nproc_per_node
         self.check_works_ran(world_size)
@@ -283,7 +283,7 @@ class ElasticLaunchTest(unittest.TestCase):
             elastic_launch(
                 get_test_launch_config(self._etcd_endpoint, 1, 2, 4),
                 sys.executable,
-            )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+            )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
         record_mock.assert_called_once()
 
     @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
@@ -345,7 +345,7 @@ class ElasticLaunchTest(unittest.TestCase):
             elastic_launch(
                 get_test_launch_config(self._etcd_endpoint, 1, 1, 4),
                 sys.executable,
-            )("-u", path("bin/test_script.py"), f"--touch_file_dir={self.test_dir}")
+            )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
 
             rdzv_handler_mock.shutdown.assert_called_once()
 

@@ -991,9 +991,9 @@ def extract_weight_comparison(m: GraphModule) -> NSResultsType:
     # use functions.
 
     # TODO(future PR): move this to config
-    weighted_ops = set([
+    weighted_ops = {
         torch.nn.functional.linear,
-    ])
+    }
 
     results: NSResultsType = {
         'model': {NSSingleResultValuesType.WEIGHT.value: {}}

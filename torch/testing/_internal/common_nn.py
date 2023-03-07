@@ -5848,7 +5848,7 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
+class TestBase:
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
@@ -6108,7 +6108,7 @@ class ModuleTest(TestBase):
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
-class InputVariableMixin(object):
+class InputVariableMixin:
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
@@ -6477,13 +6477,13 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 def _create_basic_net():
     class Layer(nn.Module):
         def __init__(self):
-            super(Layer, self).__init__()
+            super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
             self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
         def __init__(self):
-            super(Net, self).__init__()
+            super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
             self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))

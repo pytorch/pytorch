@@ -3,7 +3,7 @@ from contextlib import contextmanager
 try:
     from torch._C import _nvtx
 except ImportError:
-    class _NVTXStub(object):
+    class _NVTXStub:
         @staticmethod
         def _fail(*args, **kwargs):
             raise RuntimeError("NVTX functions not installed. Are you sure you have a CUDA build?")

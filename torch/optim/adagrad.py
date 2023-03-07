@@ -48,7 +48,7 @@ class Adagrad(Optimizer):
             maximize=maximize,
             differentiable=differentiable,
         )
-        super(Adagrad, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group["params"]:

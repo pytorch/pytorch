@@ -26,6 +26,7 @@ jobs:
       build-environment: caffe2-linux-focal-py3.8-gcc7
       docker-image-name: pytorch-linux-focal-py3.8-gcc7
 
+  # We only have the configs that are not already on the same pull job here
   linux-bionic-cuda11_7-py3_10-gcc7-build:
     name: linux-bionic-cuda11.7-py3.10-gcc7
     uses: ./.github/workflows/_linux-build.yml
@@ -34,17 +35,9 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.7-cudnn8-py3-gcc7
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "functorch", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
   linux-bionic-cuda11_7-py3_10-gcc7-test:
