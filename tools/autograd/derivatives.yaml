@@ -259,8 +259,8 @@
   vec2: maybe_multiply(grad.t().mv(vec1.conj()), alpha.conj())
   result: maybe_multiply(self_t, beta) + maybe_multiply(vec1_t.outer(vec2_p), alpha) + maybe_multiply(vec1_p.outer(vec2_t), alpha)
 
-- name: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
-  theta: affine_grid_generator_backward(grad, size, align_corners)
+- name: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
+  theta: affine_grid_generator_backward_symint(grad, size, align_corners)
 
 - name: alias(Tensor(a) self) -> Tensor(a)
   self: grad
@@ -2800,7 +2800,7 @@
     AutogradCUDA:
       self: grad.reshape_as(self) + 1
 
-- name: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- name: _efficientzerotensor(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   output_differentiability: [False]
 
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor

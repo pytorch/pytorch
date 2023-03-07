@@ -1224,13 +1224,7 @@ class TritonKernel(Kernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline(
-                "from torch._C import _cuda_getCurrentRawStream as get_cuda_stream"
-            )
-            result.writeline("from torch._dynamo.testing import rand_strided")
             result.writeline("from torch._inductor.utils import get_num_bytes")
-            result.writeline("import torch")
-            result.writeline("from torch._inductor.triton_ops.autotune import grid")
             result.writeline("from triton.testing import do_bench")
             result.writeline("")
 
@@ -1273,6 +1267,15 @@ class TritonKernel(Kernel):
                     from torch._inductor.utils import instance_descriptor
                 """
             )
+            if config.benchmark_kernel:
+                code.splice(
+                    """
+                        from torch._dynamo.testing import rand_strided
+                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                        import torch
+                        from torch._inductor.triton_ops.autotune import grid
+                    """
+                )
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
