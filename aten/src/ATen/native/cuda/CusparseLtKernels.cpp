@@ -35,7 +35,6 @@ The following source file implements a sparse linear operator using cusparseLt
 // TODO: template this class based on dtype or figure out another way to
 // make dtype variable
 struct CusparseLtLinear : torch::CustomClassHolder {
-  at::Tensor weight;
   cusparseLtHandle_t handle;
   cusparseLtMatmulAlgSelection_t alg_sel;
   cusparseLtMatmulDescriptor_t matmul;
@@ -46,6 +45,7 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   float beta{0.0};
   unsigned alignment{16};
   int  num_streams{0};
+  int n_search_iter{1};
   int64_t num_A_rows;
   cudaStream_t stream{nullptr};
   cudaStream_t* streams{nullptr};
@@ -215,10 +215,12 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   CHECK_CUSPARSE( cusparseLtMatmulGetWorkspace(&handle, &plan, &workspace_size) )
   CHECK_CUDA( cudaMalloc((void**) &d_workspace, workspace_size) )
 
-  CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
-                                          dA_compressed, dB, &beta,
-                                          dC, dD, nullptr,
-                                          streams, num_streams) )
+  //CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(&handle, &alg_sel, CUSPARSELT_MATMUL_SEARCH_ITERATIONS, &n_search_iter, sizeof(int)))
+
+  //CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
+                                          //dA_compressed, dB, &beta,
+                                          //dC, dD, nullptr,
+                                          //streams, num_streams) )
 
   CHECK_CUSPARSE( cusparseLtMatmul(
       &handle,

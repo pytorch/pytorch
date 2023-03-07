@@ -3,9 +3,12 @@ import torch.utils.benchmark as benchmark
 from torch import nn
 from torch.ao.pruning import WeightNormSparsifier
 from itertools import product
+from torch.profiler import profile, record_function, ProfilerActivity
+
 
 device = "cuda"
 dtype = torch.float16
+torch.set_printoptions(precision=3, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
 
 class Model(nn.Module):
 
@@ -28,7 +31,7 @@ class cuSPARSELtLinear(nn.Linear):
         convert from nn.Linear
         """
         weight_tensor = mod.weight.data
-        bias_tensor = mod.bias.data.T.contiguous()
+        bias_tensor = mod.bias.data
 
         cusparselt = cls(mod.in_features,
                          mod.out_features)
@@ -50,11 +53,11 @@ def get_linear(m, k, n):
     pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(4, 1), zeros_per_block=2)
     pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
     pruner.step()
+    pruner.squash_mask()
 
     # converted_model = pruner.convert(model, mapping={nn.Linear: cuSPARSELtLinear})
     # sparse_linear = converted_model
     # dense_linear = model
-
     sparse_linear = cuSPARSELtLinear.from_dense(model.linear)
     dense_linear = model.linear
 
@@ -66,16 +69,38 @@ def get_linear(m, k, n):
 
     return input_tensor, pruner, sparse_linear, dense_linear
 
+def get_matmul(m, k, n):
+    model = Model(m, k)
+    model.linear.bias.data.zero_()
+    model.half()
+    model.cuda()
+
+    pruner = WeightNormSparsifier(sparsity_level=1.0, sparse_block_shape=(4, 1), zeros_per_block=2)
+    pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
+    pruner.step()
+    pruner.squash_mask()
+
+    sparse_matmul = cuSPARSELtLinear.from_dense(model.linear)
+
+    def dense_matmul(x):
+        return torch.matmul(x, model.linear.weight.data.T)
+
+    for i in range(5):
+        input_tensor = torch.randn(n, k, device=device, dtype=dtype)
+        sparse_output = sparse_matmul(input_tensor)
+        dense_output = dense_matmul(input_tensor)
+        assert torch.allclose(sparse_output, dense_output, rtol=1e-2, atol=1e-3)
+
+    return input_tensor, pruner, sparse_matmul, dense_matmul
 
 if __name__ == "__main__":
     results = []
-    torch.set_printoptions(precision=3, threshold=None, edgeitems=4, linewidth=460, profile=None, sci_mode=False)
 
     shapes = [
         # distilbert shapes
         (768, 3072, 768),
-        (3072, 768, 3072),
-        # jiecao shapes
+        # (3072, 768, 3072),
+        # # jiecao shapes
         # (1024, 1536, 2048),
         # (1024, 9408, 2048),
         # (1024, 3200, 2048),
@@ -105,24 +130,23 @@ if __name__ == "__main__":
     ]
     batch_sizes = [1] # [1, 4, 16, 64, 256]
 
+
     for batch_size, (m, k, n) in product(batch_sizes, shapes):
         # label and sub_label are the rows
         # description is the column
-        label = 'nn.ParameterizedLinear vs. nn.Linear vs. cuSPARSELt Linear'
+        label = 'cuSPARSELt Linear vs. nn.Linear'
         sub_label = f'batch_size: {batch_size:2d} | m:{m:6d} | k:{k:6d} | n:{n:6d}'
 
         input_tensor, pruner, sparse_linear, dense_linear = get_linear(m, k, n)
 
-        # result = benchmark.Timer(
-            # stmt='param_linear(input_tensor)',
-            # globals={'input_tensor': input_tensor, 'param_linear': dense_linear},
-            # label=label,
-            # sub_label=sub_label,
-            # description='prepare latency',
-        # )
-        # results.append(result.blocked_autorange(min_run_time=1))
-
-        pruner.squash_mask()
+        result = benchmark.Timer(
+            stmt='sparse_linear(input_tensor)',
+            globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
+            label=label,
+            sub_label=sub_label,
+            description='sparse latency',
+        )
+        results.append(result.blocked_autorange(min_run_time=1))
 
         result = benchmark.Timer(
             stmt='dense_linear(input_tensor)',
@@ -133,14 +157,11 @@ if __name__ == "__main__":
         )
         results.append(result.blocked_autorange(min_run_time=1))
 
-        result = benchmark.Timer(
-            stmt='sparse_linear(input_tensor)',
-            globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
-            label=label,
-            sub_label=sub_label,
-            description='sparse latency',
-        )
-        results.append(result.blocked_autorange(min_run_time=1))
+        with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU], record_shapes=True) as prof:
+            with record_function("cusparselt"):
+                sparse_linear(input_tensor)
+
+        prof.export_stacks(f"{m}_{k}_{n}_cusparselt_profiler_stacks.txt", "self_cuda_time_total")
 
     compare = benchmark.Compare(results)
     compare.colorize(rowwise=True)
