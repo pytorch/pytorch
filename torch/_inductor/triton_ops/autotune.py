@@ -11,7 +11,6 @@ import os.path
 import re
 import threading
 from typing import List
-import re
 
 import torch
 from torch._dynamo.utils import dynamo_timed
@@ -254,7 +253,9 @@ class DebugAutotuner(CachingAutotuner):
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
         import colorama
 
-        info_str = f"{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s \t {kernel_name}"
+        info_str = (
+            f"{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s \t {kernel_name}"
+        )
         if ms > 0.012 and gb_per_s < 650:
             print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
         else:

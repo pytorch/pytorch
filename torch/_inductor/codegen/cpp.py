@@ -1063,13 +1063,11 @@ class CppKernel(Kernel):
         self.compute = IndentedBuffer()
         self.stores = DeferredIndentedBuffer()
         self.cse = self.cse.clone()
-        try:
-            yield
-        finally:
-            self.reduction_suffix.splice(self.loads)
-            self.reduction_suffix.splice(self.compute)
-            self.reduction_suffix.splice(self.stores)
-            (self.loads, self.compute, self.stores, self.cse) = prior
+        yield
+        self.reduction_suffix.splice(self.loads)
+        self.reduction_suffix.splice(self.compute)
+        self.reduction_suffix.splice(self.stores)
+        (self.loads, self.compute, self.stores, self.cse) = prior
 
 
 class CppVecKernel(CppKernel):

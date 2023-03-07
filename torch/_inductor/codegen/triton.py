@@ -699,10 +699,10 @@ class TritonKernel(Kernel):
             try:
                 yield
             finally:
-                if not self.persistent_reduction:
-                    # flush out any code before opening the next loop
-                    self.codegen_body()
                 self.inside_reduction = True
+            if not self.persistent_reduction:
+                # flush out any code before opening the next loop
+                self.codegen_body()
 
         return ctx()
 
@@ -1534,12 +1534,10 @@ class TritonScheduling:
                 node_schedule.pop()
             else:
                 node_schedule.append(DisableReduction)
-            try:
-                yield
-            finally:
-                node_schedule.append(EnableReduction)
-                current_loop_writes.clear()
-                is_current_reductions.clear()
+            yield
+            node_schedule.append(EnableReduction)
+            current_loop_writes.clear()
+            is_current_reductions.clear()
 
         for index, node in enumerate(nodes):
             if node in done:

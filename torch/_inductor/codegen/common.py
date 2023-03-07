@@ -215,15 +215,13 @@ class BracesBuffer(IndentedBuffer):
             for _ in range(-offset):
                 self._indent -= 1
                 self.writeline("}")
-            try:
-                yield
-            finally:
-                for _ in range(-offset):
-                    self.writeline("{")
-                    self._indent += 1
-                for _ in range(offset):
-                    self._indent -= 1
-                    self.writeline("}")
+            yield
+            for _ in range(-offset):
+                self.writeline("{")
+                self._indent += 1
+            for _ in range(offset):
+                self._indent -= 1
+                self.writeline("}")
 
         return ctx()
 
