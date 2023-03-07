@@ -234,23 +234,31 @@ def cache_on_self(fn):
 
 
 def get_fused_kernel_name(node_schedule):
-    return "_".join(
-        ["fused"]
-        + sorted(
-            [
-                str(origin.name)
-                for origin in functools.reduce(
-                    operator.or_,
-                    [
-                        node.node.origins
-                        for node in node_schedule
-                        if hasattr(node, "node")
-                    ],
-                )
-                if origin.op == "call_function"
-            ]
-        )[0 : config.kernel_name_max_ops]
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
+    if config.triton.descriptive_names == "aten":
+        # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
+        sources = [
+            origin.meta["original_aten"]._overloadpacket.__name__
+            for origin in all_origins
+            if origin.op == "call_function" and "original_aten" in origin.meta
+        ]
+    elif config.triton.descriptive_names == "torch":
+        # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
+        sources = []
+        for origin in all_origins:
+            if origin.op == "call_function" and "source_fn" in origin.meta:
+                if isinstance(origin.meta["source_fn"], str):
+                    sources.append(origin.meta["source_fn"])
+                else:
+                    sources.append(origin.meta["source_fn"].__name__)
+    else:
+        raise NotImplementedError
+    sources = set(sources)
+    sources = sorted(sources)[: config.kernel_name_max_ops]
+    return "_".join(["fused"] + sources)
 
 
 def gather_origins(args, kwargs):
