@@ -2031,11 +2031,12 @@ class TestPartitioning(AOTTestCase):
         # - 5 original outputs (sb is a tuple, gets expanded to 2 symints)
         # - 8 saved outputs for backward: 5 tensors, 3 symints
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        # in the bwd graph, 12 inputs (grad outs) because:
+        # in the bwd graph, 10 inputs (grad outs) because:
         # - The fwd graph had 13 outputs
         # - 1 was a view of an input, which gets regenerated outside of the graph
         #   and doesn't participate in the backward
-        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
+        # - 2 user outs were symints (b.size()), which don't get tangents in the backward
+        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
