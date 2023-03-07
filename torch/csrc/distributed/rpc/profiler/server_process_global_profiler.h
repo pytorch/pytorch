@@ -76,7 +76,7 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 
 // This class is used to implement a stack of ``State``s.
 // It has 2 members.
-// One is `prevPtr`, a shared_ptr poiniting to previous elememnt in the
+// One is `prevPtr`, a shared_ptr pointing to previous element in the
 // stack.
 // The other is ``statePtr``, a shared_ptr pointing to ``State``.
 class StateStackEntry {
