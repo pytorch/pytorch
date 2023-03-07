@@ -20,6 +20,7 @@ if __name__ == '__main__':
 # XXX: still in prototype
 class TestSymbolicShapeAnalysis(JitTestCase):
     def setUp(self):
+        super(JitTestCase, self).setUp()
         self.prev_symbolic_shapes_test_enabled = torch._C._jit_symbolic_shapes_test_mode_enabled()
         torch._C._jit_set_symbolic_shapes_test_mode(True)
 

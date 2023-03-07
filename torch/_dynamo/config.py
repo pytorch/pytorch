@@ -24,7 +24,7 @@ output_code = False
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
+verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # If true, traced graph outputs will be outputted as Python GraphModule code.
 # If false, traced graph outputs will be outputted in tabular form.
@@ -42,8 +42,10 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
+# whether or not to specialize on int inputs.  This only has an effect with
+# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
+# inputs
+specialize_int = True
 
 # Assume these functions return constants
 constant_functions = {
@@ -138,7 +140,7 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # Compiler compilation debug info
 # 1: Dumps the original graph out to repro.py if compilation fails
 # 2: Dumps a minifier_launcher.py if compilation fails.
-# 3: Always dumps a minifier_laucher.py. Good for segfaults.
+# 3: Always dumps a minifier_launcher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 

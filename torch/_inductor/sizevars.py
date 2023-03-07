@@ -18,16 +18,6 @@ log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class ZeroGuard:
-    """
-    An expression we should check equals zero.
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
-@dataclasses.dataclass
 class PositiveGuard:
     """
     An expression we should check for > 0
@@ -334,6 +324,9 @@ class SizeVarAllocator:
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
 
+    def guard_static_shapes(self, left: List[Expr]) -> List[int]:
+        return [self.guard_static_shape(x) for x in left]
+
     def __getitem__(self, val: int) -> Expr:
         return self.shape_env.duck_int(val)
 
@@ -457,7 +450,23 @@ class SizeVarAllocator:
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
-        for name, value in graph_inputs.items():
+        def is_expr(x):
+            return isinstance(x[1], sympy.Expr)
+
+        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
+        graph_inputs_tensors = list(
+            filter(lambda x: not is_expr(x), graph_inputs.items())
+        )
+
+        for name, shape in graph_inputs_expr:
+            shape = self.simplify(shape)
+            if shape in needed:
+                needed.remove(shape)
+                code.writeline(
+                    f"{self.declare}{shape} = {name}.item() if isinstance({name}, torch.Tensor) else {name}{self.ending}"
+                )
+
+        for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -467,7 +476,7 @@ class SizeVarAllocator:
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
 
-        for name, value in graph_inputs.items():
+        for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)

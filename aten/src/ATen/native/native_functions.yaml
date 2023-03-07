@@ -171,7 +171,7 @@
     CUDA: _assert_async_cuda
 
 
-- func: _assert_tensor_metadata(Tensor a, int[]? size=None, int[]? stride=None, ScalarType? dtype=None) -> ()
+- func: _assert_tensor_metadata(Tensor a, SymInt[]? size=None, SymInt[]? stride=None, ScalarType? dtype=None) -> ()
 
 - func: refine_names(Tensor(a) self, Dimname[] names) -> Tensor(a)
   variants: method
@@ -610,13 +610,13 @@
     MPS: addr_out_mps
     CompositeExplicitAutograd: math_addr_out
 
-- func: affine_grid_generator(Tensor theta, int[] size, bool align_corners) -> Tensor
+- func: affine_grid_generator(Tensor theta, SymInt[] size, bool align_corners) -> Tensor
   variants: function
   dispatch:
     CompositeExplicitAutograd: affine_grid_generator
   autogen: affine_grid_generator.out
 
-- func: affine_grid_generator_backward(Tensor grad, int[] size, bool align_corners) -> Tensor
+- func: affine_grid_generator_backward(Tensor grad, SymInt[] size, bool align_corners) -> Tensor
   variants: function
 
 - func: _is_all_true(Tensor self) -> Tensor
@@ -1115,7 +1115,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: copysign_out
+    CPU, CUDA, MPS: copysign_out
   tags: pointwise
 
 - func: copysign.Tensor(Tensor self, Tensor other) -> Tensor
@@ -2285,7 +2285,7 @@
   autogen: new_ones.out
 
 # other overrides are to provide a more helpful error message that dtype is required
-- func: _empty_affine_quantized(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
+- func: _empty_affine_quantized(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, float scale=1, int zero_point=0, MemoryFormat? memory_format=contiguous_format) -> Tensor
   dispatch:
     CPU: empty_affine_quantized_other_backends_stub
     QuantizedCPU, QuantizedCUDA: empty_affine_quantized
@@ -2293,7 +2293,7 @@
 
 # it's a factory function receiving a tensor argument, thus overriding explicitly
 # other overrides are to provide a more helpful error message that dtype is required
-- func: _empty_per_channel_affine_quantized(int[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
+- func: _empty_per_channel_affine_quantized(SymInt[] size, *, Tensor scales, Tensor zero_points, int axis, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=contiguous_format) -> Tensor
   category_override: factory
   dispatch:
     CPU: empty_per_channel_affine_quantized_other_backends_stub
@@ -2318,7 +2318,7 @@
 # This is a utility function to enable users to resize out tensor while registering kernels for out variants.
 # Eventually, we can consider exposing `resize_output` as a public API to ship it with python op registration
 # to make it easy to register out variants for ops.
-- func: _resize_output_(Tensor(a!) self, int[] size, Device device) -> Tensor(a!)
+- func: _resize_output_(Tensor(a!) self, SymInt[] size, Device device) -> Tensor(a!)
   use_const_ref_for_mutable_tensors: True
   variants: function
   dispatch:
@@ -2520,11 +2520,15 @@
 - func: flatten.DimnameList(Tensor(a) self, Dimname[] dims, Dimname out_dim) -> Tensor(a)
   variants: function, method
 
-- func: unflatten.int(Tensor(a) self, int dim, int[] sizes) -> Tensor(a)
+- func: unflatten.int(Tensor(a) self, int dim, SymInt[] sizes) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: unflatten_symint
 
-- func: unflatten.Dimname(Tensor(a) self, Dimname dim, int[] sizes, Dimname[] names) -> Tensor(a)
+- func: unflatten.Dimname(Tensor(a) self, Dimname dim, SymInt[] sizes, Dimname[] names) -> Tensor(a)
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: unflatten_dimname_symint
 
 - func: fill.Scalar(Tensor self, Scalar value) -> Tensor
   variants: function
@@ -3830,6 +3834,14 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
+- func: _int_mm(Tensor self, Tensor mat2) -> Tensor
+  dispatch:
+    CUDA: _int_mm_cuda
+
+- func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CUDA: _int_mm_out_cuda
+
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
@@ -5083,7 +5095,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: slice_scatter
+    CompositeExplicitAutogradNonFunctional: slice_scatter
   autogen: slice_scatter.out
   tags: core
 
@@ -5092,7 +5104,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select_scatter_symint
+    CompositeExplicitAutogradNonFunctional: select_scatter_symint
   autogen: select_scatter.out
 
 - func: diagonal_scatter(Tensor self, Tensor src, int offset=0, int dim1=0, int dim2=1) -> Tensor
@@ -5100,7 +5112,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: diagonal_scatter
+    CompositeExplicitAutogradNonFunctional: diagonal_scatter
   autogen: diagonal_scatter.out
 
 - func: as_strided_scatter(Tensor self, Tensor src, SymInt[] size, SymInt[] stride, SymInt? storage_offset=None) -> Tensor
@@ -5108,7 +5120,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: as_strided_scatter_symint
+    CompositeExplicitAutogradNonFunctional: as_strided_scatter_symint
   autogen: as_strided_scatter.out
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
@@ -5381,10 +5393,12 @@
     CPU, CUDA: nansum_out
     MPS: nansum_out_mps
 
-- func: sum_to_size(Tensor self, int[] size) -> Tensor
+- func: sum_to_size(Tensor self, SymInt[] size) -> Tensor
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    CompositeImplicitAutograd: sum_to_size_symint
 
 - func: sqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -5711,7 +5725,7 @@
 - func: roll(Tensor self, int[1] shifts, int[1] dims=[]) -> Tensor
   variants: function, method
   dispatch:
-    CPU: roll_cpu
+    CPU, MPS: roll
     CUDA: roll_cuda
   autogen: roll.out
 
@@ -6053,7 +6067,7 @@
     CompositeExplicitAutograd: zeros
   autogen: zeros.names_out
 
-- func: _efficientzerotensor(int[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+- func: _efficientzerotensor(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
     CPU: _efficientzerotensor
     CUDA: _efficientzerotensor_cuda
@@ -7423,6 +7437,7 @@
   dispatch:
     CPU: masked_scatter__cpu
     CUDA: masked_scatter__cuda
+    MPS: masked_scatter__mps
   autogen: masked_scatter.out
 
 - func: masked_scatter(Tensor self, Tensor mask, Tensor source) -> Tensor
@@ -9555,6 +9570,7 @@
   structured: True
   dispatch:
     CPU, CUDA: pow_Scalar_out
+    MPS: pow_Scalar_out_mps
   tags: pointwise
 
 - func: pow.Scalar(Scalar self, Tensor exponent) -> Tensor
@@ -14695,9 +14711,26 @@
     CompositeExplicitAutograd: all_reduce
   variants: function
 
+- func: all_gather_into_tensor(Tensor shard, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: all_gather_into_tensor
+  variants: function
+
+- func: reduce_scatter_tensor(Tensor input, str reduceOp, int scatter_dim, str tag, int[] ranks, int group_size) -> Tensor
+  # This should be changed to distributed but it requires changes all over the place to work
+  python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: reduce_scatter_tensor
+  variants: function
+
 - func: wait_tensor(Tensor self) -> Tensor
   # This should be changed to distributed but it requires changes all over the place to work
   python_module: nn
   dispatch:
     CompositeExplicitAutograd: wait_tensor
+
+# This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
+- func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function

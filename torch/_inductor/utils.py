@@ -1,13 +1,13 @@
 import collections
 import contextlib
 import functools
-import glob
 import itertools
 import logging
 import math
 import operator
 import os
 import shutil
+import sys
 import tempfile
 import textwrap
 import time
@@ -20,7 +20,7 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config, config as inductor_config
+from . import config
 from .cuda_properties import get_device_capability
 
 log = logging.getLogger(__name__)
@@ -78,8 +78,26 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
 
 
 def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
@@ -238,10 +256,14 @@ def get_fused_kernel_name(node_schedule):
 def gather_origins(args, kwargs):
     import itertools
 
-    from .ir import ComputedBuffer, IRNode
+    from . import ir
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -483,9 +505,9 @@ def is_big_gpu(index):
 
 def use_triton_template(layout):
     return (
-        (inductor_config.max_autotune or inductor_config.search_autotune_cache)
+        (config.max_autotune or config.search_autotune_cache)
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -507,33 +529,32 @@ class DebugDirManager:
         torch._dynamo.config.debug_dir_root = self.prev_debug_name
 
 
-def run_and_get_triton_code(fn, *args, **kwargs):
-    from torch._inductor.debug import DebugContext
-    from torch._inductor.virtualized import V
+def run_and_get_code(fn, *args, **kwargs):
+    from .graph import GraphLowering
 
-    torch._dynamo.reset()
+    compile_to_module = GraphLowering.compile_to_module
+    source_codes = []
 
-    context = DebugContext()
+    def patched_compile_to_module(self):
+        mod = compile_to_module(self)
+        with open(mod.__file__, "r") as f:
+            source_codes.append(f.read())
+        return mod
 
-    with DebugDirManager(), mock.patch.object(
-        config.trace, "enabled", True
-    ), context, V.set_debug_handler(context):
-
-        dir_name = "/".join(context._path.split("/")[:-1]) + "/"
-        fil = dir_name + "*inference*"
-        existing_dirs = glob.glob(fil)
-
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ):
+        torch._dynamo.reset()
         fn(*args, **kwargs)
+    return source_codes
 
-        assert context._path is not None
 
-        dir_dbg = [x for x in glob.glob(fil) if x not in existing_dirs]
-
-        assert len(dir_dbg) == 1, f"{dir_dbg}, {context._path}"
-
-        full_name = os.path.join(dir_dbg[0], "output_code.py")
-        with open(full_name, "r") as f:
-            return f.read()
+def run_and_get_triton_code(fn, *args, **kwargs):
+    source_codes = run_and_get_code(fn, *args, **kwargs)
+    assert (
+        len(source_codes) == 1
+    ), f"expected exactly one code output got {len(source_codes)}"
+    return source_codes[0]
 
 
 def developer_warning(msg):
@@ -546,3 +567,82 @@ def developer_warning(msg):
         log.warning(msg)
     else:
         log.info(msg)
+
+
+def get_num_bytes(*args):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+    """
+    return sum(
+        arg.numel() * arg.element_size()
+        for arg in args
+        if isinstance(arg, torch.Tensor)
+    )
+
+
+def get_benchmark_name():
+    """
+    An experimental API used only when config.benchmark_kernel is true.
+
+    The benchmark name is only available at codegen time. So we can not
+    directly call it in benchmark_all_kernels which is run after codegen.
+
+    The function assumes the argument after --only is the benchmark name.
+    It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
+    scripts, this function may return None.
+
+    There are 2 flavors of --only argument we need handle:
+    1. --only model_name
+    2. --only=model_name
+    """
+    try:
+        idx = sys.argv.index("--only")
+        if (
+            idx + 1 < len(sys.argv)
+            and len(sys.argv[idx + 1]) > 0
+            and sys.argv[idx + 1][0] != "-"
+        ):
+            return sys.argv[idx + 1]
+    except ValueError:
+        pass
+
+    for arg in sys.argv:
+        if arg.startswith("--only="):
+            return arg[len("--only=") :]
+
+
+def benchmark_all_kernels(benchmark_name):
+    """
+    An experimental API used only when config.benchmark_kernel is true.
+
+    Run the kernel benchmarks for all the kernels cached in PyCodeCache.
+    Used in the compiled modules.
+
+    Put this method here rather than codegen it for convenience since its implementation
+    does not change based on different graph modules being compiled.
+    """
+    from torch._inductor.codecache import PyCodeCache
+
+    nfound = 0
+    for kernel_key, kernel_mod in PyCodeCache.cache.items():
+        if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
+            continue
+        args = kernel_mod.get_args()
+        ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+        num_gb = get_num_bytes(*args) / 1e9
+        gb_per_s = num_gb / (ms / 1e3)
+
+        # follow what we do in DebugAutotuner
+        info_str = f"{benchmark_name:20} {kernel_key[:10]} {ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+        else:
+            print(info_str)
+
+        nfound += 1
+    if nfound == 0:
+        print(
+            "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
+        )
