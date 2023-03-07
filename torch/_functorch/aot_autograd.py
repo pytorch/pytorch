@@ -407,6 +407,7 @@ class OutputAliasInfo:
 # This class tells us info about user inputs.
 @dataclass(frozen=True)
 class InputAliasInfo:
+    is_leaf: bool
     mutates_data: bool
     mutates_metadata: bool
 
@@ -632,6 +633,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_metadata = False
 
             input_info.append(InputAliasInfo(
+                is_leaf=isinstance(arg, torch.Tensor) and arg.is_leaf,
                 mutates_data=mutates_data,
                 mutates_metadata=mutates_metadata
             ))
@@ -1967,7 +1969,22 @@ def create_runtime_wrapper(
                         )
                     else:
                         assert meta.mutates_data
-                    original_inpt.copy_(updated_inpt)
+                    if meta.is_leaf and original_inpt.requires_grad:
+                        # We can hit this situation in this case:
+                        #   def f(x):
+                        #       x.detach().mul_(2)
+                        #       return x + 1
+                        # AOTAutograd will see a mutation in the above case, and try to
+                        # apply a copy_() here, in the epilogue.
+                        # But if x required gradients, and is a leaf, then autograd
+                        # will yell at us for trying to mutate it.
+                        # However, it's only possible to end up in this scenario (like the above)
+                        # if all of the mutations to the leaf input were non-autograd-tracking mutations
+                        # (aka mutations under no_grad(), or on detached views).
+                        # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
+                        original_inpt.detach().copy_(updated_inpt)
+                    else:
+                        original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
 
