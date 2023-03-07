@@ -56,6 +56,7 @@ constant_functions = {
     torch.onnx.is_in_onnx_export: False,
     external_utils.is_compiling: True,
     torch._utils.is_compiling: True,
+    external_utils.is_exporting: False,
 }
 
 

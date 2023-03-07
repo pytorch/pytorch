@@ -2069,6 +2069,31 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+    @config.patch(dynamic_shapes=True)
+    def test_is_exporting(self):
+        def f(x):
+            if torch._dynamo.is_exporting():
+                return x * 4
+            elif torch._dynamo.is_compiling():
+                return x * 3
+            else:
+                return x * 2
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(f(inp), inp * 2)
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+        self.assertEqual(opt_f(inp), inp * 3)
+
+        export_f, _ = torch._dynamo.export(f, inp, aten_graph=True)
+        self.assertEqual(export_f(inp), inp * 4)
+
+        opt_f = torch._dynamo.optimize("eager")(f)
+        self.assertEqual(opt_f(inp), inp * 3)
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(f(inp), inp * 2)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

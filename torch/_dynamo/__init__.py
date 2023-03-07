@@ -14,7 +14,7 @@ from .eval_frame import (
     run,
     skip,
 )
-from .external_utils import is_compiling
+from .external_utils import is_compiling, is_exporting
 from .utils import compilation_metrics, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
@@ -35,6 +35,7 @@ __all__ = [
     "skip",
     "OptimizedModule",
     "is_compiling",
+    "is_exporting",
     "register_backend",
     "list_backends",
 ]

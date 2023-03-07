@@ -3,3 +3,7 @@
 
 def is_compiling():
     return False
+
+
+def is_exporting():
+    return False

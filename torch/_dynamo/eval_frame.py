@@ -19,6 +19,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from .backends.registry import CompilerFn, lookup_backend
+from .external_utils import is_exporting
 
 from .hooks import Hooks
 
@@ -558,6 +559,7 @@ def explain(f, *args, **kwargs):
     )
 
 
+@patch.dict(config.constant_functions, {is_exporting: True})
 def export(
     f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
 ):
