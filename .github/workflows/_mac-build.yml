@@ -132,8 +132,8 @@ jobs:
               rm -rf sccache-v0.4.0-pre.7-x86_64-apple-darwin*
               echo "SCCACHE_GHA_CACHE_TO=${BUILD_ENVIRONMENT}-sccache-${GITHUB_SHA}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_CACHE_FROM=${BUILD_ENVIRONMENT}-sccache-" >> "${GITHUB_ENV}"
-              echo "SCCACHE_GHA_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
-              echo "SCCACHE_GHA_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
+              echo "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL}" >> "${GITHUB_ENV}"
+              echo "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN}" >> "${GITHUB_ENV}"
               echo "SCCACHE_GHA_ENABLED=on" >> "${GITHUB_ENV}"
             else
               sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
