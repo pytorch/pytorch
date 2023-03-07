@@ -32,11 +32,11 @@ class FxFrontend(abc.ABC):
 
     @abc.abstractmethod
     @_beartype.beartype
-    def _inner_call(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def _trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         ...
 
     @_beartype.beartype
-    def __call__(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         """Capture the model and return a torch.fx.GraphModule.
 
         The returned GraphModule also takes the same args and kwargs as the model.
@@ -57,18 +57,18 @@ class FxFrontend(abc.ABC):
             >>> def model(x, y=2):
             >>>     return x + y
             >>> class CustomFrontend(frontend.FxFrontend):
-            >>>     def _inner_call(self, model, *args, **kwargs):
+            >>>     def _trace(self, model, *args, **kwargs):
             >>>         return torch.fx.symbolic_trace(model)
             >>>
             >>> fx_frontend = CustomFrontend()
-            >>> graph_module = fx_frontend(model, torch.randn(2), y=torch.randn(2))
+            >>> graph_module = fx_frontend.trace(model, torch.randn(2), y=torch.randn(2))
             >>> fx_output = graph_module(torch.randn(3), y=torch.randn(3))
         """
         # args will be converted to symbolic tensor. Let's copy to avoid side effects.
         # FIXME: Can this copy be avoided?
         args = copy.deepcopy(args)
         kwargs = copy.deepcopy(kwargs)
-        return self._inner_call(model, *args, **kwargs)
+        return self._trace(model, *args, **kwargs)
 
     @property
     def name(self) -> str:
@@ -125,7 +125,7 @@ class FxFrontendUnpackKwargs:
         return f"{self.__class__.__name__}_{self._fx_frontend.name}"
 
     @_beartype.beartype
-    def __call__(
+    def trace(
         self, model: Callable, *args, **kwargs
     ) -> Tuple[torch.fx.GraphModule, Tuple[Any, ...]]:
         """Capture the model and return a tuple of torch.fx.GraphModule and formatted arguments.
@@ -153,15 +153,15 @@ class FxFrontendUnpackKwargs:
             >>> def model(x, y=2):
             >>>     return x + y
             >>> class CustomFrontend(frontend.FxFrontend):
-            >>>     def _inner_call(self, model, *args, **kwargs):
+            >>>     def _trace(self, model, *args, **kwargs):
             >>>         return torch.fx.symbolic_trace(model)
             >>>
             >>> fx_frontend = frontend.FxFrontendUnpackKwargs(CustomFrontend())
-            >>> graph_module, new_awrgs = fx_frontend(model, torch.randn(2), y=torch.randn(2))
+            >>> graph_module, new_awrgs = fx_frontend.trace(model, torch.randn(2), y=torch.randn(2))
             >>> fx_output = graph_module(torch.randn(3), torch.randn(3))
         """
         bound = self.bind_args_kwargs(model, *args, **kwargs)
-        graph_module = self._fx_frontend(model, *bound.args)
+        graph_module = self._fx_frontend.trace(model, *bound.args)
         return graph_module, bound.args
 
 
@@ -176,7 +176,7 @@ class DynamoExport(FxFrontend):
         return f"{self.__class__.__name__}_{self.tracing_mode}_aten_graph_{self.aten_graph}"
 
     @_beartype.beartype
-    def _inner_call(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def _trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         torch._dynamo.reset()
         graph_module, guards = torch._dynamo.export(
             model,
@@ -220,7 +220,7 @@ class AOTAutogradFrontend(FxFrontend):
         return f"{self.__class__.__name__}_{dynamic}"
 
     @_beartype.beartype
-    def _inner_call(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def _trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         compiler = _GraphCaptureCompiler()
 
         backend = functools.partial(
@@ -248,7 +248,7 @@ class DynamoOptimize(FxFrontend):
         return f"{self.__class__.__name__}_{dynamic}"
 
     @_beartype.beartype
-    def _inner_call(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def _trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         compiler = _GraphCaptureCompiler()
 
         torch._dynamo.reset()
@@ -273,7 +273,7 @@ class MakeFx(FxFrontend):
         self.decomposition_table = decomposition_table
 
     @_beartype.beartype
-    def _inner_call(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
+    def _trace(self, model: Callable, *args, **kwargs) -> torch.fx.GraphModule:
         assert (
             not kwargs
         ), f"kwargs are not supported in {self.name}. Try wrapping this class with 'FxFrontendUnpackKwargs'"
