@@ -27,107 +27,110 @@ enum BIN_SELECTION_ALGORITHM {
 template<typename T, typename U>
 thread T * upper_bound(thread T * first, thread T * last, U val) {
   thread T * middle;
-  thread T * first_ = first;
   int64_t half_ = 0;
-  int64_t len = (int64_t)(last - first_);
+  int64_t len = (int64_t)(last - first);
 
   while (len > 0) {
-    half_ = (len >> 1);
-    middle = first_ + half_;
+    half_ = len >> 1;
+    middle = first + half_;
 
-    if (val >= *middle) {
+    if (val < *middle) {
       len = half_;
     } else {
-      first_ = middle;
-      ++first_;
+      first = middle;
+      ++first;
       len = len - half_ - 1;
     }
   }
-  return first_;
+  return first;
 }
 
 template<typename T>
-kernel void histogramdd(constant void     * input_    [[buffer(0)]],
-                  constant T        * weight        [[buffer(1)]],
-                  device   T        * local_out      [[buffer(2)]],
-                  constant uint     * offsets         [[buffer(3)]],
-                  constant size_t   & num_dims        [[buffer(4)]],
-                  constant T        * bin_seq         [[buffer(5)]],
-                  constant int64_t  * num_bin_edges   [[buffer(6)]],
-                  constant T        * leftmost_edge   [[buffer(7)]],
-                  constant T        * rightmost_edge  [[buffer(8)]],
-                  constant int64_t  * local_out_strides  [[buffer(9)]],
-                  constant uint8_t  & algorithm [[buffer(10)]],
-                  constant uint8_t  & has_weight [[buffer(11)]],
+kernel void histogramdd(constant void     * input_      [[buffer(0)]],
+                  constant T        * weight            [[buffer(1)]],
+                  device   T        * local_out         [[buffer(2)]],
+                  constant uint     * offsets           [[buffer(3)]],
+                  constant size_t   & num_dims          [[buffer(4)]],
+                  constant T        * bin_seq           [[buffer(5)]],
+                  constant int64_t  * num_bin_edges     [[buffer(6)]],
+                  constant T        * leftmost_edge     [[buffer(7)]],
+                  constant T        * rightmost_edge    [[buffer(8)]],
+                  constant int64_t  * local_out_strides [[buffer(9)]],
+                  constant uint8_t  & algorithm         [[buffer(10)]],
+                  constant uint8_t  & has_weight        [[buffer(11)]],
+                  constant uint32_t   & N        [[buffer(12)]],
                   uint tid [[thread_position_in_grid]]) {
   
-  
-
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
-  for (size_t dim = 0; dim < num_dims; dim++) {
-    constant T* input = (constant T*)((constant uint8_t*)input_ + offsets[tid * num_dims + dim]);
-    const auto element = input[tid * num_dims + dim];
 
-    // Skips elements which fall outside the specified bins and NaN elements
-    if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) {
-        skip_element = true;
-        break;
-    }
-    int64_t pos = -1;
-    
-    if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
-      pos = (int64_t)upper_bound(
-        (thread T*)(int64_t)(bin_seq + bin_seq_offset),
-        (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
-        element
-      ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
-    } else if (
-      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION || 
-      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-      pos = static_cast<int64_t>((element - leftmost_edge[dim])
-                            * (num_bin_edges[dim] - 1)
-                            / (rightmost_edge[dim] - leftmost_edge[dim]));
-      if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-          int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
-          int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
-          pos = (int64_t)upper_bound(
-            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
-            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
-            element
-          ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+  for (size_t n = 0; n < N; n++) {
+    bin_seq_offset = 0;
+    for (size_t dim = 0; dim < num_dims; dim++) {
+      T element = *(constant T*)((constant uint8_t*)input_ + offsets[n * num_dims + dim]);
+
+      // Skips elements which fall outside the specified bins and NaN elements
+      if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) { // 0 2 / 0 2
+          skip_element = true;
+          break;
       }
-    }
+      int64_t pos = -1;
+      
+      if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
+        pos = (int64_t)upper_bound(
+          (thread T*)(int64_t)(bin_seq + bin_seq_offset),
+          (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
+          element
+        ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+      } else if (
+        algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION || 
+        algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+        pos = static_cast<int64_t>((element - leftmost_edge[dim])
+                              * (num_bin_edges[dim] - 1)
+                              / (rightmost_edge[dim] - leftmost_edge[dim]));
+        if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+            int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
+            int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
+            pos = (int64_t)upper_bound(
+              (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
+              (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
+              element
+            ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
+        }
+      }
 
-    if (pos == (num_bin_edges[dim] - 1)) {
-      pos -= 1;
+      if (pos == (num_bin_edges[dim] - 1)) {
+        pos -= 1;
+      }
+      hist_index += local_out_strides[dim + 1] * pos;
+      bin_seq_offset += num_bin_edges[dim];
     }
-    hist_index += local_out_strides[dim + 1] * pos;
-    bin_seq_offset += num_bin_edges[dim];
-  }
-  if (!skip_element) {
-    // In the unweighted case, the default weight is 1
-    local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
+    if (!skip_element) {
+      // In the unweighted case, the default weight is 1
+      local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[n] : 1;
+    }
+  
   }
 }
 
-#define REGISTER_HISTOGRAMDD_OP(DTYPE)                       \
-template                                               \
-[[host_name("histogramdd_" #DTYPE)]]                         \
-kernel void histogramdd<DTYPE>(                  \
-  constant void     * input_        [[buffer(0)]],     \
-  constant DTYPE    * weight        [[buffer(1)]],     \
-  device   DTYPE    * local_out          [[buffer(2)]],     \
-  constant uint     * offsets       [[buffer(3)]], \
-  constant size_t   & num_dims         [[buffer(4)]], \
-  constant DTYPE    * bin_seq         [[buffer(5)]], \
-  constant int64_t  * num_bin_edges   [[buffer(6)]], \
-  constant DTYPE    * leftmost_edge   [[buffer(7)]], \
-  constant DTYPE    * rightmost_edge  [[buffer(8)]], \
-  constant int64_t  * local_out_strides  [[buffer(9)]], \
+#define REGISTER_HISTOGRAMDD_OP(DTYPE)                        \
+template                                                      \
+[[host_name("histogramdd_" #DTYPE)]]                          \
+kernel void histogramdd<DTYPE>(                               \
+  constant void     * input_                  [[buffer(0)]],  \
+  constant DTYPE    * weight                  [[buffer(1)]],  \
+  device   DTYPE    * local_out               [[buffer(2)]],  \
+  constant uint     * offsets                 [[buffer(3)]],  \
+  constant size_t   & num_dims                [[buffer(4)]],  \
+  constant DTYPE    * bin_seq                 [[buffer(5)]],  \
+  constant int64_t  * num_bin_edges           [[buffer(6)]],  \
+  constant DTYPE    * leftmost_edge           [[buffer(7)]],  \
+  constant DTYPE    * rightmost_edge          [[buffer(8)]],  \
+  constant int64_t  * local_out_strides       [[buffer(9)]],  \
   constant uint8_t  & bin_selection_algorithm [[buffer(10)]], \
-  constant uint8_t  & has_weight [[buffer(11)]], \
+  constant uint8_t  & has_weight              [[buffer(11)]], \
+  constant uint32_t  & N                      [[buffer(12)]], \
   uint tid [[thread_position_in_grid]]);
 
 REGISTER_HISTOGRAMDD_OP(float);
@@ -213,7 +216,6 @@ void histogramdd_kernel_impl(
   std::vector<input_t> rightmost_edge(D);
   size_t bin_seq_offset = 0;
 
-  std::cout << "bin_edges[0]" << bin_edges[0] << std::endl; 
   for (const auto dim : c10::irange(D)) {
     for (const auto elem_idx : c10::irange(bin_edges[dim].numel())) {
       bin_seq.push_back(bin_edges[dim][elem_idx].item().to<input_t>());
@@ -221,6 +223,8 @@ void histogramdd_kernel_impl(
     num_bin_edges[dim] = bin_edges[dim].numel();
     leftmost_edge[dim] = bin_seq[bin_seq_offset];
     rightmost_edge[dim] = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
+    
+    std::cout << "LME RME" << leftmost_edge[dim] << " " << rightmost_edge[dim] << std::endl; 
     bin_seq_offset += num_bin_edges[dim];
   }
 
@@ -231,8 +235,7 @@ void histogramdd_kernel_impl(
 
   DimVector thread_hist_sizes(hist_sizes.size() + 1); // [n_threads, output_sizes...]
   thread_hist_sizes[0] = numThreads;
-  std::copy(hist_sizes.begin(), hist_sizes.end(),
-              thread_hist_sizes.begin() + 1);
+  std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
     thread_hist_sizes,
     hist_output.scalar_type(),
@@ -314,6 +317,7 @@ void histogramdd_kernel_impl(
       [computeEncoder setBytes:thread_histograms.strides().data() length:sizeof(int64_t) * thread_hist_sizes.size() atIndex:9];
       [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
       [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
+      [computeEncoder setBytes:&numThreads length:sizeof(uint32_t) atIndex:12];
 
       NSUInteger tgSize = summaryPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
