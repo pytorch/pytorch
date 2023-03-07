@@ -2092,7 +2092,7 @@ class TestPartitioning(AOTTestCase):
         bw_graph = bw_graph_cell[0]
 
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
+        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
