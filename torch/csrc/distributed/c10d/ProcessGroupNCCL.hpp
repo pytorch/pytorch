@@ -408,6 +408,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void groupEnd();
 
+  void groupEndNonblocking(std::vector<std::shared_ptr<NCCLComm>> comms);
+
   // Unsupported Ops
   c10::intrusive_ptr<Work> gather(
       std::vector<std::vector<at::Tensor>>& outputTensors,

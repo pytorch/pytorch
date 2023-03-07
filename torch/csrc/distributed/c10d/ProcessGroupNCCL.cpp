@@ -1396,7 +1396,16 @@ void ProcessGroupNCCL::startCoalescing() {
 
 void ProcessGroupNCCL::endCoalescing(
     std::vector<c10::intrusive_ptr<Work>>& reqs) {
-  groupEnd();
+  if (!nccl_use_nonblocking()) {
+    groupEnd();
+  } else {
+    std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
+    for (const auto& req: reqs) {
+      auto ncclWork = static_cast<ProcessGroupNCCL::WorkNCCL*>(req.get());
+      ncclComms_.insert(ncclComms_.end(), ncclWork->ncclComms_.begin(), ncclWork->ncclComms_.end());
+    }
+    groupEndNonblocking(ncclComms_);
+  }
   if (reqs.size() != coalescedDevices_.size()) {
     TORCH_CHECK(false, "Number of requests do not match number of collectives");
   }
@@ -2679,12 +2688,28 @@ void ProcessGroupNCCL::groupEnd() {
   if (!nccl_use_nonblocking()) {
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   } else {
+    TORCH_WARN("ProcessGroupNCCL::groupEnd() called in nonblocking communicator mode without involved communicators specified; gathering all mapped communicators...");
     std::unique_lock<std::mutex> lock(mutex_);
     std::vector<std::shared_ptr<NCCLComm>> ncclComms_;
     for (auto& it: devNCCLCommMap_) {
       ncclComms_.insert(ncclComms_.end(), it.second.begin(), it.second.end());
     }
     C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), ncclComms_, c10::nullopt);
+  }
+#endif
+#endif
+  --ncclActiveGroupCounter_;
+}
+
+void ProcessGroupNCCL::groupEndNonblocking(std::vector<std::shared_ptr<NCCLComm>> comms) {
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
+#ifndef NCCL_HAS_COMM_NONBLOCKING
+  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+#else
+  if (!nccl_use_nonblocking()) {
+    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
+  } else {
+    C10D_NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), comms, c10::nullopt);
   }
 #endif
 #endif
