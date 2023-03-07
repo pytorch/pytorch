@@ -7,6 +7,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/cuda/NumericLimits.cuh>
 #include <ATen/native/cuda/SortUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 
@@ -28,12 +29,9 @@ static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
   return minGridSize;
 }
 
-// For very small sorts, use bitonicSortKVInPlace which performs
-// better because it can sort multiple arrays within the same block of
-// threads, improving occupancy.
-//
-// TODO: cub in CUDA 11.6 has a WarpMergeSort primitive that could
-// replace the bitonic sort here.
+// For very small unstable sorts (n <= 64), use bitonicSortKVInPlace
+// which performs better because it can sort multiple arrays within
+// the same block of threads, improving occupancy.
 struct SmallBitonicSort {
   template <int A, typename K, typename V, typename IndexType>
   void sort(
@@ -94,8 +92,75 @@ struct SmallBitonicSort {
   }
 };
 
+// For small stable sorts (n <= 64) we use warpMergeSortKVInPlace
+// which sorts one slice per warp and potentially multiple slices in
+// the same block for improved occupancy with large batch sizes.
+template <int sort_size>
+struct WarpMergeSort {
+
+  template <int A, typename K, typename V, typename IndexType>
+  void sort(
+      at::cuda::detail::TensorInfo<K, IndexType> keyInfo,
+      IndexType keySlices,
+      IndexType keySliceSize,
+      IndexType keySliceStride,
+      at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
+      IndexType valueSliceStride,
+      bool descending) {
+    // constexpr int sort_size = 64;
+    constexpr int max_block_y = 16;
+    const int block_x = at::cuda::warp_size();
+
+    TORCH_INTERNAL_ASSERT(keySliceSize <= sort_size);
+
+    // Scale batch size down if the grid would be too small
+    const auto min_grid = minimum_grid_for_occupancy(
+        warpMergeSortKVInPlace<
+            A, -1, sort_size, max_block_y,
+            K, V, LTOp<K, true>, IndexType>,
+        block_x * max_block_y);
+    const auto max_batch = std::max(IndexType{1}, keySlices / min_grid);
+    const int block_y = std::min(IndexType(max_block_y), max_batch);
+    dim3 block(block_x, block_y);
+
+    dim3 grid;
+    const int grid_count = (keySlices + block_y - 1) / block_y;
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(grid_count, grid),
+                          "Too many slices to sort");
+    const auto stream = at::cuda::getCurrentCUDAStream();
+
+    if (descending) {
+      const K invalid_key = at::numeric_limits<K>::lower_bound();
+      warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+        <<<grid, block, 0, stream>>>(
+          keyInfo,
+          keySlices,
+          keySliceSize,
+          keySliceStride,
+          valueInfo,
+          valueSliceStride,
+          GTOp<K, true>(),
+          invalid_key);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      const K invalid_key = at::numeric_limits<K>::upper_bound();
+      warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
+        <<<grid, block, 0, stream>>>(
+          keyInfo,
+          keySlices,
+          keySliceSize,
+          keySliceStride,
+          valueInfo,
+          valueSliceStride,
+          LTOp<K, true>(),
+          invalid_key);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+  }
+};
+
 // For medium sizes (32 < n <= 4096) use radixSortKVInplace for better
-// performance than the bitonic sort kernel.
+// performance.
 struct MediumRadixSort {
 
   template <int A, typename K, typename V, typename IndexType>
@@ -133,15 +198,16 @@ struct MediumRadixSort {
         HANDLE_CASE(1024, 32);
         break;
       case 128:
-      case 64:
         HANDLE_CASE(128, 4);
         break;
+      case 64:
       case 32:
       case 16:
       case 8:
       case 4:
       case 2:
-        HANDLE_CASE(32, 2);
+        TORCH_INTERNAL_ASSERT(
+            false, "Expected size <= 64 to be handled by different algorithm");
         break;
       case 1:
         /* Nothing to do, data already sorted */
@@ -272,9 +338,14 @@ void sortKeyValueInplace(
     int dim,
     bool descending,
     bool stable) {
-  if (!stable && key.size(dim) <= 32) {
-    // NOTE: Bitonic sort is unstable
-    sortCommon(SmallBitonicSort{}, key, value, dim, descending);
+  const auto sort_size = key.size(dim);
+  if (sort_size <= 1) {
+    return; // Already sorted
+  } else if (sort_size <= 32) {
+    sortCommon(WarpMergeSort<32>{}, key, value, dim, descending);
+    // sortCommon(SmallBitonicSort{}, key, value, dim, descending);
+  } else if (sort_size <= 128) {
+    sortCommon(WarpMergeSort<128>{}, key, value, dim, descending);
   } else {
     sortCommon(MediumRadixSort{}, key, value, dim, descending);
   }
