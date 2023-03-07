@@ -6,11 +6,19 @@ import hashlib
 from itertools import count
 from typing import Any, Dict, List
 
+import sympy
+
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
-from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
+from ..utils import (
+    cache_on_self,
+    get_benchmark_name,
+    has_triton,
+    sympy_dot,
+    sympy_product,
+)
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
@@ -294,15 +302,6 @@ class WrapperCodeGen(CodeGen):
                 """
             )
 
-            if config.triton.convolution != "aten":
-                self.header.splice(
-                    """
-                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
-                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torch._inductor.triton_ops.autotune import conv_heuristics
-                    """
-                )
-
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -388,7 +387,6 @@ class WrapperCodeGen(CodeGen):
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
-
         if isinstance(
             buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),
@@ -557,13 +555,7 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvalue()
 
-    def add_benchmark_harness(self, output):
-        """
-        Append a benchmark harness to generated code for debugging
-        """
-        if not config.benchmark_harness:
-            return
-
+    def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
@@ -572,7 +564,10 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
-        output.writelines(["", "", 'if __name__ == "__main__":'])
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
+        output.writelines(["", "", "def benchmark_compiled_module():"])
         with output.indent():
             output.splice(
                 """
@@ -588,18 +583,51 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                else:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
-    def define_kernel(self, name: str, kernel: str):
-        self.header.splice(f"\n\n{name} = {kernel}")
+    def add_benchmark_harness(self, output):
+        """
+        Append a benchmark harness to generated code for debugging
+        """
+        if not config.benchmark_harness:
+            return
+
+        self.benchmark_compiled_module(output)
+
+        output.writelines(["", "", 'if __name__ == "__main__":'])
+        with output.indent():
+            output.writelines(
+                [
+                    "import argparse",
+                    "from torch._inductor.utils import benchmark_all_kernels",
+                    "",
+                    "parser = argparse.ArgumentParser()",
+                    'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
+                    "args = parser.parse_args()",
+                    "",
+                    "if args.benchmark_kernels:",
+                ]
+            )
+            with output.indent():
+                output.writeline(f"benchmark_all_kernels('{get_benchmark_name()}')")
+            output.writeline("else:")
+            with output.indent():
+                output.writeline("benchmark_compiled_module()")
+
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
+        self.header.splice(f"\n\n{kernel_path_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return
