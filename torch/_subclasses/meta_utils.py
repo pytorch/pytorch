@@ -463,7 +463,7 @@ class MetaConverter:
             or (ignore_subclass and isinstance(t, torch.Tensor))
             or isinstance(t, FakeTensor)
         ):
-            if any(
+            if t.device.type != "xla" and any(
                 [
                     t.is_sparse_csr,
                     t.layout in [torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc],
