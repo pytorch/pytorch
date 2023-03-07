@@ -5623,8 +5623,8 @@ for shape in [(1,), ()]:
         a = torch.randn(5, requires_grad=True)
         d = checkpoint(foo, a, use_reentrant=False)
         self.assertEqual(count[0], 1)
-        # Recomputed variables are only persist within a particular backward call
-        # if _saved_result is accessed outside of a backward, it will trigger
+        # Recomputed variables only persist within a particular backward call.
+        # If _saved_result is accessed outside of a backward, it will trigger
         # a recompute. And afterwards, those recomputed results are immediately
         # cleared.
         d.grad_fn._saved_result
@@ -10530,7 +10530,7 @@ class TestNestedCheckpoint(TestCase):
         def wrapper(x):
             with torch.enable_grad():
                 out = fn(x)
-                grad_input = torch.autograd.grad(out, inputs=(x,), create_graph=True)[0]
+                grad_input, = torch.autograd.grad(out, inputs=(x,), create_graph=True)
             return grad_input
         return wrapper
 
@@ -10602,57 +10602,60 @@ class TestNestedCheckpoint(TestCase):
 
         self.assertEqual(len(node_names), 0)
 
-    @torch.utils.checkpoint._set_checkpoint_early_stop(True)
-    def test_nested_checkpoint(self):
-        x = torch.rand(1, requires_grad=True)
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint(self, early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            x = torch.randn((), requires_grad=True)
 
-        def f(x):
-            out = x.sin().exp().sin()
-            return out
+            def f(x):
+                out = x.sin().exp().sin()
+                return out
 
-        def g(x):
-            a = x.sin().exp().sin()
-            b = x.sin().exp().sin()
-            ga, = torch.autograd.grad(a, x)
-            gb, = torch.autograd.grad(b, x)
-            return x.sin()
+            def g(x):
+                a = x.sin().exp().sin()
+                b = x.sin().exp().sin()
+                ga, = torch.autograd.grad(a, x)
+                gb, = torch.autograd.grad(b, x)
+                return x.sin()
 
-        for fn in (f, g):
-            for expected_fn, actual_fns in self.get_tests(fn):
-                expected = expected_fn(x)
+            for fn in (f, g):
+                for expected_fn, actual_fns in self.get_tests(fn):
+                    expected = expected_fn(x)
 
-                for actual_fn in actual_fns:
-                    actual = actual_fn(x)
-                    self.assertTrue(torch.allclose(expected, actual))
-                    self.check_graph_dies(actual_fn)
+                    for actual_fn in actual_fns:
+                        actual = actual_fn(x)
+                        self.assertTrue(torch.allclose(expected, actual))
+                        self.check_graph_dies(actual_fn)
 
-    @torch.utils.checkpoint._set_checkpoint_early_stop(True)
-    def test_nested_checkpoint_two_children(self):
-        grad, sum, c = self.grad, self.sum, self.checkpoint
 
-        def f(x):
-            return x.sin().exp().sin()
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint_two_children(self, early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            grad, sum, c = self.grad, self.sum, self.checkpoint
 
-        def g(x):
-            return x.cos().sin().exp()
+            def f(x):
+                return x.sin().exp().sin()
 
-        def hc(x):
-            return c(g)(c(f)(x))
+            def g(x):
+                return x.cos().sin().exp()
 
-        def h(x):
-            return g(f(x))
+            def hc(x):
+                return c(g)(c(f)(x))
 
-        a = torch.randn(3, 3, requires_grad=True)
-        expected = grad(sum(grad(sum(h))))(a)
-        actual = grad(sum(grad(sum(c(hc)))))(a)
-        self.assertTrue(torch.allclose(expected, actual))
+            def h(x):
+                return g(f(x))
 
-        actual = grad(sum(c(grad(sum(c(hc))))))(a)
-        self.assertTrue(torch.allclose(expected, actual))
+            a = torch.randn(3, 3, requires_grad=True)
+            expected = grad(sum(grad(sum(h))))(a)
+            actual = grad(sum(grad(sum(c(hc)))))(a)
+            self.assertTrue(torch.allclose(expected, actual))
 
-        self.check_graph_dies(grad(c(hc)))
-        self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
-        self.check_graph_dies(grad(sum(c(grad(sum(c(hc)))))))
+            actual = grad(sum(c(grad(sum(c(hc))))))(a)
+            self.assertTrue(torch.allclose(expected, actual))
+
+            self.check_graph_dies(grad(c(hc)))
+            self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
+            self.check_graph_dies(grad(sum(c(grad(sum(c(hc)))))))
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
@@ -10848,6 +10851,7 @@ instantiate_device_type_tests(
 )
 
 instantiate_parametrized_tests(TestAutograd)
+instantiate_parametrized_tests(TestNestedCheckpoint)
 
 if __name__ == '__main__':
     run_tests()
