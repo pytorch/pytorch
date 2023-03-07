@@ -871,6 +871,16 @@ static PyObject* set_guard_error_hook(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
+static PyObject* clear_profiler_hooks(PyObject* dummy, PyObject* args) {
+  Py_XDECREF(profiler_start_hook);
+  profiler_start_hook = NULL;
+  Py_XDECREF(profiler_end_hook);
+  profiler_end_hook = NULL;
+  Py_XDECREF(guard_profiler_name_str);
+  guard_profiler_name_str = NULL;
+  Py_RETURN_NONE;
+}
+
 static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
   PyObject* start = NULL;
   PyObject* end = NULL;
@@ -891,17 +901,6 @@ static PyObject* set_profiler_hooks(PyObject* dummy, PyObject* args) {
   guard_profiler_name_str = Py_BuildValue("s", "TorchDynamo Cache Lookup");
   Py_RETURN_NONE;
 }
-
-static PyObject* clear_profiler_hooks(PyObject* dummy, PyObject* args) {
-  Py_XDECREF(profiler_start_hook);
-  profiler_start_hook = NULL;
-  Py_XDECREF(profiler_end_hook);
-  profiler_end_hook = NULL;
-  Py_XDECREF(guard_profiler_name_str);
-  guard_profiler_name_str = NULL;
-  Py_RETURN_NONE;
-}
-
 
 static PyMethodDef _methods[] = {
     {"set_eval_frame", set_eval_frame_py, METH_VARARGS, NULL},
