@@ -16,11 +16,13 @@
 #include <ATen/ops/_histogramdd_from_bin_tensors.h>
 #include <ATen/ops/_histogramdd_from_bin_tensors_native.h>
 #include <ATen/ops/aminmax.h>
+#include <ATen/ops/amin.h>
+#include <ATen/ops/amax.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/histc_native.h>
 #include <ATen/ops/histogram_native.h>
 #include <ATen/ops/histogramdd_native.h>
-#include <ATen/ops/linspace_native.h>
+#include <ATen/ops/linspace.h>
 #endif
 
 #include <numeric>
@@ -31,6 +33,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 /* Implements a numpy-like histogramdd function running on cpu
  * https://numpy.org/doc/stable/reference/generated/numpy.histogramdd.html
@@ -193,7 +196,18 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
     } else if (input.numel() > 0) {
         // non-empty input
         AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "histogramdd", [&]() {
-            infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
+            if (input.is_mps()) {
+                // aminmax has not been implemented on mps.
+                Tensor min = at::amin(input, 0);
+                Tensor max = at::amax(input, 0);
+                
+                for (const auto i : c10::irange(N)) {
+                    leftmost_edges[i] = min[i].item().to<scalar_t>();
+                    rightmost_edges[i] = max[i].item().to<scalar_t>();
+                }
+            } else {
+                infer_bin_edges_from_input<scalar_t>(input, N, leftmost_edges, rightmost_edges);
+            }
         });
     }
 
@@ -300,8 +314,8 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
 
     for (const auto dim : c10::irange(N)) {
-        linspace_out(outer_bin_edges.first[dim], outer_bin_edges.second[dim],
-                bin_ct[dim] + 1, bin_edges_out[dim]);
+        at::linspace_out(bin_edges_out[dim], outer_bin_edges.first[dim], outer_bin_edges.second[dim],
+                bin_ct[dim] + 1);
     }
 
     return bin_edges_out;
@@ -325,6 +339,7 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
 
     for (const auto dim : c10::irange(bins.size())) {
         bin_edges[dim].copy_(bins[dim]);
+        std::cout << "bins:" << bins[dim] << std::endl;
     }
 
     histogramdd_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);
@@ -381,7 +396,7 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
 
     histogramdd_prepare_out(reshaped_self, std::vector<int64_t>{bin_ct}, hist, bins_out);
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);
-    linspace_out(outer_bin_edges.first[0], outer_bin_edges.second[0], bin_ct + 1, bin_edges);
+    at::linspace_out(bin_edges, outer_bin_edges.first[0], outer_bin_edges.second[0], bin_ct + 1);
 
     histogramdd_check_inputs(reshaped_self, bins_in, reshaped_weight);
 
@@ -410,7 +425,7 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
     histogramdd_prepare_out(reshaped, std::vector<int64_t>{bin_ct}, hist, bins_out);
 
     auto outer_bin_edges = histc_select_outer_bin_edges(self, min, max);
-    linspace_out(outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1, bin_edges);
+    at::linspace_out(bin_edges, outer_bin_edges.first, outer_bin_edges.second, bin_ct + 1);
 
     histogramdd_check_inputs(reshaped, bins_in, {});
 
