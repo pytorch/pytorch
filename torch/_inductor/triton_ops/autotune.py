@@ -8,7 +8,6 @@ import logging
 import operator
 import os
 import os.path
-import re
 import threading
 from typing import List
 
