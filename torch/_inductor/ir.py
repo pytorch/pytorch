@@ -325,8 +325,10 @@ class IRNode:
     def current_origins(origins: Set[torch.fx.Node]):
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
-        yield
-        IRNode._current_origins = old
+        try:
+            yield
+        finally:
+            IRNode._current_origins = old
 
     def __post_init__(self):
         self.origins = set(self._current_origins)

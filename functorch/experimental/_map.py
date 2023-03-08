@@ -133,3 +133,4 @@ def map_functionalize(interpreter, f, xs, *args):
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
 map.fallthrough(DispatchKey.ADInplaceOrView)
 map.fallthrough(DispatchKey.BackendSelect)
+map.fallthrough(DispatchKey.AutocastCPU)

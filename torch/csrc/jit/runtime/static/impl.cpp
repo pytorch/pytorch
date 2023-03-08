@@ -679,7 +679,12 @@ void StaticModule::prepareFunctionsAndConstants(
 
     if (node->kind() == prim::Constant) {
       auto* v = node->output();
-      TORCH_CHECK(v->type()->kind() != FunctionType::Kind);
+      TORCH_CHECK(
+          v->type()->kind() != FunctionType::Kind,
+          "got ",
+          typeKindToString(v->type()->kind()),
+          " instead of ",
+          typeKindToString(FunctionType::Kind));
       value_to_index.emplace(v, constants_.size());
       constants_.emplace_back(toIValue(v).value());
       continue;
@@ -948,10 +953,24 @@ void BlockRunner::set_inputs(
 
   if (!is_root_block_ || C10_UNLIKELY(!schema)) {
     TORCH_CHECK(
-        kwargs.empty(), "Schema is not available, but BlockRunner got kwargs.");
+        kwargs.empty(),
+        "BlockRunner got kwargs; is_root_block: ",
+        std::to_string(is_root_block_),
+        "schema: ",
+        schema ? schema->name() : "(not available)");
 
     const auto total_num_inputs = args.size() + first_input_is_self_;
-    TORCH_CHECK(total_num_inputs == block_info_.num_inputs());
+    TORCH_CHECK(
+        total_num_inputs == block_info_.num_inputs(),
+        "Block runner got ",
+        std::to_string(total_num_inputs),
+        " inputs; ",
+        " first_input_is_self: ",
+        std::to_string(first_input_is_self_),
+        "; SR block expects ",
+        std::to_string(block_info_.num_inputs()),
+        " inputs for schema ",
+        schema ? schema->name() : "(not available)");
 
     for (size_t i = 0; i < args.size(); ++i) {
       set_arg(i, std::forward<IValueList>(args));
@@ -964,7 +983,12 @@ void BlockRunner::set_inputs(
   DCHECK(!schema_args.empty());
   TORCH_CHECK(
       args.size() < schema_args.size(),
-      "Static runtime got too many arguments");
+      "Static runtime got ",
+      std::to_string(args.size()),
+      " arguments, expects ",
+      std::to_string(schema_args.size() - 1),
+      " for schema ",
+      schema->name());
   for (size_t i = 0; i < schema_args.size() - 1; ++i) {
     // Start at 1 since the schema always contains `self`.
     const auto& schema_arg = schema_args[i + 1];
@@ -990,9 +1014,20 @@ void BlockRunner::set_inputs(
     }
 
     TORCH_CHECK(
-        false, "Static runtime is missing required kwarg ", schema_arg.name());
+        false,
+        "Static runtime is missing required kwarg ",
+        schema_arg.name(),
+        " for schema ",
+        schema->name());
   }
-  TORCH_CHECK(consumed_kwargs == kwargs.size());
+  TORCH_CHECK(
+      consumed_kwargs == kwargs.size(),
+      "kwargs size mismatch (consumed ",
+      std::to_string(consumed_kwargs),
+      ", expected ",
+      std::to_string(kwargs.size()),
+      " for schema ",
+      schema->name());
 }
 
 void BlockRunner::create_memory_planner() {
@@ -1958,7 +1993,14 @@ StaticNodeInfo::StaticNodeInfo(
       fn_(fn),
       inputs_(std::move(inputs)),
       outputs_offset_(outputs_offset) {
-  TORCH_CHECK(num_outputs() == node->outputs().size());
+  TORCH_CHECK(
+      num_outputs() == node->outputs().size(),
+      "Node ",
+      node->kind().toQualString(),
+      " has ",
+      std::to_string(num_outputs()),
+      " outputs, expected ",
+      std::to_string(node->outputs().size()));
 }
 
 std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
