@@ -1441,6 +1441,10 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
             num_layers, dropout_p, train, bidirectional, batch_first);
     std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
+  } else if (_input.is_mps()) {
+    TORCH_WARN_ONCE("Native multi-layer LSTM support in MPS available only on MacOS 13 onwards.",
+                    " Falling back to LSTMCell iteration.",
+                    " This may have performance implications.");
   }
 #endif
   // if cells are of different size, that means projections are used
