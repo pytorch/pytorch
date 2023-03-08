@@ -24,8 +24,10 @@ endif()
 # We use our own versions of FindCUDA.cmake and FindCUDAToolkit.cmake
 # to include some fixes for newer CUDA architectures and other issues.
 set(old_CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}")
-list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
-list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules)
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix")
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../Modules")
+# installed FindCUDAToolkit.cmake is in the parent directory.
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../")
 
 # Find CUDA.
 find_package(CUDA)
