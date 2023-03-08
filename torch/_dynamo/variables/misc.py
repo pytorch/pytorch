@@ -7,7 +7,7 @@ from typing import Dict, List
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import variables, config
+from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder

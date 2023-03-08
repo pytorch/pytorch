@@ -6,8 +6,6 @@ import inspect
 import operator
 import re
 import types
-
-from ..utils import torch_np
 from typing import Any, NamedTuple, Optional, Union
 
 import torch
@@ -36,12 +34,14 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
+
 from ..utils import (
     clone_input,
     get_fake_value,
     getfile,
     global_key_name,
     HAS_NUMPY,
+    HAS_NUMPY_TORCH_INTEROP,
     is_namedtuple,
     is_numpy_int_type,
     is_typing,
@@ -51,10 +51,11 @@ from ..utils import (
     preserve_rng_state,
     tensor_shape_should_be_static,
     tensor_static_reason_to_message,
+    torch_np,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    wrap_fake_exception, HAS_NUMPY_TORCH_INTEROP,
+    wrap_fake_exception,
 )
 
 from .base import MutableLocal, typestr, VariableTracker
@@ -935,8 +936,8 @@ def wrap_fx_proxy_cls(
             )
 
     if isinstance(example_value, torch.Tensor) or (
-            HAS_NUMPY_TORCH_INTEROP and
-            isinstance(example_value, torch_np._ndarray.ndarray)):
+        HAS_NUMPY_TORCH_INTEROP and isinstance(example_value, torch_np._ndarray.ndarray)
+    ):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
         should_specialize = options.pop("should_specialize", False)
         if is_parameter or should_specialize:

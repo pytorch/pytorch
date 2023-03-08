@@ -2,9 +2,9 @@ import inspect
 import itertools
 import operator
 import types
+from typing import Dict, List
 
 import torch_np._ndarray
-from typing import Dict, List
 
 import torch.fx
 import torch.random
@@ -630,7 +630,16 @@ class NumpyTensorVariable(TensorVariable):
     """
     Represents a numpy.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
-    def __init__(self, proxy: torch.fx.Proxy, dtype=None, ndim=None, class_type=None, shape=None, **kwargs):
+
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        dtype=None,
+        ndim=None,
+        class_type=None,
+        shape=None,
+        **kwargs,
+    ):
         self.shape = shape
         super().__init__(proxy, dtype=dtype, ndim=ndim, class_type=class_type, **kwargs)
 
@@ -642,6 +651,7 @@ class NumpyTensorVariable(TensorVariable):
 
     def call_isinstance(self, tensor_type):
         return False
+
     @staticmethod
     def specialize(value: torch_np._ndarray.ndarray):
         props = {
