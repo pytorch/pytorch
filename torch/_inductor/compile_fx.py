@@ -138,6 +138,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    aot_mode=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -174,10 +175,13 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
+            if aot_mode:
+                return compiled_fn
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -399,6 +403,7 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -409,7 +414,23 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                aot_mode=aot_mode,
             )
+
+    if aot_mode:
+        aot_config_patches = {
+            "cpp_wrapper": True,
+            "debug": True,
+            "triton.cudagraphs": False,
+        }
+        with config.patch(aot_config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                decompositions=decompositions,
+            )
+
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
