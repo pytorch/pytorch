@@ -65,7 +65,7 @@ For the non-wrapper code path:
 or a submodule chosen by the provided wrapping policy.
 """
 
-# Environment variable to toggling whether to use unsafe `setattr()` for view
+# Environment variable toggling whether to use unsafe `setattr()` for view
 # setting in `_use_sharded_views()` and `_use_unsharded_views()`
 # We should use 'safe' by default since it respects method overrides, but for
 # special cases such as for high CPU overhead or for intentionally bypassing
