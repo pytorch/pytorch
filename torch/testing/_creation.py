@@ -4,6 +4,7 @@ This module contains tensor creation utilities.
 
 import collections.abc
 import math
+import warnings
 from typing import cast, List, Optional, Tuple, Union
 
 import torch
@@ -81,7 +82,7 @@ def make_tensor(
 
     Raises:
         ValueError: If ``requires_grad=True`` is passed for integral `dtype`
-        ValueError: If ``low > high``.
+        ValueError: If ``low >= high``.
         ValueError: If either :attr:`low` or :attr:`high` is ``nan``.
         ValueError: If both :attr:`noncontiguous` and :attr:`memory_format` are passed.
         TypeError: If :attr:`dtype` isn't supported by this function.
@@ -124,10 +125,15 @@ def make_tensor(
             raise ValueError(
                 f"`low` and `high` cannot be NaN, but got {low=} and {high=}"
             )
-        elif low > high:
-            raise ValueError(
-                f"`low` must be weakly less than `high`, but got {low} >= {high}"
+        elif low == high and dtype in _FLOATING_OR_COMPLEX_TYPES:
+            warnings.warn(
+                "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types "
+                "is deprecated since 2.1 and will be removed in 2.3. "
+                "Use torch.full(...) instead.",
+                FutureWarning,
             )
+        elif low >= high:
+            raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")
 
         low = clamp(low, lowest_inclusive, highest_exclusive)
         high = clamp(high, lowest_inclusive, highest_exclusive)
