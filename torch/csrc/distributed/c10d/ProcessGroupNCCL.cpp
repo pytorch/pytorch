@@ -1535,17 +1535,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
           fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
           ncclComm->getNcclCommFailureReason());
       } else {
-        TORCH_WARN("NONBLOCKING NCCL CHECK???", i);
         C10D_NCCL_CHECK_NONBLOCKING(
           fn(inputs[i], outputs[i], ncclComm->getNcclComm(), ncclStream),
           ncclComm->getNcclComm(),
           ncclComm->getNcclCommFailureReason());
-        TORCH_WARN(i, "OK")
       }
 #endif
     }
   }
-  TORCH_WARN("POST");
   post(ncclStreams);
 
   // End event should only be recorded after the ncclGroupEnd()
@@ -2882,7 +2879,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
         }
         torch::cuda::nccl::scatter(
             inputs, outputTensors[0], comm, stream, root, nccl_use_nonblocking());
-        TORCH_WARN("DONE WITH SCATTER");
         return ncclSuccess;
       },
       OpType::SCATTER,
