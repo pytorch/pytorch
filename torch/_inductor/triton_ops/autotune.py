@@ -135,6 +135,11 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
+
+        binary._init_handles()
+        launcher.n_regs = binary.n_regs
+        launcher.n_spills = binary.n_spills
+        launcher.shared = binary.shared
         return launcher
 
     def bench(self, launcher, *args, grid):
