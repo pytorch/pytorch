@@ -16,6 +16,8 @@ from torch.testing._internal.common_dtype import floating_types_and_half
 from typing import List, Tuple, Union
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    IS_SANDCASTLE,
+    IS_FBCODE,
     TEST_FAIRSEQ,
     run_tests,
     parametrize,
@@ -539,6 +541,53 @@ class TestTransformers(NNTestCase):
             src_key_padding_mask=padding_mask,
         )
 
+
+    @unittest.skipIf(
+        IS_FBCODE or IS_SANDCASTLE, "cpp inductor backend is not supported"
+    )
+    @parametrize("with_compile", [True, False])
+    def test_transformer_encoder_dtype(self, with_compile):
+
+        def transformer_encoder(inputs, input_seq_len):
+            encoder_layer = nn.TransformerEncoderLayer(
+                d_model=16,
+                nhead=2,
+                dim_feedforward=32,
+                dropout=0.1,
+                activation='relu',
+                batch_first=True,
+            )
+            encoder_norm = nn.LayerNorm(16)
+            encoder = nn.TransformerEncoder(
+                encoder_layer, 2, encoder_norm
+            )
+
+            src_mask = torch.ones(
+                inputs.shape[1], inputs.shape[1], dtype=torch.bool
+            ).triu_(diagonal=1)
+            padding_mask = (
+                (torch.arange(inputs.shape[1])[None, :].cpu()
+                 >= input_seq_len[:, None])
+            )
+
+            return encoder(
+                inputs,
+                mask=src_mask,
+                src_key_padding_mask=padding_mask,
+            )
+
+        if with_compile:
+            transformer_encoder_opt = torch.compile(transformer_encoder)
+        else:
+            transformer_encoder_opt = transformer_encoder
+
+        inputs = torch.randn(2,3,16)
+        input_seq_len = torch.tensor([3,2])
+
+        transformer_encoder_opt(inputs, input_seq_len)
+
+
+    #================= decoder (deprecated) ================
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
