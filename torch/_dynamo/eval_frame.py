@@ -725,9 +725,6 @@ def export(
             return arg
 
         def output(self, target, args, kwargs):
-            # if tracing_mode == "symbolic":
-            # We do not rewrite output for symbolic
-            # return super().output(target, args, kwargs)
             dynamo_result_flat = args[0]
             lookup = [*dynamo_result_flat, *self.new_args]
             new_result_flat = [lookup[i] for i in matched_output_elements_positions]
