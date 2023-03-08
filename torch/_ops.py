@@ -197,9 +197,10 @@ class PyOperator(OperatorBase):
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         pyop_namespace[name] = self
+        self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
     def fallthrough(self, dispatch_key):
-        self.py_kernels[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
+        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -229,25 +230,11 @@ class PyOperator(OperatorBase):
                 self, flat_args, *args, **kwargs
             )
 
-        dispatch_key_set = _compute_keyset(args, kwargs)
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
         return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
     def name(self):
         return self.name
-
-    # TODO(voz): Should rewrite fallthrough register as the impl for keys we do not specify
-    # as opposed to being this sort of explicit thing where ops are a little too key aware...
-    def _fallthrough_fn(self, operator, dispatch_key):
-        def inner(*args, **kwargs):
-            all_keys_after_current = torch._C._dispatch_keyset_full_after(dispatch_key)
-            all_keys_after_current_masked = all_keys_after_current & _compute_keyset(
-                args, kwargs
-            )
-            return self.dispatch(
-                all_keys_after_current_masked.highestPriorityTypeId(), *args, **kwargs
-            )
-
-        return inner
 
 
 def _to_flat_tuple(args, kwargs):
@@ -257,9 +244,9 @@ def _to_flat_tuple(args, kwargs):
     return flat_all
 
 
-def _compute_keyset(args, kwargs):
+def _compute_keyset(args, kwargs, non_fallthrough_keys):
     tensors = _get_tensors(args, kwargs)
-    return key_extractor(tensors)
+    return key_extractor(tensors, non_fallthrough_keys)
 
 
 def _get_tensors(args, kwargs):
@@ -270,11 +257,12 @@ def _get_tensors(args, kwargs):
 
 # Note - this should maintain identical impl to the C++ dispatcher key extraction logic
 # at ATen/core/dispatch/DispatchKeyExtractor.h
-def key_extractor(tensors):
+def key_extractor(tensors, key_mask):
     key_set = torch._C._dispatch_tls_local_include_set()
     for tensor in tensors:
         key_set = key_set | torch._C._dispatch_keys(tensor)
     key_set = key_set - torch._C._dispatch_tls_local_exclude_set()
+    key_set = key_set & key_mask
     return key_set
 
 
