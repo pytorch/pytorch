@@ -5,10 +5,8 @@ import os
 import types
 import typing
 
-import torch._logging
-
 from torch._guards import Guard
-from torch._logging import loggable, register_log
+from torch._logging import init_logs, loggable, register_log
 from torch.fx.graph_module import GraphModule
 
 from torch.hub import _Faketqdm, tqdm
@@ -29,8 +27,8 @@ disable_progress = True
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
     return [
-        logging.getLogger("torch._dynamo"),
-        logging.getLogger("torch._inductor"),
+        logging.getLogger(TORCHDYNAMO_LOG_NAME),
+        logging.getLogger(TORCHINDUCTOR_LOG_NAME),
     ]
 
 
@@ -153,7 +151,7 @@ def init_logging(log_file_name=None):
             register_log(TORCHDYNAMO_NAME, TORCHDYNAMO_LOG_NAME, has_levels=True)
             register_log(AOT_AUTOGRAD_NAME, AOT_AUTOGRAD_LOG_NAME)
             register_log(TORCHINDUCTOR_NAME, TORCHINDUCTOR_LOG_NAME, has_levels=True)
-            torch._logging.init_logging(
+            init_logs(
                 [TORCHDYNAMO_LOG_NAME, AOT_AUTOGRAD_LOG_NAME, TORCHINDUCTOR_LOG_NAME],
                 log_file_name=log_file_name,
             )

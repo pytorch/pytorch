@@ -32,8 +32,8 @@ def log_settings(settings):
 def init_logging_post_hook(hook):
     old_init_logging = td_logging.init_logging
 
-    def new_init_logging(log_level, log_file_name=None):
-        old_init_logging(log_level, log_file_name)
+    def new_init_logging(log_file_name=None):
+        old_init_logging(log_file_name)
         hook()
 
     return unittest.mock.patch.object(td_logging, "init_logging", new_init_logging)
