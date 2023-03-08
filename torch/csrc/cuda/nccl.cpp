@@ -164,11 +164,11 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vecto
 #else
         TORCH_INTERNAL_ASSERT(false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
 #endif
-      } while (result == ncclInProgress);           
-      if (result != ncclSuccess) {                  
-        break; /* fall through to failed case */   
-      }                                            
-    }                                              
+      } while (result == ncclInProgress);
+      if (result != ncclSuccess) {
+        break; /* fall through to failed case */
+      }
+    }
   }
   if (result != ncclSuccess) {
     throw_nccl_error(from_nccl_result(result));
