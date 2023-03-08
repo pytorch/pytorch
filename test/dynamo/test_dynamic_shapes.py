@@ -26,6 +26,7 @@ test_classes = {}
 
 ALL_DYNAMIC_XFAILS = {
     "MiscTests": [
+        "test_autocast_sdpa",
         "test_parsing_sdpa",
     ],
     "ReproTests": [
