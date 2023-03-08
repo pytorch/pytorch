@@ -290,6 +290,8 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif self.value is torch.from_numpy:
+            if not config.trace_numpy:
+                unimplemented("numpy")
             assert len(args) == 1
             assert not kwargs
             t = args[0]

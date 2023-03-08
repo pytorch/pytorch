@@ -198,6 +198,9 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
+# trace through numpy ndarray as tensor and try to translate numpy function to torch function.
+trace_numpy = False
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")

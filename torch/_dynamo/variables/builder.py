@@ -6,6 +6,8 @@ import inspect
 import operator
 import re
 import types
+
+from ..utils import torch_np
 from typing import Any, NamedTuple, Optional, Union
 
 import torch
@@ -52,7 +54,7 @@ from ..utils import (
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
-    wrap_fake_exception,
+    wrap_fake_exception, HAS_NUMPY_TORCH_INTEROP,
 )
 
 from .base import MutableLocal, typestr, VariableTracker
@@ -932,7 +934,9 @@ def wrap_fx_proxy_cls(
                 example_value, tx=tx, **kwargs
             )
 
-    if isinstance(example_value, torch.Tensor):
+    if isinstance(example_value, torch.Tensor) or (
+            HAS_NUMPY_TORCH_INTEROP and
+            isinstance(example_value, torch_np._ndarray.ndarray)):
         is_parameter = isinstance(example_value, torch.nn.Parameter)
         should_specialize = options.pop("should_specialize", False)
         if is_parameter or should_specialize:

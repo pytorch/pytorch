@@ -7,7 +7,7 @@ from typing import Dict, List
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import variables
+from .. import variables, config
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
@@ -860,6 +860,8 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        if not config.trace_numpy:
+            unimplemented("numpy")
         import numpy as np
 
         from .builder import wrap_fx_proxy_cls
@@ -868,9 +870,9 @@ class NumpyVariable(VariableTracker):
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
         if self.value is np.meshgrid:
             if HAS_NUMPY_TORCH_INTEROP:
-                import torch_np
+                import torch_np._detail.implementations
 
-                meshgrid = torch_np.meshgrid
+                meshgrid = torch_np._detail.implementations.meshgrid
             else:
                 # should we give a warning since torch.meshgrid is having a different semantics than np?
                 meshgrid = torch.meshgrid
@@ -886,7 +888,7 @@ class NumpyVariable(VariableTracker):
                 **options,
             )
         else:
-            unimplemented("numpy")
+            unimplemented(f"numpy function {self.value}")
 
     def call_method(
         self,

@@ -252,11 +252,21 @@ def requires_static_shapes(fn):
     return _fn
 
 
+@contextlib.contextmanager
+def trace_numpy() -> None:
+    config.trace_numpy, prev = True, config.trace_numpy
+    try:
+        yield
+    finally:
+        config.trace_numpy = prev
+
+
 def requires_numpy_pytorch_interop(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         if utils.HAS_NUMPY_TORCH_INTEROP and utils.HAS_NUMPY:
-            return fn(*args, **kwargs)
+            with trace_numpy():
+                return fn(*args, **kwargs)
         raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
 
     return _fn
@@ -266,8 +276,9 @@ def requires_numpy(fn):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         if utils.HAS_NUMPY:
-            return fn(*args, **kwargs)
-        raise unittest.SkipTest("requires both numpy and numpy_pytorch_interop")
+            with trace_numpy():
+                return fn(*args, **kwargs)
+        raise unittest.SkipTest("requires numpy")
 
     return _fn
 

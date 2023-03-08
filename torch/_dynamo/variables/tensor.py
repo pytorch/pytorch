@@ -2,6 +2,8 @@ import inspect
 import itertools
 import operator
 import types
+
+import torch_np._ndarray
 from typing import Dict, List
 
 import torch.fx
@@ -338,6 +340,8 @@ class TensorVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
+            if not config.trace_numpy:
+                unimplemented(f"Tensor.{name}")
             from .builder import wrap_fx_proxy_cls
 
             assert not args, "Tensor.numpy() doesn't take args."
@@ -624,16 +628,29 @@ class TensorWithTFOverrideVariable(VariableTracker):
 
 class NumpyTensorVariable(TensorVariable):
     """
-    Represents a numpy.ndarray. Use this for Tensor.numpy() call.
+    Represents a numpy.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
+    def __init__(self, proxy: torch.fx.Proxy, dtype=None, ndim=None, class_type=None, shape=None, **kwargs):
+        self.shape = shape
+        super().__init__(proxy, dtype=dtype, ndim=ndim, class_type=class_type, **kwargs)
 
     def var_getattr(self, tx, name):
-        if name == "sum":
+        try:
             super().var_getattr(tx, name)
-        unimplemented(f"numpy_ndarray.{name}")
+        except NotImplementedError:
+            unimplemented(f"numpy_ndarray.{name}")
 
     def call_isinstance(self, tensor_type):
         return False
+    @staticmethod
+    def specialize(value: torch_np._ndarray.ndarray):
+        props = {
+            "dtype": value.dtype,
+            "ndim": int(value.ndim),
+            "class_type": type(value),
+            "shape": value.shape,
+        }
+        return props
 
     def call_method(
         self,
@@ -642,24 +659,7 @@ class NumpyTensorVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if name == "sum":
-            from .builder import wrap_fx_proxy_cls
-
-            if kwargs or len(args) > 1:
-                unimplemented(f"numpy_ndarray.sum() with args and/or kwargs")
-            options = VariableTracker.propagate(self, args, kwargs.values())
-            return wrap_fx_proxy_cls(
-                target_cls=NumpyTensorVariable,
-                tx=tx,
-                proxy=tx.output.create_proxy(
-                    "call_method",
-                    name,
-                    *proxy_args_kwargs([self] + list(args), kwargs),
-                ),
-                **options,
-            )
-        else:
-            unimplemented(f"numpy_ndarray.{name}")
+        unimplemented(f"numpy_ndarray.{name}")
 
 
 class UnspecializedPythonVariable(TensorVariable):

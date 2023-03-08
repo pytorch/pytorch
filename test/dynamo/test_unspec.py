@@ -55,8 +55,8 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):
             xy = [x + y, y, False]
-            np_x = x.numpy(force=False)
-            np_y = y.numpy(force=False)
+            np_x = x.numpy()
+            np_y = y.numpy()
             return {
                 "x": x,
                 "z": z,
