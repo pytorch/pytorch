@@ -10,7 +10,6 @@ import warnings
 import subprocess
 import tempfile
 import os
-import pprint
 import copy
 import gc
 import torch
@@ -23,7 +22,7 @@ from torch.nn import Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, run_tests, TestCase, download_file, IS_CI, NoTest,
-     TEST_WITH_UBSAN, dtype_abbrs, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
+     TEST_WITH_UBSAN, skipIfSlowGradcheckEnv, TEST_WITH_ASAN, suppress_warnings)
 from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -58,97 +57,118 @@ _ref_test_ops = tuple(
     )
 )
 
-def mps_ops_modifier(ops):
-    # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
-    MACOS_13_X_XFAILLIST = {
-        'masked.softmax': [torch.float32],
+def mps_ops_grad_modifier(ops):
+    XFAILLIST_GRAD = {
+        # Top 60
+        # CPU: empty is returning all 0's and there is a mismatch with MPS
+        # allocation (MacOS 13). According to
+        # https://pytorch.org/docs/2.0/generated/torch.empty.html
+        #    PyTorch `empty`, Returns a tensor filled with  uninitialized data.
+        'empty': [torch.float16, torch.float32],
+
+        # CPU Error: RuntimeError: "addmv_impl_cpu" not implemented for 'Half'
+        'addr': [torch.float16],
+
+        # Unimplemented ops
+        '__getitem__': [torch.float16],
+        'prod': [torch.float32],  # The operator 'aten::cumprod.out'
+        'sgn': [torch.float16, torch.float32],
+        '_segment_reduce': [torch.float16, torch.float32],
+        'unfold_copy': [torch.float16, torch.float32],  # unfold_backward is not implemented
+        'unfold': [torch.float16, torch.float32],
+        'trace': [torch.float32],  # missing in place aten::index_fill_.int_Tensor
+        'sparse.mmreduce': [torch.float32],  # csr not supported
+        'unique_consecutive': [torch.float16, torch.float32],
+        'special_modified_bessel_i0': [torch.float16, torch.float32],
+        'scalar_tensor': [torch.float16, torch.float32],
+        'cdist': [torch.float32],
+        'masked.scatter': [torch.float16, torch.float32],
+
+        # Correctness issues
+        'atanh': [torch.float32],
+
+        # Random output
+        'exponential': [torch.float16, torch.float32],
+
+        # CPU errors
+        # derivative for aten::floor_divide is not implemented on CPU
+        'floor_divide': [torch.float16, torch.float32],
+        # derivative for aten::narrow_copy is not implemented on CPU
+        'narrow_copy': [torch.float16, torch.float32],
+        # RuntimeError: "log_vml_cpu" not implemented for 'Half'
+        '__rpow__': [torch.float16],
+        'pow': [torch.float16],
+        # 'bool' object is not iterable
+        'allclose': [torch.float16, torch.float32],
+        'equal': [torch.float16, torch.float32],
+        # "mse_backward_cpu_out" not implemented for 'Half'
+        'nn.functional.mse_loss': [torch.float16],
+        # "smooth_l1_backward_cpu_out" not implemented for 'Half'
+        'nn.functional.smooth_l1_loss': [torch.float16],
+        # cpu error: grad requires non-empty inputs
+        'randn': [torch.float16, torch.float32],
+        'signal.windows.bartlett': [torch.float32],
+        'signal.windows.blackman': [torch.float32],
+        'signal.windows.cosine': [torch.float32],
+        'signal.windows.exponential': [torch.float32],
+        'signal.windows.gaussian': [torch.float32],
+        'signal.windows.general_cosine': [torch.float32],
+        'signal.windows.general_hamming': [torch.float32],
+        'signal.windows.hamming': [torch.float32],
+        'signal.windows.hann': [torch.float32],
+        'signal.windows.kaiser': [torch.float32],
+        'signal.windows.nuttall': [torch.float32],
+        'empty_permuted': [torch.float16, torch.float32],
+        'eye': [torch.float16, torch.float32],
+
+        # trunc_tensor not working properly for float16
+        'divtrunc_rounding': [torch.float16],
+        'fmod': [torch.float16],
+    }
+
+    MACOS_12_3_XFAILLIST_GRAD = {
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+        # Unimplemented
+        'logaddexp2': [torch.float32],
+
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13. We are not raising error.
+        '__rpow__': [torch.float32],
+        'pow': [torch.float32],
+    }
+
+    MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'masked.softmin': [torch.float32],
+        'masked.softmax': [torch.float32],
         'masked.log_softmax': [torch.float32],
-    }
-    MACOS_12_X_XFAILLIST = {
-        '__radd__': [torch.uint8],
-        '__rdiv__': [torch.uint8],
-        '__rmul__': [torch.uint8],
-        '__rpow__': [torch.uint8],
-        'abs': [torch.uint8],
-        'acos': [torch.uint8],
-        'acosh': [torch.uint8],
-        'add': [torch.uint8],
-        'asin': [torch.uint8],
-        'asinh': [torch.uint8],
-        'atan': [torch.uint8],
-        'atanh': [torch.uint8],
-        'cos': [torch.uint8],
-        'cosh': [torch.uint8],
-        'deg2rad': [torch.uint8],
-        'diff': [torch.uint8],
-        'equal': [torch.uint8],
-        'erf': [torch.uint8],
-        'exp2': [torch.uint8],
-        'exp': [torch.uint8],
-        'fmax': [torch.uint8],
-        'fmin': [torch.uint8],
-        'fmod': [torch.uint8],
-        'isclose': [torch.uint8],
-        'isnan': [torch.uint8],
-        'kron': [torch.uint8],
-        'log10': [torch.uint8],
-        'log1p': [torch.uint8],
-        'log2': [torch.uint8],
-        'log': [torch.uint8],
-        'logical_and': [torch.uint8],
-        'logical_or': [torch.uint8],
-        'logical_xor': [torch.uint8],
-        'logit': [torch.uint8],
-        'masked.mean': [torch.uint8],
-        'masked.std': [torch.uint8],
-        'masked.var': [torch.uint8],
-        'nn.functional.avg_pool1d': [torch.int64],
-        'nn.functional.avg_pool2d': [torch.int64],
-        'nn.functional.cosine_embedding_loss': [torch.uint8],
-        'nn.functional.poisson_nll_loss': [torch.uint8],
-        'nn.functional.softsign': [torch.uint8],
-        'nn.functional.tanhshrink': [torch.uint8],
-        'pow': [torch.int16, torch.int64, torch.uint8],
-        'rad2deg': [torch.uint8],
-        'reciprocal': [torch.uint8],
-        'remainder': [torch.uint8],
-        'rsqrt': [torch.uint8],
-        'sigmoid': [torch.uint8],
-        'sign': [torch.uint8],
-        'sin': [torch.uint8],
-        'sinh': [torch.uint8],
-        'special.ndtr': [torch.uint8],
-        'sqrt': [torch.uint8],
-        'sub': [torch.uint8],
-        'tan': [torch.uint8],
-        'tanh': [torch.uint8],
-        'true_divide': [torch.uint8],
-        'xlogy': [torch.uint8],
-        # Weird
-        'square': [torch.uint8, torch.bool, torch.int16, torch.int32, torch.int64],
+
+        # Unsupported Border padding mode, forward pass success as fallback to cpu
+        'grid_sampler_2d': [torch.float32],
+
+        # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+        # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+        # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+        # Running `msort` with stable `sort` passes.
+        'msort': [torch.float16],
+
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13. We are not raising error.
+        'pow': [torch.float32],
+        '__rpow__': [torch.float32],
     }
 
+    XPASSLIST_GRAD = {
+        'nn.functional.pairwise_distance': [torch.float16],
+    }
 
-    # Those ops are not expected to work
-    XFAILLIST = {
-        '__rpow__': [torch.int16, torch.int32, torch.int64],
-        'chalf': None,
-        # Unsupported dtypes
-        'dot': [torch.int64],
-        'index_add': [torch.int64],
-        'nn.functional.conv1d': [torch.int64],
-        'nn.functional.conv2d': [torch.int64],
-        'nn.functional.conv_transpose1d': [torch.int64],
-        'nn.functional.conv_transpose2d': [torch.int64],
-        # 'remainder': [torch.int64],
-        'sigmoid': [torch.int64],
-        # failures due to lack of op implementation on MPS backend
-        'put': None,
-        # Weird
-        'byte': [torch.float16, torch.float32],
-        'nn.functional.adaptive_avg_pool1d': [torch.float32],
-        'nn.functional.adaptive_avg_pool2d': [torch.float32],
+    MACOS_13_3_XFAILLIST_GRAD = {
+        # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
+        # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
+        # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
+        # Running `msort` with stable `sort` passes.
+        'msort': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
@@ -157,19 +177,571 @@ def mps_ops_modifier(ops):
 
     for op in ops:
         key = op.name + op.variant_test_name
-        if key in XFAILLIST:
+        if key in XFAILLIST_GRAD:
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
-                         dtypes=XFAILLIST[key]))
+                         dtypes=XFAILLIST_GRAD[key]))
 
-        if key in MACOS_13_X_XFAILLIST and torch.backends.mps.is_macos13_or_newer():
+        if key in XPASSLIST_GRAD:
+            addDecorator(op, DecorateInfo(
+                         unittest.skip,
+                         dtypes=XPASSLIST_GRAD[key]))
+
+        if key in MACOS_12_3_XFAILLIST_GRAD and (not torch.backends.mps.is_macos13_or_newer()):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
-                         dtypes=MACOS_13_X_XFAILLIST[key]))
-        if key in MACOS_12_X_XFAILLIST and not torch.backends.mps.is_macos13_or_newer():
+                         dtypes=MACOS_12_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_BEFORE_13_3_XFAILLIST_GRAD and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
-                         dtypes=MACOS_12_X_XFAILLIST[key]))
+                         dtypes=MACOS_BEFORE_13_3_XFAILLIST_GRAD[key]))
+
+        if key in MACOS_13_3_XFAILLIST_GRAD and (product_version >= 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_3_XFAILLIST_GRAD[key]))
+        yield op
+
+def mps_ops_modifier(ops):
+    # Those ops worked on MacOS12, but broken on MacOS13, see https://github.com/pytorch/pytorch/issues/85758
+    MACOS_12_3_XFAILLIST = {
+        # Top 60
+        # expected failures
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13.3. Currently error is not raised.
+        'pow': [torch.int16, torch.int64, torch.uint8, torch.int8],
+        # expected failures
+        '__rpow__': [torch.uint8, torch.int8],
+
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'cdist': [torch.float32],
+        'tan': [torch.uint8, torch.float32],
+
+        # Data type support starts from macOS 13
+        'nn.functional.avg_pool1d': [torch.int64],
+        'nn.functional.avg_pool2d': [torch.int64],
+        'nn.functional.local_response_norm': [torch.int64],
+        '__radd__': [torch.uint8],
+        '__rdiv__': [torch.uint8],
+        '__rmul__': [torch.uint8],
+        'abs': [torch.uint8],
+        'acos': [torch.uint8],
+        'acosh': [torch.uint8],
+        'add': [torch.uint8],
+        'asin': [torch.uint8],
+        'asinh': [torch.uint8],
+        'atan': [torch.uint8],
+        'atanh': [torch.uint8],
+        'ceil': [torch.uint8],
+        'corrcoef': [torch.uint8],
+        'cos': [torch.uint8],
+        'cosh': [torch.uint8],
+        'cov': [torch.uint8],
+        'cumulative_trapezoid': [torch.uint8],
+        'deg2rad': [torch.uint8],
+        'diff': [torch.uint8],
+        'eq': [torch.uint8],
+        'equal': [torch.uint8],
+        'erf': [torch.uint8],
+        'exp2': [torch.uint8],
+        'exp': [torch.uint8],
+        'expm1': [torch.uint8],
+        'floor': [torch.uint8],
+        'fmax': [torch.uint8],
+        'fmin': [torch.uint8],
+        'fmod': [torch.uint8],
+        'ge': [torch.uint8],
+        'gt': [torch.uint8],
+        'isclose': [torch.uint8],
+        'isnan': [torch.uint8],
+        'kron': [torch.uint8],
+        'le': [torch.uint8],
+        'log10': [torch.uint8],
+        'log1p': [torch.uint8],
+        'log2': [torch.uint8],
+        'log': [torch.uint8],
+        'logical_and': [torch.uint8],
+        'logical_or': [torch.uint8],
+        'logical_xor': [torch.uint8],
+        'logit': [torch.uint8],
+        'lt': [torch.uint8],
+        'masked.mean': [torch.uint8],
+        'masked.std': [torch.uint8],
+        'masked.var': [torch.uint8],
+        'maximum': [torch.uint8],
+        'minimum': [torch.uint8],
+        'mul': [torch.uint8],
+        'ne': [torch.uint8],
+        'neg': [torch.uint8],
+        'nn.functional.cosine_embedding_loss': [torch.uint8],
+        'nn.functional.margin_ranking_loss': [torch.uint8],
+        'nn.functional.poisson_nll_loss': [torch.uint8],
+        'nn.functional.softsign': [torch.uint8],
+        'nn.functional.tanhshrink': [torch.uint8],
+        'nn.functional.triplet_margin_loss': [torch.uint8],
+        'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
+        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
+        'outer': [torch.uint8],
+        'rad2deg': [torch.uint8],
+        'reciprocal': [torch.uint8],
+        'remainder': [torch.uint8],
+        'round': [torch.uint8],
+        'rsqrt': [torch.uint8],
+        'sigmoid': [torch.uint8],
+        'sign': [torch.uint8],
+        'signbit': [torch.uint8],
+        'sin': [torch.uint8],
+        'sinh': [torch.uint8],
+        'special.ndtr': [torch.uint8],
+        'sqrt': [torch.uint8],
+        'sub': [torch.uint8],
+        'tanh': [torch.uint8],
+        'trapezoid': [torch.uint8],
+        'trapz': [torch.uint8],
+        'true_divide': [torch.uint8],
+        'trunc': [torch.uint8],
+        'xlogy': [torch.uint8],
+        'minbinary': [torch.uint8],
+        'maxbinary': [torch.uint8],
+        'divtrunc_rounding': [torch.uint8],
+        'divfloor_rounding': [torch.uint8],
+        'divno_rounding_mode': [torch.uint8],
+        'floor_divide': [torch.uint8],
+        'ldexp': [torch.uint8],
+        # square internally calls into power, and will type cast to int64, which supports starting from macOS 13
+        'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # cpu not giving nan for x/0.0
+        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # fill tensors with uninitialized data, causing mismatch with CPU
+        'empty_permuted': [torch.bool, torch.float16, torch.float32, torch.int16,
+                           torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
+                  torch.int32, torch.int64, torch.uint8, torch.int8],
+        'dist': [torch.float16],  # cpu result off, showing inf values
+    }
+
+    MACOS_BEFORE_13_3_XFAILLIST = {
+        # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
+        'tan': [torch.float32],
+        'cdist': [torch.float32],
+
+        # CPU Error: cpu not giving nan for x/0.0
+        'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+        # Unsupported dtypes
+        'cumsum': [torch.int64],
+        'cumulative_trapezoid': [torch.int64],
+        'masked.cumsum': [torch.int64],
+    }
+
+    MACOS_13_3_XFAILLIST = {
+        # before macOS 13.3 it falls back to cpu and pass the forward pass
+        'grid_sampler_2d': [torch.float32],  # Unsupported Border padding mode
+
+        # Failure due to precision issue for fp16
+        # on both cpu and mps there are test cases that might produce inf result
+        # 'nn.functional.pairwise_distance': [torch.float16],
+
+        # test blow pass on macOS 12 as it falls back to cpu
+        # Argsort case using duplicate indices (undefined behaviour):
+        #  - CPU output: tensor([2546, 6917, 3181,  ..., 7128, 5133,   30], devuce='cpu')
+        #  - MPS output: tensor([2546, 6917, 3181,  ..., 7128,   30, 5133], device='mps:0')
+        # Elements from index 30 and 5133 are both equal.
+        # Since CPU is not using argsort with stable=True, these cases result in undefined behaviour.
+        'argsort': [torch.float16, torch.int8, torch.uint8, torch.bool],
+        # Same issue as `argsort` with duplicate indices. This test checks both the sorted values and the indices.
+        # The values of the sorted tensor match the CPU, but in case of the returned indices this results in undefined behaviour.
+        'sort': [torch.int8, torch.uint8, torch.bool, torch.float16],
+    }
+
+    # Those ops are not expected to work
+    UNIMPLEMENTED_XFAILLIST = {
+        # Failures due to lack of op implementation on MPS backend
+        'login': None,
+        'log_sigmoid': None,
+        'log_sigmoid_forward': None,
+        'linalg.eig': None,
+        'linalg.eigvals': None,
+        'fft.fft': None,
+        'fft.fft2': None,
+        'fft.fftn': None,
+        'fft.hfft': None,
+        'fft.hfft2': None,
+        'fft.hfftn': None,
+        'fft.ifft': None,
+        'fft.ifft2': None,
+        'fft.ifftn': None,
+        'fft.ihfft': None,
+        'fft.ihfft2': None,
+        'fft.ihfftn': None,
+        'fft.irfft': None,
+        'fft.irfft2': None,
+        'fft.irfftn': None,
+        'fft.rfft': None,
+        'fft.rfft2': None,
+        'fft.rfftn': None,
+        'put': None,
+        'stft': None,
+        'nn.functional.conv_transpose3d': None,
+        'rounddecimals_neg_3': None,
+        'rounddecimals_3': None,
+        'rounddecimals_0': None,
+        '__rsub__': None,
+        'aminmax': None,
+        'angle': None,
+        'bucketize': None,
+        'cauchy_': None,
+        'cauchy': None,
+        'cholesky': None,
+        'cholesky_inverse': None,
+        'cholesky_solve': None,
+        'cummax': None,
+        'cummin': None,
+        'cumprod': None,
+        'digamma': None,
+        'erfc': None,
+        'erfinv': None,
+        'frexp': None,
+        'gcd': None,
+        'geqrf': None,
+        'nn.functional.grid_sample': None,  # Unsupported Border padding mode
+        'heaviside': None,
+        'histc': None,
+        'histogram': None,
+        'histogramdd': None,
+        'i0': None,
+        'igamma': None,
+        'igammac': None,
+        'index_copy': None,
+        'index_fill': None,
+        'index_reduce': None,
+        'isin': None,
+        'isneginf': None,
+        'isposinf': None,
+        'kthvalue': None,
+        'lcm': None,
+        'lerp': None,
+        'lgamma': None,
+        'linalg.cholesky': None,
+        'linalg.cholesky_ex': None,
+        'linalg.cond': None,
+        'linalg.detsingular': None,
+        'linalg.det': None,
+        'linalg.eigh': None,
+        'linalg.eigvalsh': None,
+        'linalg.householder_product': None,
+        'linalg.ldl_factor': None,
+        'linalg.ldl_factor_ex': None,
+        'linalg.ldl_solve': None,
+        'linalg.lstsq': None,
+        'linalg.lstsqgrad_oriented': None,
+        'linalg.lu': None,
+        'linalg.lu_factor': None,
+        'linalg.lu_factor_ex': None,
+        'linalg.lu_solve': None,
+        'linalg.matrix_norm': [torch.float32],
+        'linalg.norm': [torch.float32],
+        'linalg.normsubgradients_at_zero': [torch.float32],
+        'linalg.qr': None,
+        'linalg.slogdet': None,
+        'linalg.solve': None,
+        'linalg.solve_ex': None,
+        'linalg.svdvals': None,
+        'linalg.tensorsolve': None,
+        'linalg.vander': None,
+        'linalg.vecdot': None,
+        'logcumsumexp': None,
+        'logdet': None,
+        'lu': None,
+        'lu_solve': None,
+        'lu_unpack': None,
+        'masked.cumprod': None,
+        'masked.median': None,
+        'matrix_exp': None,
+        'mode': None,
+        'mvlgamma': None,
+        'mvlgammamvlgamma_p_1': None,
+        'mvlgammamvlgamma_p_3': None,
+        'mvlgammamvlgamma_p_5': None,
+        'nanquantile': None,
+        'nanmedian': None,
+        'native_dropout_backward': None,
+        'nextafter': None,
+        'normnuc': None,
+        'nn.functional.fractional_max_pool2d': None,
+        'nn.functional.fractional_max_pool3d': None,
+        'nn.functional.adaptive_avg_pool3d': None,
+        'nn.functional.adaptive_max_pool3d': None,
+        'nn.functional.interpolatearea': None,
+        'nn.functional.interpolatebicubic': None,
+        'nn.functional.interpolatelinear': None,
+        'nn.functional.interpolatetrilinear': None,
+        'nn.functional.max_unpool1dgrad': None,
+        'nn.functional.max_unpool2dgrad': None,
+        'nn.functional.max_unpool3dgrad': None,
+        'nn.functional.avg_pool3d': None,
+        'nn.functional.ctc_loss': None,
+        'nn.functional.embedding_bag': None,
+        'nn.functional.hardshrink': None,
+        'nn.functional.max_pool3d': None,
+        'nn.functional.max_unpool1d': None,
+        'nn.functional.max_unpool2d': None,
+        'nn.functional.max_unpool3d': None,
+        'nn.functional.mish': None,
+        'nn.functional.multi_margin_loss': None,
+        'nn.functional.multilabel_margin_loss': None,
+        'nn.functional.pdist': None,
+        'nn.functional.rrelu': None,
+        'nn.functional.softshrink': None,
+        'nn.functional.norm': None,
+        'ormqr': None,
+        'pca_lowrank': None,
+        'pinverse': None,
+        'polar': None,
+        'polygamma': None,
+        'polygammapolygamma_n_0': None,
+        'polygammapolygamma_n_1': None,
+        'polygammapolygamma_n_2': None,
+        'polygammapolygamma_n_3': None,
+        'polygammapolygamma_n_4': None,
+        'qr': None,
+        'quantile': None,
+        'renorm': None,
+        'rsub': None,
+        'scatter_reduceamax': None,
+        'scatter_reduceamin': None,
+        'scatter_reducemin': None,
+        'scatter_reducemean': None,
+        'scatter_reduceprod': None,
+        'scatter_reducesum': None,
+        'searchsorted': None,
+        'segment_reduce': None,
+        '_segment.reduce': None,
+        'segment.reduce': None,
+        'segment_reduce_offsets': None,
+        '_segment_reduce_offsets': None,
+        '_segment_reduce_lengths': None,
+        '_segment_reducelengths': None,
+        '_segment_reduceoffsets': None,
+        'sinc': None,
+        'sparse.mm': None,
+        'sparse.mmreduce': None,
+        'special.airy_ai': None,
+        'special.bessel_j0': None,
+        'special.bessel_j1': None,
+        'special.bessel_y0': None,
+        'special.bessel_y1': None,
+        'special.chebyshev_polynomial_t': None,
+        'special.chebyshev_polynomial_u': None,
+        'special.entr': None,
+        'special.erfcx': None,
+        'special.hermite_polynomial_h': None,
+        'special.hermite_polynomial_he': None,
+        'special.i0e': None,
+        'special.i1': None,
+        'special.i1e': None,
+        'special.laguerre_polynomial_l': None,
+        'special.log_ndtr': None,
+        'special.modified_bessel_i0': None,
+        'special.modified_bessel_i1': None,
+        'special.modified_bessel_k0': None,
+        'special.modified_bessel_k1': None,
+        'special.ndtri': None,
+        'special.polygamma': None,
+        'special.polygammaspecial_polygamma_n_0': None,
+        'special.scaled_modified_bessel_k0': None,
+        'special.scaled_modified_bessel_k1': None,
+        'special.spherical_bessel_j0': None,
+        'special.xlog1py': None,
+        'special.zeta': None,
+        'std_mean': None,
+        'std_meanunbiased': None,
+        'svd_lowrank': None,
+        'symeig': None,
+        'take': None,
+        'to': None,
+        'to_sparse': None,
+        'unique': None,
+        'vdot': None,
+        'view_as_complex': None,
+        'segment_reduce': None,
+        'segment_reduce_': None,
+        '_segment_reduce_lengths': None,
+        '_upsample_bilinear2d_aa': None,
+        'geometric' : None,
+        'geometric_': None,
+        'log_normal_': None,
+        'log_normal': None,
+        'bfloat16': None,
+        'cdouble': None,
+        'cfloat': None,
+        'complex': None,
+        'double': None,
+        'chalf': None,
+        'nn.functional.softminwith_dtype': None,
+        'log_softmaxwith_dtype': None,
+        'softmaxwith_dtype': None,
+        'float_power': None,
+        'full_like': None,
+        'linalg.matrix_rank': None,
+        'linalg.matrix_rankhermitian': None,
+        'linalg.pinv': None,
+        'linalg.pinvhermitian': None,
+
+        # MPS: input sizes must be divisible by output sizes
+        'nn.functional.adaptive_avg_pool1d': None,
+        'nn.functional.adaptive_avg_pool2d': None,
+
+        # Unsupported dtypes
+        # bmm is not supported for integral types
+        'nn.functional.bilinear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # Cannot convert a MPS Tensor to float64 dtype. The tensors
+        # input data is created with double in common_methods_invocations.py
+        'nn.functional.batch_norm': [torch.float32],
+        'ones_like': None,
+        'zeros_like': None,
+
+        # Convolution for integral types is not supported on MPS
+        'nn.functional.conv1d': [torch.int64],
+        'nn.functional.conv2d': [torch.int64],
+        'nn.functional.conv_transpose1d': [torch.int64],
+        'nn.functional.conv_transpose2d': [torch.int64],
+
+        # Unsupported dtypes
+        'dot': [torch.int64],
+        'index_add': [torch.int64],
+        'log1p': [torch.int64],
+        'sigmoid': [torch.int64],
+        'atan2': [torch.int64],
+
+        # GEMM on MPS is not supported for integral types
+        'nn.functional.linear': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        '__rmatmul__': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmmdecomposed': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'addmv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'baddbmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'bmm': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'einsum': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'inner': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'linalg.multi_dot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'matmul': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mat': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'mv': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'tensordot': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # new_zeros/new_ones: Cannot convert a MPS Tensor to float64 dtype as
+        # the MPS framework doesn't support float64
+        'new_zeros': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_ones': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'new_full': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # returned output on CPU is float64
+        'bincount': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # trunc_tensor not working properly for float16
+        'divtrunc_rounding': [torch.float16],
+        'fmod': [torch.float16],
+    }
+
+    UNDEFINED_XFAILLIST = {
+        # Top 60 operators
+        # topk fails with duplicate indices
+        'topk': [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+
+        # Failures due to random output that they generate using
+        # Philox engine causing mismatch with CPU results
+        'multinomial': [torch.float32],  # random results
+        'uniform': [torch.float16, torch.float32],
+        'rand_like': [torch.float16, torch.float32],
+        'randint_like': [torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'randn_like': [torch.float16, torch.float32],
+        'bernoulli': [torch.float32],
+        'exponential': [torch.float16, torch.float32],
+        'nn.functional.feature_alpha_dropoutwith_train': [torch.float32],
+        'normal': [torch.float16, torch.float32, torch.float16, torch.float32],
+        'normalin_place': [torch.float16, torch.float32],
+        'normalnumber_mean': [torch.float16, torch.float32],
+        'nn.functional.alpha_dropout': [torch.float32],
+        'nn.functional.dropout': [torch.float32],
+        'nn.functional.dropout2d': [torch.float32],
+        'nn.functional.dropout3d': [torch.float32],
+
+        # these fill tensors with uninitialized data, causing mismatch with CPU
+        'new_empty': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'empty_like': [torch.bool, torch.float16, torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        # 'empty': [torch.int8],
+        'new_empty_strided': [torch.bool, torch.float16, torch.float32, torch.int16,
+                              torch.int32, torch.int64, torch.uint8, torch.int8],
+        # duplicate indices are used in the testcase - undefined behaviour
+        'index_put': None,
+        # zero to negative integer powers are undefined
+        '__rpow__': [torch.int8, torch.int16, torch.int32, torch.int64],
+        'resize_': [torch.float16, torch.float32],
+        'resize_as_': [torch.float16, torch.float32],
+
+        # CPU Errors:
+        'addr': [torch.bool, torch.int16, torch.int32,
+                 torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
+        'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                    torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+        'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
+                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
+
+        # random results
+        # mps vs cpu:
+        # Mismatched elements: 40 / 96 (41.7%)
+        # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
+        # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
+        # cuda(2.0.0.dev20230301+cu117) vs cpu:
+        # Mismatched elements: 56 / 96 (58.3%)
+        # Greatest absolute difference: 17.892311096191406 at index (1, 0, 2) (up to 1e-05 allowed)
+        # Greatest relative difference: inf at index (1, 0, 0) (up to 1.3e-06 allowed)
+        'nn.functional.scaled_dot_product_attention': [torch.float32],
+
+        # Failures due to casting negative float to uint8 is undefined
+        'byte': [torch.float16, torch.float32],
+    }
+
+    def addDecorator(op, d) -> None:
+        op.decorators = list(op.decorators) if op.decorators is not None else []
+        op.decorators.append(d)
+
+    for op in ops:
+        key = op.name + op.variant_test_name
+        for xfaillist in [UNIMPLEMENTED_XFAILLIST, UNDEFINED_XFAILLIST]:
+            if key in xfaillist:
+                addDecorator(op, DecorateInfo(
+                             unittest.expectedFailure,
+                             dtypes=xfaillist[key]))
+
+        if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_13_3_XFAILLIST[key]))
+
+        if key in MACOS_13_3_XFAILLIST and (product_version >= 13.3):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_13_3_XFAILLIST[key]))
+
+        if key in MACOS_12_3_XFAILLIST and (not torch.backends.mps.is_macos13_or_newer()):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_12_3_XFAILLIST[key]))
         yield op
 
 # Same logic as test_cuda.py
@@ -9349,7 +9921,6 @@ class TestRNNMPS(TestCaseMPS):
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
-
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size, device='mps')
@@ -9555,6 +10126,8 @@ MPS_DTYPES = get_all_dtypes()
 for t in [torch.double, torch.cdouble, torch.cfloat, torch.bfloat16]:
     del MPS_DTYPES[MPS_DTYPES.index(t)]
 
+MPS_GRAD_DTYPES = [torch.float32, torch.float16]
+
 
 class TestConsistency(TestCaseMPS):
     # TODO: This is only used while some ops are being added.
@@ -9562,629 +10135,34 @@ class TestConsistency(TestCaseMPS):
     # This can be generated automatically in the `new_mps_allowlist.txt` file
     # by doing `EXPECTTEST_ACCEPT=1 python test_mps.py TestConsistencyCPU`
     # You most likely do NOT want to modify this manually
-    ALLOWLIST_OP = {
-        '__getitem__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__radd__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__rand__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        '__rdiv__': ['f16', 'f32', 'i16', 'i32', 'u8'],
-        '__rmatmul__': ['f32'],
-        '__rmul__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__ror__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        '__rpow__': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        '__rxor__': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.log_softmax': ['f32'],
-        'masked.logaddexp': ['f32'],
-        'masked.logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.norm': ['f16', 'f32'],
-        'masked.normalize': ['f16', 'f32'],
-        'masked.softmax': ['f32'],
-        'masked.softmin': ['f32'],
-        'masked.std': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.var': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'abs': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'acos': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'acosh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'addbmm': ['f32'],
-        'addcdiv': ['f32'],
-        'addcmul': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'addmm': ['f32'],
-        'addmv': ['f32'],
-        'addr': ['f32'],
-        'all': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'allclose': ['f16', 'f32'],
-        'any': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'arange': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'argmax': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'argmin': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amix': ['f32'],
-        'asin': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'asinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atan': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atan2': ['f32'],
-        'atanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'atleast_1d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'atleast_2d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'atleast_3d': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'baddbmm': ['f32'],
-        'bitwise_and': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_left_shift': ['i16', 'i32', 'i64', 'u8'],
-        'bitwise_not': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_or': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'bitwise_right_shift': ['i16', 'i32', 'i64', 'u8'],
-        'bitwise_xor': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'block_diag': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'bmm': ['f32'],
-        'broadcast_shapes': ['f32'],
-        'byte': None,
-        'cat': None,
-        'ceil': ['f32', 'int32', 'int64', 'f16'],
-        'chalf': None,
-        'char': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'chunk': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_max': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clamp_min': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'clone': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'column_stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'combinations': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'conj_physical': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'constant_pad_nd': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'contiguous': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'copysign': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'corrcoef': ['f32'],
-        'cos': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'cosh': ['b8', 'f32', 'i16', 'i32', 'u8', 'i64'],
-        'cov': ['f32'],
-        'cumsum': ['i8', 'b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'deg2rad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'diag': ['f32', 'i32'],
-        'diag_embed': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diagflat': ['f32', 'i32'],
-        'diagonal_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'diff': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'dist': ['f32'],
-        'dot': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'einsum': ['f32'],
-        'equal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'erf': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'exp': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'exp2': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'eye': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flip': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'fliplr': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'flipud': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'float': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'floor': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'floor_divide': ['f32', 'f16'],
-        'fmax': ['b8', 'f32', 'f16', 'i16', 'i32', 'i64', 'u8'],
-        'fmin': ['b8', 'f32', 'f16', 'i16', 'i32', 'i64', 'u8'],
-        'fmod': ['f32', 'f16', 'i16', 'i32', 'i64', 'u8'],
-        'frac': ['f16', 'f32'],
-        'gather': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'gradient': ['f16', 'f32', 'i16'],
-        'ge': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'gt': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'half': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'hstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'hypot': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'index_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'int': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isclose': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isfinite': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isinf': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isnan': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'isreal': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'kron': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'linalg.matrix_norm': ['f16'],
-        'linalg.matrix_power': ['f32'],
-        'linalg.svd': ['f32'],
-        'linalg.vector_norm': ['f16', 'f32'],
-        'linspace': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'log': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log10': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log1p': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log2': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'log_softmax': ['f32'],
-        'logaddexp': ['f16', 'f32'],
-        'logaddexp2': ['f16', 'f32'],
-        'logical_and': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_not': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_or': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logical_xor': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'logspace': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'logsumexp': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'long': None,
-        'masked_fill': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked_select': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked_scatter': ['i8', 'b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'matmul': ['f32'],
-        'mm': ['f32'],
-        'mv': ['f32'],
-        'nan_to_num': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'nn.functional.adaptive_max_pool1d': ['f32'],
-        'nn.functional.adaptive_max_pool2d': ['f32'],
-        'nn.functional.adaptive_avg_pool1d': ['f32'],
-        'nn.functional.adaptive_avg_pool2d': ['f32'],
-        'nn.functional.avg_pool1d': ['f32', 'i64'],
-        'nn.functional.avg_pool2d': ['f32', 'i64'],
-        'nn.functional.binary_cross_entropy': ['f32'],
-        'nn.functional.binary_cross_entropy_with_logits': ['f32'],
-        'nn.functional.celu': ['f32'],
-        'nn.functional.conv1d': ['f32'],
-        'nn.functional.conv2d': ['f32'],
-        'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.cosine_similarity': ['f32'],
-        'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.embedding': ['f16', 'f32'],
-        'nn.functional.gaussian_nll_loss': ['f32'],
-        'nn.functional.glu': ['f32'],
-        'nn.functional.group_norm': ['f32'],
-        'nn.functional.hardsigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.hardtanh': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f16', 'f32'],
-        'nn.functional.instance_norm': ['f32'],
-        'nn.functional.kl_div': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.l1_loss': ['f16', 'f32'],
-        'nn.functional.leaky_relu': ['f32'],
-        'nn.functional.linear': ['f32'],
-        'nn.functional.local_response_norm': ['f32'],
-        'nn.functional.logsigmoid': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.margin_ranking_loss': ['f32', 'i16', 'i32'],
-        'nn.functional.max_pool1d': ['f32'],
-        'nn.functional.max_pool2d': ['f32'],
-        'max_pool2d_with_indices_backward': ['f32'],
-        'nn.functional.mse_loss': ['f16', 'f32'],
-        'nn.functional.nll_loss': ['f32'],
-        'nn.functional.pad': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.padconstant': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.padreflect': ['f32'],
-        'nn.functional.padreplicate': ['f32'],
-        # TODO: add f16 test case after solve the accuracy issue,
-        # see https://github.com/pytorch/pytorch/pull/95166#issuecomment-1439359181.
-        'nn.functional.pairwise_distance': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.poisson_nll_loss': ['f32', 'i16', 'i32', 'u8'],
-        'nn.functional.prelu': ['f32'],
-        'nn.functional.relu': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.relu6': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.selu': ['f32'],
-        'nn.functional.silu': ['f32'],
-        'nn.functional.smooth_l1_loss': ['f16', 'f32'],
-        'nn.functional.soft_margin_loss': ['f32'],
-        'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
-        'nn.functional.softsign': ['f16', 'f32', 'i16', 'u8'],
-        'nn.functional.tanhshrink': ['f32', 'i16', 'i32', 'u8'],
-        'nn.functional.threshold': ['f32', 'i16', 'i32', 'i64', 'u8'],
-        'nn.functional.triplet_margin_loss': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.triplet_margin_with_distance_loss': ['f32', 'i16', 'i32', 'i64'],
-        'nn.functional.upsample_bilinear': ['f32'],
-        'nn.functional.upsample_nearest': ['f32'],
-        'norm': ['f32', 'f16'],
-        'positive': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'pow': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'put': None,
-        'rad2deg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'real': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'reciprocal': ['b8', 'f16', 'f32', 'i16', 'i32', 'u8'],
-        'remainder' : None,
-        'repeat': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'repeat_interleave': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'resize_': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'resize_as_': ['b8', 'i16', 'i32', 'i64', 'u8'],
-        'resolve_conj': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'resolve_neg': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'roll': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'rot90': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'round': ['f32', 'f16', 'i16', 'i32', 'i64'],
-        'rsqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'scatter': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'scatter_add': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'select_scatter': None,
-        'sgn': None,
-        'short': None,
-        'sigmoid': None,
-        'sign': None,
-        'sin': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'sinh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'slice_scatter': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'softmax': ['f32'],
-        'special.ndtr': ['b8', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sqrt': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'square': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'squeeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'stack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sub': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sum_to_size': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'svd': ['f32'],
-        't': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tan': ['b8', 'i16', 'i32', 'u8'],
-        'tanh': ['b8', 'f32', 'i16', 'i32', 'u8'],
-        'tensordot': ['f32'],
-        'tensor_split': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tile': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'topk': ['f32', 'f16'],
-        'trapz': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        'sort': ['f32', 'i16', 'i32', 'i64'],
-        'argsort': ['f32', 'i16', 'i32', 'i64'],
-        'tril': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'tril_indices': ['i32', 'i64'],
-        'triu': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'triu_indices': ['i32', 'i64'],
-        'true_divide': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'trunc': ['f32'],
-        'unbind': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unflatten': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unsqueeze': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'view': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'view_as': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'vsplit': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'vstack': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'zero_': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'where': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'nonzero': ['b8', 'u8', 'f16', 'f32', 'i16', 'i32', 'i64'],
-        'cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'linalg.cross': ['f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'unique_consecutive': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'std': ['f16', 'f32'],
-        'var': ['f16', 'f32'],
-        'amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'mean': ['f16', 'f32'],
-        'count_nonzero': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'xlogy': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.amax': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.amin': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.mean': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.prod': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'masked.sum': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'native_layer_norm': ['torch.float32'],
-        'nn.functional.layer_norm': ['torch.float32'],
-        'nn.functional.bilinear': ['f32'],
-        'linalg.solve_triangular': ['f32'],
-        'triangular_solve': ['f32'],
-        'trace': None,
-        '_native_batch_norm_legit': ['f32'],
-        'native_batch_norm': ['f32'],
-        'minreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'maxreduction_with_dim': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'linalg.inv': ['f32'],
-        'linalg.inv_ex': ['f32'],
-        'mH': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'mT': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'T': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-        'H': ['b8', 'f16', 'f32', 'i16', 'i32', 'i64', 'u8'],
-    }
-
-
-    ALLOWLIST_OP_GRAD = {
-        '__radd__': ['f16', 'f32'],
-        '__rdiv__': ['f16', 'f32'],
-        '__rmatmul__': ['f32'],
-        '__rmul__': ['f16', 'f32'],
-        '__rpow__': ['f32'],
-        'masked.log_softmax': ['f32'],
-        'masked.logaddexp': ['f32'],
-        'masked.softmax': ['f32'],
-        'masked.softmin': ['f32'],
-        'masked.std': ['f32'],
-        'masked_scatter': ['f16', 'f32'],
-        'abs': ['f16', 'f32'],
-        'acos': ['f32'],
-        'acosh': ['f32'],
-        'add': ['f16', 'f32'],
-        'addbmm': ['f32'],
-        'addcdiv': ['f32'],
-        'addcmul': ['f32'],
-        'addmm': ['f32'],
-        'addmv': ['f32'],
-        'addr': ['f32'],
-        'all': ['f16', 'f32'],
-        'any': ['f16', 'f32'],
-        'arange': ['f16', 'f32'],
-        'argmax': ['f16', 'f32'],
-        'argmin': ['f16', 'f32'],
-        'asin': ['f32'],
-        'asinh': ['f32'],
-        'atan': ['f32'],
-        'atan2': ['f32'],
-        'atleast_1d': ['f16', 'f32'],
-        'atleast_2d': ['f16', 'f32'],
-        'atleast_3d': ['f16', 'f32'],
-        'baddbmm': ['f32'],
-        'block_diag': ['f16', 'f32'],
-        'bmm': ['f32'],
-        'broadcast_shapes': ['f32'],
-        'ceil': ['f32'],
-        'chunk': ['f16', 'f32'],
-        'clone': ['f16', 'f32'],
-        'column_stack': ['f16', 'f32'],
-        'conj': ['f16', 'f32'],
-        'conj_physical': ['f16', 'f32'],
-        'contiguous': ['f16', 'f32'],
-        'copysign': ['f16', 'f32'],
-        'corrcoef': ['f32'],
-        'cos': ['f32'],
-        'cosh': ['f32'],
-        'cumsum': ['f16', 'f32'],
-        'deg2rad': ['f16', 'f32'],
-        'diag': ['f32'],
-        'diag_embed': ['f16', 'f32'],
-        'diagflat': ['f32'],
-        'diagonal_scatter': ['f16', 'f32'],
-        'diff': ['f16', 'f32'],
-        'dist': ['f32'],
-        'dot': ['f32'],
-        'einsum': ['f32'],
-        'erf': ['f32'],
-        'exp': ['f32'],
-        'exp2': ['f16', 'f32'],
-        'fill': ['f16', 'f32'],
-        'flatten': ['f16', 'f32'],
-        'flip': ['f16', 'f32'],
-        'fliplr': ['f16', 'f32'],
-        'flipud': ['f16', 'f32'],
-        'float': ['f32'],
-        'floor': ['f32'],
-        'fmax': ['f16', 'f32'],
-        'fmin': ['f16', 'f32'],
-        'gradient': ['f32'],
-        'half': ['f16'],
-        'hstack': ['f16', 'f32'],
-        'hypot': ['f16', 'f32'],
-        'index_select': ['f16', 'f32'],
-        'index_add': ['f16', 'f32'],
-        'isclose': ['f16', 'f32'],
-        'isfinite': ['f16', 'f32'],
-        'isinf': ['f16', 'f32'],
-        'isnan': ['f16', 'f32'],
-        'isreal': ['f16', 'f32'],
-        'kron': ['f32'],
-        'linalg.matrix_norm': ['f16'],
-        'linalg.svd': ['f32'],
-        'linspace': ['f16', 'f32'],
-        'log': ['f32'],
-        'log10': ['f32'],
-        'log1p': ['f32'],
-        'log2': ['f32'],
-        'log_softmax': ['f32'],
-        'logaddexp': ['f32'],
-        'logical_not': ['f16', 'f32'],
-        'logit': ['f16', 'f32'],
-        'logspace': ['f32'],
-        'matmul': ['f32'],
-        'mm': ['f32'],
-        'mv': ['f32'],
-        'neg': ['f16', 'f32'],
-        'nn.functional.adaptive_max_pool1d': ['f32'],
-        'nn.functional.adaptive_max_pool2d': ['f32'],
-        'nn.functional.adaptive_avg_pool1d': ['f32'],
-        'nn.functional.adaptive_avg_pool2d': ['f32'],
-        'nn.functional.avg_pool1d': ['f32'],
-        'nn.functional.avg_pool2d': ['f32'],
-        'nn.functional.binary_cross_entropy': ['f32'],
-        'nn.functional.celu': ['f32'],
-        'nn.functional.conv1d': ['f32'],
-        'nn.functional.conv2d': ['f32'],
-        'nn.functional.conv_transpose1d': ['f32'],
-        'nn.functional.cosine_embedding_loss': ['f32'],
-        'nn.functional.elu': ['f32'],
-        'nn.functional.feature_alpha_dropout': ['f16', 'f32'],
-        'nn.functional.glu': ['f32'],
-        'nn.functional.hardsigmoid': ['f16', 'f32'],
-        'nn.functional.hardtanh': ['f32'],
-        'nn.functional.hinge_embedding_loss': ['f32'],
-        'nn.functional.huber_loss': ['f16', 'f32'],
-        'nn.functional.instance_norm': ['f32'],
-        'nn.functional.kl_div': ['f32'],
-        'nn.functional.l1_loss': ['f16', 'f32'],
-        'nn.functional.leaky_relu': ['f32'],
-        'nn.functional.local_response_norm': ['f32'],
-        'nn.functional.logsigmoid': ['f16', 'f32'],
-        'nn.functional.margin_ranking_loss': ['f32'],
-        'nn.functional.max_pool1d': ['f32'],
-        'nn.functional.max_pool2d': ['f32'],
-        'nn.functional.mse_loss': ['f32'],
-        'nn.functional.nll_loss': ['f32'],
-        'nn.functional.pad': ['f16', 'f32', 'i16', 'i32', 'i64'],
-        # TODO: add f16 test case after solve the accuracy issue,
-        # see https://github.com/pytorch/pytorch/pull/95166#issuecomment-1439359181.
-        'nn.functional.pairwise_distance': ['f32'],
-        'nn.functional.poisson_nll_loss': ['f32'],
-        'nn.functional.relu': ['f32'],
-        'nn.functional.relu6': ['f32'],
-        'nn.functional.selu': ['f32'],
-        'nn.functional.silu': ['f32'],
-        'nn.functional.soft_margin_loss': ['f32'],
-        'nn.functional.softmin': ['f32'],
-        'nn.functional.softplus': ['f32'],
-        'nn.functional.softsign': ['f16', 'f32'],
-        'nn.functional.smooth_l1_loss': ['f32'],
-        'nn.functional.threshold': ['f32'],
-        'nn.functional.triplet_margin_loss': ['f32'],
-        'nn.functional.triplet_margin_with_distance_loss': ['f32'],
-        'nn.functional.upsample_bilinear': ['f32'],
-        'norm': ['f32', 'f16'],
-        'positive': ['f16', 'f32'],
-        'pow': ['f32'],
-        'rad2deg': ['f16', 'f32'],
-        'real': ['f16', 'f32'],
-        'reciprocal': ['f16', 'f32'],
-        'repeat': ['f16', 'f32'],
-        'repeat_interleave': ['f16', 'f32'],
-        'resolve_conj': ['f16', 'f32'],
-        'resolve_neg': ['f16', 'f32'],
-        'roll': ['f16', 'f32'],
-        'round': ['f32'],
-        'rsqrt': ['f32'],
-        'select_scatter': ['f16', 'f32'],
-        'sign': ['f16', 'f32'],
-        'sin': ['f32'],
-        'sinh': ['f32'],
-        'slice_scatter': ['f16', 'f32'],
-        'softmax': ['f32'],
-        'split': ['f16', 'f32'],
-        'sqrt': ['f32'],
-        'square': ['f16', 'f32'],
-        'squeeze': ['f16', 'f32'],
-        'stack': ['f16', 'f32'],
-        'sub': ['f32'],
-        'sum_to_size': ['f16', 'f32'],
-        'svd': ['f32'],
-        't': ['f16', 'f32'],
-        'tanh': ['f32'],
-        'tensordot': ['f32'],
-        'tile': ['f16', 'f32'],
-        'tril': ['f16', 'f32'],
-        'triu': ['f16', 'f32'],
-        'true_divide': ['f16', 'f32'],
-        'trunc': ['f32'],
-        'unbind': ['f16', 'f32'],
-        'unflatten': ['f16', 'f32'],
-        'unsqueeze': ['f16', 'f32'],
-        'view': ['f16', 'f32'],
-        'view_as': ['f16', 'f32'],
-        'vsplit': ['f16', 'f32'],
-        'vstack': ['f16', 'f32'],
-        'xlogy': ['f16', 'f32'],
-        'zero_': ['f16', 'f32'],
-        'linalg.solve_triangular': ['f32'],
-        'triangular_solve': ['f32'],
-        '_native_batch_norm_legit': ['f32'],
-        'native_batch_norm': ['f32'],
-        'native_layer_norm': ['f32'],
-        'nn.functional.gelu': ['f32'],
-        'nn.functional.bilinear': ['f32'],
-        'nn.functional.prelu': ['f32'],
-    }
-
-    # These ops that are problematic. So never run them even when
-    # generating the new allowlist.
-    # If the dtype list is None, all dtypes are excluded.
-    # All the entries in this list should be removed
-    BLOCKLIST = {
-        # Functions that hang
-        'masked_fill': [torch.bool, torch.uint8, torch.float32], 'where': [torch.bool],
-        # + forward when requires_grad=True or running backward
-        'masked.mean': [torch.bool, torch.float16],
-        'masked.prod': [torch.bool],
-        'masked.sum': [torch.bool],
-
-        # Functions that hard crash
-        'std': [torch.float16],
-        'stft': [torch.float32], 'var': [torch.float16],
-        # + forward when requires_grad=True or running backward
-        'nn.functional.embedding': [torch.float32, torch.float16],
-
-        'as_strided_scatter': [torch.uint8],
-        'atan2': [torch.int64],
-        'bfloat16': None,
-        'block_diag': [torch.uint8],
-        'diag_embed': [torch.uint8],
-        'diagonal_scatter': [torch.uint8],
-        'nn.functional.conv_transpose3d': [torch.int64, torch.float32],
-        'nn.functional.local_response_norm': [torch.int64],
-        'nn.functional.padcircular': [torch.uint8],
-
-
-
-        # These were moved from ALLOWLIST to BLOCK as they are not working
-        # locally
-        'tile': ['torch.float16', 'torch.float32', 'torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        '__radd__': ['torch.bool', 'torch.uint8'],
-        '__rmul__': ['torch.uint8'],
-        'neg': ['torch.uint8'],
-        'add': ['torch.bool', 'torch.uint8'],
-        'addr': ['torch.int16', 'torch.int32', 'torch.int64', 'torch.uint8'],
-        'diag': ['torch.int64'],
-        'diagflat': ['torch.int64'],
-
-        # Functions that are flaky
-        # These are detected as "ok" by the expect case but actually fail to run sometimes
-        'as_strided': None,
-        'broadcast_tensors': None,
-        'broadcast': None,
-        'broadcast_to': None,
-        'diagonal': None,
-        'divfloor_rounding': None,
-        'divno_rounding_mode': None,
-        'divtrunc_rounding': None,
-        'dsplit': None,
-        'hsplit': None,
-        'empty': None,
-        'expand_as': None,
-        'expand': None,
-        'ge': None,
-        'ne': None,
-        'le': None,
-        'lt': None,
-        'gt': None,
-        'transpose': None,
-        'splitlist_args': None,
-        'select': None,
-        'reshape': None,
-        'reshape_as': None,
-        'permute': None,
-        'norm': None,
-        'nn.functional.pixel_unshuffle': None,
-        'nn.functional.pixel_shuffle': None,
-        'nn.functional.cross_entropy': None,
-        'nn.functional.one_hot': None,
-        'narrow': None,
-        'movedim': None,
-        'minreduction_with_dim': None,
-        'minreduction_no_dim': None,
-        'minbinary': None,
-        'meshgridvariadic_tensors': None,
-        'meshgridlist_of_tensors': None,
-        'maxreduction_with_dim': None,
-        'maxreduction_no_dim': None,
-        'maxbinary': None,
-        'maximum': None,
-        'minimum': None,
-        'outer': None,
-        'softmaxwith_dtype': None,
-        'rounddecimals_neg_3': None,
-        'rounddecimals_3': None,
-        'rounddecimals_0': None,
-        'normnuc': None,
-        'nn.functional.softminwith_dtype': None,
-        'nn.functional.feature_alpha_dropoutwith_train': None,
-        'log_softmaxwith_dtype': None,
-        'split_with_sizes': None,
-        'trapezoid': None,
-        'eq': None,
-        'mul': None,
-        'cartesian_prod': None,
-        'bool': None,
-        'inner': None,
-        'dstack': None,
-        'take_along_dim': None,
-    }
 
     FP16_LOW_PRECISION_LIST = {
         'add', 'sub', 'div',
         '__rdiv__', '__rmul__',
         'nn.functional.huber_loss',
         'true_divide', 'kron',
-        'gradient', 'var', 'std',
+        'gradient', 'var', 'std', 'ldexp',
         'linalg.vector_norm',
-        'masked.sum', 'masked.std',
-        'masked.var',
+        'addr', 'var_mean',
+        'var_mean_unbiased',
+
+        # for macOS 12
+        'masked.normalize', 'masked.sum', 'masked.var',
+        'outer',
+        'sum_to_size', 'sum',
+        'mul',
+        'nansum', 'nanmean',
+        'norm',
+    }
+
+    FP32_LOW_PRECISION_LIST = {
+        # conv2d and conv_transpose2d results have a very small
+        # difference compared to CPU/CUDA, so we use lower precision on FP32
+        'nn.functional.conv2d',
+        'nn.functional.conv_transpose2d',
+        'matmul', '__rmatmul__',
+        'linalg.multi_dot',
+        'addbmm',
     }
 
     # Used for accept mode only
@@ -10195,29 +10173,60 @@ class TestConsistency(TestCaseMPS):
     def test_output_match(self, device, dtype, op):
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
+        run_grad_test = True
 
-        if key in self.BLOCKLIST:
-            if self.BLOCKLIST[key] is None or dtype in self.BLOCKLIST[key]:
-                self.skipTest(f"Running test with {op.name} hangs so skipping")
+        def get_samples():
+            return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
+        cpu_samples = get_samples()
 
-        # Make this an expecttest manually
-        # When this env variable is set, generate a new ALLOWLIST_OP
-        # that reflects the current state of what passes or not
-        if os.environ.get("EXPECTTEST_ACCEPT", None) == "1":
-            generate_new_truth = True
-        else:
-            generate_new_truth = False
+        all_backward_pass = True
+        for cpu_sample in cpu_samples:
+            #
+            # Forward check
+            #
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
+
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = cpu_args[1]
+
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
+
+            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+                atol = 1e-2
+                rtol = 1e-2
+            elif op.name == "masked.mean":
+                atol = 7e-4
+                rtol = 2e-3
+            elif op.name == "native_layer_norm":
+                atol = 1e-4
+                rtol = 1.3e-5
+            elif op.name in ["pow", "__rpow__"]:
+                atol = 1e-6
+                rtol = 4e-6
+            else:
+                atol = None
+                rtol = None
+
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
+
+
+    @ops(mps_ops_grad_modifier(copy.deepcopy(op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
+    def test_output_grad_match(self, device, dtype, op):
+        self.assertEqual(device, "cpu")
+        key = op.name + op.variant_test_name
 
         run_grad_test = True
-        if not generate_new_truth:
-            if op.name not in self.ALLOWLIST_OP:
-                self.skipTest(f"{op.name} is not in the allow list for test on MPS")
-            elif self.ALLOWLIST_OP[op.name] is not None:
-                if dtype_abbrs[dtype] not in self.ALLOWLIST_OP[op.name]:
-                    self.skipTest(f"{op.name} is in the allow list for MPS but {dtype} is excluded")
-
-            if op.name not in self.ALLOWLIST_OP_GRAD or dtype_abbrs[dtype] not in self.ALLOWLIST_OP_GRAD[op.name]:
-                run_grad_test = False
 
         def get_samples():
             return op.sample_inputs(device, dtype, requires_grad=(dtype.is_floating_point or dtype.is_complex))
@@ -10234,8 +10243,6 @@ class TestConsistency(TestCaseMPS):
                 mps_sample = cpu_sample.transform(
                     lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-                # TODO: This checks only the function variant. We should also check the method and inplace version
-                # when they exist
                 cpu_args = [cpu_sample.input] + list(cpu_sample.args)
                 cpu_kwargs = cpu_sample.kwargs
                 mps_args = [mps_sample.input] + list(mps_sample.args)
@@ -10248,21 +10255,26 @@ class TestConsistency(TestCaseMPS):
                 cpu_out = op(*cpu_args, **cpu_kwargs)
                 mps_out = op(*mps_args, **mps_kwargs)
 
-                if op.name == "nn.functional.conv2d" and dtype == torch.float32:
+                if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
                     atol = 1e-4
                     rtol = 3e-5
-                elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+                elif op.name == "nn.functional.conv2d" or op.name == "linalg.multi_dot" and dtype == torch.float32:
+                    atol = 1e-4
+                    rtol = 3e-5
+                elif (op.name in self.FP16_LOW_PRECISION_LIST) and dtype == torch.float16:
                     atol = 1e-2
                     rtol = 1e-2
-                elif op.name == "masked.mean":
+                elif (op.name == "masked.mean"):
                     atol = 7e-4
                     rtol = 2e-3
-                elif op.name == "native_layer_norm":
+                elif (op.name == "native_layer_norm"):
                     atol = 1e-4
                     rtol = 1.3e-5
-                elif op.name in ["pow", "__rpow__"]:
-                    atol = 1e-6
-                    rtol = 4e-6
+                elif op.name == "norm" and dtype == torch.float16:
+                    atol = 7e-4
+                    rtol = 1.5e-3
+                elif op.name == "unique" and cpu_kwargs["sorted"] is False:
+                    continue
                 else:
                     atol = None
                     rtol = None
@@ -10270,82 +10282,44 @@ class TestConsistency(TestCaseMPS):
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:
-                if any(s in str(e).lower() for s in ["int64", "float16", "div truc rounding"]):
-                    self.skipTest(f"Expected Runtime Error: {str(e)}")
-
-                if not generate_new_truth:
-                    raise e
+                raise e
                 forward_failed = True
                 all_forward_pass = False
-
-            if not (dtype.is_floating_point or dtype.is_complex):
-                # Maybe we should error here instead?
-                continue
 
             #
             # Backward check
             #
+            if forward_failed:
+                # We would've failed immediately anyway, but this error is clearer
+                # We error instead of continuing so that all_backward_pass would not be True
+                raise RuntimeError("Forward pass already failed")
 
-            # Skip the grad test if it is not part of the allow list
-            if not generate_new_truth and not run_grad_test:
-                # TODO: maybe there is a way to print only when we have -v
-                # if i == 0:
-                #     print(f"Skipping gradient check because {op.name} is not on the allow list")
+            cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
+            mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
+
+            def req_grad(t):
+                return isinstance(t, torch.Tensor) and t.requires_grad
+
+            diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
+            diff_mps_out = tuple(t for t in mps_out if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
+            self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
+
+            if len(diff_cpu_out) == 0:
                 continue
+            # rand_like does not work with certain dtypes, so cast to double and cast back
+            cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
+            mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
-            try:
-                if forward_failed:
-                    # We would've failed immediately anyway, but this error is clearer
-                    # We error instead of continuing so that all_backward_pass would not be True
-                    raise RuntimeError("Forward pass already failed")
+            # Compare computed gradients with cpu given random grad_output vector
+            # Sometimes when the derivative is 0, we just don't bother creating the graph
+            # allow_unused is needed in those cases.
+            cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
+            mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
-                cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
-                mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
-
-                def req_grad(t):
-                    return isinstance(t, torch.Tensor) and t.requires_grad
-
-                diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
-                diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-                diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-                diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
-                self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
-                self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
-
-                if len(diff_cpu_out) == 0:
-                    continue
-                # rand_like does not work with certain dtypes, so cast to double and cast back
-                cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
-                mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
-
-                # Compare computed gradients with cpu given random grad_output vector
-                # Sometimes when the derivative is 0, we just don't bother creating the graph
-                # allow_unused is needed in those cases.
-                cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
-                mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
-
-                self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
-            except Exception as e:
-                if not generate_new_truth:
-                    raise e
-                all_backward_pass = False
-
-        if all_forward_pass and generate_new_truth:
-            if dtype_abbrs[dtype] not in self.NEW_ALLOW_LIST[op.name]:
-                self.NEW_ALLOW_LIST[op.name].append(dtype_abbrs[dtype])
-            # We could write it only once. But I don't know how to detect that the current test is the last one
-            # So each test append to the dict and write it.
-            with open("new_mps_allowlist.txt", "w") as f:
-                pprint.pprint(self.NEW_ALLOW_LIST, stream=f)
-
-        if all_backward_pass and generate_new_truth and dtype.is_floating_point:
-            if dtype_abbrs[dtype] not in self.NEW_ALLOW_LIST_GRAD[op.name]:
-                self.NEW_ALLOW_LIST_GRAD[op.name].append(dtype_abbrs[dtype])
-            # We could write it only once. But I don't know how to detect that the current test is the last one
-            # So each test append to the dict and write it.
-            with open("new_mps_allowlist_grad.txt", "w") as f:
-                pprint.pprint(self.NEW_ALLOW_LIST_GRAD, stream=f)
-
+            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
