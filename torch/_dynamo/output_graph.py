@@ -700,7 +700,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                         assert (
                             node._original_name
                             in self.tracing_context.param_and_attr_names_to_sources
-                        )
+                        ), f"{node._original_name} not found"
                     else:
                         raise AssertionError(f"Unknown node {node.name}")
         torch._dynamo.utils.increment_op_count(tot)

@@ -1382,10 +1382,16 @@ def tensor_always_has_static_shape(
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
 
-
+# Note - On normalizing attr names
+# 
+# Normalizing names is not new to dynamo. We have historically normalized names
+# with the regex `name = re.sub(r"[^a-zA-Z0-9]", "_", name)` in most places,
+# and at times, with the regex `name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)` if we anticipate
+# square brackets. We did not have a consistent normalization scheme across every attribute, just a regex we
+# copy pasted. This util is meant to replace that regex.
 def normalize_attr_name(name):
     # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-    name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
+    # name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     return name
