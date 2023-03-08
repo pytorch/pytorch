@@ -659,8 +659,7 @@ struct StackContext : public c10::GatheredContext {
   static std::shared_ptr<c10::GatheredContext> gather() {
     return _gather(true, true, false);
   }
-  static std::shared_ptr<c10::GatheredContext>
-  gather_with_cpp() {
+  static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
     return _gather(true, true, true);
   }
 };
