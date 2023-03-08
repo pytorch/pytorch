@@ -99,6 +99,17 @@ def _wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
     return tensor
 
 class AsyncCollectiveTensor(torch.Tensor):
+    r"""
+    A Tensor wrapper subclass that is used to trigger a call to wait
+    prior to first use of the underlying tensor.
+    Use it inside functional collective pytorch wrappers like the following:
+    def functional_collective(self, group, tag):
+        tag, rankset, group_size = _expand_group(group, tag)
+        tensor = torch._C._nn.{collective}(self, tag, rankset, group_size)
+        res = AsyncCollectiveTensor(tensor)
+        _register_wrapper_tensor(res, tensor)
+        return res
+    """
     elem: torch.Tensor
 
     __slots__ = ['elem']
