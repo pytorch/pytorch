@@ -739,6 +739,9 @@ def _checkpoint_impl(fn, recompute_fn, *args):
     new_frame = _CheckpointFrame(recompute_fn)
     new_frame.input_saver = _NoopSaveInputs.apply(*args)
 
+    if new_frame.input_saver.grad_fn is None:
+        return fn(*args)
+
     with _checkpoint_hook(new_frame):
         ret = fn(*args)
 
