@@ -523,9 +523,7 @@ def _export(
     # ONNX exporter used in _ts_graph_to_onnx_model_in_protobuf is not compatible
     # with FakeTensorMode.
     with torch.utils._mode_utils.no_dispatch():
-        onnxscript_graph = _export_fx_to_onnxscript(
-            decomposed_module, export_options
-        )
+        onnxscript_graph = _export_fx_to_onnxscript(decomposed_module, export_options)
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(export_options.opset_version)
 
