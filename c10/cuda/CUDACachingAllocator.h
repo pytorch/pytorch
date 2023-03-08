@@ -151,7 +151,7 @@ struct TraceEntry {
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         addr_(addr),
-        context_(context),
+        context_(std::move(context)),
         stream_(stream),
         size_(size) {}
   Action action_;
