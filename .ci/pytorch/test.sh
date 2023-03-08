@@ -302,8 +302,7 @@ test_single_dynamo_benchmark() {
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     python "benchmarks/dynamo/$suite.py" \
-      --ci --training --performance \
-      --disable-cudagraphs --amp \
+      --ci --performance --disable-cudagraphs \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
@@ -331,7 +330,9 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
-  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
+  elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # Performance test training only, for float32 and amp
     test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
     test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 "$@"
