@@ -3,7 +3,7 @@ import ctypes
 import inspect
 import sys
 import types
-from typing import Any, Dict, Type
+from typing import Any, Callable, Dict, Type, Union
 
 import torch._C
 
@@ -54,7 +54,9 @@ class OperatorBase:
         # for use with OpOverload; cache lookup is done entirely from C++
         # for speed.
         # TODO: The cache is NOT currently used by PyOperator, but it should!
-        self._dispatch_cache: Dict[torch._C.DispatchKey, Union[torch._C.DispatchKey, Callable[..., Any]]] = {}
+        self._dispatch_cache: Dict[
+            torch._C.DispatchKey, Union[torch._C.DispatchKey, Callable[..., Any]]
+        ] = {}
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
@@ -73,7 +75,9 @@ class OperatorBase:
         # thought of as an open world extension of dispatch keys, so it
         # makes sense that you should be able to register them, the same
         # way you can register dispatch keys.
-        self.python_key_mode_table: Dict[Type[TorchDispatchMode]] = {}
+        self.python_key_mode_table: Dict[
+            Type[TorchDispatchMode], Callable[..., Any]
+        ] = {}
 
         # This table allows you to override the behavior of functorch
         # transformations.  NB: this currently only does something for
@@ -83,7 +87,7 @@ class OperatorBase:
     def __call__(self, *args, **kwargs):
         raise NotImplementedError()
 
-    def has_key(self, k):
+    def has_kernel_for_dispatch_key(self, k):
         return k in self.py_kernels
 
     def has_kernel_for_any_dispatch_key(self, ks):
@@ -103,9 +107,7 @@ class OperatorBase:
                 self._dispatch_cache.clear()
                 return fn
 
-            if isinstance(
-                k, torch._C._functorch.TransformType
-            ):
+            if isinstance(k, torch._C._functorch.TransformType):
                 assert k not in self.functorch_table
                 self.functorch_table[k] = fn
                 return fn
@@ -117,7 +119,7 @@ class OperatorBase:
 
             if k in self.py_kernels:
                 raise RuntimeError(
-                    f"Trying to override a python impl for {dispatch_key_or_mode} on operator {self._name}"
+                    f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
             self.py_kernels[k] = fn
             self._dispatch_cache.clear()
@@ -136,40 +138,44 @@ DispatchKey = torch._C.DispatchKey
 # Equivalent to computeDispatchTableEntryWithDebug
 def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     # 1. (Direct) operator registration
-    if op.has_key(k):
+    if op.has_kernel_for_dispatch_key(k):
         return k
     # 2.1 Use CompositeExplicitAutogradNonFunctional kernel if available
     cand = DispatchKey.CompositeExplicitAutogradNonFunctional
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and op.has_key(cand):
+    if (
+        k == DispatchKey.Undefined or is_included_in_alias(k, cand)
+    ) and op.has_kernel_for_dispatch_key(cand):
         return cand
     # 2.2 Use CompositeExplicitAutograd kernel if available
     cand = DispatchKey.CompositeExplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and op.has_key(cand):
+    if (
+        k == DispatchKey.Undefined or is_included_in_alias(k, cand)
+    ) and op.has_kernel_for_dispatch_key(cand):
         return cand
-    has_backend_kernel = (
-        op.has_kernel_for_any_dispatch_key(torch._C._dispatch_get_backend_keyset_from_autograd(k)) or
-        op.has_key(DispatchKey.CompositeExplicitAutograd)
-    )
+    has_backend_kernel = op.has_kernel_for_any_dispatch_key(
+        torch._C._dispatch_get_backend_keyset_from_autograd(k)
+    ) or op.has_kernel_for_dispatch_key(DispatchKey.CompositeExplicitAutograd)
     # 2.3. Use CompositeImplicitAutograd kernel if available
     cand = DispatchKey.CompositeImplicitAutogradNestedTensor
     if (
         (k != DispatchKey.Undefined and is_included_in_alias(k, cand))
-        and op.has_key(cand)
+        and op.has_kernel_for_dispatch_key(cand)
         and not has_backend_kernel
     ):
         return cand
     cand = DispatchKey.CompositeImplicitAutograd
-    if (k == DispatchKey.Undefined or is_included_in_alias(k, cand)) and op.has_key(cand):
-        if (
-            k == DispatchKey.AutogradOther
-            and op.has_kernel_for_any_dispatch_key(torch._C._dispatch_autogradother_backends)
+    if (
+        k == DispatchKey.Undefined or is_included_in_alias(k, cand)
+    ) and op.has_kernel_for_dispatch_key(cand):
+        if k == DispatchKey.AutogradOther and op.has_kernel_for_any_dispatch_key(
+            torch._C._dispatch_autogradother_backends
         ):
             raise RuntimeError("ambiguous autogradother kernel")
         elif not has_backend_kernel:
             return cand
     # 2.4. For autograd backend keys, use kernel from DispatchKey::Autograd if available
     cand = DispatchKey.Autograd
-    if is_included_in_alias(k, cand) and op.has_key(cand):
+    if is_included_in_alias(k, cand) and op.has_kernel_for_dispatch_key(cand):
         return cand
     # Backend fallback
     if torch._C._dispatch_has_backend_fallback(k):
@@ -218,7 +224,9 @@ class PyOperator(OperatorBase):
 
         final_key = resolve_key(self, dispatch_key)
 
-        assert not isinstance(final_key, str), f"C++ fallbacks don't work for PyOperator, please reimplement {final_key}"
+        assert not isinstance(
+            final_key, str
+        ), f"C++ fallbacks don't work for PyOperator, please reimplement {final_key}"
         assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         return self.py_kernels[final_key](*args, **kwargs)
@@ -322,14 +330,15 @@ class OpOverload(OperatorBase):
     def __str__(self):
         return "{}.{}.{}".format(*self._schema.name.split("::"), self._overloadname)
 
-    def has_key(self, k):
-        return super().has_key(k) or torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), k)
+    def has_kernel_for_dispatch_key(self, k):
+        return super().has_kernel_for_dispatch_key(
+            k
+        ) or torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), k)
 
     def has_kernel_for_any_dispatch_key(self, ks):
-        return (
-            torch._C._dispatch_has_kernel_for_any_dispatch_key(self.name(), ks) or
-            super().has_kernel_for_any_dispatch_key(ks)
-        )
+        return torch._C._dispatch_has_kernel_for_any_dispatch_key(
+            self.name(), ks
+        ) or super().has_kernel_for_any_dispatch_key(ks)
 
     @property
     def namespace(self):
