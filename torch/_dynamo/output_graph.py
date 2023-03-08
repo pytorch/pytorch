@@ -11,13 +11,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Unio
 
 import torch.nn
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    tracing,
-    TracingContext,
-)
+from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -191,6 +185,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         fake_mode = torch._subclasses.FakeTensorMode(
             shape_env=ShapeEnv(
                 allow_scalar_outputs=config.capture_scalar_outputs,
+                allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
                 strict_mark_dyn=export,
                 assume_static_by_default=config.assume_static_by_default,
             )
@@ -355,34 +350,33 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             var = f"___{name}_{i}"
             if var not in existing:
-                self.code_options["co_varnames"] = self.code_options["co_varnames"] + (
-                    var,
-                )
+                self.code_options["co_varnames"] += (var,)
                 return var
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""
         if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
+            self.code_options["co_names"] += (name,)
 
     @staticmethod
-    def module_has_hooks(mod):
-        return any(
-            len(getattr(mod, x)) > 0
-            for x in [
-                "_backward_pre_hooks",
-                "_backward_hooks",
-                "_forward_pre_hooks",
-                "_forward_hooks",
-                "_state_dict_pre_hooks",
-                "_state_dict_hooks",
-                "_load_state_dict_pre_hooks",
-                "_load_state_dict_post_hooks",
-            ]
-            if hasattr(mod, x)
-        )
+    def module_has_hooks(mod, only_check_unsupported=False):
+        supported_hooks = [
+            "_forward_pre_hooks",
+            "_forward_hooks",
+        ]
+        unsupported_hooks = [
+            "_backward_pre_hooks",
+            "_backward_hooks",
+            "_state_dict_pre_hooks",
+            "_state_dict_hooks",
+            "_load_state_dict_pre_hooks",
+            "_load_state_dict_post_hooks",
+        ]
+        check_hooks = unsupported_hooks
+        if not only_check_unsupported:
+            check_hooks += supported_hooks
+
+        return any(len(getattr(mod, x)) > 0 for x in check_hooks if hasattr(mod, x))
 
     def register_attr_or_module(
         self,
@@ -411,7 +405,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
-            if self.module_has_hooks(target):
+            if self.module_has_hooks(target, only_check_unsupported=True):
                 log.warning(
                     "nn.Module hooks are not fully supported, they may be ignored"
                 )
@@ -454,7 +448,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
-        # e.g. repalce abc.xyz[123].qkv with abc.xyz_123.qkv
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
         name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
         # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
         name = re.sub(r"[^a-zA-Z0-9]", "_", name)
@@ -618,8 +612,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        with tracing(self.tracing_context):
-            compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -705,8 +698,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             _step_logger()(logging.INFO, f"done compiler function {name}")
             assert callable(compiled_fn), "compiler_fn did not return callable"
         except Exception as e:
-            compiled_fn = gm.forward
-            raise BackendCompilerFailed(self.compiler_fn, e) from e
+            raise BackendCompilerFailed(self.compiler_fn, e).with_traceback(
+                e.__traceback__
+            ) from None
         return compiled_fn
 
     def fake_example_inputs(self) -> List[torch.Tensor]:
@@ -809,15 +803,20 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
+        elif kind == "call_module":
+            # For modules we store the class
+            rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:
             frame_summaries.append(tx.frame_summary())
             tx = getattr(tx, "parent", None)
+        # Reverse the frame_summaries, such that the innermost frame is at the last
+        frame_summaries.reverse()
 
         # official from_list stub doesn't have new-style type
         msgs = traceback.StackSummary.from_list(frame_summaries).format()  # type: ignore[arg-type]
-        rv.node.stack_trace = " | ".join(msgs)
+        rv.node.stack_trace = "".join(msgs)
 
         return rv
 
