@@ -1986,7 +1986,13 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.use_deterministic_algorithms(True)
+        if args.only is not None and args.only not in {
+            "pytorch_CycleGAN_and_pix2pix",
+            "pytorch_unet",
+            "Super_SloMo",
+        }:
+            # some of the models do not support use_deterministic_algorithms
+            torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
