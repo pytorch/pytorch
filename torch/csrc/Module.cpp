@@ -1,6 +1,7 @@
 #include <c10/util/Optional.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <structmember.h>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -841,6 +842,66 @@ PyObject* THPModule_setCheckSparseTensorInvariants(
   Py_RETURN_NONE;
 }
 
+// This function tries to check if the given object looks like an nn.Module
+// and if so if it has hooks installed on it.
+// It will return None if it doesn't know how to handle the given object and you
+// should check the fields manually (we could do it here but this is a POC and there
+// is little benefit at doing these full checks with the C API).
+// It will return True if all hooks field are dict and are empty.
+// It will return False if the hook fiels were found and are not empty.
+PyObject* THPModule_try_check_module_has_hooks(PyObject*,
+    PyObject* const* args,
+    Py_ssize_t nargs) {
+  TORCH_CHECK(nargs == 1, "_try_check_module_has_hooks takes only one argument");
+  PyObject* self = args[0];
+  // We don't check the type but we also don't assume this is an nn.Module!
+  PyTypeObject* self_t = self->ob_type;
+
+  // Module are always heap types
+  if (!(self_t->tp_flags & Py_TPFLAGS_HEAPTYPE)) {
+    Py_RETURN_NONE;
+  }
+
+  PyHeapTypeObject *self_ht = (PyHeapTypeObject *)self_t;
+
+  // No slots, we can't do fast check
+  if (!self_ht->ht_slots) {
+    Py_RETURN_NONE;
+  }
+
+  bool res = true;
+
+  // TODO: Read this from nn.Module at initialization time to avoid duplicate
+  static int slots_size = 4;
+  static const char* slots[] = {"_backward_hooks", "_backward_pre_hooks", "_forward_hooks", "_forward_pre_hooks"};
+
+  // Wrong number of slots
+  if (slots_size != PyTuple_GET_SIZE(self_ht->ht_slots)) {
+    Py_RETURN_NONE;
+  }
+
+  PyMemberDef *mp = self_t->tp_members;
+
+  for (int i; i < slots_size; ++i) {
+    // A slot doesn't have the right name
+    if (strcmp(mp[i].name, slots[i])) {
+      Py_RETURN_NONE;
+    }
+    char *addr = (char *)self + mp[i].offset;
+    PyObject *d = *(PyObject **)addr;
+
+    // We found the slot but it is not empty
+    if (!PyDict_Check(d) || PyDict_Size(d) > 0) {
+      res = false;
+    }
+  }
+
+  if (res)
+    Py_RETURN_TRUE;
+  else
+    Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_checkSparseTensorInvariants(
     PyObject* _unused,
     PyObject* noargs) {
@@ -1189,6 +1250,10 @@ static PyMethodDef TorchMethods[] = {
      nullptr},
     {"_has_torch_function_variadic",
      (PyCFunction)(void (*)(void))THPModule_has_torch_function_variadic,
+     METH_FASTCALL,
+     nullptr},
+    {"_try_check_module_has_hooks",
+     (PyCFunction)(void (*)(void))THPModule_try_check_module_has_hooks,
      METH_FASTCALL,
      nullptr},
     {nullptr, nullptr, 0, nullptr}};

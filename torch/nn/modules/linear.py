@@ -82,6 +82,8 @@ class Linear(Module):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+    __slots__ = ("_forward_hooks", "_forward_pre_hooks", "_backward_hooks", "_backward_pre_hooks")
+
     __constants__ = ['in_features', 'out_features']
     in_features: int
     out_features: int
