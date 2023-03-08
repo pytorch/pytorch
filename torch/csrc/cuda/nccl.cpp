@@ -16,7 +16,8 @@
 #include <type_traits>
 #include <unordered_map>
 
-#if (NCCL_MACJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14))
+#if !defined(USE_ROCM) && \
+    ((NCCL_MACJOR > 2) || ((NCCL_MAJOR == 2) && (NCCL_MINOR >= 14)))
 #define NCCL_HAS_COMM_NONBLOCKING 1
 #endif
 
@@ -137,18 +138,18 @@ static inline void NCCL_CHECK(ncclResult_t result) {
 }
 
 static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   while (result == ncclInProgress) {
-#ifdef NCCL_HAS_COMM_NONBLOCKING
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
-#else
-    TORCH_INTERNAL_ASSERT(
-        false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
-#endif
   }
   if (result != ncclSuccess) {
     throw_nccl_error(from_nccl_result(result));
   }
+#else
+  TORCH_INTERNAL_ASSERT(
+      false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+#endif
 }
 
 static inline void NCCL_CHECK_NONBLOCKING(
@@ -160,16 +161,12 @@ static inline void NCCL_CHECK_NONBLOCKING(
 static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
+#ifdef NCCL_HAS_COMM_NONBLOCKING
   ncclResult_t result = to_nccl_result(status);
   if (result == ncclInProgress) {
     for (const auto i : c10::irange(comms.size())) {
       do {
-#ifdef NCCL_HAS_COMM_NONBLOCKING
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
-#else
-        TORCH_INTERNAL_ASSERT(
-            false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
-#endif
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
         break; /* fall through to failed case */
@@ -179,6 +176,10 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
   if (result != ncclSuccess) {
     throw_nccl_error(from_nccl_result(result));
   }
+#else
+  TORCH_INTERNAL_ASSERT(
+      false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+#endif
 }
 
 static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
