@@ -473,7 +473,7 @@ class ReplicationPad3d(_ReplicationPadNd):
 
 
 class ZeroPad1d(ConstantPad1d):
-    r"""Pads the input tensor boundaries with a constant value.
+    r"""Pads the input tensor boundaries with zero.
 
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
@@ -578,7 +578,7 @@ class ZeroPad2d(ConstantPad2d):
         return '{}'.format(self.padding)
 
 class ZeroPad3d(ConstantPad3d):
-    r"""Pads the input tensor boundaries withzero.
+    r"""Pads the input tensor boundaries with zero.
 
     For `N`-dimensional padding, use :func:`torch.nn.functional.pad()`.
 
