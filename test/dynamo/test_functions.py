@@ -567,6 +567,51 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         test(self)
 
     @make_test
+    def test_call_dict1(x):
+        d1 = dict()
+        d1["x"] = x + 1
+        d2 = collections.OrderedDict()
+        d2["x"] = x + 2
+        return d1["x"] + d2["x"] + 1
+
+    @make_test
+    def test_call_dict2(x):
+        d1 = dict()
+        d1["x"] = x
+        d2 = collections.OrderedDict(d1)
+        if isinstance(d2, collections.OrderedDict):
+            return x + 1
+        else:
+            return x - 1
+
+    @make_test
+    def test_call_dict3(x):
+        my_list = [("a", x), ("b", x + 1), ("c", x + 2)]
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict4(x):
+        my_list = (("a", x), ("b", x + 1), ("c", x + 2))
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
+    def test_call_dict5(x):
+        my_list = iter([("a", x), ("b", x + 1), ("c", x + 2)])
+        d1 = dict(my_list)
+        d1["a"] = x + 10
+        d2 = collections.OrderedDict(my_list)
+        d2["c"] = x + 20
+        return d1["a"] + d2["c"] + 1
+
+    @make_test
     def test_min_max(a, b):
         c = a + b
         a = a.sum()
@@ -686,6 +731,12 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         a, b = list(itertools.islice(itertools.chain(tmp1, tmp2), 1, 3))
         c = next(itertools.islice(tmp1, 1, None))
         return a - b / c
+
+    @make_test
+    def test_namedtuple(a, b):
+        mytuple = collections.namedtuple("mytuple", ["x", "y", "xy"])
+        tmp = mytuple(a, b, a + b)
+        return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
     @make_test
     def test_is_quantized(a, b):

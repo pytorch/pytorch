@@ -66,6 +66,7 @@ Tensor _mps_convolution_impl(
     int64_t groups,
     c10::optional<IntArrayRef> input_shape) {
   TORCH_CHECK(input_t.dim() < 5, "Conv3D is not supported on MPS");
+  TORCH_CHECK(isFloatingType(input_t.scalar_type()), "Convolution is supported only for Floating types");
 
   namespace native_mps = at::native::mps;
   CheckedFrom c = "mps_convolution";
@@ -256,6 +257,7 @@ Tensor mps_convolution_backward_input(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_input";
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
@@ -392,6 +394,7 @@ Tensor mps_convolution_backward_weights(
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups, bool bias_defined) {
   namespace native_mps = at::native::mps;
   using namespace mps;
+  TORCH_CHECK(isFloatingType(grad_output_t.scalar_type()), "Convolution is supported only for Floating types");
   CheckedFrom c = "mps_convolution_backward_weights";
   auto memory_format = grad_output_t.suggest_memory_format();
   bool is_channels_last = (memory_format == at::MemoryFormat::ChannelsLast);

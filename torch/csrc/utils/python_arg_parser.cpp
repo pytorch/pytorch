@@ -783,6 +783,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return !var.requires_grad() && var.dim() == 0;
       }
+      if (torch::is_symfloat(py::handle(obj))) {
+        // This will induce a guard
+        return true;
+      }
       return false;
     }
     case ParameterType::INT64: {
@@ -793,6 +797,10 @@ auto FunctionParameter::check(
         const auto& var = THPVariable_Unpack(obj);
         return at::isIntegralType(var.scalar_type(), /*includeBool=*/false) &&
             !var.requires_grad() && var.dim() == 0;
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        // This will induce a guard
+        return true;
       }
       return false;
     }
