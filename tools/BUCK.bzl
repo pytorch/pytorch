@@ -292,6 +292,7 @@ def define_tools_targets(
     python_test(
         name = "test_torchgen_executorch",
         srcs = [
+	    "test/test_executorch_custom_ops.py",
             "test/test_executorch_gen.py",
             "test/test_executorch_signatures.py",
             "test/test_executorch_types.py",
@@ -300,6 +301,7 @@ def define_tools_targets(
         contacts = contacts,
         visibility = ["PUBLIC"],
         deps = [
+            third_party("expecttest"),
             torchgen_deps,
         ],
     )

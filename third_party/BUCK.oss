@@ -227,6 +227,20 @@ prebuilt_python_library(
   deps = [":pyyaml-download"],
 )
 
+remote_file(
+  name = "expecttest-download",
+  url = "https://files.pythonhosted.org/packages/a6/26/1a287e44618c14659db0256bc1ee239c2134f9c863cb9a85813ecab73413/expecttest-0.1.4-py3-none-any.whl",
+  sha1 = "8cb529eefd897932f2d153f12b21e42be0fbd68e",
+  out = "expecttest.whl",
+)
+
+prebuilt_python_library(
+  name = "expecttest",
+  binary_src = ":expecttest-download",
+  visibility = ["PUBLIC"],
+  deps = [":expecttest-download"],
+)
+
 cxx_library(
     name = "ruy_lib",
     srcs = glob(
