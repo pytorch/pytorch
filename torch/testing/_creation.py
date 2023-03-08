@@ -132,7 +132,7 @@ def make_tensor(
         low = clamp(low, lowest_inclusive, highest_exclusive)
         high = clamp(high, lowest_inclusive, highest_exclusive)
 
-        if dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+        if dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
             return math.floor(low), math.ceil(high)
 
         return low, high
@@ -153,8 +153,19 @@ def make_tensor(
         )
 
     if dtype is torch.bool:
-        result = torch.randint(0, 2, shape, device=device, dtype=dtype)
-    elif dtype in _INTEGRAL_TYPES:
+        low, high = cast(
+            Tuple[int, int],
+            modify_low_high(
+                low,
+                high,
+                lowest_inclusive=0,
+                highest_exclusive=2,
+                default_low=0,
+                default_high=2,
+            ),
+        )
+        result = torch.randint(low, high, shape, device=device, dtype=dtype)
+    elif dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
         low, high = cast(
             Tuple[int, int],
             modify_low_high(
