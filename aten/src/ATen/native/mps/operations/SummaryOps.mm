@@ -24,8 +24,8 @@ enum BIN_SELECTION_ALGORITHM {
   BINARY_SEARCH,
 };
 
-template<typename T, typename U>
-thread T * upper_bound(thread T * first, thread T * last, U val) {
+template<typename T>
+thread T * upper_bound(thread T * first, thread T * last, T val) {
   thread T * middle;
   int64_t half_ = 0;
   int64_t len = (int64_t)(last - first);
@@ -58,61 +58,60 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
                   constant int64_t  * local_out_strides [[buffer(9)]],
                   constant uint8_t  & algorithm         [[buffer(10)]],
                   constant uint8_t  & has_weight        [[buffer(11)]],
-                  constant uint32_t   & N        [[buffer(12)]],
+                  constant uint32_t & N                 [[buffer(12)]],
                   uint tid [[thread_position_in_grid]]) {
   
   bool skip_element = false;
   int64_t hist_index = 0;
   int64_t bin_seq_offset = 0;
 
-  for (size_t n = 0; n < N; n++) {
-    bin_seq_offset = 0;
-    for (size_t dim = 0; dim < num_dims; dim++) {
-      T element = *(constant T*)((constant uint8_t*)input_ + offsets[n * num_dims + dim]);
+  for (size_t dim = 0; dim < num_dims; dim++) {
+    T element = *(constant T*)((constant uint8_t*)input_ + offsets[tid * num_dims + dim]);
 
-      // Skips elements which fall outside the specified bins and NaN elements
-      if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) { // 0 2 / 0 2
-          skip_element = true;
-          break;
+    // Skips elements which fall outside the specified bins and NaN elements
+    if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) { // 0 2 / 0 2
+        skip_element = true;
+        break;
+    }
+    int64_t pos = -1;
+    
+    if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
+      pos = (int64_t)(upper_bound(
+        (thread T*)(int64_t)(bin_seq + bin_seq_offset),
+        (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
+        element
+      ) - (bin_seq + bin_seq_offset) - 1);
+    } else if (
+      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION ||
+      algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+      pos = static_cast<int64_t>((element - leftmost_edge[dim])
+                            * (num_bin_edges[dim] - 1)
+                            / (rightmost_edge[dim] - leftmost_edge[dim]));
+      if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
+          int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
+          int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
+          pos = (int64_t)(upper_bound(
+            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
+            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
+            element
+          ) - (bin_seq + bin_seq_offset) - 1);
       }
-      int64_t pos = -1;
-      
-      if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
-        pos = (int64_t)upper_bound(
-          (thread T*)(int64_t)(bin_seq + bin_seq_offset),
-          (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
-          element
-        ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
-      } else if (
-        algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION || 
-        algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-        pos = static_cast<int64_t>((element - leftmost_edge[dim])
-                              * (num_bin_edges[dim] - 1)
-                              / (rightmost_edge[dim] - leftmost_edge[dim]));
-        if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
-            int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
-            int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
-            pos = (int64_t)upper_bound(
-              (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
-              (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
-              element
-            ) - (int64_t)(bin_seq + bin_seq_offset) - 1;
-        }
-      }
+    }
 
-      if (pos == (num_bin_edges[dim] - 1)) {
-        pos -= 1;
-      }
-      hist_index += local_out_strides[dim + 1] * pos;
-      bin_seq_offset += num_bin_edges[dim];
+    if (pos == (num_bin_edges[dim] - 1)) {
+      pos -= 1;
     }
-    if (!skip_element) {
-      // In the unweighted case, the default weight is 1
-      local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[n] : 1;
-    }
-  
+    hist_index += local_out_strides[dim + 1] * pos;
+    bin_seq_offset += num_bin_edges[dim];
   }
+  if (!skip_element) {
+    // In the unweighted case, the default weight is 1
+    local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
+  }
+  local_out[local_out_strides[0] * tid] += 1;
+
 }
+
 
 #define REGISTER_HISTOGRAMDD_OP(DTYPE)                        \
 template                                                      \
@@ -243,6 +242,10 @@ void histogramdd_kernel_impl(
     kMPS,
     c10::nullopt /* pin_memory */
   );
+  
+  std::cout << "algorithm" << algorithm << std::endl;
+  std::cout << "thread hist sizes" << thread_hist_sizes << std::endl;
+  std::cout << "thread hist strides" << thread_histograms.strides() << std::endl;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
