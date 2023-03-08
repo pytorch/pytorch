@@ -129,6 +129,10 @@ class _ContainerTemplate(ABC):
         """
 
 
+def _no_op(x):
+    return x
+
+
 class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
@@ -154,7 +158,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 UserWarning
             )
         if copy is None:
-            self.copy_fn = None
+            self.copy_fn = _no_op
         elif copy == "shallow":
             self.copy_fn = copymodule.copy
         elif copy == "deep":
@@ -206,10 +210,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
 
-                if self.copy_fn is None:
-                    yield return_val
-                else:
-                    yield self.copy_fn(return_val)
+                yield self.copy_fn(return_val)
         finally:
             self._child_stop[instance_id] = True
             # Cleanup _datapipe_iterator for the case that fork exits earlier
