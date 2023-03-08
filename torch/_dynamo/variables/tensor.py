@@ -4,8 +4,6 @@ import operator
 import types
 from typing import Dict, List
 
-import torch_np._ndarray
-
 import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
@@ -653,7 +651,7 @@ class NumpyTensorVariable(TensorVariable):
         return False
 
     @staticmethod
-    def specialize(value: torch_np._ndarray.ndarray):
+    def specialize(value: "torch_np._ndarray.ndarray"):
         props = {
             "dtype": value.dtype,
             "ndim": int(value.ndim),

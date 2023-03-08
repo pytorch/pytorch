@@ -292,25 +292,23 @@ class TorchVariable(VariableTracker):
         elif self.value is torch.from_numpy:
             if not config.trace_numpy:
                 unimplemented("numpy")
-            assert len(args) == 1
+            assert len(args) == 1, f"Got arguments {args}"
             assert not kwargs
             t = args[0]
             from .tensor import NumpyTensorVariable
 
             if isinstance(t, NumpyTensorVariable):
                 # TODO: mark the tensor as non-resizable
-                return TensorVariable(
-                    t.proxy,
-                    dtype=t.dtype,
-                    device=t.device,
-                    layout=t.layout,
-                    ndim=t.ndim,
-                    size=t.size,
-                    stride=t.stride,
-                    requires_grad=t.requires_grad,
-                    is_quantized=t.requires_grad,
-                    is_contiguous=t.is_contiguous,
-                    is_sparse=t.is_sparse,
+                return wrap_fx_proxy_cls(
+                    target_cls=TensorVariable,
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_method",
+                        "detach",
+                        *proxy_args_kwargs(args, {}),
+                    ),
+                    example_value=None,
+                    **options,
                 )
             else:
                 unimplemented(f"torch.from_numpy(<{type(t)}>)")
