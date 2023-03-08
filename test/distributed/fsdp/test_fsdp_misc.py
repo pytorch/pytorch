@@ -651,7 +651,6 @@ class TestFSDPMiscWorldSize1(FSDPTest):
             self._test_unsafe_setattr,
         )
 
-
     def _test_unsafe_setattr(self, use_orig_params: bool):
         called_setattr_override = False
 
