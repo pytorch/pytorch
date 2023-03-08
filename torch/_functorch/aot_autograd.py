@@ -862,33 +862,11 @@ class CompiledRuntimeMetadata:
 def maybe_to_fresh_input(idx, t, meta):
     if not isinstance(t, Tensor):
         return t
-
-    if meta.synthetic_base_info is None:
-        outer_aliased_indices_of_current_base_arg = [idx]
-    else:
-        outer_aliased_indices_of_current_base_arg = [
-            # For every argument index in the outer calling convention (before synthetic bases)
-            # find its index in the inner calling convention.
-            # if it matches the index of our current arg (idx), track the outer argument's index (i)
-            i
-            for i, outer_idx_or_tuple in enumerate(meta.synthetic_base_info)
-            if (isinstance(outer_idx_or_tuple, int) and outer_idx_or_tuple == idx)
-            or (
-                isinstance(outer_idx_or_tuple, tuple)
-                and outer_idx_or_tuple[0] == idx
-            )
-        ]
-    if any(
-        meta.fw_metadata.input_info[i].mutates_data
-        for i in outer_aliased_indices_of_current_base_arg
-    ):
+    if meta.fw_metadata.input_info[idx].mutates_data:
         # Make sure the primal we pass to autograd.grad()
         # sees the tensor before the mutation
         return t.clone()
-    if any(
-        meta.fw_metadata.input_info[i].mutates_metadata and not meta.fw_metadata.input_info[i].mutates_data
-        for i in outer_aliased_indices_of_current_base_arg
-    ):
+    if meta.fw_metadata.input_info[idx].mutates_metadata:
         # Make sure the primal we pass to autograd.grad()
         # sees the tensor before the metadata mutation
         return t.view(t.shape)
