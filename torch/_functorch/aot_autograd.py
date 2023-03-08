@@ -2356,6 +2356,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
+                    assert all(a is not None for a in all_args)
                     if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
