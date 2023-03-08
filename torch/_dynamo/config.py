@@ -200,6 +200,11 @@ allow_rnn = False
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
+# If True, record autograd profiler events for dynamo cache lookups (guards)
+# TODO can we default this to True?
+# and how can we cause registration/deregestration to be sensitive to runtime change of this flag?
+profile_cache_lookup = False
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
