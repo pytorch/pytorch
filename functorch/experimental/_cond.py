@@ -247,4 +247,3 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
-cond.fallthrough(DispatchKey.AutocastCPU)
