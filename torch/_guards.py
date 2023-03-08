@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import enum
 import logging
@@ -346,11 +347,28 @@ class TracingContext:
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
+        self.frame_summary_stack = []
         self.param_and_attr_names_to_sources: Dict[str, Source] = dict()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_frame(frame_summary):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        tc.frame_summary_stack.append(frame_summary)
+        try:
+            yield
+        finally:
+            tc.frame_summary_stack.pop()
 
     def register(self, name: str, source: Source):
         if name in self.param_and_attr_names_to_sources:
-            assert self.param_and_attr_names_to_sources[name] == source
+            curr_source = self.param_and_attr_names_to_sources[name]
+            assert (
+                curr_source.name() == source.name()
+            ), f"Mismatch {curr_source} vs {source}"
             return
         self.param_and_attr_names_to_sources[name] = source
 
