@@ -19,7 +19,6 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
-from torch._export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -590,7 +589,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
-    constraints: List[Constraint] = None,
+    constraints: List[Tuple[torch.nn.Tensor, int]] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
