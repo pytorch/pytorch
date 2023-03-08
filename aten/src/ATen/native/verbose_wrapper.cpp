@@ -14,7 +14,8 @@ namespace verbose {
 
 TORCH_API int _mkl_set_verbose(int enable) {
 #if AT_MKL_ENABLED()
-  return mkl_verbose(enable);
+  int ret = mkl_verbose(enable);
+  return ret != -1;
 #else
   return 0;
 #endif
