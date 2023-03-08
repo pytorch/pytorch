@@ -36,7 +36,7 @@ c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
 
-struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
+struct StackContext : public c10::GatheredContext {
   std::vector<void*> cpp_frames;
   std::vector<jit::StackEntry> script_frames;
 
@@ -50,17 +50,17 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
     }
     return r;
   }
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+  static std::shared_ptr<c10::GatheredContext> gather() {
     return _gather(true, false);
   }
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>
+  static std::shared_ptr<c10::GatheredContext>
   gather_with_cpp() {
     return _gather(true, true);
   }
 };
 
 StackContext* getFromContext(
-    const std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>& x) {
+    const std::shared_ptr<c10::GatheredContext>& x) {
   if (StackContext* sc = dynamic_cast<StackContext*>(x.get())) {
     return sc;
   }
