@@ -406,6 +406,14 @@ class CppVecOverrides(OpOverrides):
         return f"{x}.asin()"
 
     @staticmethod
+    def cosh(x):
+        return f"{x}.cosh()"
+
+    @staticmethod
+    def sinh(x):
+        return f"{x}.sinh()"
+
+    @staticmethod
     def log10(x):
         return f"{x}.log10()"
 
@@ -701,6 +709,14 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def acosh(x):
         return f"std::acosh({x})"
+
+    @staticmethod
+    def cosh(x):
+        return f"std::cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"std::sinh({x})"
 
     @staticmethod
     def asin(x):
