@@ -133,7 +133,6 @@ using namespace at;
 namespace detail {
 
 static inline void NCCL_CHECK(ncclResult_t result) {
-  TORCH_INTERNAL_ASSERT(((int)result) != 7, "INPROGRESS IN BLOCKING CHECK");
   NCCL_CHECK(from_nccl_result(result));
 }
 
