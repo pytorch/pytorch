@@ -611,7 +611,7 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs, show_kernel_detail):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -631,9 +631,16 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         num_gb = get_num_bytes(*args) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+            if show_kernel_detail:
+                kernel_detail_str = (
+                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+                )
+            else:
+                kernel_detail_str = ""
+
             gb_per_s = num_gb / (ms / 1e3)
             # follow what we do in DebugAutotuner
-            info_str = f"{prefix}{ms:6.3f}ms    {num_gb:6.3f}GB    {gb_per_s:8.2f}GB/s  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+            info_str = f"{prefix}{ms:6.3f}ms    {num_gb:6.3f}GB    {gb_per_s:8.2f}GB/s{kernel_detail_str}"
             import colorama
 
             if ms > 0.012 and gb_per_s < 650:

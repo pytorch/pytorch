@@ -615,6 +615,8 @@ class WrapperCodeGen(CodeGen):
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
                     'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    'parser.add_argument("--no-show-kernel-detail", dest="show_kernel_detail", action="store_false", help="Whether to print a longer output to show kenrel details for each config")',  # noqa: B950, line too long
+                    "parser.set_defaults(show_kernel_detail=True)",
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
@@ -622,7 +624,7 @@ class WrapperCodeGen(CodeGen):
             )
             with output.indent():
                 output.writeline(
-                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs)"
+                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs, args.show_kernel_detail)"
                 )
             output.writeline("else:")
             with output.indent():
