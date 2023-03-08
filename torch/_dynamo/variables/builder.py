@@ -835,7 +835,7 @@ class VariableBuilder:
                     GraphArg(
                         self.get_source(),
                         wrapped_value,
-                        True,
+                        isinstance(wrapped_value, torch.Tensor),
                         fake_tensor_value,
                         is_tensor=False,
                     )
