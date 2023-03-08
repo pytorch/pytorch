@@ -5,6 +5,7 @@ from typing import Callable, Dict
 import torch
 import torch._ops
 import torch.fx
+from torch.fx import traceback as fx_traceback
 from torch.fx.experimental import proxy_tensor
 
 from torch.onnx._internal import _beartype
@@ -35,11 +36,17 @@ def decompose(
     decomposition_table: Dict[torch._ops.OpOverload, Callable],
     *args,
 ) -> torch.fx.GraphModule:
+    # A trick adopted from `dynamo.export` in `eval_frame.py`.
+    # Running graph with interpreter is needed for propagating the stack_trace.
+
+    def graph_with_interpreter(*args):
+        with fx_traceback.preserve_node_meta():
+            return torch.fx.Interpreter(module).run(*args)
 
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
     decomposed_module = proxy_tensor.make_fx(
-        module,
+        graph_with_interpreter,
         decomposition_table=decomposition_table,
         tracing_mode="fake",
         _allow_non_fake_inputs=True,
