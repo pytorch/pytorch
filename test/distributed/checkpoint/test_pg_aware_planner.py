@@ -117,11 +117,7 @@ class TestProcessGroupAwarePlanner(DTensorTestBase):
             cp.save_state_dict(
                 state_dict=state_dict,
                 storage_writer=cp.FileSystemWriter(path=CHECKPOINT_DIR),
-                planner=ProcessGroupAwareSavePlanner(
-                    flatten_sharded_tensors=False,
-                    flatten_state_dict=False,
-                    dedup_replicated_tensors=False,
-                ),
+                planner=ProcessGroupAwareSavePlanner(),
             )
 
         model = MyModule(
@@ -153,10 +149,7 @@ class TestProcessGroupAwarePlanner(DTensorTestBase):
             cp.load_state_dict(
                 state_dict=state_dict,
                 storage_reader=cp.FileSystemReader(path=CHECKPOINT_DIR),
-                planner=ProcessGroupAwareLoadPlanner(
-                    flatten_sharded_tensors=False,
-                    flatten_state_dict=False,
-                ),
+                planner=ProcessGroupAwareLoadPlanner(),
             )
 
             model.load_state_dict(state_dict)
