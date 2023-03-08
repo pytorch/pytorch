@@ -192,14 +192,14 @@ struct CodeTemplate {
       const string_list& strings,
       bool comma_before,
       bool comma_after) const {
-    if (comma_before && strings.size() > 0)
+    if (comma_before && !strings.empty())
       out << ", ";
     for (const auto i : c10::irange(strings.size())) {
       if (i > 0)
         out << ", ";
       out << strings[i];
     }
-    if (comma_after && strings.size() > 0)
+    if (comma_after && !strings.empty())
       out << ", ";
   }
   // These indentation functions follow the convention that they never emit

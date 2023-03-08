@@ -81,7 +81,7 @@ Tensor view_as_complex(const Tensor& self) {
     "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
 
   auto old_sizes = self.sym_sizes();
-  TORCH_CHECK(old_sizes.size() != 0, "Input tensor must have one or more dimensions");
+  TORCH_CHECK(!old_sizes.empty(), "Input tensor must have one or more dimensions");
   TORCH_CHECK(old_sizes[old_sizes.size()-1] == 2, "Tensor must have a last dimension of size 2");
   SymDimVector new_sizes(old_sizes.begin(), old_sizes.end() - 1);
 

@@ -220,7 +220,7 @@ Reductions
 ----------
 
 The following reductions are available (with autograd support). For more information, the
-`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html/>`_ tutorial
+`Overview <https://pytorch.org/tutorials/prototype/maskedtensor_overview.html>`_ tutorial
 details some examples of reductions, while the
 `Advanced semantics <https://pytorch.org/tutorials/prototype/maskedtensor_advanced_semantics.html>`_ tutorial
 has some further in-depth discussions about how we decided on certain reduction semantics.

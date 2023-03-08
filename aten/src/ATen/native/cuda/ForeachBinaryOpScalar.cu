@@ -14,6 +14,7 @@
 #include <ATen/ops/_foreach_sub_native.h>
 #include <ATen/ops/_foreach_clamp_min_native.h>
 #include <ATen/ops/_foreach_clamp_max_native.h>
+#include <ATen/ops/_foreach_pow_native.h>
 
 #include <ATen/ops/empty_like_native.h>
 #endif
@@ -56,6 +57,7 @@ void foreach_binary_op_(TensorList tensors, const Scalar& scalar) {
                                                 /* res_arg_index */ 0>(),
                                                 Op<opmath_t>(),
                           scalar.to<opmath_t>());
+    increment_version(tensors);
 }
 
 template<template<class> class Op>
@@ -86,6 +88,20 @@ void all_types_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
     });
 }
 
+template<template<class> class Op>
+std::vector<Tensor> all_types_complex_half_bfloat16(TensorList tensors, const Scalar& scalar) {
+    return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda", [&]() {
+        return foreach_binary_op<scalar_t, Op>(tensors, scalar);
+    });
+}
+
+template<template<class> class Op>
+void all_types_complex_half_bfloat16_(TensorList tensors, const Scalar& scalar) {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, tensors[0].scalar_type(), "foreach_binary_op_scalar_cuda_", [&]() {
+        foreach_binary_op_<scalar_t, Op>(tensors, scalar);
+    });
+}
+
 #define FOREACH_BINARY_OP_SCALAR(FUNCTION, NAME, OP, DIVISION_OP)                                   \
 void foreach_tensor_##NAME##_scalar_kernel_cuda_(TensorList tensors, const Scalar& scalar) {        \
     check_foreach_api_restrictions(tensors);                                                        \
@@ -107,6 +123,15 @@ std::vector<Tensor> foreach_tensor_##NAME##_scalar_kernel_cuda(TensorList tensor
 
 FOREACH_BINARY_OP_SCALAR(all_types_complex_bool_half_bfloat16, add, std::plus, /*div_op*/ false);
 FOREACH_BINARY_OP_SCALAR(all_types_complex_bool_half_bfloat16, mul, std::multiplies, /*div_op*/ false);
+// See [Why is foreach_pow's division_op=true?]
+FOREACH_BINARY_OP_SCALAR(all_types_complex_half_bfloat16, pow, power_functor, /*div_op*/ true);
+std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(const Scalar& scalar, TensorList exponent) {
+  check_foreach_api_restrictions(exponent);
+  if (!can_use_fast_route(exponent)) {
+    return at::native::foreach_scalar_pow_list_kernel_slow(scalar, exponent);
+  }
+  return all_types_complex_half_bfloat16<reverse_power_functor>(exponent, scalar);
+}
 
 // In the case of division, integer inputs will result in float.
 // Currently multi tensor apply can only return result of the same type as input.

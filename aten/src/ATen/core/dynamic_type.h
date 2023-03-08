@@ -56,6 +56,7 @@ constexpr DynamicTypeBits kDynamicClassTypeBit = DYNAMIC_TYPE_BIT(10);
   _(AnyEnum, DYNAMIC_TYPE_BIT(20), 1)                                        \
   _(RRef, DYNAMIC_TYPE_BIT(21), 0)                                           \
   _(Future, DYNAMIC_TYPE_BIT(22), 0)                                         \
+  _(Await, DYNAMIC_TYPE_BIT(23), 0)                                          \
   _(Any, 0xffffffff, 1)
 
 #define FORALL_DYNAMIC_TYPES_FAKE(_) \

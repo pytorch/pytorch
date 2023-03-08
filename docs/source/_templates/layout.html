@@ -31,6 +31,20 @@
     {% include "searchbox.html" %}
 {% endblock %}
 
+{%- block content %}
+{{ super() }}
+<script>
+
+var match = window.location.href.match(/\/_[a-zA-Z0-9_]*.html|_dynamo/gi);
+var url = window.location.href.lastIndexOf(match[match.length-1]);
+
+if (url)
+  {
+    var div = '<div class="admonition note"><p class="admonition-title">Note</p><p><i class="fa fa-exclamation-circle" aria-hidden="true">&nbsp</i> This page describes an internal API which is not intended to be used outside of the PyTorch codebase and can be modified or removed without notice.</p></div>'
+    document.getElementById("pytorch-article").insertAdjacentHTML('afterBegin', div)
+  }
+</script>
+{%- endblock %}
 
 {% block footer %}
 {{ super() }}

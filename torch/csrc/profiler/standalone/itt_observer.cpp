@@ -22,8 +22,8 @@ struct ITTThreadLocalState : ProfilerStateBase {
     return ActiveProfilerType::ITT;
   }
 
-  void reportMemoryUsage(void*, int64_t, int64_t, int64_t, c10::Device)
-      override {}
+  void reportMemoryUsage(void*, int64_t, size_t, size_t, c10::Device) override {
+  }
 
   static ITTThreadLocalState* getTLS() {
     auto tls = ProfilerStateBase::get(/*global=*/false);

@@ -22,9 +22,6 @@ GRAD_FN_NEXT_FUNCTIONS = "next_functions"
 
 
 class CheckpointWrapperTest(TestCase):
-    def setUp(self):
-        super().setUp()
-
     def test_load_activation_checkpointed_module(self):
         lin = nn.Linear(10, 10, bias=False)
         lin = checkpoint_wrapper(

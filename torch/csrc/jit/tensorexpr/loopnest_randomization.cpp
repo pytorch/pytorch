@@ -36,7 +36,7 @@ std::vector<std::vector<ForPtr>> GetAllPerfectlyNestedLoopNests(
   // Find the first set of loops that can be reordered
   std::vector<std::vector<ForPtr>> all_nested_loops;
   std::vector<ForPtr> nested_loops;
-  if (loops.size() == 0) {
+  if (loops.empty()) {
     return all_nested_loops;
   }
   nested_loops.push_back(loops[0]);
@@ -218,7 +218,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case COMPUTE_INLINE: {
           if (can_inline) {
             auto bufs = NodeFinder<Buf>::find(l.root_stmt());
-            if (bufs.size() > 0) {
+            if (!bufs.empty()) {
               int buf_number = std::rand() % (int)bufs.size();
               message =
                   "computeInline(" + bufs[buf_number]->name_hint() + ");\n";
@@ -247,7 +247,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         }
         case SPLIT_TAIL: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -261,7 +261,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         }
         case SPLIT_MASK: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -275,14 +275,14 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         }
         case DIST1: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
           auto loop = loops[loop_n];
           std::vector<StmtPtr> stmts(
               loop->body()->begin(), loop->body()->end());
-          if (stmts.size() == 0) {
+          if (stmts.empty()) {
             break;
           }
           int n_pivots = (std::rand() % (int)stmts.size()) + 1;
@@ -302,7 +302,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case DIST2: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
 
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -316,7 +316,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case DIST3: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
 
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -331,7 +331,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case DIST4: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
 
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -346,7 +346,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case DIST5: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
 
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -402,7 +402,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           }
 
           // Choose a pair randomly
-          if (valid_pairs.size() == 0) {
+          if (valid_pairs.empty()) {
             break;
           }
           int valid_pair_n = std::rand() % (int)valid_pairs.size();
@@ -434,7 +434,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // Find all perfectly nested loop nests
           auto all_nested_loops =
               randomization_helper::GetAllPerfectlyNestedLoopNests(loops);
-          if (all_nested_loops.size() == 0) {
+          if (all_nested_loops.empty()) {
             break;
           }
 
@@ -475,7 +475,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // Find all perfectly nested loop nests
           auto all_nested_loops =
               randomization_helper::GetAllPerfectlyNestedLoopNests(loops);
-          if (all_nested_loops.size() == 0) {
+          if (all_nested_loops.empty()) {
             break;
           }
 
@@ -512,7 +512,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
         case FULL_UNROLL: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -526,7 +526,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
         case NORMALIZE: {
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -548,7 +548,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // Find all perfectly nested loop nests
           auto all_nested_loops =
               randomization_helper::GetAllPerfectlyNestedLoopNests(loops);
-          if (all_nested_loops.size() == 0) {
+          if (all_nested_loops.empty()) {
             break;
           }
 
@@ -583,8 +583,6 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         }
 
         case COMPRESS_ALL_BUFFERS: {
-          auto buffers = BufFinder::find(l.root_stmt());
-
           message = "compressAllBuffers(l.root_stmt());\n";
           randomization_helper::printHistory(n_transform, message);
           l.compressAllBuffers(l.root_stmt());
@@ -594,7 +592,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case SLICE_HEAD: {
           // Get all the loops
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -613,7 +611,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
         case SLICE_TAIL: {
           // Get all the loops
           auto loops = NodeFinder<For>::find(l.root_stmt());
-          if (loops.size() == 0) {
+          if (loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)loops.size();
@@ -661,7 +659,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
             }
           }
 
-          if (producer_consumer_pairs.size() == 0) {
+          if (producer_consumer_pairs.empty()) {
             break;
           }
 
@@ -702,7 +700,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
             }
           }
 
-          if (innermost_loops.size() == 0) {
+          if (innermost_loops.empty()) {
             break;
           }
           int loop_n = std::rand() % (int)innermost_loops.size();

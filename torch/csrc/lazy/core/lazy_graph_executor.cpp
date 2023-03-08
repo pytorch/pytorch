@@ -1037,8 +1037,7 @@ void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
   if (coll) {
     static const std::string invalid_device(
         "Unknown0"); /* Temp solution to idetify unassigned devices */
-    if (coll->device.toString() == invalid_device ||
-        coll->unlocker.size() > 0) {
+    if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
       return;
     }
     VLOG(4) << "Waiting on device barrier for device " << coll->device

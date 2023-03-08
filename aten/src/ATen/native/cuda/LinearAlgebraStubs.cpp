@@ -32,8 +32,7 @@ struct MagmaInitializer {
 namespace at::native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
-cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
-                                     _cholesky_solve_helper_cuda};
+cuda::detail::LinalgDispatch disp = {_cholesky_solve_helper_cuda};
 
 at::DynamicLibrary& getTorchLinalgLibrary() {
   static at::DynamicLibrary lib("libtorch_cuda_linalg.so", nullptr, true);
@@ -172,12 +171,6 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     getTorchLinalgLibrary();
     TORCH_CHECK(disp.cholesky_solve_helper != _cholesky_solve_helper_cuda, "Can't find _cholesky_solve_helper_cuda");
     return disp.cholesky_solve_helper(self, A, upper);
-}
-
-std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.symeig_helper != _symeig_helper_cuda, "Can't find _symeig_helper_cuda");
-    return disp.symeig_helper(self, eigenvectors, upper);
 }
 
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/

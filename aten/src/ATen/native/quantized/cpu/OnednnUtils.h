@@ -277,6 +277,12 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point);
 
+  at::Tensor apply_add_relu(
+      const at::Tensor& input,
+      const at::Tensor& accum,
+      double output_scale,
+      int64_t output_zero_point);
+
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
   static c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> prepack(
@@ -385,18 +391,27 @@ static bool is_weight_symmetric_quant(
   return is_symmetric;
 }
 
-// Check if onednn should be used w.r.t fbgemm
+// When qengine is x86, use this util func to check if onednn kernel
+// is preferred than fbgemm's to get better performance.
 static bool should_use_onednn_quant(
     const at::Tensor& weight,
     bool is_transposed_conv,
     int groups,
     torch::List<int64_t> output_padding) {
+  // Performance of onednn is only validated on Linux right now.
+  // Also, the heuristics for dispatching are based on perf data on Linux.
+  // So, for x86 qengine, we always use fbgemm kernels if OS is not Linux.
+  // TODO Support more OSs.
+#if !defined(__linux__)
+  return false;
+#else
   bool vnni_available = cpuinfo_has_x86_avx512vnni();
   bool w_sym_quant =
       is_weight_symmetric_quant(weight, is_transposed_conv);
   bool opad_all_zero =
       std::all_of(output_padding.begin(), output_padding.end(), [](int i) { return i==0; });
   return vnni_available && (groups <= 100) && w_sym_quant && opad_all_zero;
+#endif
 }
 
 } // onednn_utils

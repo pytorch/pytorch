@@ -57,7 +57,7 @@ void FunctionalizeInterpreterPtr::sendToNextInterpreterImpl(
   sanityCheckNotFunctional(op, stack, args_size);
 
   // Re-dispatch
-  if (getDynamicLayerStack().size() == 0) {
+  if (getDynamicLayerStack().empty()) {
     sanityCheckStack(op, stack);
   }
   op.callBoxed(stack);

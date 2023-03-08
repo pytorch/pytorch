@@ -90,7 +90,7 @@ const std::vector<std::string> functions = {
                 i = 0
             return i
 
-        def AD_var_backward_0(grad, self, correction: int):
+        def AD_var_backward_0(grad, self, correction: number):
             # FIXME: torchscript: div(float, float)
             return  grad * (self - self.mean()) * 2.0 / (self.numel() - correction)
 
@@ -115,7 +115,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_1(grad,
                               self,
                               dim: List[int],
-                              correction: int,
+                              correction: number,
                               keepdim: bool):
             if self.dim() == 0:
                 return AD_var_backward_0(grad, self, correction)
@@ -129,7 +129,7 @@ const std::vector<std::string> functions = {
         def AD_var_backward_2(grad,
                               self,
                               dim: Optional[List[int]],
-                              correction: Optional[int],
+                              correction: Optional[number],
                               keepdim: bool):
             if correction is None:
                 correction = 1
@@ -163,7 +163,7 @@ const std::vector<std::string> functions = {
         def std_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             std_out = torch.std(self, dim, correction=correction, keepdim=keepdim)
             def backward(grad_output):
@@ -195,7 +195,7 @@ const std::vector<std::string> functions = {
         def var_2(self,
                   dim: Optional[List[int]],
                   *,
-                  correction: Optional[int],
+                  correction: Optional[number],
                   keepdim: bool):
             def backward(grad_output):
                 grad_self = AD_var_backward_2(grad_output, self, dim, correction, keepdim)
@@ -1617,7 +1617,7 @@ void loadFunctions() {
 c10::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema) {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_graphs.size() == 0) {
+  if (schema_to_graphs.empty()) {
     loadFunctions();
   }
   auto cache_it = cached_gradient_pairs.find(&schema);

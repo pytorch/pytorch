@@ -13,7 +13,7 @@ from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_gloo, \
     create_device, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import TestCase, run_tests, sandcastle_skip_if, TEST_WITH_DEV_DBG_ASAN
+from torch.testing._internal.common_utils import TestCase, run_tests, skip_but_pass_in_sandcastle_if, TEST_WITH_DEV_DBG_ASAN
 
 # Fails on Python-3.9, see https://github.com/pytorch/pytorch/issues/51619
 if sys.version_info < (3, 9):
@@ -35,11 +35,12 @@ if sys.version_info < (3, 9):
             # set process group backends manually
             c10d.init_process_group(backend="gloo", store=store, rank=rank, world_size=world_size)
             pg = c10d.distributed_c10d._get_default_group()
-            pg._set_backend(torch.device("cpu"), c10d.Backend.GLOO, backend)
-            pg._set_backend(torch.device("cuda"), c10d.Backend.GLOO, backend)
+            pg._register_backend(torch.device("cpu"), c10d.ProcessGroup.BackendType.GLOO, backend)
+            pg._register_backend(torch.device("cuda"), c10d.ProcessGroup.BackendType.GLOO, backend)
+
             return pg
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_broadcast_gloo(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_broadcast_process,
@@ -47,7 +48,7 @@ if sys.version_info < (3, 9):
                 ProcessGroupShareTensorTest._init_pg_gloo,
                 1)
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_allreduce_gloo(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allreduce_process,
@@ -55,7 +56,7 @@ if sys.version_info < (3, 9):
                 ProcessGroupShareTensorTest._init_pg_gloo,
                 1)
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_allgather_gloo(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allgather_process,
@@ -75,7 +76,7 @@ if sys.version_info < (3, 9):
             c2p.put((rank, chunks[1].to("cpu"), ys[1].to("cpu")))
             p2c.get()
 
-        @sandcastle_skip_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
+        @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "At least 2 CUDA GPUS needed")
         def test_shared_allgather_chunk_gloo(self):
             self._test_multiprocess(
                 ProcessGroupShareTensorTest._test_allgather_chunk_process,
@@ -136,12 +137,12 @@ class DistributedDataParallelSingleProcessTest(TestCase):
         self._test_base(nn.Linear(2, 2), [torch.randn(30, 2)])
 
     @requires_gloo()
-    @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
     def test_cuda(self):
         self._test_base(nn.Linear(2, 2).to(0), [torch.randn(30, 2).to(0)])
 
     @requires_gloo()
-    @sandcastle_skip_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
+    @skip_but_pass_in_sandcastle_if(not TEST_CUDA, "At least 1 CUDA GPUS needed")
     def test_rnn(self):
         # This test is inspired by the bug reported in
         # https://github.com/pytorch/pytorch/issues/36268
@@ -154,7 +155,7 @@ class DistributedDataParallelSingleProcessTest(TestCase):
 
         class Net(nn.Module):
             def __init__(self, input_dim, hidden_dim, output_dim, hidden_layers):
-                super(Net, self).__init__()
+                super().__init__()
                 self.input_dim = input_dim
                 self.hidden_dim = hidden_dim
                 self.output_dim = output_dim
@@ -187,44 +188,44 @@ if not TEST_WITH_DEV_DBG_ASAN:
         # Test Common Ops First.
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_broadcast(self):
             self._test_broadcast("gloo")
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_reduce(self):
             self._test_reduce("gloo")
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_allreduce(self):
             self._test_allreduce("gloo")
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_gather(self):
             self._test_all_gather("gloo")
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_to_all(self):
             self._test_all_to_all("gloo")
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_all_to_all_single(self):
             self._test_all_to_all_single("gloo")
 
         # Test Ops only supported in GLOO.
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_gather(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs
@@ -251,7 +252,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
 
         @requires_gloo()
         @skip_if_lt_x_gpu(2)
-        @sandcastle_skip_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
+        @skip_but_pass_in_sandcastle_if(not _torch_dist_nn_available, "torch.distributed.nn is not available")
         def test_scatter(self):
             store = c10d.FileStore(self.file_name, self.world_size)
             # This is required because these functions calls directly to the .dist and needs

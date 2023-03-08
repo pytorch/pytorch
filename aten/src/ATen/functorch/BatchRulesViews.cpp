@@ -247,7 +247,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_dims_batch_rule(
   auto ndim = self.dim();
   if (ndim == 1) {
     TORCH_CHECK(
-        dims.size() == 0 || (dims.size() == 1 && dims[0] == 0),
+        dims.empty() || (dims.size() == 1 && dims[0] == 0),
         "Dimension is out of range (expected to be in range of [-1, 0], but got ", dims);
     return std::make_tuple(self.alias(), bdim);
   }
@@ -319,7 +319,14 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
   auto old_shape = self_.sizes();
   new_dims.push_back(1);
+  auto logical_rank = rankWithoutBatchDim(self, bdim);
+  if (logical_rank == 0) {
+    self_ = self_.unsqueeze(0);
+  }
+
   auto output = at::roll(self_.flatten(1), shifts, new_dims);
+  // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
+  // with `old_shape` takes care of it.
   output = output.reshape(old_shape);
   return std::make_tuple(output, 0);
 }

@@ -37,7 +37,7 @@ static std::unordered_map<std::string, int64_t> parseJITOptLimitOption(
   std::unordered_map<std::string, int64_t> passes_to_opt_limits;
   std::string line;
   while (std::getline(in_ss, line, ':')) {
-    if (line.size() == 0) {
+    if (line.empty()) {
       continue;
     }
     auto index_at = line.find_last_of('=');

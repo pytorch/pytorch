@@ -20,7 +20,7 @@ __all__ = ['TracerBase', 'GraphAppendingTracer', 'TraceError',
 
 
 @compatibility(is_backward_compatible=False)
-class Scope(object):
+class Scope:
     """ Scope object that records the module path and the module type
     of a module. Scope is used to track the information of the module
     that contains a Node in a Graph of GraphModule. For example::
@@ -51,7 +51,7 @@ class Scope(object):
 
 
 @compatibility(is_backward_compatible=False)
-class ScopeContextManager(object):
+class ScopeContextManager:
     """ A context manager to track the Scope of Node during symbolic tracing.
     When entering a forward function of a Module, we'll update the scope information of
     the current module, and when we exit, we'll restore the previous scope information.
@@ -126,7 +126,24 @@ class TracerBase:
             self.scope.module_path,
             self.scope.module_type,
         )
-        if self.module_stack:
+        # Optionally set stack trace on the created Node for debugging purposes
+        if fx_traceback.has_preserved_node_meta():
+            current_meta: Dict[str, Any] = fx_traceback.get_current_meta()
+
+            # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
+            # If other meta fields are needed, they can be added here
+            stack_trace = current_meta.get("stack_trace")
+            if stack_trace:
+                node.stack_trace = stack_trace
+
+            nn_module_stack = current_meta.get("nn_module_stack")
+            if nn_module_stack:
+                node.meta["nn_module_stack"] = nn_module_stack
+
+            source_fn = current_meta.get("source_fn")
+            if source_fn:
+                node.meta["source_fn"] = source_fn
+        elif self.module_stack:
             node.meta['nn_module_stack'] = copy.copy(self.module_stack)
         return node
 
@@ -160,17 +177,12 @@ class TracerBase:
         else:
             proxy = proxy_factory_fn(node)
 
-        # Optionally set stack trace on the created Node for debugging purposes
-        if fx_traceback.is_stack_trace_overridden():
-            proxy.node.meta = fx_traceback.get_current_meta()
-            stacks = fx_traceback.format_stack()
-            proxy.node.stack_trace = '\n'.join(reversed(stacks))
-        elif self.record_stack_traces:
+        if self.record_stack_traces and not proxy.node.stack_trace:
             user_frame = self._find_user_frame()
             if user_frame:
-                walk_stack_gen = traceback.walk_stack(user_frame)
-                summary = traceback.StackSummary.extract(walk_stack_gen)  # type: ignore[arg-type]
+                summary = traceback.extract_stack(user_frame)
                 tb_lines = summary.format()
+                # stack_trace would have innermost frame at the bottom
                 proxy.node.stack_trace = ''.join(tb_lines)
 
         return proxy

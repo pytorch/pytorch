@@ -10,7 +10,7 @@ ProcessGroupRoundRobin::ProcessGroupRoundRobin(
   TORCH_WARN(
       "ProcessGroupRoundRobin is deprecated and scheduled to be removed after this current release (1.13). ",
       "Please file an issue on https://github.com/pytorch/pytorch/issues if there are any concerns or issues with this deprecation.");
-  TORCH_CHECK(processGroups_.size() >= 1);
+  TORCH_CHECK(!processGroups_.empty());
   for (const auto& processGroup : processGroups_) {
     TORCH_CHECK(processGroup->getRank() == rank_);
     TORCH_CHECK(processGroup->getSize() == size_);

@@ -11,7 +11,7 @@
 
 namespace at::native {
 
-const char addcmul_name[] = "addcmul";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcmul_name[] = "addcmul";
 void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {
@@ -56,7 +56,7 @@ void addcmul_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
 }
 
 // return a + alpha * (b / static_cast<accscalar_t>(c));
-const char addcdiv_name[] = "addcdiv";
+CONSTEXPR_EXCEPT_WIN_CUDA char addcdiv_name[] = "addcdiv";
 void addcdiv_cuda_kernel(TensorIteratorBase& iter, const Scalar& value) {
   auto dtype = iter.common_dtype();
   if (at::isComplexType(dtype)) {

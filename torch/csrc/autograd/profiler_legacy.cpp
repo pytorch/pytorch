@@ -44,13 +44,13 @@ namespace profiler {
 // mapping. A corresponding entry is removed when the guard is destroyed,
 // potentially revealing the previously set value for the same slot.
 //
-// For the async tasks, slots previuosly set in the main thread before
+// For the async tasks, slots previously set in the main thread before
 // launching of an async task are shared and visible in the async task.
 //
 // On the other hand, any adding or overwriting of the mapping by the
 // async task is not visible to the main thread and any modification
 // (including removal of the entries) in the main thread is not visible
-// to the async task if it happends after launching the task.
+// to the async task if it happens after launching the task.
 //
 // We use ThreadLocalDebugInfo (slot PROFILER_STATE) to store profiler config,
 // as well as a list of events that happen during profiling.
@@ -153,8 +153,8 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   void reportMemoryUsage(
       void* /* unused */,
       int64_t alloc_size,
-      int64_t /* total_allocated, unused for legacy */,
-      int64_t /* total_reserved, unused for legacy */,
+      size_t /* total_allocated, unused for legacy */,
+      size_t /* total_reserved, unused for legacy */,
       c10::Device device) override;
 
   ActiveProfilerType profilerType() override {
@@ -300,8 +300,8 @@ void ProfilerLegacyThreadLocalState::popRange(
 void ProfilerLegacyThreadLocalState::reportMemoryUsage(
     void* /* unused */,
     int64_t alloc_size,
-    int64_t /* total_allocated, unused for legacy */,
-    int64_t /* total_reserved, unused for legacy */,
+    size_t /* total_allocated, unused for legacy */,
+    size_t /* total_reserved, unused for legacy */,
     c10::Device device) {
   if (config_.profile_memory && !config_.disabled()) {
     uint64_t thread_id = at::RecordFunction::currentThreadId();

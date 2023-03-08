@@ -3,7 +3,7 @@
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-pushd .jenkins/pytorch/perf_test
+pushd .ci/pytorch/perf_test
 
 echo "Running GPU perf test for PyTorch..."
 

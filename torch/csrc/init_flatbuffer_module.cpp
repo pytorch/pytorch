@@ -117,8 +117,8 @@ extern "C"
       "_get_module_info_from_flatbuffer", [](std::string flatbuffer_content) {
         py::gil_scoped_acquire acquire;
         py::dict result;
-        mobile::ModuleInfo minfo = torch::jit::get_module_info_from_flatbuffer(
-            flatbuffer_content.data());
+        mobile::ModuleInfo minfo =
+            torch::jit::get_module_info_from_flatbuffer(&flatbuffer_content[0]);
         result["bytecode_version"] = minfo.bytecode_version;
         result["operator_version"] = minfo.operator_version;
         result["function_names"] = minfo.function_names;

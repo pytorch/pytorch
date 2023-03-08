@@ -850,7 +850,7 @@ struct TORCH_API Node {
     return removeAttribute(Symbol::attr(name));
   }
   bool hasAttributes() const {
-    return values_.size() > 0;
+    return !values_.empty();
   }
   size_t numAttributes() const {
     return values_.size();

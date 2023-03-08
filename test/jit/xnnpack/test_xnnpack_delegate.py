@@ -38,9 +38,6 @@ class TestXNNPackBackend(unittest.TestCase):
 
     def test_xnnpack_lowering(self):
         class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x):
                 return x + x
 
@@ -98,9 +95,6 @@ class TestXNNPackBackend(unittest.TestCase):
 
     def test_xnnpack_backend_add(self):
         class AddModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = x + y
                 z = z + x
@@ -130,9 +124,6 @@ class TestXNNPackBackend(unittest.TestCase):
 
     def test_xnnpack_broadcasting(self):
         class AddModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 return x + y
 
@@ -159,9 +150,6 @@ class TestXNNPackBackend(unittest.TestCase):
 
     def test_xnnpack_unsupported(self):
         class AddSpliceModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, y):
                 z = x + y[:, :, 1, :]
                 return z

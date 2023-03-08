@@ -5,9 +5,7 @@ import torch.nn as nn
 from torch.distributed import distributed_c10d
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
-    _PartialTensor
 )
-from .replicated_tensor import ReplicatedTensor
 from .sharding_spec import (
     ShardingSpec,
     ChunkShardingSpec
@@ -121,29 +119,13 @@ def shard_parameter(
     # Replace param with ShardedTensor.
     module.register_parameter(param_name, nn.Parameter(st))
 
-def _replicate_tensor(tensor: torch.Tensor, process_group=None) -> ReplicatedTensor:
-    """
-    Given a :class:`torch.Tensor`, mark it as a ReplicatedTensor where all
-    ranks have the same value.
-
-    Args:
-        tensor (:class:`torch.Tensor`): the tensor to be marked as replicated.
-    Keyword args:
-        process_group (ProcessGroup, optional): The process group to replicate on.
-            If None, the default process group will be used.
-    Returns:
-        A :class:`ReplicatedTensor` from the given tensor.
-
-    """
-    return ReplicatedTensor(tensor, process_group=process_group)
-
 # Tracks the current process group in the load context manager.
 _CURRENT_PROCESS_GROUP = None
 
 @contextmanager
 def load_with_process_group(process_group):
     """
-    Context manager to set the process group with which to load a ShardedTensor/ReplicatedTensor.
+    Context manager to set the process group with which to load a ShardedTensor.
     """
     global _CURRENT_PROCESS_GROUP
     if _CURRENT_PROCESS_GROUP is not None:
@@ -183,7 +165,7 @@ def _reshard_output(
         A :class:`torch.nn.Module` object with reshard API hooked.
     """
     def hook_func(_module, _input, output):
-        if isinstance(output, ShardedTensor) or isinstance(output, _PartialTensor):
+        if isinstance(output, ShardedTensor):
             return output.reshard(resharding_spec)
         return output
     module.register_forward_hook(hook_func)

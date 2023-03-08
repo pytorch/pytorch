@@ -28,7 +28,7 @@ class _IncompatibleKeys(namedtuple('IncompatibleKeys', ['missing_keys', 'unexpec
     def __repr__(self):
         if not self.missing_keys and not self.unexpected_keys:
             return '<All keys matched successfully>'
-        return super(_IncompatibleKeys, self).__repr__()
+        return super().__repr__()
 
     __str__ = __repr__
 
@@ -94,6 +94,16 @@ _global_backward_hooks: Dict[int, Callable] = OrderedDict()
 _global_is_full_backward_hook: Optional[bool] = None
 _global_forward_pre_hooks: Dict[int, Callable] = OrderedDict()
 _global_forward_hooks: Dict[int, Callable] = OrderedDict()
+_has_global_hooks: bool = False
+
+def _update_has_global_hooks():
+    global _has_global_hooks
+    _has_global_hooks = bool(
+        _global_backward_pre_hooks
+        or _global_backward_hooks
+        or _global_forward_hooks
+        or _global_forward_pre_hooks
+    )
 
 _EXTRA_STATE_KEY_SUFFIX = '_extra_state'
 
@@ -199,6 +209,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
     """
     handle = hooks.RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
@@ -231,6 +242,7 @@ def register_module_forward_hook(hook: Callable[..., None]) -> RemovableHandle:
     """
     handle = hooks.RemovableHandle(_global_forward_hooks)
     _global_forward_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
@@ -255,9 +267,9 @@ def register_module_backward_hook(
                            "global Module hook. Please use only one of them.")
 
     _global_is_full_backward_hook = False
-
     handle = hooks.RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
+    _update_has_global_hooks()
     return handle
 
 
@@ -293,6 +305,7 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
+    _update_has_global_hooks()
     handle = hooks.RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
     return handle
@@ -432,12 +445,26 @@ class Module:
     _state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
+    _has_hooks: bool = False
+    call_super_init: bool = False
 
-    def __init__(self) -> None:
+    # we want _has_hooks to be updated properly by _update_has_hooks in jit ScriptModules
+    __jit_ignored_attributes__ = ["_has_hooks"]
+
+    def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
         torch._C._log_api_usage_once("python.nn_module")
+
+        # Backward compatibility: no args used to be allowed when call_super_init=False
+        if self.call_super_init is False and bool(kwargs):
+            raise TypeError("{}.__init__() got an unexpected keyword argument '{}'"
+                            "".format(type(self).__name__, next(iter(kwargs))))
+
+        if self.call_super_init is False and bool(args):
+            raise TypeError("{}.__init__() takes 1 positional argument but {} were"
+                            " given".format(type(self).__name__, len(args) + 1))
 
         """
         Calls super().__setattr__('a', a) instead of the typical self.a = a
@@ -462,7 +489,18 @@ class Module:
         super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
         super().__setattr__('_modules', OrderedDict())
 
+        if self.call_super_init:
+            super().__init__(*args, **kwargs)
+
     forward: Callable[..., Any] = _forward_unimplemented
+
+    def _update_has_hooks(self):
+        self._has_hooks = bool(
+            self._backward_hooks
+            or self._backward_pre_hooks
+            or self._forward_hooks
+            or self._forward_pre_hooks
+        )
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
         r"""Adds a buffer to the module.
@@ -499,7 +537,7 @@ class Module:
         if '_buffers' not in self.__dict__:
             raise AttributeError(
                 "cannot assign buffer before Module.__init__() call")
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -540,7 +578,7 @@ class Module:
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -582,7 +620,7 @@ class Module:
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        elif not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, str):
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
@@ -1174,10 +1212,11 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        handle = hooks.RemovableHandle(self._backward_pre_hooks, module=self)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def register_backward_hook(
@@ -1200,8 +1239,9 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = hooks.RemovableHandle(self._backward_hooks, module=self)
         self._backward_hooks[handle.id] = hook
+        self._update_has_hooks()
         return handle
 
     def register_full_backward_hook(
@@ -1258,10 +1298,11 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = hooks.RemovableHandle(self._backward_hooks, module=self)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def _get_backward_hooks(self):
@@ -1387,7 +1428,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(
             self._forward_pre_hooks,
-            extra_dict=self._forward_pre_hooks_with_kwargs
+            extra_dict=self._forward_pre_hooks_with_kwargs,
+            module=self
         )
         self._forward_pre_hooks[handle.id] = hook
         if with_kwargs:
@@ -1395,6 +1437,7 @@ class Module:
 
         if prepend:
             self._forward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def register_forward_hook(
@@ -1448,7 +1491,8 @@ class Module:
         """
         handle = hooks.RemovableHandle(
             self._forward_hooks,
-            extra_dict=self._forward_hooks_with_kwargs
+            extra_dict=self._forward_hooks_with_kwargs,
+            module=self
         )
         self._forward_hooks[handle.id] = hook
         if with_kwargs:
@@ -1456,6 +1500,7 @@ class Module:
 
         if prepend:
             self._forward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
+        self._update_has_hooks()
         return handle
 
     def _slow_forward(self, *input, **kwargs):
@@ -1481,10 +1526,10 @@ class Module:
     def _call_impl(self, *args, **kwargs):
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
-        # this function, and just call forward.
-        if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks
-                or _global_backward_pre_hooks or _global_backward_hooks
-                or _global_forward_hooks or _global_forward_pre_hooks):
+        # this function, and just call forward.  It's slow for dynamo to guard on the state
+        # of all these hook dicts individually, so instead it can guard on 2 bools and we just
+        # have to promise to keep them up to date when hooks are added or removed via official means.
+        if not self._has_hooks and not _has_global_hooks:
             return forward_call(*args, **kwargs)
         # Do not call functions when jit is used
         full_backward_hooks, non_full_backward_hooks = [], []
@@ -2099,8 +2144,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._parameters.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def buffers(self, recurse: bool = True) -> Iterator[Tensor]:
         r"""Returns an iterator over module buffers.
@@ -2150,8 +2194,7 @@ class Module:
         gen = self._named_members(
             lambda module: module._buffers.items(),
             prefix=prefix, recurse=recurse, remove_duplicate=remove_duplicate)
-        for elem in gen:
-            yield elem
+        yield from gen
 
     def children(self) -> Iterator['Module']:
         r"""Returns an iterator over immediate children modules.
@@ -2320,7 +2363,7 @@ class Module:
         return self
 
     def zero_grad(self, set_to_none: bool = True) -> None:
-        r"""Sets gradients of all model parameters to zero. See similar function
+        r"""Resets gradients of all model parameters. See similar function
         under :class:`torch.optim.Optimizer` for more context.
 
         Args:

@@ -12,7 +12,7 @@ microbenchmarks.
 """
 
 
-class Caffe2BenchmarkBase(object):
+class Caffe2BenchmarkBase:
     """ This is a base class used to create Caffe2 operator benchmark
     """
     tensor_index = 0
@@ -103,7 +103,7 @@ class Caffe2BenchmarkBase(object):
         pass
 
 
-class Caffe2OperatorTestCase(object):
+class Caffe2OperatorTestCase:
     """ This class includes all the information needed to benchmark an operator.
         op_bench: it's a user-defined class (child of Caffe2BenchmarkBase)
         which includes input and operator, .etc

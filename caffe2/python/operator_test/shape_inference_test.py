@@ -26,13 +26,13 @@ class TestShapeInference(test_util.TestCase):
                 {'data': [b, 96]}
             )
 
-            self.assertEquals(shapes['data'], [b, 96])
-            self.assertEquals(shapes['fc1_w'], [32, 96])
-            self.assertEquals(shapes['fc1_b'], [32])
-            self.assertEquals(shapes['fc1'], [b, 32])
-            self.assertEquals(shapes['fc2_w'], [55, 32])
-            self.assertEquals(shapes['fc2_b'], [55])
-            self.assertEquals(shapes['fc2'], [b, 55])
+            self.assertEqual(shapes['data'], [b, 96])
+            self.assertEqual(shapes['fc1_w'], [32, 96])
+            self.assertEqual(shapes['fc1_b'], [32])
+            self.assertEqual(shapes['fc1'], [b, 32])
+            self.assertEqual(shapes['fc2_w'], [55, 32])
+            self.assertEqual(shapes['fc2_b'], [55])
+            self.assertEqual(shapes['fc2'], [b, 55])
 
     def testFCAxis2(self):
         model = model_helper.ModelHelper(name="test_model")

@@ -1585,7 +1585,6 @@ cc_library(
             "torch/csrc/**/*.h",
             "torch/csrc/distributed/c10d/*.hpp",
             "torch/lib/libshm/*.h",
-            "torch/csrc/generic/*.cpp",
         ],
         exclude = [
             "torch/csrc/autograd/generated/VariableType.h",

@@ -6,10 +6,12 @@ import tempfile
 import unittest
 
 import numpy as np
+import onnx
 import parameterized
 import pytorch_test_common
 
 import torch
+from packaging import version
 from torch.onnx import _constants, _experimental, verification
 from torch.testing._internal import common_utils
 
@@ -150,8 +152,12 @@ class TestVerificationOnWrongExport(pytorch_test_common.ExportTestCase):
         [
             common_utils.subtest(
                 verification.OnnxBackend.REFERENCE,
-                # TODO: enable this when ONNX submodule catches up to >= 1.13.
-                decorators=[unittest.expectedFailure],
+                decorators=[
+                    unittest.skipIf(
+                        version.Version(onnx.__version__) < version.Version("1.13"),
+                        reason="Reference Python runtime was introduced in 'onnx' 1.13.",
+                    )
+                ],
             ),
             verification.OnnxBackend.ONNX_RUNTIME_CPU,
         ],

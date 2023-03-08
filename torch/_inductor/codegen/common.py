@@ -9,6 +9,8 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+import torch
+
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
@@ -50,6 +52,11 @@ class ExprPrinter(Printer):
         # Pow() confuses triton
         base, exp = expr.args
         base = self._print(base)
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for sqrt/floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -70,6 +77,31 @@ class ExprPrinter(Printer):
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
+
+
+class PythonPrinter(ExprPrinter):
+    def _print_ModularIndexing(self, expr):
+        x, div, mod = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        mod = self.paren(self.doprint(mod))
+        if div != "1":
+            x = f"({x} // {div})"
+        return f"{x} % {mod}"
+
+    def _print_FloorDiv(self, expr):
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    def _print_floor(self, expr):
+        assert len(expr.args) == 1
+        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
 
 
 class OpOverrides:
@@ -124,6 +156,16 @@ class OpOverrides:
         return f"{ExprPrinter.paren(x)} ^ {ExprPrinter.paren(y)}"
 
     @staticmethod
+    def bitwise_left_shift(x, y):
+        return f"{ExprPrinter.paren(x)} << {ExprPrinter.paren(y)}"
+
+    # TODO(fdrocha): this is currently not being used anywhere,
+    # pending on moving triton pin past 972b761
+    @staticmethod
+    def bitwise_right_shift(x, y):
+        return f"{ExprPrinter.paren(x)} >> {ExprPrinter.paren(y)}"
+
+    @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
         return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
@@ -150,7 +192,7 @@ class DeferredLine(DeferredLineBase):
 
 class DeferredIndentedBuffer(IndentedBuffer):
     def __init__(self, initial_indent=0):
-        super(DeferredIndentedBuffer, self).__init__(initial_indent)
+        super().__init__(initial_indent)
 
     def writeline(self, name, line):
         if name is None:
@@ -274,9 +316,14 @@ class KernelArgs:
 
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
-        buffer_types.update(
-            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
-        )
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Expr):
+                if val.is_integer:
+                    buffer_types[name] = torch.int64
+                else:
+                    buffer_types[name] = torch.float64
+            else:
+                buffer_types[name] = val.get_dtype()
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
@@ -340,6 +387,7 @@ class KernelArgs:
             arg_defs.append(inner)
             call_args.append(str(outer))
             precompile_args.append(SizeArg(inner, outer))
+
         return arg_defs, call_args, precompile_args
 
     def aliases(self):
@@ -619,7 +667,9 @@ class Kernel(CodeGen):
         index = V.graph.sizevars.simplify(index)
         sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)
         replacements = {
-            x: self.args.size(x) for x in sorted_symbols if x.name.startswith("s")
+            x: self.args.size(x)
+            for x in sorted_symbols
+            if x.name.startswith("s") or x.name.startswith("ps")
         }
         return sympy_subs(index, replacements)
 

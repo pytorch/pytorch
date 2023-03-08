@@ -51,7 +51,7 @@ class TestReBatchingQueue(TestCase):
         workspace.RunNetOnce(net)
 
         for idx in range(3):
-            self.assertEquals(workspace.FetchBlob(results[idx]), [1.0])
+            self.assertEqual(workspace.FetchBlob(results[idx]), [1.0])
 
     def test_rebatching_queue_multi_enqueue_dequeue(self):
         net = core.Net('net')
@@ -280,7 +280,7 @@ class TestReBatchingQueue(TestCase):
         # We check that the outputs are a permutation of inputs
         inputs.sort()
         outputs.sort()
-        self.assertEquals(inputs, outputs)
+        self.assertEqual(inputs, outputs)
 
 
 if __name__ == "__main__":

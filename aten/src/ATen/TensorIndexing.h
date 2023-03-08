@@ -237,7 +237,7 @@ static inline Tensor applySelect(
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     TORCH_CHECK_INDEX(
-        !(index == 0 && dim == 0 && self_sizes->size() == 0),
+        !(index == 0 && dim == 0 && self_sizes->empty()),
         "invalid index of a 0-dim tensor. ",
         "Use `tensor.item()` in Python or `tensor.item<T>()` in C++ to convert a 0-dim tensor to a number");
 
@@ -382,7 +382,10 @@ static inline Tensor scalarToTensor(
 static inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   size_t first_non1_src = sizes.size();
   for (const auto i : c10::irange(sizes.size())) {
-    if (sizes[i] != 1) {
+    // Unbacked SymInt has different behavior, but this is sound because
+    // failing to slice will only ever cause an error, not divergent
+    // behavior
+    if (!sizes[i].has_hint() || sizes[i] != 1) {
       first_non1_src = i;
       break;
     }

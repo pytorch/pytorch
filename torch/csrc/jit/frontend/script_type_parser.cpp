@@ -37,7 +37,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       // i.e. `typing.Tuple[()]`. Allow for parsing an empty tuple literal
       // here. See https://docs.python.org/3/library/typing.html#typing.Tuple
       auto tup_literal = TupleLiteral(subscript.subscript_exprs()[0]);
-      if (tup_literal.inputs().size() > 0) {
+      if (!tup_literal.inputs().empty()) {
         throw ErrorReport(tup_literal.range())
             << "Tuple literal in Tuple type annotation must not "
             << "have any elements!";
@@ -85,6 +85,15 @@ TypePtr ScriptTypeParser::subscriptToType(
     auto elem_type =
         parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
     return FutureType::create(elem_type);
+  } else if (typeName == "Await" || typeName == "torch.jit._Await") {
+    if (subscript.subscript_exprs().size() != 1) {
+      throw ErrorReport(subscript)
+          << " expected exactly one element type but found "
+          << subscript.subscript_exprs().size();
+    }
+    auto elem_type =
+        parseTypeFromExprImpl(*subscript.subscript_exprs().begin());
+    return AwaitType::create(elem_type);
   } else if (typeName == "RRef") {
     if (subscript.subscript_exprs().size() != 1) {
       throw ErrorReport(subscript)
@@ -456,6 +465,10 @@ c10::IValue ScriptTypeParser::parseClassConstant(const Assign& assign) {
   if (assign.lhs().kind() != TK_VAR) {
     throw ErrorReport(assign.range())
         << "Expected to a variable for class constant";
+  }
+  if (!assign.type().present()) {
+    throw ErrorReport(assign.range())
+        << "Expected a type to present for class constant";
   }
   const auto final_type = assign.type().get();
   auto expr = assign.rhs().get();

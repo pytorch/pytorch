@@ -47,7 +47,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             This attribute access will be consistent with MTML model.
         '''
 
-        super(LayerModelHelper, self).__init__(name=name)
+        super().__init__(name=name)
         self._layer_names = set()
         self._layers = []
         self._param_to_shape = {}

@@ -11,7 +11,7 @@ class MEM_FORMAT_ENCODING(Enum):
     TORCH_PRESERVE_FORMAT = 2
 
 @dataclass
-class TensorProperties(object):
+class TensorProperties:
     """ Properties used to create :class:`Tensor` """
 
     # Regular tensor fields
@@ -68,7 +68,7 @@ class TensorProperties(object):
             pin_memory=tensor.is_pinned()
         )
 @dataclass
-class ShardedTensorMetadata(object):
+class ShardedTensorMetadata:
     """
     Represents metadata for :class:`ShardedTensor`
     """

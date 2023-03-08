@@ -65,9 +65,6 @@ class TestDataclasses(JitTestCase):
     def tearDownClass(cls):
          torch._C._jit_clear_class_registry()
 
-    # We only support InitVar in JIT dataclasses for Python 3.8+ because it would be very hard
-    # to support without the `type` attribute on InitVar (see comment in _dataclass_impls.py).
-    @unittest.skipIf(sys.version_info < (3, 8), "InitVar not supported in Python < 3.8")
     def test_init_vars(self):
         @torch.jit.script
         @dataclass(order=True)

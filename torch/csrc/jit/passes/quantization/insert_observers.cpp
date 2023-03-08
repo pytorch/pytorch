@@ -63,7 +63,7 @@ void fillQConfigMap(
 
   for (const NameModule& s : module.named_children()) {
     std::string child_key;
-    if (key == "") {
+    if (key.empty()) {
       child_key = s.name;
     } else {
       child_key = key + "." + s.name;
@@ -1562,7 +1562,7 @@ InsertObserversHelper::insertObserversFor(
             subblock_output_observe_state.push_back(
                 isObserved(output, block_observed_values));
           }
-          if (aggregated_output_observe_state.size() > 0) {
+          if (!aggregated_output_observe_state.empty()) {
             TORCH_CHECK(
                 aggregated_output_observe_state ==
                     subblock_output_observe_state,

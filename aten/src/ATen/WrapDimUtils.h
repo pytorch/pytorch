@@ -19,7 +19,7 @@ inline int64_t maybe_wrap_dim(int64_t dim, TensorImpl* tensor) {
 }
 
 inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
-  if (tensors.size() == 0) {
+  if (tensors.empty()) {
     // can't wrap empty TensorList; rely on underlying implementation to throw
     // error if necessary.
     return dim;
@@ -30,7 +30,7 @@ inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
 inline int64_t maybe_wrap_dim(
     int64_t dim,
     const std::vector<std::vector<int64_t>>& tensor_sizes) {
-  if (tensor_sizes.size() == 0) {
+  if (tensor_sizes.empty()) {
     // can't wrap empty list; rely on underlying implementation to throw error
     // if necessary
     return dim;

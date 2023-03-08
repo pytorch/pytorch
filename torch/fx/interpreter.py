@@ -76,6 +76,7 @@ class Interpreter:
         self.env : Dict[Node, Any] = {}
         self.name = "Interpreter"
         self.garbage_collect_values = garbage_collect_values
+        self.extra_traceback = True
 
         if self.garbage_collect_values:
             # Run through reverse nodes and record the first instance of a use
@@ -135,12 +136,13 @@ class Interpreter:
             try:
                 self.env[node] = self.run_node(node)
             except Exception as e:
-                msg = f"While executing {node.format_node()}"
-                msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
-                msg += f"\nOriginal traceback:\n{node.stack_trace}"
-                e.args = (msg,) + e.args[1:]
-                if isinstance(e, KeyError):
-                    raise RuntimeError(*e.args) from e
+                if self.extra_traceback:
+                    msg = f"While executing {node.format_node()}"
+                    msg = '{}\n\n{}'.format(e.args[0], msg) if e.args else str(msg)
+                    msg += f"\nOriginal traceback:\n{node.stack_trace}"
+                    e.args = (msg,) + e.args[1:]
+                    if isinstance(e, KeyError):
+                        raise RuntimeError(*e.args) from e
                 raise
 
             if self.garbage_collect_values:
@@ -153,7 +155,7 @@ class Interpreter:
 
     @contextmanager
     def _set_current_node(self, node):
-        with fx_traceback.append_stack_trace(node.stack_trace), fx_traceback.set_current_meta(node.meta):
+        with fx_traceback.set_current_meta(node.meta):
             yield
 
     @compatibility(is_backward_compatible=True)
@@ -457,7 +459,7 @@ class Transformer(Interpreter):
             kwargs (Dict): Dict of keyword arguments for this invocation
         """
         assert isinstance(target, str)
-        return Proxy(self.new_graph.get_attr(target), self.tracer)
+        return self.tracer.create_proxy("get_attr", target, args, kwargs)
 
     @compatibility(is_backward_compatible=True)
     def call_module(self, target : 'Target', args : Tuple[Argument, ...], kwargs : Dict[str, Any]) -> Any:
@@ -477,7 +479,7 @@ class Transformer(Interpreter):
         Transform ``self.module`` and return the transformed
         ``GraphModule``.
         """
-        with fx_traceback.override_stack_trace():
+        with fx_traceback.preserve_node_meta():
             result = super().run(enable_io_processing=False)
         if result is not None:
             def strip_proxy(a : Union[Argument, Proxy]) -> Any:

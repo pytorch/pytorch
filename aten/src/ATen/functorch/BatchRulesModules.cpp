@@ -300,7 +300,7 @@ struct UpsampleBackwardBatchRuleHelper<F, Func, typelist<A, B, C, T...>> {
       c10::SymIntArrayRef output_size, c10::SymIntArrayRef input_size,
       T... extra_args) {
     auto grad_output_ = reshape_dim_into(*grad_output_bdim, 0, grad_output);
-    TORCH_INTERNAL_ASSERT(input_size.size() > 0);
+    TORCH_INTERNAL_ASSERT(!input_size.empty());
 
     // input_size is wrong so we correct it
     c10::SymDimVector physical_input_size(input_size.begin(), input_size.end());

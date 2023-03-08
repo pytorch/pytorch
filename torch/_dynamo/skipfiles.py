@@ -130,13 +130,11 @@ FILENAME_ALLOWLIST = {
 }
 
 # Include optimizer code for tracing
-FILENAME_ALLOWLIST |= set(
-    [
-        inspect.getfile(obj)
-        for obj in torch.optim.__dict__.values()
-        if inspect.isclass(obj)
-    ]
-)
+FILENAME_ALLOWLIST |= {
+    inspect.getfile(obj)
+    for obj in torch.optim.__dict__.values()
+    if inspect.isclass(obj)
+}
 FILENAME_ALLOWLIST |= {torch.optim._functional.__file__}
 
 if HAS_PRIMS_REFS:
@@ -220,7 +218,9 @@ def is_torch_inline_allowed(filename):
 
 @functools.lru_cache(None)
 def dynamo_dir():
-    return _module_dir(importlib.import_module(config.dynamo_import))
+    import torch._dynamo
+
+    return _module_dir(torch._dynamo)
 
 
 def is_torch(filename):

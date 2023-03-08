@@ -14,7 +14,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
 
     .. note::
         To access the weights and biases, you need to access them per layer.
-        See examples in :class:`~torch.nn.quantizable.LSTM`
+        See examples in :class:`~torch.ao.nn.quantizable.LSTM`
 
     Examples::
         >>> # xdoctest: +SKIP
@@ -29,7 +29,7 @@ class LSTM(torch.ao.nn.quantizable.LSTM):
         >>> tq.prepare(model, prepare_custom_module_class=custom_module_config)
         >>> tq.convert(model, convert_custom_module_class=custom_module_config)
     """
-    _FLOAT_MODULE = torch.nn.quantizable.LSTM  # type: ignore[assignment]
+    _FLOAT_MODULE = torch.ao.nn.quantizable.LSTM  # type: ignore[assignment]
 
     def _get_name(self):
         return 'QuantizedLSTM'

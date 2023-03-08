@@ -1,6 +1,6 @@
 import torch
 from torch import Tensor
-from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_foreach,
+from .optimizer import (Optimizer, required, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
@@ -24,7 +24,7 @@ class SGD(Optimizer):
                         differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
-        super(SGD, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -207,7 +207,7 @@ def sgd(params: List[Tensor],
         # why must we be explicit about an if statement for torch.jit.is_scripting here?
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
-            foreach = _default_to_foreach([params, d_p_list, momentum_buffer_list])
+            _, foreach = _default_to_fused_or_foreach(params, differentiable=False, use_fused=False)
         else:
             foreach = False
 

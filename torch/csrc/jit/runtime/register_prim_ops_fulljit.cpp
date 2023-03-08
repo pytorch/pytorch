@@ -91,7 +91,7 @@ RegisterOperators reg({
           int64_t chunks = node->i(attr::chunks);
           int64_t dim = node->i(attr::dim);
           auto outputs_used = fmap(node->outputs(), [](const Value* v) {
-            return v->uses().size() > 0;
+            return !v->uses().empty();
           });
           return [=](Stack& stack) {
             RECORD_FUNCTION("chunk", last(stack, 1));
@@ -313,6 +313,24 @@ RegisterOperators reg({
         "aten::wait(Future(t) self) -> t",
         [](Stack& stack) {
           TORCH_CHECK(false, "wait is implemented directly in the interpreter");
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "prim::awaitable_wait(Await(t) self) -> t",
+        [](Stack& stack) {
+          auto aw = stack.back().toAwait();
+          aw->wait();
+          stack.pop_back();
+          stack.emplace_back(aw->value());
+        },
+        aliasAnalysisSpecialCase()),
+    Operator(
+        "prim::awaitable_nowait(t self) -> Await(t)",
+        [](Stack& stack) {
+          auto aw =
+              c10::make_intrusive<c10::ivalue::Await>(stack.back().type());
+          aw->markCompleted(pop(stack));
+          push(stack, std::move(aw));
         },
         aliasAnalysisSpecialCase()),
 });

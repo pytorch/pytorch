@@ -57,7 +57,7 @@ void RegisterOperators::checkSchemaAndRegisterOp_(Options&& options) {
 }
 
 c10::FunctionSchema RegisterOperators::inferSchemaFromKernels_(const OperatorName& opName, const RegisterOperators::Options& options) {
-  TORCH_CHECK(options.kernels.size() > 0, "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
+  TORCH_CHECK(!options.kernels.empty(), "Cannot infer operator schema in registration of operator ", opName, " because there is no kernel specified.");
 
   c10::optional<FunctionSchema> inferred_schema = c10::nullopt;
   for (const auto& kernel : options.kernels) {

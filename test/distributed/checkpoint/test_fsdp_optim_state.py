@@ -40,16 +40,13 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
         with FSDP.state_dict_type(model, StateDictType.SHARDED_STATE_DICT):
             state_dict = {
                 "model": model.state_dict(),
-                "optim": FSDP.sharded_optim_state_dict(model, optim),
+                "optim": FSDP.optim_state_dict(model, optim),
             }
 
             dist_cp.save_state_dict(
                 state_dict=state_dict,
                 storage_writer=dist_cp.FileSystemWriter(CHECKPOINT_DIR),
-                planner=DefaultSavePlanner(
-                    flatten_state_dict=True,
-                    flatten_sharded_tensors=True,
-                ),
+                planner=DefaultSavePlanner(),
             )
 
         # now load the model and ensure the values are the same
@@ -73,10 +70,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
             dist_cp.load_state_dict(
                 state_dict=state_dict,
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
-                planner=DefaultLoadPlanner(
-                    flatten_state_dict=True,
-                    flatten_sharded_tensors=True,
-                ),
+                planner=DefaultLoadPlanner(),
             )
             model_2.load_state_dict(state_dict["model"])
 
@@ -86,7 +80,7 @@ class FsdpOptimStateCheckpoint(DTensorTestBase):
                 storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             )
 
-            flattened_osd = FSDP.flatten_sharded_optim_state_dict(
+            flattened_osd = FSDP.optim_state_dict_to_load(
                 optim_state["optim"], model_2, optim_2
             )
             optim_2.load_state_dict(flattened_osd)

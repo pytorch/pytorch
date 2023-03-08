@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -47,7 +47,9 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
-skipIfNoTorchVision = sandcastle_skip_if(not HAS_TORCHVISION, "no torchvision")
+skipIfNoTorchVision = skip_but_pass_in_sandcastle_if(
+    not HAS_TORCHVISION, "no torchvision"
+)
 
 
 if not dist.is_available():
@@ -664,7 +666,7 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
     def test_mp_batchnorm(self, convert_sync_bn):
         class BatchNormNet(nn.Module):
             def __init__(self, affine=True):
-                super(BatchNormNet, self).__init__()
+                super().__init__()
                 self.fc1 = nn.Linear(2, 40, bias=False)
                 self.bn = nn.BatchNorm1d(4, affine=affine)
                 self.fc2 = nn.Linear(40, 4, bias=False)

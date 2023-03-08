@@ -7,11 +7,11 @@ To launch a **fault-tolerant** job, run the following on all nodes.
 
     torchrun
        --nnodes=NUM_NODES
-       --nproc_per_node=TRAINERS_PER_NODE
-       --max_restarts=NUM_ALLOWED_FAILURES
-       --rdzv_id=JOB_ID
-       --rdzv_backend=c10d
-       --rdzv_endpoint=HOST_NODE_ADDR
+       --nproc-per-node=TRAINERS_PER_NODE
+       --max-restarts=NUM_ALLOWED_FAILURES
+       --rdzv-id=JOB_ID
+       --rdzv-backend=c10d
+       --rdzv-endpoint=HOST_NODE_ADDR
        YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 
@@ -22,18 +22,18 @@ and at most ``MAX_SIZE`` nodes.
 
     torchrun
         --nnodes=MIN_SIZE:MAX_SIZE
-        --nproc_per_node=TRAINERS_PER_NODE
-        --max_restarts=NUM_ALLOWED_FAILURES_OR_MEMBERSHIP_CHANGES
-        --rdzv_id=JOB_ID
-        --rdzv_backend=c10d
-        --rdzv_endpoint=HOST_NODE_ADDR
+        --nproc-per-node=TRAINERS_PER_NODE
+        --max-restarts=NUM_ALLOWED_FAILURES_OR_MEMBERSHIP_CHANGES
+        --rdzv-id=JOB_ID
+        --rdzv-backend=c10d
+        --rdzv-endpoint=HOST_NODE_ADDR
         YOUR_TRAINING_SCRIPT.py (--arg1 ... train script args...)
 
 .. note::
    TorchElastic models failures as membership changes. When a node fails,
    this is treated as a "scale down" event. When the failed node is replaced by
    the scheduler, it is a "scale up" event. Hence for both fault tolerant
-   and elastic jobs, ``--max_restarts`` is used to control the total number of
+   and elastic jobs, ``--max-restarts`` is used to control the total number of
    restarts before giving up, regardless of whether the restart was caused
    due to a failure or a scaling event.
 
@@ -47,8 +47,8 @@ ideally you should pick a node that has a high bandwidth.
 
 .. note::
    The ``--standalone`` option can be passed to launch a single node job with a
-   sidecar rendezvous backend. You don’t have to pass ``--rdzv_id``,
-   ``--rdzv_endpoint``, and ``--rdzv_backend`` when the ``--standalone`` option
+   sidecar rendezvous backend. You don’t have to pass ``--rdzv-id``,
+   ``--rdzv-endpoint``, and ``--rdzv-backend`` when the ``--standalone`` option
    is used.
 
 

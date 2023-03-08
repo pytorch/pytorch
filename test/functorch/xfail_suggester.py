@@ -114,7 +114,7 @@ def get_suggested_xfails(base, tests):
     tests = [test[len(base):] for test in tests if
              belongs_to_base(test, base)]
 
-    base_tests = set([remove_device_dtype(test) for test in tests])
+    base_tests = {remove_device_dtype(test) for test in tests}
     tests = set(tests)
     for base in base_tests:
         cpu_variant = base + '_cpu_float32'

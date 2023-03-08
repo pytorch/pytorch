@@ -65,7 +65,7 @@ class Cache {
 
   TypePtr GetLatest() {
     std::lock_guard<std::mutex> g(lock_);
-    TORCH_CHECK(element_list_.size() > 0);
+    TORCH_CHECK(!element_list_.empty());
     return element_list_.front().second;
   }
 

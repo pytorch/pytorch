@@ -311,6 +311,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensor", c10::DispatchKey::NestedTensor},
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
+      {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
       {"PrivateUse2", c10::DispatchKey::PrivateUse2},
       {"PrivateUse3", c10::DispatchKey::PrivateUse3},

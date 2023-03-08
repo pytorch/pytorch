@@ -40,7 +40,7 @@ try:
 except ImportError:
     import functools
 
-    class _ContextDecorator(object):  # type: ignore[no-redef]
+    class _ContextDecorator:  # type: ignore[no-redef]
 
         def __enter__(self):
             raise NotImplementedError
@@ -56,7 +56,7 @@ except ImportError:
 
             return wrapped
 
-class profile(object):
+class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
     Under the hood it just records events of functions being executed in C++ and
     exposes those events to Python. You can wrap any code into it and it will
@@ -549,12 +549,12 @@ class record_function(_ContextDecorator):
         return profiled_future
 
 
-class emit_itt(object):
+class emit_itt:
     """Context manager that makes every autograd operation emit an ITT range.
 
     It is useful when running the program under Intel(R) VTune Profiler::
 
-        vtune <--vtune_flags> <regular command here>
+        vtune <--vtune-flags> <regular command here>
 
     The Instrumentation and Tracing Technology (ITT) API enables your application to generate and
     control the collection of trace data during its execution across different Intel tools.
@@ -616,7 +616,7 @@ class emit_itt(object):
         return False
 
 
-class emit_nvtx(object):
+class emit_nvtx:
     """Context manager that makes every autograd operation emit an NVTX range.
 
     It is useful when running the program under nvprof::
@@ -742,7 +742,7 @@ def load_nvprof(path):
     return EventList(parse_nvprof_trace(path))
 
 
-class EnforceUnique(object):
+class EnforceUnique:
     """Raises an error if a key is seen more than once."""
     def __init__(self):
         self.seen = set()

@@ -37,7 +37,7 @@
 #endif
 
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/detail/UnpackRaw.cuh>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 
 #include <ATen/native/transformers/cuda/flash_attn/fmha_utils.h>
 

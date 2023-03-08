@@ -18,7 +18,7 @@ StringCordView::StringCordView(
   accumulated_sizes_.push_back(0);
   size_t running_sum = 0;
   for (auto& s : pieces_) {
-    if (s.size() > 0) {
+    if (!s.empty()) {
       running_sum += s.size();
       accumulated_sizes_.push_back(running_sum);
     }
@@ -26,7 +26,7 @@ StringCordView::StringCordView(
 }
 
 size_t StringCordView::find(const std::string& tok, size_t start) const {
-  if (tok.size() == 0) {
+  if (tok.empty()) {
     return 0;
   }
 
@@ -257,7 +257,7 @@ void SourceRange::print_with_context(
     size_t line, col;
     std::tie(filename, line, col) = *flc;
     out << "  File \"" << filename << "\", line " << line;
-    if (funcname != "") {
+    if (!funcname.empty()) {
       out << ", in " << funcname;
     }
     out << "\n";

@@ -55,7 +55,7 @@ class Transformer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Transformer, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
 
         if custom_encoder is not None:
@@ -184,7 +184,7 @@ class TransformerEncoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
-        super(TransformerEncoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -217,6 +217,15 @@ class TransformerEncoder(Module):
             other_type=F._none_or_dtype(mask),
             other_name="mask",
             target_type=src.dtype
+        )
+
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         output = src
@@ -332,7 +341,7 @@ class TransformerDecoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, decoder_layer, num_layers, norm=None):
-        super(TransformerDecoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
@@ -399,7 +408,8 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Fast path:
-        forward() will use a special optimized implementation if all of the following
+        forward() will use a special optimized implementation described in
+        `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
         conditions are met:
 
         - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
@@ -419,6 +429,10 @@ class TransformerEncoderLayer(Module):
         mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
         returned, and an additional speedup proportional to the fraction of the input that
         is padding can be expected.
+
+        .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
+
     """
     __constants__ = ['batch_first', 'norm_first']
 
@@ -427,7 +441,7 @@ class TransformerEncoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerEncoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         # Implementation of Feedforward model
@@ -456,7 +470,7 @@ class TransformerEncoderLayer(Module):
         self.activation = activation
 
     def __setstate__(self, state):
-        super(TransformerEncoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
         if not hasattr(self, 'activation'):
             self.activation = F.relu
 
@@ -485,6 +499,15 @@ class TransformerEncoderLayer(Module):
             other_type=F._none_or_dtype(src_mask),
             other_name="src_mask",
             target_type=src.dtype
+        )
+
+        src_mask = F._canonical_mask(
+            mask=src_mask,
+            mask_name="src_mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
@@ -626,7 +649,7 @@ class TransformerDecoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerDecoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
@@ -653,7 +676,7 @@ class TransformerDecoderLayer(Module):
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
-        super(TransformerDecoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
         self,
