@@ -315,6 +315,7 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
 
+
 def free_symbol_has(index: sympy.Expr, pattern: str):
     return any(pattern in v.name for v in index.free_symbols)
 
