@@ -9834,76 +9834,6 @@ class TestAdvancedIndexing(TestCaseMPS):
         out = x[idx]  # index
         self.assertEqual(out, torch.zeros(2, device=device), atol=0, rtol=0)
 
-<<<<<<< HEAD
-class TestRNNMPS(TestCase):
-    def test_lstm_forward(self, device="mps", dtype=torch.float32):
-        def helper(input_size, hidden_size, num_layers, bidirectional=False, batch_first=False):
-            bsz = 3
-            D = 2 if bidirectional else 1
-            rnn = nn.LSTM(input_size, hidden_size, num_layers, device="cpu", bidirectional=bidirectional, batch_first=batch_first)
-            if batch_first:
-                input = torch.randn(bsz, num_layers, input_size, device="cpu")
-            else:
-                input = torch.randn(num_layers, bsz, input_size, device="cpu")
-            hx = torch.randn(D * num_layers, bsz, hidden_size, device="cpu")
-            cx = torch.randn(D * num_layers, bsz, hidden_size, device="cpu")
-
-            cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
-
-            rnn = rnn.to(device)
-            input = input.to(device)
-            hx = hx.to(device)
-            cx = cx.to(device)
-            output, (hn, cn) = rnn(input, (hx, cx))
-
-            self.assertEqual(cpu_output, output)
-            self.assertEqual(cpu_hn, hn)
-            self.assertEqual(cpu_cn, cn)
-
-        helper(1, 4, 1)
-        helper(1, 4, 2)
-        helper(1, 4, 2, bidirectional=True)
-        helper(1, 4, 2, bidirectional=True, batch_first=True)
-        helper(1, 4, 2, batch_first=True)
-
-    def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        def helper(input_size, hidden_size, num_layers, bidirectional=False, batch_first=False):
-            bsz = 3
-            D = 2 if bidirectional else 1
-            rnn = nn.LSTM(input_size, hidden_size, num_layers, device="cpu", bidirectional=bidirectional, batch_first=batch_first)
-            if batch_first:
-                input = torch.randn(bsz, num_layers, input_size, device="cpu", requires_grad=True)
-            else:
-                input = torch.randn(num_layers, bsz, input_size, device="cpu", requires_grad=True)
-            hx = torch.randn(D * num_layers, bsz, hidden_size, device="cpu")
-            cx = torch.randn(D * num_layers, bsz, hidden_size, device="cpu")
-
-            cpu_output, _ = rnn(input, (hx, cx))
-            cpu_output.sum().backward()
-            cpu_weight_grad = rnn.weight_ih_l0.grad.clone()
-            cpu_input_grad = input.grad.clone()
-
-            rnn.zero_grad()
-
-            rnn = rnn.to(device)
-            input = input.detach().clone().to(device).requires_grad_()
-            hx = hx.detach().clone().to(device)
-            cx = cx.detach().clone().to(device)
-            output, _ = rnn(input, (hx, cx))
-            output.sum().backward()
-            mps_weight_grad = rnn.weight_ih_l0.grad.clone()
-            mps_input_grad = input.grad.clone()
-
-            self.assertEqual(cpu_output, output)
-            self.assertEqual(cpu_input_grad, mps_input_grad)
-            self.assertEqual(cpu_weight_grad, mps_weight_grad)
-
-        helper(1, 4, 1)
-        helper(1, 4, 2)
-        helper(1, 4, 2, bidirectional=True)
-        helper(1, 4, 2, bidirectional=True, batch_first=True)
-        helper(1, 4, 2, batch_first=True)
-=======
 class TestRNNMPS(TestCaseMPS):
     def _lstm_helper(self, num_layers, dtype, device, bidirectional=False, bias=True, batch_first=False,
                      seq_len=3, batch_size=5, hidden_size=7, input_size=11, backward=False):
@@ -9982,12 +9912,12 @@ class TestRNNMPS(TestCaseMPS):
     ]
 
     def test_lstm_forward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
@@ -10047,7 +9977,6 @@ class TestRNNMPS(TestCaseMPS):
         self.assertRaises(Exception, lambda: lstm(input, (hx, cx)))
         self.assertRaises(Exception, lambda: lstm(input, (cx, hx)))
 
->>>>>>> viable/strict
 
 class TestFallbackWarning(TestCase):
     # TODO: Remove once test_testing.py is running on MPS devices
