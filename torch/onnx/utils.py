@@ -686,19 +686,9 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        try:
-            _C._jit_pass_onnx_graph_shape_type_inference(
-                graph, params_dict, GLOBALS.export_onnx_opset_version
-            )
-        except RuntimeError as exc:
-            if (
-                _C_onnx._CAFFE2_ATEN_FALLBACK
-                and exc.args[0]
-                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
-            ):
-                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
-                pass
-
+        _C._jit_pass_onnx_graph_shape_type_inference(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
     return graph
 
 
@@ -1193,18 +1183,9 @@ def _model_to_graph(
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        try:
-            _C._jit_pass_onnx_graph_shape_type_inference(
-                graph, params_dict, GLOBALS.export_onnx_opset_version
-            )
-        except RuntimeError as exc:
-            if (
-                _C_onnx._CAFFE2_ATEN_FALLBACK
-                and exc.args[0]
-                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
-            ):
-                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
-                pass
+        _C._jit_pass_onnx_graph_shape_type_inference(
+            graph, params_dict, GLOBALS.export_onnx_opset_version
+        )
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 

@@ -1735,8 +1735,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                                       scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1761,18 +1765,19 @@ class TestSDPA(NNTestCase):
             # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
             if isSM86Device and head_dim == 128:
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p, is_causal=is_causal))
+                                                                                       dropout_p=dropout_p,
+                                                                                       is_causal=is_causal, scale=scale))
                 return
             else:
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal)
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
             out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
-                                                     dropout_p=dropout_p, is_causal=is_causal)
+                                                     dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             # Low Precision Math Reference
             out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
-                                                        dropout_p=dropout_p, is_causal=is_causal)
+                                                        dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -1819,8 +1824,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("scale", [None, "l1"])
     def test_flash_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                               scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1842,7 +1851,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, return_debug_mask=True)
+            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         out = output_tuple[0]
         dbug_mask = output_tuple[-1]
 
@@ -1859,17 +1868,18 @@ class TestSDPA(NNTestCase):
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=is_causal)
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
