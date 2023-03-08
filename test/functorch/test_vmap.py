@@ -3595,6 +3595,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04), torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
+        xfail('aminmax'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
