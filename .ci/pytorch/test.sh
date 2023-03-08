@@ -126,7 +126,7 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -305,7 +305,7 @@ test_single_dynamo_benchmark() {
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
       --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
-      --no-graphs --no-update-archive --no-gh-comment
+      --no-graphs --no-update-archive --no-gh-comment "$@"
   else
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -333,7 +333,7 @@ test_dynamo_benchmark() {
     # Check inference with --float32
     test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
 
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* && "${TEST_CONFIG}" != *dynamic* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Check training with --amp
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
