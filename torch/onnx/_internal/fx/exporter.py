@@ -87,7 +87,14 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
         # 2. fx_node_arg (variable in torch.fx.Graph) is be mapped to
         #    torch.jit.Value, fx_name_to_onnxscipt_value[fx_node_arg.name],
         #    in TorchScript graph.
+        # onnx tensor should be TorchScriptTensor here.
         onnx_tensor = fx_name_to_onnxscipt_value[onnx_tensor.name]
+    elif isinstance(onnx_tensor, (tuple, list)):
+        # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
+        # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
+        # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
+        # eg: aten_expand size
+        pass
     elif isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
 
@@ -182,11 +189,17 @@ def _fill_tensor_meta(
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
-    if isinstance(expected_values, (list, tuple)) and not isinstance(onnxscript_values, (list, tuple)):
+    if isinstance(expected_values, (list, tuple)) and not isinstance(
+        onnxscript_values, (list, tuple)
+    ):
         # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
         # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
         # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
         # eg: aten_split
+        warnings.warn(
+            f"node: {name} has list of tensors: {expected_values},"
+            f"but onnxscript_value wrapped it as a single tensor: {onnxscript_values}"
+        )
         return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
