@@ -1987,9 +1987,11 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {
+            "alexnet",
             "pytorch_CycleGAN_and_pix2pix",
             "pytorch_unet",
             "Super_SloMo",
+            "vgg16",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
