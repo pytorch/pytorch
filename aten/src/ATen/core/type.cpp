@@ -304,6 +304,21 @@ TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
   return containerTypePtrs[map_key];
 }
 
+std::string DictType::annotation_str_impl(TypePrinter printer) const {
+  auto keyAnnotation = getKeyType()->annotation_str(printer);
+  auto valueAnnotation = getValueType()->annotation_str(std::move(printer));
+
+  std::string result;
+  result.reserve(5 /* "Dict[" */ + keyAnnotation.size() + 2 /* ", " */ + valueAnnotation.size() + 1 /* "]" */);
+  result = "Dict[";
+  result += keyAnnotation;
+  result.push_back(',');
+  result.push_back(' ');
+  result += valueAnnotation;
+  result.push_back(']');
+  return result;
+}
+
 AnyListTypePtr AnyListType::get() {
   static AnyListTypePtr value(new AnyListType());
   return value;
