@@ -3826,13 +3826,13 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _cusparselt_create_meta(Tensor mask) -> (Tensor, Tensor)
+- func: _cutlass_create_meta(Tensor mask) -> (Tensor, Tensor)
   dispatch:
-    CUDA: _cusparselt_create_meta
+    CUDA: _cutlass_create_meta
 
-- func: _cusparselt_linear(Tensor sparse, Tensor dense, Tensor meta, Tensor meta_reordered) -> Tensor
+- func: _cutlass_linear(Tensor sparse, Tensor dense, Tensor meta, Tensor meta_reordered) -> Tensor
   dispatch:
-    CUDA: _cusparselt_linear
+    CUDA: _cutlass_linear
 
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse

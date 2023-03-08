@@ -1,5 +1,5 @@
 /*
-The following source file implements a sparse linear operator using cusparseLt
+The following source file implements a sparse linear operator using CUTLASS
 */
 
 #include <ATen/Functions.h>
@@ -118,7 +118,7 @@ __global__ void reorder_meta_kernel(
     dst.at({dst_row, dst_col}) = src.at({m, k});
 }
 
-std::tuple<Tensor, Tensor> _cusparselt_create_meta(const Tensor& mask) {
+std::tuple<Tensor, Tensor> _cutlass_create_meta(const Tensor& mask) {
     const int length_m = mask.size(0);
     const int length_k = mask.size(1);
 
@@ -144,8 +144,8 @@ std::tuple<Tensor, Tensor> _cusparselt_create_meta(const Tensor& mask) {
 }
 
 // TODO: Pull back in device and cuda version constraints.
-Tensor _cusparselt_linear(const Tensor& sparse, const Tensor& dense,
-                          const Tensor& meta, const Tensor& meta_reordered) {
+Tensor _cutlass_linear(const Tensor& sparse, const Tensor& dense,
+                       const Tensor& meta, const Tensor& meta_reordered) {
     // The code section below describes datatype for input, output
     // matrices and computation between elements in input matrices,
     // which will all be used as template parameters for
