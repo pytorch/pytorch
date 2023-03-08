@@ -778,10 +778,9 @@ void set_device(int device) {
   // Don't use DeviceGuard here because its destructor may be called before the
   // device is reset. This is fine because the device is thread local.
   //
-  // Setting the CUDA device is being omitted because it will unnecessary
-  // allocate a primary context. Instead let it use whatever current device is
-  // set. At this point the current device must have been already set by device
-  // guard.
+  // Setting the CUDA device is being omitted because it will unnecessarily
+  // allocate primary context. Instead, let it the engine use current device
+  // which must have been already set by prevoius device guard.
 
   if (device != CPU_DEVICE) {
     for (const auto i : c10::irange(static_cast<size_t>(
