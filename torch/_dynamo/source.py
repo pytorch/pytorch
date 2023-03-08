@@ -136,7 +136,7 @@ class AttrSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        if not self.member.isidentifier():
+        if self.member.isnumeric():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
