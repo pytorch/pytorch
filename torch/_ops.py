@@ -205,7 +205,9 @@ class PyOperator(OperatorBase):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key in self._dispatch_cache:
-            return self._dispatch_cache[dispatch_key](*args, **kwargs)
+            kernel = self._dispatch_cache[dispatch_key]
+            assert not isinstance(kernel, torch._C.DispatchKey)
+            return kernel(*args, **kwargs)
 
         if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
             return dispatch_functorch(self, args, kwargs)
