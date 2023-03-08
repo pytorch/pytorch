@@ -5860,10 +5860,9 @@ def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
 
     low = low + domain_eps
     high = high - domain_eps
-    make_arg = partial(
-        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad, low=low, high=high)
 
     make_arg = partial(make_tensor, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
+
     yield SampleInput(make_arg((S, S, S)))
     yield SampleInput(make_arg((S, S, S)), 0.2)
     yield SampleInput(make_arg(()))

@@ -64,6 +64,9 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
@@ -323,6 +326,13 @@ class TorchVariable(VariableTracker):
                 tensor_with_tf_override.subclass_type,
             )
         elif self.value is torch.amp.autocast_mode.autocast:
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
+            assert "device_type" not in kwargs
+            if self.value is torch.cuda.amp.autocast:
+                kwargs.update({"device_type": ConstantVariable("cuda")})
+            else:
+                kwargs.update({"device_type": ConstantVariable("cpu")})
             return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
