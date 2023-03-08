@@ -129,6 +129,13 @@ def mps_ops_grad_modifier(ops):
     MACOS_12_3_XFAILLIST_GRAD = {
         # Unsupported Border padding mode, forward pass success as fallback to cpu
         'grid_sampler_2d': [torch.float32],
+        # Unimplemented
+        'logaddexp2': [torch.float32],
+
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13. We are not raising error.
+        '__rpow__': [torch.float32],
+        'pow': [torch.float32],
     }
 
     MACOS_BEFORE_13_3_XFAILLIST_GRAD = {
@@ -145,6 +152,11 @@ def mps_ops_grad_modifier(ops):
         # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
         # Running `msort` with stable `sort` passes.
         'msort': [torch.float16],
+
+        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
+        # fixed in macOS 13. We are not raising error.
+        'pow': [torch.float32],
+        '__rpow__': [torch.float32],
     }
 
     XPASSLIST_GRAD = {
@@ -198,9 +210,9 @@ def mps_ops_modifier(ops):
         # expected failures
         # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
         # fixed in macOS 13.3. Currently error is not raised.
-        'pow': [torch.float32, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
+        'pow': [torch.int16, torch.int64, torch.uint8, torch.int8],
         # expected failures
-        '__rpow__': [torch.float32, torch.uint8, torch.int8],
+        '__rpow__': [torch.uint8, torch.int8],
 
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'cdist': [torch.float32],
@@ -269,7 +281,7 @@ def mps_ops_modifier(ops):
         'nn.functional.tanhshrink': [torch.uint8],
         'nn.functional.triplet_margin_loss': [torch.uint8],
         'nn.functional.triplet_margin_with_distance_loss': [torch.uint8],
-        'nn.functional.pairwise_distance': [torch.uint8],
+        'nn.functional.pairwise_distance': [torch.uint8, torch.float16],
         'outer': [torch.uint8],
         'rad2deg': [torch.uint8],
         'reciprocal': [torch.uint8],
@@ -296,6 +308,7 @@ def mps_ops_modifier(ops):
         'divfloor_rounding': [torch.uint8],
         'divno_rounding_mode': [torch.uint8],
         'floor_divide': [torch.uint8],
+        'ldexp': [torch.uint8],
         # square internally calls into power, and will type cast to int64, which supports starting from macOS 13
         'square': [torch.bool, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
 
@@ -306,24 +319,16 @@ def mps_ops_modifier(ops):
                            torch.int32, torch.int64, torch.uint8, torch.int8],
         'empty': [torch.bool, torch.float16, torch.float32, torch.int16,
                   torch.int32, torch.int64, torch.uint8, torch.int8],
+        'dist': [torch.float16],  # cpu result off, showing inf values
     }
 
     MACOS_BEFORE_13_3_XFAILLIST = {
-        # The result of pow(9 , 8) is showing 43046716, whereas it should've been 43046721.
-        # fixed in macOS 13. We are not raising error.
-        'pow': [torch.float32, torch.int8],
-        '__rpow__': [torch.float32],
-
         # Failures due to precision issues (due to fast-math). These has been fixed in MacOS 13.3+
         'tan': [torch.float32],
         'cdist': [torch.float32],
 
         # CPU Error: cpu not giving nan for x/0.0
         'atan2': [torch.bool, torch.float16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-
-        # Failure due to precision issue for fp16
-        # on both cpu and mps there are test cases that might produce inf result
-        'nn.functional.pairwise_distance': [torch.float16],
 
         # test blow pass on macOS 12 as it falls back to cpu
         # Argsort case using duplicate indices (undefined behaviour):
@@ -694,7 +699,6 @@ def mps_ops_modifier(ops):
         # CPU Errors:
         'addr': [torch.bool, torch.int16, torch.int32,
                  torch.int64, torch.uint8, torch.int8],  # "addmv_impl_cpu" not implemented for 'Half'
-        # 'dist': [torch.float16],  # cpu result off, showing inf values
         'as_stridedpartial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
                                     torch.int32, torch.int64, torch.uint8, torch.int8],  # cpu result off, showing random values
         'as_strided_partial_views': [torch.bool, torch.float16, torch.float32, torch.int16,
@@ -2917,7 +2921,7 @@ class TestMPS(TestCaseMPS):
 
     def test_repeat_interleave(self, device="mps"):
         x = torch.tensor([0, 1, 2, 3], device=device)
-        expected = torch.tensor([1, 2, 2, 3, 3, 3], device=device)
+        expected = torch.tensor([1, 2, 2, 3, 3, 3], dtype=torch.int32, device=device)
         self.assertEqual(torch.repeat_interleave(x), expected)
 
         with self.assertRaises(RuntimeError):
@@ -10226,54 +10230,45 @@ class TestConsistency(TestCaseMPS):
             #
             # Forward check
             #
-            try:
-                mps_sample = cpu_sample.transform(
-                    lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
+            mps_sample = cpu_sample.transform(
+                lambda x: x.detach().to("mps").requires_grad_(x.requires_grad) if isinstance(x, torch.Tensor) else x)
 
-                cpu_args = [cpu_sample.input] + list(cpu_sample.args)
-                cpu_kwargs = cpu_sample.kwargs
-                mps_args = [mps_sample.input] + list(mps_sample.args)
-                mps_kwargs = mps_sample.kwargs
+            cpu_args = [cpu_sample.input] + list(cpu_sample.args)
+            cpu_kwargs = cpu_sample.kwargs
+            mps_args = [mps_sample.input] + list(mps_sample.args)
+            mps_kwargs = mps_sample.kwargs
 
-                # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-                if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                    mps_args[1] = cpu_args[1]
+            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
+            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
+                mps_args[1] = cpu_args[1]
 
-                cpu_out = op(*cpu_args, **cpu_kwargs)
-                mps_out = op(*mps_args, **mps_kwargs)
+            cpu_out = op(*cpu_args, **cpu_kwargs)
+            mps_out = op(*mps_args, **mps_kwargs)
 
-                if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
-                    atol = 1e-4
-                    rtol = 3e-5
-                elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
-                    atol = 1e-2
-                    rtol = 1e-2
-                elif op.name == "masked.mean":
-                    atol = 7e-4
-                    rtol = 2e-3
-                elif op.name == "native_layer_norm":
-                    atol = 1e-4
-                    rtol = 1.3e-5
-                elif op.name in ["pow", "__rpow__"]:
-                    atol = 1e-6
-                    rtol = 4e-6
-                else:
-                    atol = None
-                    rtol = None
+            if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+                atol = 1e-4
+                rtol = 3e-5
+            elif op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:
+                atol = 1e-2
+                rtol = 1e-2
+            elif op.name == "masked.mean":
+                atol = 7e-4
+                rtol = 2e-3
+            elif op.name == "native_layer_norm":
+                atol = 1e-4
+                rtol = 1.3e-5
+            elif op.name in ["pow", "__rpow__"]:
+                atol = 1e-6
+                rtol = 4e-6
+            else:
+                atol = None
+                rtol = None
 
-                self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
-
-            except Exception as e:
-                raise e
-
-            if not (dtype.is_floating_point or dtype.is_complex):
-                # Maybe we should error here instead?
-                continue
+            self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
     @ops(mps_ops_grad_modifier(copy.deepcopy(op_db)), allowed_dtypes=MPS_GRAD_DTYPES)
     def test_output_grad_match(self, device, dtype, op):
-        # sys.setprofile(tracefunc)
         self.assertEqual(device, "cpu")
         key = op.name + op.variant_test_name
 
@@ -10337,51 +10332,42 @@ class TestConsistency(TestCaseMPS):
                 forward_failed = True
                 all_forward_pass = False
 
-            if not (dtype.is_floating_point or dtype.is_complex):
-                # Maybe we should error here instead?
-                continue
-
             #
             # Backward check
             #
-            try:
-                if forward_failed:
-                    # We would've failed immediately anyway, but this error is clearer
-                    # We error instead of continuing so that all_backward_pass would not be True
-                    raise RuntimeError("Forward pass already failed")
+            if forward_failed:
+                # We would've failed immediately anyway, but this error is clearer
+                # We error instead of continuing so that all_backward_pass would not be True
+                raise RuntimeError("Forward pass already failed")
 
-                if (op.name == "masked_select"):
-                    continue
-                cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
-                mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
+            if (op.name == "masked_select"):
+                continue
+            cpu_out = (cpu_out,) if isinstance(cpu_out, torch.Tensor) else tuple(cpu_out)
+            mps_out = (mps_out,) if isinstance(mps_out, torch.Tensor) else tuple(mps_out)
 
-                def req_grad(t):
-                    return isinstance(t, torch.Tensor) and t.requires_grad
+            def req_grad(t):
+                return isinstance(t, torch.Tensor) and t.requires_grad
 
-                diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
-                diff_mps_out = tuple(t for t in mps_out if req_grad(t))
-                diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
-                diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
-                self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
-                self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
+            diff_cpu_out = tuple(t for t in cpu_out if req_grad(t))
+            diff_mps_out = tuple(t for t in mps_out if req_grad(t))
+            diff_cpu_arg = tuple(t for t in pytree.tree_flatten((cpu_args, cpu_kwargs))[0] if req_grad(t))
+            diff_mps_arg = tuple(t for t in pytree.tree_flatten((mps_args, mps_kwargs))[0] if req_grad(t))
+            self.assertEqual(len(diff_cpu_out), len(diff_mps_out))
+            self.assertEqual(len(diff_cpu_arg), len(diff_mps_arg))
 
-                if len(diff_cpu_out) == 0:
-                    continue
-                # rand_like does not work with certain dtypes, so cast to double and cast back
-                cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
-                mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
+            if len(diff_cpu_out) == 0:
+                continue
+            # rand_like does not work with certain dtypes, so cast to double and cast back
+            cpu_grad_outputs = tuple(torch.rand_like(t.to(dtype=torch.double)).to(dtype=dtype) for t in diff_cpu_out)
+            mps_grad_outputs = tuple(t.to("mps") for t in cpu_grad_outputs)
 
-                # Compare computed gradients with cpu given random grad_output vector
-                # Sometimes when the derivative is 0, we just don't bother creating the graph
-                # allow_unused is needed in those cases.
-                cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
-                mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
+            # Compare computed gradients with cpu given random grad_output vector
+            # Sometimes when the derivative is 0, we just don't bother creating the graph
+            # allow_unused is needed in those cases.
+            cpu_grad_inputs = torch.autograd.grad(diff_cpu_out, diff_cpu_arg, grad_outputs=cpu_grad_outputs, allow_unused=True)
+            mps_grad_inputs = torch.autograd.grad(diff_mps_out, diff_mps_arg, grad_outputs=mps_grad_outputs, allow_unused=True)
 
-                self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
-            except Exception as e:
-                raise e
-                all_backward_pass = False
-
+            self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol)
 
 # Copied from `TestCommon` in `test_ops.py`, just enough to duplicate the `test_numpy_ref` for MPS
 @skipIfSlowGradcheckEnv
