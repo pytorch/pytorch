@@ -7,8 +7,8 @@
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <climits>
+#include <iostream>
 #include <limits>
-
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
@@ -198,14 +198,17 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
-    std::vector<opmath_t>sum(m, 0);
+    std::vector<opmath_t> sum(m);
+    for (const auto i : c10::irange(m)) {
+      sum[i] = y[i * incy];
+    }
     for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
       scalar_t z = alpha * x[j * incx];
       for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
-         y[i * incy] = scalar_t(0);
+          sum[i] = 0;
         }
         sum[i] += z * column_[i];
       }
