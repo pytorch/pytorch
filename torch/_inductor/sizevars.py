@@ -462,9 +462,7 @@ class SizeVarAllocator:
             shape = self.simplify(shape)
             if shape in needed:
                 needed.remove(shape)
-                code.writeline(
-                    f"{self.declare}{shape} = {name}.item() if isinstance({name}, torch.Tensor) else {name}{self.ending}"
-                )
+                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()

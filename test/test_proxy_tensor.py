@@ -970,6 +970,16 @@ def forward(self, crop_camera_1, mask_1):
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
     return None""")
 
+    def test_unbacked_slice(self):
+        def f(x, m):
+            x = x[m]
+            return x[slice(None, None, None), slice(None, None, None), slice(None, 2, None)]
+
+        make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 3, 3)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        )
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_unbacked_batch_resnet(self):
         mod = torchvision.models.resnet18()
