@@ -1,7 +1,7 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
-#include <c10/util/env.h>
 #include <c10/util/CallOnce.h>
+#include <c10/util/env.h>
 
 #ifdef USE_C10D_NCCL
 
@@ -54,7 +54,8 @@ std::string getNcclVersion() {
 }
 
 bool nccl_use_nonblocking() {
-  static bool nccl_use_nonblocking_ = c10::utils::check_env("NCCL_USE_COMM_NONBLOCKING") == true;
+  static bool nccl_use_nonblocking_ =
+      c10::utils::check_env("NCCL_USE_COMM_NONBLOCKING") == true;
   if (nccl_use_nonblocking_) {
     TORCH_WARN("Using experimental non-blocking NCCL communicator.");
   }

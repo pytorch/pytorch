@@ -132,7 +132,7 @@ using namespace at;
 namespace detail {
 
 static inline void NCCL_CHECK(ncclResult_t result) {
-  TORCH_INTERNAL_ASSERT(((int) result) != 7, "INPROGRESS IN BLOCKING CHECK");
+  TORCH_INTERNAL_ASSERT(((int)result) != 7, "INPROGRESS IN BLOCKING CHECK");
   NCCL_CHECK(from_nccl_result(result));
 }
 
@@ -142,7 +142,8 @@ static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
 #else
-    TORCH_INTERNAL_ASSERT(false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+    TORCH_INTERNAL_ASSERT(
+        false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
 #endif
   }
   if (result != ncclSuccess) {
@@ -150,11 +151,15 @@ static inline void NCCL_CHECK_NONBLOCKING(ncclResult status, ncclComm_t comm) {
   }
 }
 
-static inline void NCCL_CHECK_NONBLOCKING(ncclResult_t result, ncclComm_t comm) {
+static inline void NCCL_CHECK_NONBLOCKING(
+    ncclResult_t result,
+    ncclComm_t comm) {
   NCCL_CHECK_NONBLOCKING(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vector<ncclComm_t> &comms) {
+static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
+    ncclResult status,
+    std::vector<ncclComm_t>& comms) {
   ncclResult_t result = to_nccl_result(status);
   if (result == ncclInProgress) {
     for (const auto i : c10::irange(comms.size())) {
@@ -162,7 +167,8 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vecto
 #ifdef NCCL_HAS_COMM_NONBLOCKING
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
 #else
-        TORCH_INTERNAL_ASSERT(false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
+        TORCH_INTERNAL_ASSERT(
+            false, "NCCL COMM NONBLOCKING USED WITH UNSUPPORTED NCCL VERSION.");
 #endif
       } while (result == ncclInProgress);
       if (result != ncclSuccess) {
@@ -175,7 +181,9 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult status, std::vecto
   }
 }
 
-static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(ncclResult_t result, std::vector<ncclComm_t> &comms) {
+static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
+    ncclResult_t result,
+    std::vector<ncclComm_t>& comms) {
   NCCL_CHECK_NONBLOCKING_GROUPEND(from_nccl_result(result), comms);
 }
 
@@ -364,7 +372,9 @@ AutoNcclGroup::AutoNcclGroup() {
 #endif
 }
 
-AutoNcclGroup::AutoNcclGroup(std::vector<ncclComm_t> &comms, bool comm_nonblocking) {
+AutoNcclGroup::AutoNcclGroup(
+    std::vector<ncclComm_t>& comms,
+    bool comm_nonblocking) {
   (c10::cuda::getFreeMutex())->lock();
   // TODO(eqy): can we make comms_ reference?
   comms_ = comms;
@@ -376,11 +386,11 @@ AutoNcclGroup::AutoNcclGroup(std::vector<ncclComm_t> &comms, bool comm_nonblocki
 
 AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
-if (!comm_nonblocking_) {
-  detail::NCCL_CHECK(ncclGroupEnd());
-} else {
-  detail::NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), comms_);
-}
+  if (!comm_nonblocking_) {
+    detail::NCCL_CHECK(ncclGroupEnd());
+  } else {
+    detail::NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), comms_);
+  }
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
   (c10::cuda::getFreeMutex())->unlock();
@@ -862,11 +872,11 @@ void all2all(
           stream.stream()));
     }
   }
-if (!comm_nonblocking) {
-  NCCL_CHECK(ncclGroupEnd());
-} else {
-  NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
-}
+  if (!comm_nonblocking) {
+    NCCL_CHECK(ncclGroupEnd());
+  } else {
+    NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), _comm);
+  }
 #else
   AT_ERROR("all2all is only supported for NCCL lib version >= 2.7.0");
 #endif
@@ -894,13 +904,15 @@ void send(
         to_nccl_comm(comm),
         stream.stream()));
   } else {
-    NCCL_CHECK_NONBLOCKING(ncclSend(
-        input.data_ptr(),
-        input.numel(),
-        to_nccl_data_type(input),
-        dst,
-        to_nccl_comm(comm),
-        stream.stream()), comm);
+    NCCL_CHECK_NONBLOCKING(
+        ncclSend(
+            input.data_ptr(),
+            input.numel(),
+            to_nccl_data_type(input),
+            dst,
+            to_nccl_comm(comm),
+            stream.stream()),
+        comm);
   }
 #else
   AT_ERROR("Send is only supported for NCCL lib version >= 2.7.0");
@@ -929,13 +941,15 @@ void recv(
         to_nccl_comm(comm),
         stream.stream()));
   } else {
-    NCCL_CHECK_NONBLOCKING(ncclRecv(
-        output.data_ptr(),
-        output.numel(),
-        to_nccl_data_type(output),
-        src,
-        to_nccl_comm(comm),
-        stream.stream()), comm);
+    NCCL_CHECK_NONBLOCKING(
+        ncclRecv(
+            output.data_ptr(),
+            output.numel(),
+            to_nccl_data_type(output),
+            src,
+            to_nccl_comm(comm),
+            stream.stream()),
+        comm);
   }
 #else
   AT_ERROR("Recv is only supported for NCCL lib version >= 2.7.0");
@@ -1028,7 +1042,8 @@ void scatter(
         auto send_type = to_nccl_data_type(inputs[r]);
         const auto* sendbuff = reinterpret_cast<char*>(inputs[r].data_ptr());
         if (!comm_nonblocking) {
-          NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
+          NCCL_CHECK(
+              ncclSend(sendbuff, send_count, send_type, r, comm, stream));
         } else {
           ncclSend(sendbuff, send_count, send_type, r, comm, stream);
         }
