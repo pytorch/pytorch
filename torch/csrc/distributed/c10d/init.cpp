@@ -1494,7 +1494,7 @@ Arguments:
           processGroup,
           "Options",
           R"(
-Base class for all processs group options implementations, such as the nccl
+Base class for all processes group options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def(
@@ -2096,7 +2096,7 @@ Example::
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                    1. For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                    1. For CPU work, ``fut.done()`` returns true when work has been completed and value()
                        tensors are ready.
                     2. For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
                     3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns
