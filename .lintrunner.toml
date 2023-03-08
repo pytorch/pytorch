@@ -1,3 +1,5 @@
+merge_base_with = "master"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
@@ -841,6 +843,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/**/*.pyi',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
     'torch/_functorch/make_functional.py',

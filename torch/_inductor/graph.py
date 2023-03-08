@@ -116,6 +116,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
     ):
         super().__init__(gm)
+        self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -154,6 +155,13 @@ class GraphLowering(torch.fx.Interpreter):
     @property
     def fake_mode(self):
         return V.fake_mode
+
+    def get_buffer(self, buffer_name: str):
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name]
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name]
+        return None
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -278,9 +286,13 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)
         if isinstance(example, SymTypes):
             expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
+        elif isinstance(example, int):
+            expr = sympy.Integer(example)
             self.graph_inputs[target] = expr
             return expr
         # todo(chilli): We can remove the last check once we turn buffers into
@@ -312,43 +324,43 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        with ir.IRNode.current_origins(gather_origins(args, kwargs)):
-            if target is operator.getitem and isinstance(args[0], (list, tuple)):
-                return super().call_function(target, args, kwargs)
+        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+            return super().call_function(target, args, kwargs)
 
-            if hasattr(target, "_inductor_lowering_function"):
-                # passthrough lowerings from .pattern_matcher
-                return target(*args, **kwargs)
+        if hasattr(target, "_inductor_lowering_function"):
+            # passthrough lowerings from .pattern_matcher
+            return target(*args, **kwargs)
 
-            if target not in lowerings:
-                base_name = target.name().split(".")[0]
-                if base_name in FALLBACK_ALLOW_LIST:
-                    make_fallback(target)
-                elif config.implicit_fallbacks:
-                    error = (
-                        MissingOperatorWithDecomp
-                        if get_decompositions([target])
-                        else MissingOperatorWithoutDecomp
-                    )
-                    log.info(
-                        "Creating implicit fallback for:\n%s",
-                        error.operator_str(target, args, kwargs),
-                    )
-                    make_fallback(target)
-                elif get_decompositions([target]):
-                    # There isn't a good way to dynamically patch this in
-                    # since AOT Autograd already ran.  The error message tells
-                    # the user how to fix it.
-                    raise MissingOperatorWithDecomp(target, args, kwargs)
-                else:
-                    raise MissingOperatorWithoutDecomp(target, args, kwargs)
+        if target not in lowerings:
+            base_name = target.name().split(".")[0]
+            if base_name in FALLBACK_ALLOW_LIST:
+                make_fallback(target)
+            elif config.implicit_fallbacks:
+                error = (
+                    MissingOperatorWithDecomp
+                    if get_decompositions([target])
+                    else MissingOperatorWithoutDecomp
+                )
+                log.info(
+                    "Creating implicit fallback for:\n%s",
+                    error.operator_str(target, args, kwargs),
+                )
+                make_fallback(target)
+            elif get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how to fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
+            else:
+                raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
-            try:
-                out = lowerings[target](*args, **kwargs)
-                return out
-            except Exception as e:
-                log.exception("Error from lowering")
-                raise LoweringException(e, target, args, kwargs) from e
+        try:
+            out = lowerings[target](*args, **kwargs)
+            return out
+        except Exception as e:
+            raise LoweringException(e, target, args, kwargs).with_traceback(
+                e.__traceback__
+            ) from None
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -415,7 +427,11 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
-        with ir.IRNode.current_origins({n}):
+        origins = {n}
+        if n.op == "call_function":
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            origins |= gather_origins(args, kwargs)
+        with ir.IRNode.current_origins(origins):
             if n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
@@ -469,12 +485,24 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        if user.target in (
+                        need_fixed_layout = [
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
                             torch.ops.aten._int_mm.default,
-                        ):
+                        ]
+                        if torch._C.has_mkldnn:
+                            need_fixed_layout += [
+                                torch.ops.mkldnn._convolution_pointwise.default,
+                                torch.ops.mkldnn._convolution_pointwise.binary,
+                                torch.ops.mkldnn._convolution_pointwise_.binary,
+                                torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                            ]
+                            if torch._C.has_mkl:
+                                need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
+                        if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
@@ -599,8 +627,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        if dynamo_config.output_code:
-            log.info("Output code: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
