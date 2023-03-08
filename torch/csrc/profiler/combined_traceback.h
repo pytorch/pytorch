@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/python_headers.h>
+#include <torch/csrc/utils/pybind.h>
 
 namespace py = pybind11;
 
