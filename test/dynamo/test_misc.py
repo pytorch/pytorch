@@ -3287,10 +3287,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_amp_autocast(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    def test_is_autocast_cpu_enabled(self):
+        def fn(a_float32, b_float32):
+            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+                c_float16 = torch.mm(a_float32, b_float32)
+                if torch.is_autocast_cpu_enabled():
+                    c_float16 = c_float16 + 1
+            return c_float16
+
+        a = torch.rand((8, 8))
+        b = torch.rand((8, 8))
+        ref = fn(a, b)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
