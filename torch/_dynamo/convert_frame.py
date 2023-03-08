@@ -7,7 +7,6 @@ import weakref
 from typing import Dict, Optional, Set
 
 import torch
-from torch._guards import tracing
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -309,8 +308,7 @@ def _compile(
             export,
             mutated_closure_cell_contents,
         )
-        with tracing(tracer.output.tracing_context):
-            tracer.run()
+        tracer.run()
         output = tracer.output
         assert output is not None
         assert output.output_instructions
