@@ -65,7 +65,11 @@ For the non-wrapper code path:
 or a submodule chosen by the provided wrapping policy.
 """
 
-# Environment variable to use unsafe `setattr()` for view setting
+# Environment variable to toggling whether to use unsafe `setattr()` for view
+# setting in `_use_sharded_views()` and `_use_unsharded_views()`
+# We should use 'safe' by default since it respects method overrides, but for
+# special cases such as for high CPU overhead or for intentionally bypassing
+# checks in the overrides, we may use 'unsafe'.
 _FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
 
 
@@ -352,8 +356,6 @@ class FlatParamHandle:
         use_orig_params: bool,
     ):
         super().__init__()
-        # For special cases (e.g. high CPU overhead), we may want to bypass the
-        # `nn.Module.setattr()` checks, where we gate this with an env var.
         use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
         self._setattr_tensor: Callable[[nn.Module, str, Tensor], None]
         self._setattr_param: Callable[[nn.Module, str, nn.Parameter], None]
