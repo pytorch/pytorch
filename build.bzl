@@ -114,6 +114,12 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
     )
 
+    rules.cc_library(
+        name = "torch_library_headers",
+        hdrs = ["torch/library.h"] + rules.glob(["torch/csrc/jit/*.h"]),
+        visibility = ["//aten/src/ATen/view:__pkg__"],
+    )
+
     rules.genrule(
         name = "version_h",
         srcs = [
