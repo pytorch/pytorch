@@ -13,12 +13,12 @@ runs:
           # Pulled from instance metadata endpoint for EC2
           # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
           category=$1
-          # If it is GCP runner (runner name contains gcp), do not run this 
-          runner_name_str=${{ runner.name }} 
+          # If it is GCP runner (runner name contains gcp), do not run this
+          runner_name_str=${{ runner.name }}
           if [[ $runner_name_str != *"gcp"* ]]; then
             curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          else 
-            echo "Runner is from Google Cloud Platform, No info on ec2 metadata" 
+          else
+            echo "Runner is from Google Cloud Platform, No info on ec2 metadata"
           fi
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
