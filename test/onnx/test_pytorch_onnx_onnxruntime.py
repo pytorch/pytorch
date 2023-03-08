@@ -4912,16 +4912,16 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 return torch.logical_not(x)
 
         x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
-        self.run_test(NotModel(), input_args=(x, ))
+        self.run_test(NotModel(), input_args=(x,))
 
         x = torch.randint(10, (5, 5), dtype=torch.int32)
-        self.run_test(NotModel(), input_args=(x, ))
+        self.run_test(NotModel(), input_args=(x,))
 
         x = torch.randint(10, (5, 5), dtype=torch.double)
-        self.run_test(NotModel(), input_args=(x, ))
+        self.run_test(NotModel(), input_args=(x,))
 
         x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
-        self.run_test(NotModel(), input_args=(x, ))
+        self.run_test(NotModel(), input_args=(x,))
 
     @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
     def test_eq(self):
