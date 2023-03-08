@@ -82,6 +82,11 @@ class OperatorBase:
         # way you can register dispatch keys.
         self.python_key_mode_table: Dict[Type[TorchDispatchMode]] = {}
 
+        # This table allows you to override the behavior of functorch
+        # transformations.  NB: this currently only does something for
+        # PyOperator
+        self.functorch_table = {}
+
     def __call__(self, *args, **kwargs):
         raise NotImplementedError()
 
@@ -186,16 +191,13 @@ class PyOperator(OperatorBase):
     def __init__(self, name):
         super().__init__()
         self._name = name
-        self.table = {}
-        self.python_key_mode_table = {}
-        self.functorch_table = {}
 
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         pyop_namespace[name] = self
 
     def fallthrough(self, dispatch_key):
-        self.table[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
+        self.py_kernels[dispatch_key] = self._fallthrough_fn(self, dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -215,8 +217,8 @@ class PyOperator(OperatorBase):
             # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
             return self.python_key_mode_table[type(curr_mode)](*args, **kwargs)
 
-        assert dispatch_key in self.table, dispatch_key
-        return self.table[dispatch_key](*args, **kwargs)
+        assert dispatch_key in self.py_kernels, dispatch_key
+        return self.py_kernels[dispatch_key](*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
