@@ -5019,14 +5019,6 @@ TEST_F(ModulesTest, PrettyPrintReplicationPad) {
       "torch::nn::ReplicationPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
-// TEST_F(ModulesTest, PrettyPrintZeroPad2d) {
-//   ASSERT_EQ(
-//       c10::str(ZeroPad2d(ZeroPad2dOptions(2))),
-//       "torch::nn::ZeroPad2d(padding=[2, 2, 2, 2])");
-//   ASSERT_EQ(
-//       c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
-//       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
-// }
 TEST_F(ModulesTest, PrettyPrintZeroPad) {
   ASSERT_EQ(
       c10::str(ZeroPad1d(ZeroPad1dOptions(2))),
@@ -5040,6 +5032,12 @@ TEST_F(ModulesTest, PrettyPrintZeroPad) {
   ASSERT_EQ(
       c10::str(ZeroPad2d(ZeroPad2dOptions({1, 1, 2, 0}))),
       "torch::nn::ZeroPad2d(padding=[1, 1, 2, 0])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions(1))),
+      "torch::nn::ZeroPad3d(padding=[1, 1, 1, 1, 1, 1])");
+  ASSERT_EQ(
+      c10::str(ZeroPad3d(ZeroPad3dOptions({1, 2, 1, 2, 1, 2}))),
+      "torch::nn::ZeroPad3d(padding=[1, 2, 1, 2, 1, 2])");
 }
 
 
