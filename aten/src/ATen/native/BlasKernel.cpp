@@ -198,6 +198,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
+    std::vector<opmath_t>sum(m, 0);
     for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
       scalar_t z = alpha * x[j * incx];
@@ -206,8 +207,11 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
         if (j==0 && beta==scalar_t(0)) {
          y[i * incy] = scalar_t(0);
         }
-        y[i * incy] += z * column_[i];
+        sum[i] += z * column_[i];
       }
+    }
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
     }
   }
   return;
@@ -268,7 +272,7 @@ scalar_t dot_naive(
   using opmath_t = at::opmath_type<scalar_t>;
   opmath_t sum = 0;
   for (i = 0; i < n; i++) {
-    sum += static_cast<opmath_t>(op(x[i * incx], y[i * incy]));
+    sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
   return static_cast<scalar_t>(sum);
 }

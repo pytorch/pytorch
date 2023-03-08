@@ -323,21 +323,8 @@ void gemm(
    }
 #endif
    gemm_stub(
-       at::kCPU,
-       at::kBFloat16,
-       transa,
-       transb,
-       m,
-       n,
-       k,
-       alpha,
-       a,
-       lda,
-       b,
-       ldb,
-       beta,
-       c,
-       ldc);
+      at::kCPU, at::kBFloat16,
+      transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
 void gemm(
