@@ -21,6 +21,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -909,6 +910,28 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         for _ in range(10):
             opt_fn(a, b)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_nested_grad_mode_graph_break(self):
+        def fn(x):
+            before = torch.is_grad_enabled()
+            with torch.set_grad_enabled(False):
+                torch._dynamo.graph_break()
+                with torch.set_grad_enabled(True):
+                    x = torch.mul(x, 5)
+                    torch._dynamo.graph_break()
+                    x = torch.sqrt(x)
+                    assert torch.is_grad_enabled()
+                assert not torch.is_grad_enabled()
+            assert torch.is_grad_enabled() == before
+            return x
+
+        a = torch.randn([3, 4])
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+
+        for _ in range(10):
+            opt_fn(a)
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_build_tuple_unpack(self):
         def fn1(a, b, c):
@@ -1980,6 +2003,48 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_profiler_cache_lookup(self):
+        def fn(x):
+            y = x**2
+            y = y + 2
+            z = y**3
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        # warmup
+        opt_fn(x)
+
+        enable_cache_lookup_profiler(True)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(
+            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
+        )
+
+        enable_cache_lookup_profiler(False)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
@@ -3222,10 +3287,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_amp_autocast(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    def test_is_autocast_cpu_enabled(self):
+        def fn(a_float32, b_float32):
+            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+                c_float16 = torch.mm(a_float32, b_float32)
+                if torch.is_autocast_cpu_enabled():
+                    c_float16 = c_float16 + 1
+            return c_float16
+
+        a = torch.rand((8, 8))
+        b = torch.rand((8, 8))
+        ref = fn(a, b)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
@@ -3381,6 +3487,109 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(res, opt_res))
         self.assertEqual(res.dtype, torch.bfloat16)
         self.assertEqual(opt_res.dtype, torch.bfloat16)
+
+    def test_autocast_cpu_graph_break_inner_fn(self):
+        class MyModule(torch.nn.Module):
+            @staticmethod
+            def mm_breaks(x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y)
+
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    torch._dynamo.graph_break()
+                    with torch.autocast(
+                        device_type="cpu", dtype=torch.bfloat16, enabled=False
+                    ):
+                        torch._dynamo.graph_break()
+                        g_float32 = torch.mm(a_float32, b_float32)
+                        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                            # Check that nested with non-inlineable function with graph break
+                            torch._dynamo.graph_break()
+                            f_float16_1 = self.mm_breaks(a_float32, b_float32)
+                    # We remember to exit the inner autocast correctly to outer
+                    # even after graph breaks
+                    f_float16 = self.mm_breaks(a_float32, b_float32)
+                    assert f_float16.dtype == f_float16_1.dtype
+                return f_float16, g_float32
+
+        module = MyModule()
+        real_16, real_32 = module(torch.tensor([0.5]))
+        real_device_16 = real_16.device
+        real_dtype_16 = real_16.dtype
+        real_device_32 = real_32.device
+        real_dtype_32 = real_32.dtype
+
+        graph = torch._dynamo.optimize("eager")(module)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
+
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
+
+    def test_autocast_graph_break_method(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.bias = bias
+
+            def mm_not_break(self, x, y):
+                return torch.mm(x, y) + self.bias
+
+            def mm_breaks(self, x, y):
+                torch._dynamo.graph_break()
+                return torch.mm(x, y) + self.bias
+
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cpu")
+                b_float32 = torch.rand((8, 8), device="cpu")
+
+                with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+                    with torch.autocast(
+                        device_type="cpu", dtype=torch.bfloat16, enabled=False
+                    ):
+                        g_float32 = torch.mm(a_float32, b_float32)
+                    f_float16 = self.mm_breaks(a_float32, b_float32)
+
+                    assert (
+                        f_float16[0][0] == self.mm_not_break(a_float32, b_float32)[0][0]
+                    )
+                return f_float16, g_float32
+
+        module = MyModule(bias=torch.rand((8, 8), device="cpu", dtype=torch.bfloat16))
+
+        with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
+            # Autocast doesn't work on addition, so we need the bias to be `bfloat16`
+            res = torch.rand((8, 8), device="cpu", dtype=torch.float32) + torch.rand(
+                (8, 8), device="cpu", dtype=torch.bfloat16
+            )
+            self.assertEqual(res.dtype, torch.float32)
+
+        real_16, real_32 = module(torch.tensor([0.5]))
+        real_device_16 = real_16.device
+        real_dtype_16 = real_16.dtype
+        real_device_32 = real_32.device
+        real_dtype_32 = real_32.dtype
+
+        graph = torch._dynamo.optimize("eager")(module)
+        out_16, out_32 = graph(torch.tensor([0.5]))
+        self.assertEqual(out_16.device, real_device_16)
+        self.assertEqual(out_16.dtype, real_dtype_16)
+        self.assertEqual(out_32.device, real_device_32)
+        self.assertEqual(out_32.dtype, real_dtype_32)
+
+        self.assertEqual(out_16.device.type, "cpu")
+        self.assertEqual(out_16.dtype, torch.bfloat16)
+        self.assertEqual(out_32.device.type, "cpu")
+        self.assertEqual(out_32.dtype, torch.float32)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_autocast_float64(self):
