@@ -48,6 +48,22 @@ from torchgen.utils import (
 )
 
 
+def _sig_decl_wrapper(sig: Union[CppSignature, ExecutorchCppSignature]) -> str:
+    """
+    A wrapper function to basically get `sig.decl(include_context=True)`.
+    For ATen kernel, the codegen has no idea about ET contextArg, so we
+    use this wrapper to add it.
+    """
+    if isinstance(sig, ExecutorchCppSignature):
+        return sig.decl()
+
+    returns_type = aten_cpp.returns_type(sig.func.returns).cpp_type()
+    cpp_args = [a.decl() for a in sig.arguments()]
+    cpp_args_str = ", ".join([contextArg.decl()] + cpp_args)
+    sig_decl = f"{returns_type} {sig.name()}({cpp_args_str})"
+    return sig_decl
+
+
 def static_dispatch(
     sig: Union[CppSignature, ExecutorchCppSignature],
     f: NativeFunction,
@@ -80,7 +96,7 @@ ET_ASSERT_UNREACHABLE_MSG("The number of native function(s) binding to {f.func.n
     """
     return f"""
 // {f.namespace}::{f.func}
-TORCH_API inline {sig.decl()} {{
+TORCH_API inline {_sig_decl_wrapper(sig)} {{
     {static_block}
 }}
 """
@@ -116,10 +132,10 @@ class ComputeFunction:
 
             return f"""
 // {f.namespace}::{f.func}
-TORCH_API inline {sig.decl()} {{
+TORCH_API inline {_sig_decl_wrapper(sig)} {{
     return at::{sig.name()}({comma.join(e.name for e in sig.arguments())});
 }}
-            """
+"""
 
         else:
             return static_dispatch(
@@ -188,11 +204,10 @@ class ComputeCodegenUnboxedKernels:
 Operator(
     "{f.namespace}::{f.func.name}",
     []({contextArg.defn()}, EValue** stack) {{
-        {"(void)context;" if self.use_aten_lib else ""}
         {code_connector.join(code_list)}
 
         EXECUTORCH_SCOPE_PROF("native_call_{f.func.name}");
-        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"" if self.use_aten_lib else "context, "}{args_str});
+        {ret_prefix}torch::executor::{f.namespace}::{sig.name()}({"context, "}{args_str});
 
         {return_assignment}
     }}
