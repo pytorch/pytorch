@@ -15,7 +15,7 @@ from torch.ao.quantization.quantize_fx import (
     prepare_fx,
 )
 
-# TODO: move all these LSTM util functions to a separate file
+# TODO: move all LSTM util functions from fx/utils.py to this file
 def _get_lstm_with_individually_observed_parts(
     float_lstm: torch.nn.LSTM,
     example_inputs: Tuple[Any, ...],
