@@ -64,6 +64,9 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
@@ -324,6 +327,13 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
+            assert "device_type" not in kwargs
+            if self.value is torch.cuda.amp.autocast:
+                kwargs.update({"device_type": ConstantVariable("cuda")})
+            else:
+                kwargs.update({"device_type": ConstantVariable("cpu")})
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -544,6 +554,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
                     fn_ = sym_sqrt
+
+            if fn_ is torch.tensor:
+
+                def check_any_unspec(x):
+                    # NB: This includes UnspecializedPythonVariable
+                    if isinstance(x, (TensorVariable, SymNodeVariable)):
+                        return True
+                    elif isinstance(x, ListVariable):
+                        return any(check_any_unspec(y) for y in x.items)
+                    # TODO: there maybe other recursive structures you need to
+                    # check
+                    else:
+                        return False
+
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                if isinstance(args[0], ListVariable) and check_any_unspec(args[0]):
+                    unimplemented("torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,

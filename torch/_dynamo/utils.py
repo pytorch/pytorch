@@ -954,14 +954,17 @@ def same(
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
-            ref = ref.item()
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): {ref} != {res}")
+            log.error(f"Accuracy failed (numpy): {ref} != {res}")
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1295,6 +1298,13 @@ def ifdyn(count1, count2):
         return count2
 
 
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
+        return count1
+    else:
+        return count2
+
+
 def import_submodule(mod: types.ModuleType):
     """
     Ensure all the files in a given submodule are imported
@@ -1346,7 +1356,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
     raise AssertionError(f"Illegal reason {reason}")
 
 
-def tensor_shape_should_be_static(
+def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """
