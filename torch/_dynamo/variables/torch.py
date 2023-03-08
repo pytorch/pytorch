@@ -564,8 +564,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 data_arg = None
                 if args:
                     data_arg = args[0]
-                elif 'data' in kwargs:
-                    data_arg = kwargs['data']
+                elif "data" in kwargs:
+                    data_arg = kwargs["data"]
 
                 if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")

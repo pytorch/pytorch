@@ -1989,7 +1989,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_tensor_data_kwarg(self):
         # https://github.com/pytorch/pytorch/issues/96278
         def f():
-            return torch.tensor(data=[[1., -1.]])
+            return torch.tensor(data=[[1.0, -1.0]])
 
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
