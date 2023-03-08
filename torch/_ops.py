@@ -224,12 +224,15 @@ class PyOperator(OperatorBase):
 
         final_key = resolve_key(self, dispatch_key)
 
-        assert not isinstance(
-            final_key, str
-        ), f"C++ fallbacks don't work for PyOperator, please reimplement {final_key}"
+        # This can current fail due to backend fallbacks.  You just have to
+        # register them by hand for PyOperator.
         assert final_key in self.py_kernels, f"{dispatch_key} -> {final_key}"
         self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
-        return self.py_kernels[final_key](*args, **kwargs)
+        kernel = self.py_kernels[final_key]
+        # It's illegal to register DispatchKey to py_kernels, since there's no
+        # C++ kernel to call into
+        assert not isinstance(kernel, torch._C.DispatchKey)
+        return kernel(*args, **kwargs)
 
     def __call__(self, *args, **kwargs):
         flat_args = _to_flat_tuple(args, kwargs)
