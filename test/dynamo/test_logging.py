@@ -7,6 +7,7 @@ import torch
 import torch._dynamo.logging as td_logging
 import torch._dynamo.test_case
 import torch._dynamo.testing
+import torch._logging
 
 
 def check_log_result():
@@ -24,7 +25,7 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
 def log_settings(settings):
-    return unittest.mock.patch.dict(os.environ, {"TORCH_COMPILE_LOGS": settings})
+    return unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": settings})
 
 
 # This is needed because we reinit logging each time dynamo is called
@@ -135,8 +136,8 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         pass
 
 
-exclusions = set(["bytecode", "output_code"])
-for name, ty in td_logging.LOGGABLE_OBJ_TO_REC_TYPE.items():
+exclusions = {"bytecode", "output_code"}
+for name, ty in torch._logging.NAME_TO_RECORD_TYPE.items():
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))
 

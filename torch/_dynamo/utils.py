@@ -255,9 +255,7 @@ graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
 def init_logging():
-    torchdynamo_logging.init_logging(
-        config.log_level, log_file_name=config.log_file_name
-    )
+    torchdynamo_logging.init_logging(log_file_name=config.log_file_name)
     graph_break_dup_warning_checker.reset()
 
 
