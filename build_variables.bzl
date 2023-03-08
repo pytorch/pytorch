@@ -147,6 +147,7 @@ libtorch_profiler_sources = [
     "torch/csrc/profiler/perf.cpp",
     "torch/csrc/monitor/counters.cpp",
     "torch/csrc/monitor/events.cpp",
+    "torch/csrc/profiler/unwind/unwind.cpp",
 ]
 
 libtorch_edge_profiler_sources = libtorch_profiler_sources + [
@@ -681,7 +682,6 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/passes/frozen_conv_add_relu_fusion_cuda.cpp",
     "torch/csrc/jit/tensorexpr/cuda_codegen.cpp",
     "torch/csrc/jit/runtime/register_cuda_ops.cpp",
-    "torch/csrc/profiler/unwind/unwind.cpp",
 ]
 
 # These files are the only ones that are supported on Windows.
@@ -870,6 +870,7 @@ libtorch_python_core_sources = [
     "torch/csrc/multiprocessing/init.cpp",
     "torch/csrc/onnx/init.cpp",
     "torch/csrc/profiler/python/init.cpp",
+    "torch/csrc/profiler/combined_traceback.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/utils/init.cpp",

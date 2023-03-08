@@ -4974,6 +4974,13 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        c = gather_traceback(True, True, True)
+        r, = symbolize_tracebacks([c])
+        self.assertTrue("combined_traceback.cpp" in str(r))
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_with_cpp(self):
         try:
