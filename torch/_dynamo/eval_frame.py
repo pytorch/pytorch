@@ -609,9 +609,9 @@ def export(
         tracing_mode (str): Specifies the tracing mode. Must be set to "real" if decomposition_table is not specified.
         If decomposition_table is specified, the options are "symbolic" or "fake". Default is "real".
 
-        constraints List[Constraint]: A list of user specified constraints, see Note - [On Export Dynamic Dimension UX]
-        for more details. Constraints must be unique per tensor+dim pair, must not be called alongside mark_dynamic
-        for the same tensor, and must only specify tensors that are part of the arg inputs.
+        constraints List[Constraint]: A list of user specified constraints. Constraints must be unique per tensor+dim
+        pair, must not be called alongside mark_dynamic for the same tensor, and must only specify tensors that are
+        part of the arg inputs.
 
         **kwargs: Arbitrary keyword arguments to be passed to the function f.
 
