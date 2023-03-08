@@ -85,6 +85,11 @@ _device_not_kwarg_ops = (
     aten._resize_output.out,
 )
 
+_nested_constructors = (
+    aten._nested_tensor_from_tensor_list.default,
+    aten._nested_tensor_from_tensor_list.out,
+)
+
 # this op is never actually used
 _non_kwarg_device_constructors = (aten._list_to_tensor,)
 
@@ -513,7 +518,27 @@ def index_put_(fake_mode, func, *args, **kwargs):
     return new_kwargs["input"]
 
 
-@register_op_impl(lambda fn: fn in _device_not_kwarg_ops)
+@register_op_impl(lambda fn: fn in _nested_constructors)
+def nested_constructor(fake_mode, func, *args, **kwargs):
+    assert func not in _non_kwarg_device_constructors
+    new_args, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=False
+    )
+    # default device is device of first tensor in tensorlist
+    default_device = (
+        torch.device("cpu") if len(args[0]) == 0 else args[0][0].fake_device
+    )
+    device_arg = new_args[3]
+    out_device = default_device if device_arg is None else device_arg
+    new_args = new_args[:3] + (torch.device("meta"),) + new_args[4:]
+    with in_kernel_invocation_manager(fake_mode):
+        r = func(*new_args, **new_kwargs)
+    return FakeTensor(fake_mode, r, out_device)
+
+
+@register_op_impl(
+    lambda fn: fn in _device_not_kwarg_ops and fn not in _nested_constructors
+)
 def nyi(fake_mode, func, *args, **kwargs):
     assert func not in _device_not_kwarg_ops, f"NYI: {func}"
 
@@ -1420,7 +1445,10 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
 
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                out = torch.zeros_like(e, device=e.fake_device)
+                if e.is_nested:
+                    out = torch.empty_like(e, device=e.fake_device)
+                else:
+                    out = torch.zeros_like(e, device=e.fake_device)
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e

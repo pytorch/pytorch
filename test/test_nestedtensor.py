@@ -26,6 +26,12 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    FakeTensorConverter,
+)
+
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
 
@@ -1922,6 +1928,34 @@ class TestNestedTensorDeviceType(TestCase):
         assert nt_cont.is_same_size(nt_empty)
         with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
             nt_empty = torch.empty_like(nt_noncont)
+
+    def _assert_real_fake_equivalent(self, real_nt, fake_nt):
+        # Helper function to verify real and fake are equal minus actual data.
+        self.assertFalse(isinstance(real_nt, FakeTensor))
+        self.assertTrue(isinstance(fake_nt, FakeTensor))
+
+        self.assertEqual(real_nt.device, fake_nt.device)
+        for (t1, t2) in zip(real_nt.unbind(), fake_nt.unbind()):
+            self.assertEqual(t1.shape, t2.shape)
+
+    def test_fake_tensor_mode(self, device):
+        shapes = [(3, 2), (4, 2)]
+        real_components = [torch.randn(*shape) for shape in shapes]
+        real_nt = torch.nested.nested_tensor(real_components, device=device)
+
+        with FakeTensorMode() as mode:
+            fake_components = [torch.randn(*shape) for shape in shapes]
+            fake_nt = torch.nested.nested_tensor(fake_components, device=device)
+
+        self._assert_real_fake_equivalent(real_nt, fake_nt)
+
+    def test_fake_tensor_converter(self, device):
+        mode = FakeTensorMode()
+        converter = mode.fake_tensor_converter
+        real_nt = torch.nested.nested_tensor([torch.randn(3), torch.randn(4)], device=device)
+        fake_nt = converter(mode, real_nt)
+
+        self._assert_real_fake_equivalent(real_nt, fake_nt)
 
 
 class TestNestedTensorAutograd(TestCase):

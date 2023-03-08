@@ -400,7 +400,15 @@ inline Tensor wrap_tensor_node(
     }
     options = flat_tensors[0].options().merge_in(options_);
     nt_buffer = at::cat(flat_tensors);
+
+    // Temporarily disable meta if needed to ensure sizes are built as real tensors.
+    auto orig_keyset = c10::impl::tls_local_dispatch_key_set();
+    auto local_keyset = orig_keyset;
+    local_keyset.included_ =
+      local_keyset.included_.remove_backend(c10::BackendComponent::MetaBit);
+    c10::impl::_force_tls_local_dispatch_key_set(local_keyset);
     nt_sizes = at::native::stack(sizes);
+    c10::impl::_force_tls_local_dispatch_key_set(orig_keyset);
   }
 
   return wrap_buffer(nt_buffer.to(options), nt_sizes);

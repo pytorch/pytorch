@@ -5049,7 +5049,7 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: detach
-    NestedTensorCPU, NestedTensorCUDA: detach
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: detach
 
 # Like `detach()`, but modifies this `Variable` in-place. This method may
 # only be called on non-view `Variable`s. You can use `is_view()` to check
@@ -6824,7 +6824,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: values_sparse
     SparseCsrCPU, SparseCsrCUDA: values_sparse_csr
-    NestedTensorCPU, NestedTensorCUDA: values_nested
+    NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: values_nested
     CompositeExplicitAutograd: values_default
   device_check: NoCheck
   device_guard: False
