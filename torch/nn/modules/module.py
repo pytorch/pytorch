@@ -496,10 +496,10 @@ class Module:
 
     def _update_has_hooks(self):
         self._has_hooks = bool(
-            self._backward_hooks
-            or self._backward_pre_hooks
-            or self._forward_hooks
-            or self._forward_pre_hooks
+            getattr(self, "_backward_hooks", False)
+            or getattr(self, "_backward_pre_hooks", False)
+            or getattr(self, "_forward_hooks", False)
+            or getattr(self, "_forward_pre_hooks", False)
         )
 
     def register_buffer(self, name: str, tensor: Optional[Tensor], persistent: bool = True) -> None:
@@ -1629,6 +1629,9 @@ class Module:
             self._is_full_backward_hook = None
         if '_backward_pre_hooks' not in self.__dict__:
             self._backward_pre_hooks = OrderedDict()
+
+        # ensure self._has_hooks exists and is set to a current value
+        self._update_has_hooks()
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
         if '_parameters' in self.__dict__:
