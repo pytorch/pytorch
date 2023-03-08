@@ -1,6 +1,7 @@
 name: inductor-A100-perf-compare
 
 on:
+  pull_request: # will remove this when landing
   push:
     tags:
       - ciflow/inductor-perf-compare/*
