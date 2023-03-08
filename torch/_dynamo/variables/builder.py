@@ -107,6 +107,23 @@ class _missing:
     pass
 
 
+def is_global_hooks_dict(source: Source):
+    # TODO we could make a different source type for these or we could come up with a config-driven
+    # approach to opt into special bool-false guard handling, or...
+    names = {
+        "_global_backward_pre_hooks",
+        "_global_backward_hooks",
+        "_global_forward_hooks",
+        "_global_forward_pre_hooks",
+    }
+    return (
+        isinstance(source, AttrSource)
+        and isinstance(source.base, GlobalSource)
+        and source.base.global_name == "__import_torch_dot_nn_dot_modules_dot_module"
+        and source.member in names
+    )
+
+
 @dataclasses.dataclass
 class GraphArg:
     source: Source
@@ -323,7 +340,10 @@ class VariableBuilder:
                 value.keys(),
             )
         ):
-            if not value and self.get_source().is_nn_module():
+            if not value and (
+                self.get_source().is_nn_module()
+                or is_global_hooks_dict(self.get_source())
+            ):
                 # It is faster to guard on 'false' property than to guard
                 # on actual dict keys, but we can't do this fast guard in general because
                 # it omits a crucial type check that ensures the value is actually still a dict at runtime.
