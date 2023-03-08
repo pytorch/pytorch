@@ -466,6 +466,8 @@ class CppVecOverrides(OpOverrides):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
         assert opt_ctx.dtype in [torch.int32, torch.float32]
+        if dtype in [torch.bfloat16]:
+            assert opt_ctx.is_load_bf16_as_fp32
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
             assert proposed_dtype == torch.float
@@ -549,9 +551,6 @@ class CppVecOverrides(OpOverrides):
             torch.float,
             torch.bfloat16,
         ], f"{__name__} does not support {dtype}"
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        if dtype in [torch.float, torch.bfloat16]:
-            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_store_fp32_as_bf16
         return f"({x})"
 
     @staticmethod
@@ -1492,22 +1491,27 @@ class CppVecKernelChecker(CppVecKernel):
         else:
             return False
 
-    def can_load_bf16_as_fp32(self, name: str, users: Dict[torch.fx.Node, None]):
-        load_type = V.graph.get_dtype(name)
-        if load_type != torch.bfloat16:
+    def can_load_bf16_as_fp32(self, input_node: torch.fx.Node):
+        assert input_node.target in ["load", "constant"]
+        load_type = (
+            V.graph.get_dtype(input_node.args[1])
+            if input_node.target == "load"
+            else input_node.args[-1]
+        )
+        if load_type not in [torch.bfloat16]:
             return False
 
         if not all(
             user.target == "to_dtype" and user.args[-1] == torch.float
-            for user in users.keys()
+            for user in input_node.users
         ):
             return False
 
         return True
 
-    def can_store_fp32_as_bf16(self, name: str, value_node: torch.fx.Node):
-        load_type = V.graph.get_dtype(name)
-        if load_type != torch.bfloat16:
+    def can_store_fp32_as_bf16(self, store_var: str, value_node: torch.fx.Node):
+        load_type = V.graph.get_dtype(store_var)
+        if load_type not in [torch.bfloat16]:
             return False
 
         if value_node.target == "to_dtype" and value_node.args[-1] == torch.bfloat16:
@@ -1536,7 +1540,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             if load_dtype in [torch.bfloat16]:
                 opt_ctx.is_load_bf16_as_fp32 = self.can_load_bf16_as_fp32(
-                    name, node_ctx.get_fx_node().users
+                    node_ctx.get_fx_node()
                 )
                 if not opt_ctx.is_load_bf16_as_fp32:
                     self.simd_vec = False
@@ -1617,7 +1621,7 @@ class CppVecKernelChecker(CppVecKernel):
             return left_dtype == right_dtype
 
     def is_load_only_block(self, sub_graph: torch.fx.Graph):
-        # The sub graph only contains "placeholder", "output", "get_index", "load"
+        # The sub graph only contains "placeholder", "output", "get_index", "load", "to_dtype"
         is_load_only = False
         load_dtype = None
         skip_io_nodes = ["placeholder", "output"]
@@ -1625,31 +1629,52 @@ class CppVecKernelChecker(CppVecKernel):
             if _node.op in skip_io_nodes:
                 continue
 
-            if _node.target not in ["load", "get_index", "constant"]:
+            if _node.target not in ["load", "get_index", "constant", "to_dtype"]:
                 # The body contains non load node
                 is_load_only = False
                 break
 
-            if _node.target == "load":
-                _, name, _ = _node.args
-                load_dtype = V.graph.get_dtype(name)
-                is_load_only = True
-
-            # Support "constant" node
-            if _node.target == "constant":
-                _, _, load_dtype = _node.args
+            if _node.target in ["load", "constant"]:
+                load_dtype = (
+                    V.graph.get_dtype(_node.args[1])
+                    if _node.target == "load"
+                    else _node.args[-1]
+                )
+                is_bf16_as_fp32 = load_dtype in [
+                    torch.bfloat16
+                ] and self.can_load_bf16_as_fp32(_node)
+                is_fp32 = load_dtype in [torch.float]
+                is_load_only = is_bf16_as_fp32 or is_fp32
+                load_dtype = torch.float if is_load_only else load_dtype
+                if not is_load_only:
+                    break
 
                 # Create and record the context
                 opt_ctx = OptimizationContext()
                 opt_ctx.dtype = load_dtype
                 opt_ctx.ops_name = _node.target
+                opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
                 _node.meta[OptimizationContext.key] = opt_ctx
 
-                # TODO: Support BF16 and FP16
-                if load_dtype in [torch.float32, torch.int32]:
-                    is_load_only = True
+            if _node.target == "to_dtype":
+                dtype = _node.args[-1]
+                if dtype == torch.float:
+                    # load -> to_dtype
+                    is_load_only = all(
+                        usr.target in ["ops", "load"] for usr in _node.all_input_nodes
+                    )
+                elif dtype == torch.bfloat16:
+                    # to_dtype -> store
+                    is_load_only = all(usr.target in ["store"] for usr in _node.users)
                 else:
                     is_load_only = False
+
+                if not is_load_only:
+                    break
+
+            if _node.target == "get_index":
+                is_load_only = all(usr.target in ["load"] for usr in _node.users)
+                if not is_load_only:
                     break
 
         return is_load_only, load_dtype
@@ -1729,11 +1754,18 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
-                    supported_dtype = (torch.float32, torch.int32)
-                    is_supported_dtype = opt_ctx.dtype in (supported_dtype)
-                    if not is_supported_dtype:
+                    supported_dtypes = [torch.float32, torch.int32, torch.bfloat16]
+                    if opt_ctx.dtype not in supported_dtypes:
                         self.simd_vec = False
-                    return is_supported_dtype
+
+                    if opt_ctx.dtype in [torch.bfloat16]:
+                        if self.can_load_bf16_as_fp32(node_ctx.get_fx_node()):
+                            opt_ctx.is_load_bf16_as_fp32 = True
+                            opt_ctx.dtype = torch.float
+                        else:
+                            self.simd_vec = False
+
+                    return val
 
             @staticmethod
             def index_expr(expr, dtype):
@@ -1836,9 +1868,16 @@ class CppVecKernelChecker(CppVecKernel):
 
                     cur_node = node_ctx.get_fx_node()
                     input_value: torch.fx.Node = cur_node.all_input_nodes[1]
-                    if dtype == torch.float and input_value.target == "load":
-                        _, name, _ = input_value.args
-                        if V.graph.get_dtype(name) in [torch.bfloat16]:
+                    if dtype == torch.float and input_value.target in [
+                        "load",
+                        "constant",
+                    ]:
+                        dtype = (
+                            V.graph.get_dtype(input_value.args[1])
+                            if input_value.target == "load"
+                            else input_value.args[-1]
+                        )
+                        if dtype in [torch.bfloat16]:
                             opt_ctx.is_load_bf16_as_fp32 = True
                         else:
                             self.simd_vec = False
@@ -1953,9 +1992,16 @@ class CppKernelProxy(CppKernel):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             for node in sub_graph.nodes:
                 _node: torch.fx.Node = node
-                if _node.target == "load":
-                    ops, load_var, _ = _node.args
-                    load_dtype = V.graph.get_dtype(load_var)
+                if _node.target in ["load", "constant"]:
+                    assert len(_node.args) == 3
+                    ops = _node.args[0]
+                    # If the node is constant, the last arg is dtype
+                    load_dtype = (
+                        V.graph.get_dtype(_node.args[1])
+                        if _node.target == "load"
+                        else _node.args[-1]
+                    )
+
                     if load_dtype == torch.bfloat16:
                         with sub_graph.inserting_after(_node):
                             to_type_node = sub_graph.call_method(
