@@ -20,7 +20,7 @@ from torch.distributed.fsdp import (
     ShardingStrategy,
 )
 from torch.distributed.fsdp._runtime_utils import HOMOGENEOUS_ATTR_NAMES
-from torch.distributed.fsdp.flat_param import _FSDP_USE_SAFE_SETATTR
+from torch.distributed.fsdp.flat_param import _FSDP_USE_UNSAFE_SETATTR
 from torch.distributed.fsdp.wrap import (
     always_wrap_policy,
     ModuleWrapPolicy,
@@ -668,8 +668,8 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         fsdp_module(inp)
         self.assertTrue(called_setattr_override)
 
-        # Repeat with safe setattr explicitly disabled
-        os.environ[_FSDP_USE_SAFE_SETATTR] = "0"
+        # Repeat with unsafe setattr explicitly enabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "1"
         module = SetattrLinear(5, 5, torch.device("cuda"))
         fsdp_module = FSDP(module, use_orig_params=True)
         inp = torch.randn((8, 5), device=torch.device("cuda"))
@@ -677,8 +677,8 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         fsdp_module(inp)
         self.assertFalse(called_setattr_override)
 
-        # Repeat with safe setattr explicitly enabled
-        os.environ[_FSDP_USE_SAFE_SETATTR] = "1"
+        # Repeat with unsafe setattr explicitly disabled
+        os.environ[_FSDP_USE_UNSAFE_SETATTR] = "0"
         module = SetattrLinear(5, 5, torch.device("cuda"))
         fsdp_module = FSDP(module, use_orig_params=True)
         inp = torch.randn((8, 5), device=torch.device("cuda"))

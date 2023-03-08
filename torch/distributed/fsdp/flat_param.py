@@ -65,8 +65,8 @@ For the non-wrapper code path:
 or a submodule chosen by the provided wrapping policy.
 """
 
-
-_FSDP_USE_SAFE_SETATTR = "FSDP_USE_SAFE_SETATTR"
+# Environment variable to use unsafe `setattr()` for view setting
+_FSDP_USE_UNSAFE_SETATTR = "FSDP_USE_UNSAFE_SETATTR"
 
 
 class ParamInfo(NamedTuple):
@@ -354,15 +354,15 @@ class FlatParamHandle:
         super().__init__()
         # For special cases (e.g. high CPU overhead), we may want to bypass the
         # `nn.Module.setattr()` checks, where we gate this with an env var.
-        use_safe_setattr = os.environ.get(_FSDP_USE_SAFE_SETATTR, "1") == "1"
+        use_unsafe_setattr = os.environ.get(_FSDP_USE_UNSAFE_SETATTR, "") == "1"
         self._setattr_tensor: Callable[[nn.Module, str, Tensor], None]
         self._setattr_param: Callable[[nn.Module, str, nn.Parameter], None]
-        if use_safe_setattr:
-            self._setattr_tensor = _safe_setattr_tensor_or_param
-            self._setattr_param = _safe_setattr_tensor_or_param
-        else:
+        if use_unsafe_setattr:
             self._setattr_tensor = _unsafe_setattr_tensor
             self._setattr_param = _unsafe_setattr_param
+        else:
+            self._setattr_tensor = _safe_setattr_tensor_or_param
+            self._setattr_param = _safe_setattr_tensor_or_param
         self.device = device
         self.process_group = process_group
         self.rank = process_group.rank()
