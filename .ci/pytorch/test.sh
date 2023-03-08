@@ -332,7 +332,7 @@ test_dynamo_benchmark() {
   shift
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
-    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # Performance test training only, for float32 and amp
     test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
