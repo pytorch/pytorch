@@ -1,9 +1,11 @@
 import contextlib
+import os
 import warnings
 from enum import auto, Enum
 from itertools import accumulate, chain
 from typing import (
     Any,
+    Callable,
     Dict,
     Generator,
     Iterator,
@@ -62,6 +64,9 @@ For the non-wrapper code path:
 - The fully sharded module may either be the direct argument to ``fully_shard``
 or a submodule chosen by the provided wrapping policy.
 """
+
+
+_FSDP_USE_SAFE_SETATTR = "FSDP_USE_SAFE_SETATTR"
 
 
 class ParamInfo(NamedTuple):
@@ -347,6 +352,17 @@ class FlatParamHandle:
         use_orig_params: bool,
     ):
         super().__init__()
+        # For special cases (e.g. high CPU overhead), we may want to bypass the
+        # `nn.Module.setattr()` checks, where we gate this with an env var.
+        use_safe_setattr = os.environ.get(_FSDP_USE_SAFE_SETATTR, "1") == "1"
+        self._setattr_tensor: Callable[[nn.Module, str, Tensor], None]
+        self._setattr_param: Callable[[nn.Module, str, nn.Parameter], None]
+        if use_safe_setattr:
+            self._setattr_tensor = _safe_setattr_tensor_or_param
+            self._setattr_param = _safe_setattr_tensor_or_param
+        else:
+            self._setattr_tensor = _unsafe_setattr_tensor
+            self._setattr_param = _unsafe_setattr_param
         self.device = device
         self.process_group = process_group
         self.rank = process_group.rank()
@@ -1384,20 +1400,18 @@ class FlatParamHandle:
         for i, (view, (param_name, module, _)) in enumerate(
             zip(views, self.flat_param._param_infos)
         ):
-            if hasattr(module, param_name):
-                delattr(module, param_name)
             if self._use_orig_params and as_params:
                 if type(view) is DTensor:
                     # A `DTensor` `view` is not compatible with assigning
                     # `param.data = view`, so we cannot preserve the parameter
                     # variable.
-                    setattr(module, param_name, nn.Parameter(view))
+                    self._setattr_param(module, param_name, nn.Parameter(view))
                     continue
                 param = self.flat_param._params[i]  # type: ignore[index]
-                setattr(module, param_name, param)
+                self._setattr_param(module, param_name, param)
                 param.data = view
             elif as_params:
-                module.register_parameter(param_name, nn.Parameter(view))
+                self._setattr_param(module, param_name, nn.Parameter(view))
             else:  # `as_params=False`
                 param_var: Tensor = view
                 if self._use_orig_params:
@@ -1418,7 +1432,7 @@ class FlatParamHandle:
                         tensor.data = view  # type: ignore[union-attr]
                         assert tensor is not None  # mypy
                         param_var = tensor
-                setattr(module, param_name, param_var)
+                self._setattr_tensor(module, param_name, param_var)
                 if (
                     self._use_orig_params
                     and self._training_state == HandleTrainingState.FORWARD
@@ -1447,13 +1461,13 @@ class FlatParamHandle:
             )
             if self._use_orig_params and as_params:
                 shared_param = self.flat_param._shared_params[i]  # type: ignore[index]
-                setattr(module, param_name, shared_param)
+                self._setattr_param(module, param_name, shared_param)
                 shared_param.data = prim_param
             elif as_params:
                 assert isinstance(prim_param, nn.Parameter)
-                module.register_parameter(param_name, prim_param)
+                self._setattr_param(module, param_name, prim_param)
             else:
-                setattr(module, param_name, prim_param)
+                self._setattr_tensor(module, param_name, prim_param)
                 if (
                     self._use_orig_params
                     and self._training_state == HandleTrainingState.FORWARD
@@ -1563,7 +1577,7 @@ class FlatParamHandle:
         for i, (param, (param_name, module, _)) in enumerate(
             zip(self.flat_param._params, self.flat_param._param_infos)
         ):
-            setattr(module, param_name, param)
+            self._setattr_param(module, param_name, param)
             in_sharded_flat_param = (
                 i >= start
                 and i <= end
@@ -1589,7 +1603,7 @@ class FlatParamHandle:
         ) in enumerate(
             zip(self.flat_param._shared_params, self.flat_param._shared_param_infos)
         ):
-            setattr(module, param_name, param)
+            self._setattr_param(module, param_name, param)
             prim_param = getattr(prim_module, prim_param_name)
             param.data = prim_param  # could be both empty and non-empty
         if self._training_state == HandleTrainingState.BACKWARD_POST:
@@ -2047,6 +2061,32 @@ class FlatParamHandle:
             self._training_state == HandleTrainingState.SUMMON_FULL_PARAMS
             and self._uses_param_mixed_precision
         )
+
+
+# NOTE: These are hacks to bypass `nn.Module.__setattr__` checks.
+def _unsafe_setattr_param(
+    module: nn.Module, param_name: str, param: nn.Parameter
+) -> None:
+    module._parameters[param_name] = param
+    # This bypasses any overrides in case `module` is an instance of an
+    # `nn.Module` subclass
+    super(nn.Module, module).__setattr__(param_name, param)
+
+
+def _unsafe_setattr_tensor(module: nn.Module, param_name: str, tensor: Tensor) -> None:
+    module._parameters.pop(param_name, None)
+    # This bypasses any overrides in case `module` is an instance of an
+    # `nn.Module` subclass
+    super(nn.Module, module).__setattr__(param_name, tensor)
+
+
+def _safe_setattr_tensor_or_param(
+    module: nn.Module, param_name: str, tensor_or_param: Union[Tensor, nn.Parameter]
+):
+    # Call `delattr()` and `setattr()` to go through `nn.Module` checks
+    if hasattr(module, param_name):
+        delattr(module, param_name)
+    setattr(module, param_name, tensor_or_param)
 
 
 # A handles key represents the group of `FlatParamHandle`s involved in a given
