@@ -61,7 +61,9 @@ class OperatorBase:
         # for use with OpOverload; cache lookup is done entirely from C++
         # for speed.
         # TODO: The cache is NOT currently used by PyOperator, but it should!
-        self._dispatch_cache: Dict[torch._C.DispatchKey, Union[torch._C.DispatchKey, Callable[..., Any]]] = {}
+        self._dispatch_cache: Dict[
+            torch._C.DispatchKey, Union[torch._C.DispatchKey, Callable[..., Any]]
+        ] = {}
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
@@ -101,9 +103,7 @@ class OperatorBase:
                 self._dispatch_cache.clear()
                 return fn
 
-            if isinstance(
-                k, torch._C._functorch.TransformType
-            ):
+            if isinstance(k, torch._C._functorch.TransformType):
                 assert k not in self.functorch_table
                 self.functorch_table[k] = fn
                 return fn
