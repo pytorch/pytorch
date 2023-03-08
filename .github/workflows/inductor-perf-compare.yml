@@ -20,10 +20,10 @@ jobs:
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
+          { config: "inductor_timm_perf_compare", shard: 1, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_timm_perf_compare", shard: 2, num_shards: 2, runner: "linux.gcp.a100" },
+          { config: "inductor_torchbench_perf_compare", shard: 1, num_shards: 1, runner: "linux.gcp.a100" },
         ]}
 
   linux-bionic-cuda11_8-py3_10-gcc7-inductor-test:
