@@ -12,9 +12,6 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
-# limit lines of inner_fn() when printing IR
-debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
-
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -52,9 +49,7 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = (
-    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
-)
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have

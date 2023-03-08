@@ -245,6 +245,7 @@ class TestAOTAutograd(AOTTestCase):
         *,
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
+        dynamic: bool = False,
     ):
         for keep_input_mutations in [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
@@ -294,7 +295,8 @@ class TestAOTAutograd(AOTTestCase):
                     fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                     bw_compiler=nop,
                     decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations
+                    keep_inference_input_mutations=keep_input_mutations,
+                    dynamic=dynamic
                 )
             else:
                 compiled_f = aot_function(
@@ -302,7 +304,8 @@ class TestAOTAutograd(AOTTestCase):
                     fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                     bw_compiler=nop,
                     decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations
+                    keep_inference_input_mutations=keep_input_mutations,
+                    dynamic=dynamic
                 )
             ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
             test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
@@ -366,8 +369,6 @@ class TestAOTAutograd(AOTTestCase):
         self.verify_aot_autograd(f, inp)
 
     # Test for bug occurring at the intersection of fake tensors & functionalization.
-    @patch("torch._functorch.config.use_dynamic_shapes", True)
-    @patch("torch._functorch.config.use_fake_tensor", True)
     def test_squeeze_mutation(self):
         def f(a):
             b = a.clone().squeeze(-1)
@@ -375,12 +376,10 @@ class TestAOTAutograd(AOTTestCase):
             return a + b
 
         inp = [torch.randn(3, 1, requires_grad=True)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, dynamic=True)
         inp = [torch.randn(3, 1, requires_grad=False)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, dynamic=True)
 
-    @patch("torch._functorch.config.use_dynamic_shapes", True)
-    @patch("torch._functorch.config.use_fake_tensor", True)
     def test_embedding_bag_view(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
@@ -395,7 +394,7 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
-        self.verify_aot_autograd(F(), [x, y])
+        self.verify_aot_autograd(F(), [x, y], dynamic=True)
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -1714,8 +1713,6 @@ def forward(self, primals_1, primals_2):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -1738,12 +1735,10 @@ def forward(self, primals_1, primals_2):
         # TODO: assert outputs of fwd graph trace to correct symint
 
         # e2e test that fails without symint clone fix
-        af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"))
+        af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"), dynamic=True)
         out = af(inp)
         self.assertEqual(out, f(inp))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -1764,7 +1759,7 @@ def forward(self, primals_1, primals_2):
             d = b.masked_fill_(c, 0)
             return d
 
-        compiled_f = aot_function(f, nop)
+        compiled_f = aot_function(f, nop, dynamic=True)
         inp_ref = torch.ones(2, 2, requires_grad=True)
         inp_test = torch.ones(2, 2, requires_grad=True)
 
@@ -1859,14 +1854,15 @@ def get_num_ins_outs(fx_g):
     return tuple(len(i) for i in get_ins_outs(fx_g))
 
 
-def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
+def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition, dynamic=False):
     fw_graph_cell = [None]
     bw_graph_cell = [None]
     aot_function(f,
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
                  partition_fn=partitioner,
-                 decompositions=default_decompositions)(*inps).sum().backward()
+                 decompositions=default_decompositions,
+                 dynamic=dynamic)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
@@ -1933,8 +1929,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_save_shape(self):
 
@@ -1943,7 +1937,7 @@ class TestPartitioning(AOTTestCase):
             return s
 
         inp = [torch.ones([10, 10], requires_grad=True)]
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
         _, fw_output = get_ins_outs(fw_graph)
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
         self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
@@ -1968,14 +1962,12 @@ class TestPartitioning(AOTTestCase):
             x = sb[0] + sc[0]
             a_sz = (x, a.size(0))
             return torch.cat([a.expand(a_sz), b, c])
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
         self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -2004,7 +1996,8 @@ class TestPartitioning(AOTTestCase):
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
             partition_fn=default_partition,
-            decompositions=default_decompositions)(*inp)
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
         fw_graph = fw_graph_cell[0]
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
@@ -2037,8 +2030,6 @@ class TestPartitioning(AOTTestCase):
         # TODO(whc) we should learn to return torch.Sizes
         self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
 
@@ -2068,7 +2059,8 @@ class TestPartitioning(AOTTestCase):
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
             partition_fn=min_cut_rematerialization_partition,
-            decompositions=default_decompositions)(*inp)
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
         fw_graph = fw_graph_cell[0]
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
@@ -2617,7 +2609,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 
-def _test_aot_autograd_helper(self, device, dtype, op):
+def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -2639,7 +2631,7 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             return op.op(*c_args, **c_kwargs)
 
-        compiled_f = compiled_function(f, nop, nop)
+        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic)
         try:
             _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
         except GuardOnDataDependentSymNode:
@@ -2651,7 +2643,7 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             else:
                 raise
 
-def _test_aot_autograd_module_helper(self, device, dtype, training, module_info):
+def _test_aot_autograd_module_helper(self, device, dtype, training, module_info, *, dynamic=False):
     module_cls = module_info.module_cls
     module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                    requires_grad=True, training=training)
@@ -2696,7 +2688,7 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
         named_params = dict(m.named_parameters(remove_duplicate=False))
         named_buffers = dict(m.named_buffers(remove_duplicate=False))
         num_params_buffers = len(named_params) + len(named_buffers)
-        compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers)
+        compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers, dynamic=dynamic)
         params_buffers_args = [named_params, named_buffers, args]
         _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, params_buffers_args)
 
@@ -2708,13 +2700,11 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
-        _test_aot_autograd_helper(self, device, dtype, op)
+        _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
 
 
 aot_autograd_module_failures = set({
@@ -2754,13 +2744,11 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
     @modules(module_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @decorateForModules(unittest.expectedFailure,
                         aot_autograd_module_failures | symbolic_aot_autograd_module_failures)
     def test_aot_autograd_symbolic_module_exhaustive(self, device, dtype, training, module_info):
-        _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
+        _test_aot_autograd_module_helper(self, device, dtype, training, module_info, dynamic=True)
 
 
 only_for = ("cpu")
