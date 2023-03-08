@@ -50,6 +50,10 @@ class ManagedStorages {
 
   void deallocate();
 
+  bool is_allocated() const {
+    return storages_ != nullptr;
+  }
+
   // Append a new StorageImpl to the buffer. The new StorageImpl is given the
   // same size and allocator as `storageImpl` argument
   void append(at::StorageImpl& storageImpl);

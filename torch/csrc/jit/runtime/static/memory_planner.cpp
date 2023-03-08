@@ -143,16 +143,16 @@ ManagedStorages::~ManagedStorages() {
 }
 
 void ManagedStorages::allocate(size_t capacity) {
-  if (storages_ != nullptr) {
-    deallocate();
-  }
+  TORCH_CHECK(!is_allocated(), "Must deallocate before allocating again");
+  // `size_` should already be 0 if not allocated, so double check it here
+  TORCH_INTERNAL_ASSERT(size_ == 0);
   capacity_ = capacity;
   storages_ = reinterpret_cast<at::StorageImpl*>(
       new unsigned char[capacity_ * sizeof(at::StorageImpl)]);
 }
 
 void ManagedStorages::deallocate() {
-  if (storages_ != nullptr) {
+  if (is_allocated()) {
     for (const size_t idx : c10::irange(size_)) {
       storages_[idx].~StorageImpl();
     }
@@ -447,6 +447,9 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   auto group_idx = 0;
   const bool first_time = storages_.empty();
   if (C10_UNLIKELY(first_time)) {
+    if (storages_.is_allocated()) {
+      storages_.deallocate();
+    }
     storages_.allocate(managed_tensors_.size());
     storages_nbytes_.reserve(managed_tensors_.size());
   }
