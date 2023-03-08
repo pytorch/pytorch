@@ -24,10 +24,10 @@ bool isUnmanagedSpecialCase(const ProcessedNode& pnode, size_t output_idx) {
       pnode.Output(output_idx).isNone();
 }
 
-FastMap<const Value*, at::Tensor*> tensorValueToTensor(
+c10::FastMap<const Value*, at::Tensor*> tensorValueToTensor(
     const std::vector<ProcessedNode>& nodes,
-    const FastSet<const Value*>& managed_tensor_values) {
-  FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
+    const c10::FastSet<const Value*>& managed_tensor_values) {
+  c10::FastMap<const Value*, at::Tensor*> tensor_value_to_tensor;
   for (auto& pnode : nodes) {
     auto* node = pnode.node();
     for (const auto output_idx : c10::irange(node->outputs().size())) {
@@ -72,10 +72,10 @@ at::DataPtr allocate_buffer(size_t size) {
 std::vector<StorageGroup> assignStorageToManagedTensors(
     graph_node_list nodes,
     const ManagedTensorRanges& ranges,
-    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor) {
+    const c10::FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor) {
   std::vector<StorageGroup> managed_tensor_groups;
   // This set maps each Value* to its assigned storage group.
-  FastMap<const Value*, size_t> storage_group_mapping;
+  c10::FastMap<const Value*, size_t> storage_group_mapping;
   // On each iteration, this vector stores the set of storage groups that
   // are available for re-use.
   std::vector<size_t> free_storage_groups;
@@ -137,13 +137,13 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
 
 namespace {
 
-bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
+bool setIncludes(const c10::FastSet<const Value*>& set, const Value* v) {
   return set.find(v) != set.end();
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
     BlockRunner* block_runner,
-    const FastSet<const Value*>& managed_output_tensor_values) {
+    const c10::FastSet<const Value*>& managed_output_tensor_values) {
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
   for (auto& pnode : block_runner->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
@@ -174,8 +174,8 @@ MemoryPlanner::MemoryPlanner(
   const auto& leaked_values = block_info.leaked_values();
 
   // collect unmanaged output ivalues
-  FastSet<IValue*> unmanaged_ivalues;
-  FastSet<IValue*> unmanaged_borrowed_ivalues;
+  c10::FastSet<IValue*> unmanaged_ivalues;
+  c10::FastSet<IValue*> unmanaged_borrowed_ivalues;
   for (ProcessedNode& pnode : block_runner->nodes()) {
     const auto borrows_outputs = borrowsOutputs(pnode.node()->kind());
     for (const auto i : c10::irange(pnode.outputs().size())) {
