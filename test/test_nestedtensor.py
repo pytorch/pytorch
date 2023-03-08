@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
-    FakeTensorConverter,
 )
 
 # Tests are ported from pytorch/nestedtensor.

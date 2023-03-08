@@ -249,9 +249,7 @@ class MetaConverter:
                             r._coalesced_(t.is_coalesced())
                 elif t.is_nested:
                     is_leaf = safe_is_leaf(t)
-                    r = callback(
-                        lambda: torch.empty_like(t, device="meta")
-                    )
+                    r = callback(lambda: torch.empty_like(t, device="meta"))
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
