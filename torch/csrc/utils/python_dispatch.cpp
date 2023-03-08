@@ -537,8 +537,16 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
-      .def("remove", [](c10::DispatchKeySet self, c10::DispatchKey k) { return self.remove(k); })
-      .def("add", [](c10::DispatchKeySet self, c10::DispatchKey k) { return self.add(k); })
+      .def(
+          "remove",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.remove(k);
+          })
+      .def(
+          "add",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.add(k);
+          })
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
