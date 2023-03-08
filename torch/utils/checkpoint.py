@@ -465,48 +465,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #      We save x and w, however.
 #   7. Continue with returning
 #
-# [ backward within nested checkpoint ]
-#
-# Another case to consider is when we do backward within checkpoint, but we are
-# also in a nested checkpoint. Properly handling this case has implications for
-# how inputs are saved.
-#
-# def f(x):
-#   y = x.sin()
-#   z = y.cos()
-#   gx, = torch.autograd.grad(z, x)       # (1)
-#   return z
-#
-# def g(x):
-#   return checkpoint(f)(x)
-#
-# out = checkpoint(g)(inp)
-#
-# In the above example, when we recompute for the outer checkpoint (the one
-# wrapping g), we are recomputing checkpointed f.
-#
-# When checkpointed f was original computed in forward, there was already a
-# checkpoint active when we entered f's checkpoint, which means that f's
-# checkpoint is nested. However, during the recomputation of g, we enter
-# into a checkpoint wrapping f yet again, but this time there is no longer a
-# checkpoint active. How should we save f's inputs in this situation?
-#
-# Recall that we should save f's inputs onto the parent checkpoint if we are
-# nested, or directly onto the checkpoint otherwise, so on the surface it sounds
-# like we should save directly onto the checkpoint.
-#
-# Strangely, the answer here is actually both!
-#
-# In addition to saving our inputs onto the frame directly, we also save f's
-# inputs onto the parent checkpoint. We do this for two reasons:
-#
-# 1) First, if we did not save f's inputs directly onto its own frame we would
-#    not be able to recompute f during recomputation for - see line marked (1)
-#    above in the example.
-# 2) Second, since f's checkpoint was originally saved its inputs as if it were
-#    nested, it must also save its inputs as if it were nested so that the
-#    indices of the recomputed variables match.
-#
 
 # NB: This is temporary and should be removed in a follow up PR. Early stopping
 #     is currently disabled by default. Since some nested test cases require
@@ -550,15 +508,24 @@ def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> T
     return args, kwargs
 
 class _NoopSaveInputs(torch.autograd.Function):
-    # Autograd Function that saves inputs and returns them as-is
-    # This is not used directly, see _applyAutogradFunctionToSaveInputs below.
     @staticmethod
     def forward(*args):
         return torch.empty((0,))
 
     @staticmethod
     def setup_context(ctx: Any, inputs: Tuple[Any, ...], output: Any) -> None:
-        ctx.save_for_backward(*inputs)
+        # Only tensors can be saved with ctx.save_for_backward, everything else
+        # is captured by get_args, which is saved directly on ctx
+        tensor_indices, tensors = zip(*[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)])
+        idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
+        args = [None if isinstance(o, torch.Tensor) else o for o in inputs]
+
+        def get_args(saved_tensors):
+            ret = [saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o for i, o in enumerate(args)]
+            return ret
+
+        ctx.get_args = get_args
+        ctx.save_for_backward(*tensors)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -568,9 +535,7 @@ class _CheckpointFrame():
     def __init__(self, recompute_fn):
         self.recompute_fn = recompute_fn
         self.input_saver = None
-
         self.weak_holders: List[ReferenceType] = []
-
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
         self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
@@ -644,7 +609,8 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 holder.handles[gid] = None
                 return ret
 
-            args = frame.input_saver.grad_fn.saved_tensors
+            ctx = frame.input_saver.grad_fn
+            args = ctx.get_args(ctx.saved_tensors)
 
             try:
                 # pass gid in in case we do reentrant backward
@@ -694,8 +660,6 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    # From checkpoint_wrapper.
-    # We should modify to handle non-tensor, kwargs
     flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
 
     def new_fn(*inputs):

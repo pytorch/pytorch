@@ -10696,6 +10696,86 @@ class TestNestedCheckpoint(TestCase):
             self.check_graph_dies(grad(sum(grad(sum(c(hc))))))
             self.check_graph_dies(grad(sum(c(grad(sum(c(hc)))))))
 
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint_non_tensor_inputs_and_outputs(self, early_stop):
+        def fn(k, a, b, f):
+            return f(k * a * b.exp()), 1, "abcd"
+
+        k = 3
+        a = torch.tensor(2., requires_grad=True)
+        b = torch.tensor(3., requires_grad=True)
+
+        def f(x):
+            return x.sin()
+
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            out, _unused1, _unused2 = checkpoint(fn, k, a, b, f, use_reentrant=False)
+        actual_grads = torch.autograd.grad(out, (a, b))
+
+        out, _unused1, _unused2 = fn(k, a, b, f)
+        expected_grads = torch.autograd.grad(out, (a, b))
+        for actual, expected in zip(actual_grads, expected_grads):
+            self.assertTrue(torch.allclose(actual, expected))
+
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint_kwargs(self, early_stop):
+        def fn(a, blah=None):
+            out = a.sin().exp()
+            if blah is not None:
+                out = out * blah
+            return out.sin().exp()
+
+        a = torch.tensor(2., requires_grad=True)
+        b = torch.tensor(3., requires_grad=True)
+
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            out = checkpoint(fn, a, blah=b, use_reentrant=False)
+            actual_grads = torch.autograd.grad(out, (a, b))
+
+            out = fn(a, blah=b)
+            expected_grads = torch.autograd.grad(out, (a, b))
+            for actual, expected in zip(actual_grads, expected_grads):
+                self.assertTrue(torch.allclose(actual, expected))
+
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint_same_graph(self, early_stop):
+        counter = [0]
+
+        def hook(*_unused_args):
+            counter[0] += 1
+
+        def fn(a):
+            return a.sin().cos().sin()
+
+        a = torch.tensor(1., requires_grad=True)
+
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            out = checkpoint(fn, a, use_reentrant=False)
+        # The hook is registered on the original graph
+        out.grad_fn.next_functions[0][0].register_hook(hook)
+        # And backward is performed on the original graph
+        out.backward()
+
+        self.assertEqual(counter[0], 1)
+
+    @parametrize("early_stop", [True, False])
+    def test_nested_checkpoint_reentrant_backwards(self, early_stop):
+        def fn(a):
+            x = a.sin().cos()
+            out = x.sin()
+            return x, out
+
+        def hook(*_unused_args):
+            # do backward again, but skip over the part of the graph where
+            # the hook was registered
+            x.backward(retain_graph=True)
+
+        a = torch.tensor(1., requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+            x, out = checkpoint(fn, a, use_reentrant=False)
+        out.grad_fn.register_hook(hook)
+        out.backward(retain_graph=True)
+
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
         t = torch.randn(3, 3, device=device, requires_grad=True)
