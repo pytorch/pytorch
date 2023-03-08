@@ -3,7 +3,7 @@ import ctypes
 import inspect
 import sys
 import types
-from typing import Any, Dict, Type
+from typing import Any, Callable, Dict, Type, Union
 
 import torch._C
 
@@ -82,7 +82,9 @@ class OperatorBase:
         # thought of as an open world extension of dispatch keys, so it
         # makes sense that you should be able to register them, the same
         # way you can register dispatch keys.
-        self.python_key_mode_table: Dict[Type[TorchDispatchMode]] = {}
+        self.python_key_mode_table: Dict[
+            Type[TorchDispatchMode], Callable[..., Any]
+        ] = {}
 
         # This table allows you to override the behavior of functorch
         # transformations.  NB: this currently only does something for
@@ -115,7 +117,7 @@ class OperatorBase:
 
             if k in self.py_kernels:
                 raise RuntimeError(
-                    f"Trying to override a python impl for {dispatch_key_or_mode} on operator {self._name}"
+                    f"Trying to override a python impl for {k} on operator {self.name()}"
                 )
             self.py_kernels[k] = fn
             self._dispatch_cache.clear()
