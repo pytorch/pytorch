@@ -283,6 +283,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config.triton, "descriptive_names", False)
     def test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
