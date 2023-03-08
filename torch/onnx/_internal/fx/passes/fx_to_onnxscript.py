@@ -244,9 +244,6 @@ def _export_fx_node_to_onnxscript(
     fx_name_to_onnxscipt_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
-    onnxscript_value_name_to_real_tensor: Dict[
-        str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
-    ],
     tracer: graph_building.TorchScriptTracingEvaluator,
     fx_module_with_metadata: torch.fx.GraphModule,
     options: options.ExportOptions,
@@ -380,7 +377,9 @@ def _export_fx_node_to_onnxscript(
         assert isinstance(input_, graph_building.TorchScriptTensor)
         assert isinstance(input_, onnxscript.tensor.Tensor)
         fx_name_to_onnxscipt_value[node.name] = input_
-        onnxscript_value_name_to_real_tensor[input_.name] = current_attr  # type: ignore[assignment]
+        # FIXME: Refactor logic getting 'current_attr'.
+        assert isinstance(current_attr, torch.Tensor)
+        onnxscript_graph.add_initializer(input_.name, current_attr)
     else:
         # TODO(wechi): Support get_attr, call_module, call_method.
         raise RuntimeError(f"Found node type not defined in torch.fx: {node.op}")
@@ -405,18 +404,11 @@ def export_fx_to_onnxscript(
     fx_name_to_onnxscipt_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ] = {}
-    # Similar to fx_name_to_onnxscipt_value, we need a mapping fo real tensors (usually tensor parameters
-    # in nn.Module). Note that TorchScript's cannot store real tensors; TorchScript values are all
-    # symbolic. This is passed into ONNX ModelProto as the initializers.
-    onnxscript_value_name_to_real_tensor: Dict[
-        str, Union[torch.Tensor, Tuple[torch._C.Value, ...]]
-    ] = {}
     for node in fx_module_with_metadata.graph.nodes:
         _export_fx_node_to_onnxscript(
             node,
             onnxscript_graph,
             fx_name_to_onnxscipt_value,
-            onnxscript_value_name_to_real_tensor,
             tracer,
             fx_module_with_metadata,
             options,
@@ -431,7 +423,7 @@ def export_fx_to_onnxscript(
         opset_version=options.opset_version,
     )
 
-    return onnxscript_graph, onnxscript_value_name_to_real_tensor
+    return onnxscript_graph
 
 
 @_beartype.beartype
