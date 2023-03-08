@@ -123,11 +123,8 @@ def make_tensor(
         low = clamp(low, lowest, highest)
         high = clamp(high, lowest, highest)
 
-        if dtype in [torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
-            # 1. `low` is ceiled to avoid creating values smaller than `low` and thus outside the specified interval
-            # 2. Following the same reasoning as for 1., `high` should be floored. However, the higher bound of
-            #    `torch.randint` is exclusive and thus ceiling here as well is fine.
-            return math.ceil(low), math.ceil(high)
+        if dtype in [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64]:
+            return math.floor(low), math.ceil(high)
 
         return low, high
 
@@ -142,12 +139,7 @@ def make_tensor(
         raise ValueError("make_tensor: requires_grad must be False for integral dtype")
 
     if dtype is torch.bool:
-        ranges = (0, 2)
-        low, high = cast(
-            Tuple[int, int],
-            _modify_low_high(low, high, ranges[0], ranges[1], 0, 10, dtype),
-        )
-        result = torch.randint(low, high, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
+        result = torch.randint(0, 2, shape, device=device, dtype=dtype)  # type: ignore[call-overload]
     elif dtype is torch.uint8:
         ranges = (torch.iinfo(dtype).min, torch.iinfo(dtype).max)
         low, high = cast(
