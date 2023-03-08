@@ -1882,7 +1882,7 @@ if(USE_KINETO)
       if(NOT USE_CUPTI_SO)
         include(CheckCXXSourceRuns)
         # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
-        if(UNIX)
+        if(UNIX AND NOT APPLE)
           set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
           set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUDA_cupti_LIBRARY},--no-whole-archive")
         else()
