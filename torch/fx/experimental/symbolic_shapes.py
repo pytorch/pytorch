@@ -1536,7 +1536,7 @@ class ShapeEnv:
                     if _is_int(ss):
                         raise RuntimeError(f"Attempting to constrain dimension "
                                            f"{source.name()}.size()[{i}] to {int(ss)}, "
-                                           "which violates user's mark_dynamic")
+                                           "which violates user's constraints")
                     dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)

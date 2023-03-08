@@ -204,6 +204,8 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
     graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
 
+# See Note - [On Export Dynamic Dimension UX]
+# The integer here represents a dimension
 Constraint = Tuple[torch.Tensor, int]
 
 # Note - [On Export Dynamic Dimension UX]
@@ -237,6 +239,5 @@ Constraint = Tuple[torch.Tensor, int]
 #         0 <= dynamic_dim(blah, 1) <= 100,
 #     ]
 # )
-@torch._dynamo.forbid_in_graph
 def dynamic_dim(t: torch.Tensor, index: int):
     return (t, index)
