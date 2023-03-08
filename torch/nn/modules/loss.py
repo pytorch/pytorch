@@ -1040,7 +1040,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     The `input` is expected to contain the unnormalized logits for each class (which do `not` need
     to be positive or sum to 1, in general).
-    `input` has to be a Tensor of size :math:`(C)` for unbatched input,
+    `Input` has to be a Tensor of size :math:`(C)` for unbatched input,
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 1` for the
     `K`-dimensional case. The last being useful for higher dimension inputs, such
     as computing cross entropy loss per-pixel for 2D images.
