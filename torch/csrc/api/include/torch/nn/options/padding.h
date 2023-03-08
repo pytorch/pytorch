@@ -111,10 +111,28 @@ struct TORCH_API ZeroPadOptions {
   TORCH_ARG(ExpandingArray<D * 2>, padding);
 };
 
+/// `ZeroPadOptions` specialized for the `ZeroPad1d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad1d model(ConstantPad1dOptions({3, 1});
+/// ```
 using ZeroPad1dOptions = ZeroPadOptions<1>;
 
+/// `ZeroPadOptions` specialized for the `ZeroPad2d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad2d model(ConstantPad2dOptions({1, 1, 2, 0});
+/// ```
 using ZeroPad2dOptions = ZeroPadOptions<2>;
 
+/// `ZeroPadOptions` specialized for the `ZeroPad3d` module.
+///
+/// Example:
+/// ```
+/// ConstantPad3d model(ConstantPad3dOptions({1, 2, 1, 2, 1, 2});
+/// ```
 using ZeroPad3dOptions = ZeroPadOptions<3>;
 
 // ============================================================================

@@ -212,6 +212,8 @@ class TORCH_API ReplicationPad3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ReplicationPad3d);
 
+// ============================================================================
+
 /// Base class for all (dimension-specialized) ZeroPad modules.
 template <size_t D, typename Derived>
 class TORCH_API ZeroPadImpl : public torch::nn::Cloneable<Derived> {
