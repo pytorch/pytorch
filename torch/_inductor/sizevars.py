@@ -7,7 +7,7 @@ from typing import Callable, Dict, List, Tuple
 import sympy
 from sympy import Expr
 
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import Mod, ShapeEnv
 
 from . import ir
 from .codegen.common import IndentedBuffer
@@ -315,7 +315,7 @@ class SizeVarAllocator:
             # can prove it symbolically
             return True
         if self.size_hint(numerator) % self.size_hint(denominator) == 0:
-            self.guard_equals(numerator % denominator, 0)
+            self.guard_equals(Mod(numerator, denominator), 0)
             return True
         return False
 

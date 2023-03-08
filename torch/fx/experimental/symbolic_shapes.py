@@ -648,6 +648,53 @@ class FloorDiv(sympy.Function):
                 sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
             )
 
+class Mod(sympy.Function):
+    """
+    Mod(a, b) => a % b
+    """
+
+    nargs = (2,)
+    is_integer = True
+    precedence = 50
+
+    def _sympystr(self, printer):
+        base = printer.parenthesize(self.args[0], self.precedence)
+        divisor = printer.parenthesize(self.args[1], self.precedence)
+        return f"{base}%{divisor}"
+
+    @classmethod
+    def eval(cls, base, modulus):
+        if base == 0 or modulus == 1:
+            return sympy.Integer(0)
+
+        if (
+            isinstance(base, sympy.Integer)
+            and isinstance(modulus, sympy.Integer)
+        ):
+            return base % modulus
+
+        if isinstance(base, sympy.Add):
+            new_terms = []
+            all_positive = True
+            for term in base.args:
+                if sympy.gcd(term, modulus) != modulus:
+                    if (isinstance(term, sympy.Integer) and term < 0) or (
+                        isinstance(term, sympy.Mul)
+                        and isinstance(term.args[0], sympy.Integer)
+                        and term.args[0] < 0
+                    ):
+                        # workaround for https://github.com/openai/triton/issues/619,
+                        # if there are negative terms, // produces wrong result
+                        # TODO if https://github.com/openai/triton/issues/619 is fixed
+                        # this optimization would become valid
+                        all_positive = False
+                        break
+                    else:
+                        new_terms.append(term)
+
+            if len(new_terms) != len(base.args) and all_positive:
+                return Mod(sum(new_terms), modulus)
+
 # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
 # Because we do not have the ability to guard on the stride permutation
 # at the moment, it is hard to make further inferences when this is true,
@@ -693,7 +740,7 @@ reflectable_magic_methods = {
     'add': lambda a, b: a + b,
     'sub': lambda a, b: a - b,
     'mul': lambda a, b: a * b,
-    'mod': lambda a, b: a % b,
+    'mod': lambda a, b: Mod(a, b),
     'pow': lambda a, b: Pow(a, b),
     'and': lambda a, b: a & b,
     'or': lambda a, b: a | b,
@@ -899,7 +946,7 @@ SYMPY_INTERP = {
     'Ge': operator.ge,
     'Min': min,
     'Max': max,
-    'Mod': operator.mod,
+    'Mod': Mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
@@ -1845,7 +1892,7 @@ class ShapeEnv:
         free = sorted(free, key=lambda x: (self.size_hint(x), x.name), reverse=True)  # type: ignore[attr-defined]
         lhs = expr.lhs
         rhs = expr.rhs
-        if not expr.has(sympy.Mod):
+        if not expr.has(Mod):
             try:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
@@ -1861,8 +1908,8 @@ class ShapeEnv:
                 pass
             except RecursionError:
                 log.warning(f"RecursionError in sympy.solve({lhs} - {rhs}, {free[0]})")
-        if expr.has(sympy.Mod):
-            mod_expr = tuple(expr.atoms(sympy.Mod))[0]
+        if expr.has(Mod):
+            mod_expr = tuple(expr.atoms(Mod))[0]
             try:
                 solutions = sympy.solve(lhs - rhs, mod_expr, dict=True)
                 if len(solutions) == 1 and solutions[0][mod_expr] == 0:
@@ -1879,7 +1926,7 @@ class ShapeEnv:
         # even if tracing doesn't require them otherwise
         for fd in reversed(floor_divs):
             base, divisor = fd.args
-            mod_expr = sympy.Mod(base, divisor)
+            mod_expr = Mod(base, divisor)
             eq_expr = sympy.Eq(mod_expr, 0)
             # add necessary mod guards
             self.evaluate_expr(eq_expr)

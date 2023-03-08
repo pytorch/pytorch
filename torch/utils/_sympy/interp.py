@@ -22,7 +22,7 @@ import torch
 @functools.lru_cache(None)
 def handlers():
     from torch._inductor.ir import CleanDiv
-    from torch.fx.experimental.symbolic_shapes import FloorDiv, Pow, TrueDiv
+    from torch.fx.experimental.symbolic_shapes import FloorDiv, Mod, Pow, TrueDiv
 
     # TODO: CeilDiv, ModularIndexing
 
@@ -43,7 +43,7 @@ def handlers():
         sympy.Mul: "mul",
         Pow: "pow",
         sympy.Pow: "pow",
-        sympy.Mod: "mod",
+        Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
         sympy.exp: "exp",
