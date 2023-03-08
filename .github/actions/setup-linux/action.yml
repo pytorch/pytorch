@@ -14,7 +14,7 @@ runs:
           # see https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
           category=$1
           # If it is GCP runner (runner name contains gcp), do not run this 
-          runner_name_str= {{ runner.name }}
+          runner_name_str=${{ runner.name }} 
           echo $runner_name_str
           if [[ $runner_name_str != *"gcp"* ]]; then
             curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
