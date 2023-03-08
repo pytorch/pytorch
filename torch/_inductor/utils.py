@@ -646,14 +646,24 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             bench_result = kernel_mod.benchmark_all_configs(args)
             print(f"{benchmark_name:20} {kernel_key[:10]}")
             for launcher, ms in bench_result.items():
-                print(f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}")
+                print(
+                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
+                )
         else:
             ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
             assert (
                 len(kernel_mod.triton_.launchers) == 1
             ), "Autotuner should have selected the best config"
             launcher = kernel_mod.triton_.launchers[0]
-            print(get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared, prefix=f"{benchmark_name:20} {kernel_key[:10]} "))
+            print(
+                get_info_str(
+                    ms,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
+                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                )
+            )
 
         nfound += 1
     if nfound == 0:
