@@ -22,13 +22,17 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch.cuda._memory_viz import profile_plot
+from torch.cuda._memory_viz import trace_plot
+from torch.cuda._memory_viz import segment_plot
+
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -44,7 +48,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
@@ -52,6 +56,7 @@ TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_GRAPH = TEST_CUDA
 TEST_CUDNN = TEST_CUDA
 TEST_BF16 = False
+TEST_PYNVML = not torch.cuda._HAS_PYNVML
 if TEST_CUDA:
     torch.ones(1).cuda()  # initialize cuda context
     TEST_CUDNN = TEST_CUDA and (TEST_WITH_ROCM or
@@ -61,17 +66,6 @@ if TEST_CUDA:
     TEST_BF16 = torch.cuda.is_bf16_supported()
     TEST_GRAPH = (torch.version.cuda and int(torch.version.cuda.split(".")[0]) >= 11) or \
                  (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
-
-
-def make_sparse_tensor(t, n, *sizes):
-    assert t.is_sparse
-    tensor = t()
-    i = tensor._indices()
-    i = i.new(len(sizes), n).copy_(
-        torch.cat([torch.LongTensor(1, n).random_(s) for s in sizes], 0))
-    v = tensor._values()
-    v = v.new(n).copy_(torch.randn(n))
-    return t(i, v, torch.Size(sizes)).coalesce()
 
 _cycles_per_ms = None
 
@@ -2237,11 +2231,6 @@ torch.cuda.synchronize()
         found_inf = torch.empty((1,), dtype=dtype, device=device)
         cur = found_inf.device
 
-        # As of d0c925f (4/16/20), docs are unclear about best API for sparse cuda tensor construction.
-        # https://pytorch.org/docs/master/tensors.html shows torch.sparse_coo_tensor(...), but it has no docstring.
-        # The same page shows several tensors with layout=torch.sparse_coo, but no constructors using that layout.
-        # Meanwhile, https://pytorch.org/docs/master/sparse.html shows torch.sparse.FloatTensor(...), which looks
-        # legacy and does not accept a device="cuda" kwarg.  Going with torch.sparse_coo_tensor.
         i = torch.tensor([[0, 1, 1],
                           [2, 0, 2]], device="cuda", dtype=torch.int64)
         v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
@@ -4573,16 +4562,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -4648,16 +4637,16 @@ class TestCudaComm(TestCase):
         numel = 5
         num_bytes = numel * 8
         tensors = [
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 1, 2, 3),
+            self.genSparseTensor((2, 3), 2, 1, False, 'cuda', torch.float64)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).cuda(),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 10, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.DoubleTensor, 5, 2, 3),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 7, 3, 3),
-            make_sparse_tensor(torch.cuda.sparse.FloatTensor, 2, 2, 3),
+            self.genSparseTensor((2, 3), 2, 10, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((2, 3), 2, 5, False, 'cuda', torch.float64)[0],
+            self.genSparseTensor((3, 3), 2, 7, False, 'cuda', torch.int64)[0],
+            self.genSparseTensor((2, 3), 2, 2, False, 'cuda', torch.float32)[0],
             torch.randn(numel).long().cuda(),
             torch.randn(numel).long().cuda(),
-            make_sparse_tensor(torch.cuda.sparse.LongTensor, 3, 2, 7),
+            self.genSparseTensor((2, 7), 2, 3, False, 'cuda', torch.int64)[0],
             torch.randn(numel * 2).int().cuda(),  # int is 2x shorter
             torch.randn(numel).cuda(),
         ]
@@ -5006,6 +4995,47 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
 
+    @skipIfRocm
+    def test_memory_profiler_viz(self):
+        with torch.profiler.profile(
+            with_stack=True,
+            profile_memory=True,
+            record_shapes=True
+        ) as prof:
+            x = torch.rand(128, 128, device='cuda')
+            x * x + x * x
+        plot = profile_plot(prof)
+        self.assertTrue("test_cuda.py" in plot)
+        self.assertTrue("test_memory_profiler_viz" in plot)
+        self.assertTrue('"elements_category": [' in plot)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_plots(self):
+        for record_context in (True, False):
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(
+                    True,
+                    record_context=record_context,
+                    trace_alloc_max_entries=1000000,
+                    trace_alloc_record_context=True)
+
+                def run():
+                    x = torch.rand(128, 128, device='cuda')
+                    x * x + x * x
+
+                run()
+                ss = torch.cuda.memory._snapshot()
+                tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(str(128 * 128 * 4) in tplot)
+                splot = segment_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
+                torch.cuda.memory._record_memory_history(False)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
@@ -5137,6 +5167,22 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
         self.assertTrue(x)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_nvml_get_handler(self):
+        self.assertTrue(torch.cuda._get_pynvml_handler() is not None)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_temperature(self):
+        self.assertTrue(0 <= torch.cuda.temperature() <= 150)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_power_draw(self):
+        self.assertTrue(torch.cuda.power_draw() >= 0)
+
+    @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
+    def test_clock_speed(self):
+        self.assertTrue(torch.cuda.clock_rate() >= 0)
 
 
 instantiate_parametrized_tests(TestCuda)
