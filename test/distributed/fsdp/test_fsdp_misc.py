@@ -642,6 +642,17 @@ class TestFSDPMiscWorldSize1(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_unsafe_setattr(self):
+        """
+        Tests that the environment variable for using unsafe setattr gates as
+        expected.
+        """
+        self.run_subtests(
+            {"use_orig_params": [False, True]},
+            self._test_unsafe_setattr,
+        )
+
+
+    def _test_unsafe_setattr(self, use_orig_params: bool):
         called_setattr_override = False
 
         class SetattrLinear(nn.Module):
@@ -662,7 +673,7 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         # Construct FSDP module without changing any environment variables and
         # run forward, which triggers both unsharded and sharded view setting
         module = SetattrLinear(5, 5, torch.device("cuda"))
-        fsdp_module = FSDP(module, use_orig_params=True)
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
         inp = torch.randn((8, 5), device=torch.device("cuda"))
         called_setattr_override = False
         fsdp_module(inp)
@@ -671,7 +682,7 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         # Repeat with unsafe setattr explicitly enabled
         os.environ[_FSDP_USE_UNSAFE_SETATTR] = "1"
         module = SetattrLinear(5, 5, torch.device("cuda"))
-        fsdp_module = FSDP(module, use_orig_params=True)
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
         inp = torch.randn((8, 5), device=torch.device("cuda"))
         called_setattr_override = False
         fsdp_module(inp)
@@ -680,7 +691,7 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         # Repeat with unsafe setattr explicitly disabled
         os.environ[_FSDP_USE_UNSAFE_SETATTR] = "0"
         module = SetattrLinear(5, 5, torch.device("cuda"))
-        fsdp_module = FSDP(module, use_orig_params=True)
+        fsdp_module = FSDP(module, use_orig_params=use_orig_params)
         inp = torch.randn((8, 5), device=torch.device("cuda"))
         called_setattr_override = False
         fsdp_module(inp)
