@@ -72,8 +72,8 @@ class ForkerIterDataPipe(IterDataPipe):
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
         copy: copy strategy to use for items yielded by each branch. Supported
-            options are ``None`` for no copying, ``shallow`` for shallow object
-            copies, and ``deep`` for deep object copies. Defaults to None.
+            options are ``None`` for no copying, ``"shallow"`` for shallow object
+            copies, and ``"deep"`` for deep object copies. Defaults to ``None``.
 
     Note:
         All branches of the forked pipeline return the identical object unless
