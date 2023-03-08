@@ -578,8 +578,6 @@ aten::alias_copy.out
 aten::all_gather_into_tensor
 aten::all_reduce
 aten::allclose
-aten::aminmax
-aten::aminmax.out
 aten::angle
 aten::angle.out
 aten::argmax
@@ -960,8 +958,6 @@ aten::nanmedian
 aten::nanmedian.dim
 aten::nanmedian.dim_values
 aten::nanmedian.out
-aten::nansum
-aten::nansum.out
 aten::native_group_norm.out
 aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
