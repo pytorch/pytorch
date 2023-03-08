@@ -182,7 +182,9 @@ def _fill_tensor_meta(
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
-    if isinstance(expected_values, (list, tuple)) and not isinstance(onnxscript_values, (list, tuple)):
+    if isinstance(expected_values, (list, tuple)) and not isinstance(
+        onnxscript_values, (list, tuple)
+    ):
         # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
         # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
         # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
