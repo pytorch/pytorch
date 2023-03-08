@@ -1,6 +1,6 @@
+#include <c10/macros/Export.h>
 #include <string>
 #include <vector>
-#include <c10/macros/Export.h>
 
 namespace torch {
 namespace unwind {
@@ -20,7 +20,8 @@ struct Frame {
 // Callers should first batch up all the unique void* pointers
 // across a number of unwind states and make a single call to
 // symbolize.
-TORCH_CUDA_CU_API std::vector<Frame> symbolize(const std::vector<void*>& frames);
+TORCH_CUDA_CU_API std::vector<Frame> symbolize(
+    const std::vector<void*>& frames);
 
 struct Stats {
   size_t hits = 0;
