@@ -392,7 +392,7 @@ Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool lo
 
 Tensor& soft_margin_loss_backward_out(const Tensor& grad_output, const Tensor& input, const Tensor& target, int64_t reduction, Tensor& grad_input) {
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
-  auto z = at::exp(-target * input);
+  auto z = at::exp(target * (-input));
   // inplace version of: grad_input = -norm * target * z / (1. + z) * grad_output;
   at::mul_out(grad_input, target, z).mul_(-norm);
   z.add_(1);
