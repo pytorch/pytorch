@@ -87,6 +87,10 @@ class TestExportModes(pytorch_test_common.ExportTestCase):
         x = torch.ones(3)
         torch.onnx.export(foo, (x,), f)
 
+    # TODO(87318): Can't pass even with Caffe2
+    @unittest.skip(
+        "RuntimeError: ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type"
+    )
     @common_utils.skipIfNoCaffe2
     @common_utils.skipIfNoLapack
     def test_caffe2_aten_fallback(self):
