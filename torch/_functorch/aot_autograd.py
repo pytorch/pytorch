@@ -390,6 +390,8 @@ class OutputAliasInfo:
     #     as a graph output
     # (6) an alias of an intermediate, where that intermediate is also a user output
     output_type: OutputType
+    # The raw type of the output (torch.Tensor, SymInt, etc)
+    raw_type: type
     # If (1) above, then
     # - base_idx is None
     # If (2) or (3) above, then
@@ -712,6 +714,7 @@ def run_functionalized_fw_and_collect_metadata(
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
+                raw_type=type(o),
                 base_idx=base_idx,
             )
             output_info.append(out_info)
@@ -737,7 +740,7 @@ def run_functionalized_fw_and_collect_metadata(
         f_output_tangents = [
             o
             for o, info in zip(flat_f_outs, output_info)
-            if info.output_type == OutputType.non_alias
+            if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
         ]
         # intermediate bases are also included in the backward graph
         f_tangents = f_input_tangents + f_output_tangents + intermediate_bases
@@ -956,6 +959,9 @@ def forward_or_joint(
         x
         for (i, x) in enumerate(outs)
         if meta.fw_metadata.output_info[i].output_type == OutputType.non_alias
+        # Also, only tensor outputs should participate in the backward
+        # (in particular, Symint outputs in the forward graph shouldn't get tangents)
+        and issubclass(meta.fw_metadata.output_info[i].raw_type, torch.Tensor)
     ]
     # Pass any (non-aliased) mutated inputs in as tangents, since they'll be returned as outputs in the fw
     # Important: the traced joint fw/bw will return updated inputs with data mutations,
@@ -1272,6 +1278,7 @@ class AOTConfig:
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
+    dynamic_shapes: bool = False
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -2262,6 +2269,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             )
 
             assert len(flat_args) == expected_grad_outs
+            out_info = CompiledFunction.metadata.fw_metadata.output_info
             if (
                 CompiledFunction.metadata.num_mutated_metadata_only_inputs > 0
                 or CompiledFunction.metadata.num_outputs_aliased > 0
@@ -2283,11 +2291,10 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                     if input_info[info_idx].mutates_data
                 ]
                 # We also need to filter out grad outputs that correspond to outputs aliasing inputs/intermediates
-                out_info = CompiledFunction.metadata.fw_metadata.output_info
                 out_tangents_filtered = [
                     x
                     for x, info in zip(out_tangents, out_info)
-                    if info.output_type == OutputType.non_alias
+                    if info.output_type == OutputType.non_alias and issubclass(info.raw_type, torch.Tensor)
                 ]
                 # intermediate bases always require gradients, and always participate in the backward graph.
                 flat_bw_args = itertools.chain(inp_tangents_filtered, out_tangents_filtered, intermediate_base_tangents)
@@ -2302,7 +2309,13 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
                 # assert all(x is None for x in metadata_only_inps)
                 # assert all(x is None for x in aliased_outputs)
             else:
-                flat_bw_args = flat_args
+                # filter out non-tensor grad_outputs (aka due to ints being returned as outputs in the forward)
+                num_mutated_inps = CompiledFunction.metadata.num_mutated_inputs
+                mutated_inp_args = flat_args[:num_mutated_inps] if num_mutated_inps > 0 else []
+                user_tangents = flat_args[num_mutated_inps:]
+                assert len(user_tangents) == len(out_info)
+                filtered_user_tangents = [x for x, info in zip(user_tangents, out_info) if issubclass(info.raw_type, torch.Tensor)]
+                flat_bw_args = tuple(mutated_inp_args) + tuple(filtered_user_tangents)
 
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
@@ -2315,12 +2328,14 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
-                    if config.use_dynamic_shapes:
+                    if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
                                 aot_config.bw_compiler, None, None,
-                                aot_config.decompositions, 0, aot_config.aot_id, aot_config.keep_inference_input_mutations
+                                aot_config.decompositions, 0, aot_config.aot_id,
+                                aot_config.keep_inference_input_mutations,
+                                aot_config.dynamic_shapes
                             )
                         )
                     else:
@@ -2453,7 +2468,7 @@ def create_aot_dispatcher_function(
             shape_env = fake_mode.shape_env
             break
     else:
-        shape_env = ShapeEnv() if config.use_dynamic_shapes else None
+        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
         fake_mode = (
             FakeTensorMode(shape_env=shape_env)
             if config.use_fake_tensor
@@ -2552,7 +2567,10 @@ def aot_function(
     num_params_buffers: int = 0,
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
-    keep_inference_input_mutations: bool = False
+    keep_inference_input_mutations: bool = False,
+    *,
+    # Whether or not to trace with dynamic shapes
+    dynamic=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -2618,7 +2636,8 @@ def aot_function(
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
-        keep_inference_input_mutations=keep_inference_input_mutations
+        keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic,
     )
     cached_res = None
 
@@ -2801,6 +2820,17 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+
+    full_args = []
+    full_args.extend(params_flat)
+    full_args.extend(args)
+
+    dynamic_shapes = False
+    for x in full_args:
+        if isinstance(x, FakeTensor):
+            dynamic_shapes = x.fake_mode.shape_env is not None
+            break
+
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
@@ -2809,11 +2839,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic_shapes
     )
-
-    full_args = []
-    full_args.extend(params_flat)
-    full_args.extend(args)
 
     compiled_fn = create_aot_dispatcher_function(
         functional_call,
