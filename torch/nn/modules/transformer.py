@@ -219,6 +219,15 @@ class TransformerEncoder(Module):
             target_type=src.dtype
         )
 
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
+        )
+
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -490,6 +499,15 @@ class TransformerEncoderLayer(Module):
             other_type=F._none_or_dtype(src_mask),
             other_name="src_mask",
             target_type=src.dtype
+        )
+
+        src_mask = F._canonical_mask(
+            mask=src_mask,
+            mask_name="src_mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
         )
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
