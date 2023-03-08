@@ -682,7 +682,6 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         os.environ[_FSDP_USE_UNSAFE_SETATTR] = "1"
         module = SetattrLinear(5, 5, torch.device("cuda"))
         fsdp_module = FSDP(module, use_orig_params=use_orig_params)
-        inp = torch.randn((8, 5), device=torch.device("cuda"))
         called_setattr_override = False
         fsdp_module(inp)
         self.assertFalse(called_setattr_override)
@@ -691,7 +690,6 @@ class TestFSDPMiscWorldSize1(FSDPTest):
         os.environ[_FSDP_USE_UNSAFE_SETATTR] = "0"
         module = SetattrLinear(5, 5, torch.device("cuda"))
         fsdp_module = FSDP(module, use_orig_params=use_orig_params)
-        inp = torch.randn((8, 5), device=torch.device("cuda"))
         called_setattr_override = False
         fsdp_module(inp)
         self.assertTrue(called_setattr_override)
