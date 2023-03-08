@@ -1574,9 +1574,11 @@ def _export(
                     module_typenames_to_export_as_functions,
                     list(params_dict.keys()),
                 )
-            params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
-                graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
-            )
+
+            if keep_initializers_as_inputs is not True:
+                params_dict = _C._jit_pass_onnx_deduplicate_initializers(  # type: ignore[assignment]
+                    graph, params_dict, getattr(model, "training", False)  # type: ignore[arg-type]
+                )
             _C._jit_pass_onnx_assign_scoped_names_for_node_and_value(graph)
             if export_params:
                 (
