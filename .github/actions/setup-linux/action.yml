@@ -15,11 +15,9 @@ runs:
           category=$1
           # If it is GCP runner (runner name contains gcp), do not run this 
           echo {{ runner.name }}
-          if [[ {{ runner.name}} != *"gcp"* ]]; then  
-            curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
-          else
-            echo "Runner is from Google Cloud Platform, No OP on ec2 metadata" 
-          fi
+          curl -fsSL "http://169.254.169.254/latest/meta-data/${category}"
+          echo "Runner is from Google Cloud Platform, No OP on ec2 metadata" 
+          exit 1
         }
         echo "ami-id: $(get_ec2_metadata ami-id)"
         echo "instance-id: $(get_ec2_metadata instance-id)"
