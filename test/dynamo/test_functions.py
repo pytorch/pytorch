@@ -827,6 +827,11 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
         return augment(x)
 
+    @make_test
+    def test_torch_tensor(x):
+        data = [0.1, 0.2, 0.3]
+        return x + 1, torch.tensor(data), torch.tensor(data=data)
+
     # # This is to test the new syntax for pattern matching
     # # ("match ... case ...") added on python 3.10.
     # # Uncomment these test cases if you run on 3.10+
