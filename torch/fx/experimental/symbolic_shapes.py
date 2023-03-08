@@ -1514,7 +1514,7 @@ class ShapeEnv:
                 srcs = symbol_to_source[expr.free_symbols.pop()]
                 for src in srcs:
                     if src in dynamic_sources:
-                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's mark_dynamic")
+                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's constraint")
 
         for t, source in zip(placeholders, sources):
             if isinstance(source, str):
@@ -1534,7 +1534,9 @@ class ShapeEnv:
                     # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                     # constrained to an integer.
                     if _is_int(ss):
-                        raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
+                        raise RuntimeError(f"Attempting to constrain dimension "
+                                           f"{source.name()}.size()[{i}] to {int(ss)}, "
+                                           "which violates user's mark_dynamic")
                     dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)

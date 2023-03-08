@@ -167,3 +167,14 @@ def mark_dynamic(t, index):
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def has_dynamic_dims(t):
+    return hasattr(t, "_dynamo_dynamic_indices")
+
+
+@forbid_in_graph
+def clear_dynamic_dims(t):
+    assert has_dynamic_dims(t)
+    delattr(t, "_dynamo_dynamic_indices")
