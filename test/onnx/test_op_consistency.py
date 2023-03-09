@@ -437,7 +437,11 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                     # Relax atol and rtol for float32 based on empirical results
                     # The current most relaxed values are for aten::stft
                     rtol = 1e-5
-                    atol = 1e-4
+                    atol = 1e-5
+                elif dtype == torch.float64:
+                    # The current most relaxed values are for aten::stft
+                    rtol = 1e-5
+                    atol = 1e-5
                 else:
                     rtol = None
                     atol = None
