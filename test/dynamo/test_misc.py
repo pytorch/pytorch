@@ -565,7 +565,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(v, v.size())[0, 0], -10)
         self.assertEqual(opt_fn(v, (10, 20))[0, 0], -10)
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
-        self.assertEqual(cnts.op_count, 2)
+        # One recompile per differing input type
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_cell_output1(self):
         out = None
