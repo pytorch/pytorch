@@ -1186,7 +1186,7 @@ class CppTile1DOverrides(CppVecOverrides):
     """Ops handle for 1D (i.e., vector) tile variable"""
 
     @staticmethod
-    def _get_vec_itervar_idx(index: sympy.Expr):
+    def _get_vec_tile_idx(index: sympy.Expr):
         """Check if we can vectorize on current tile index"""
         self = V.kernel
         # indirect indexing, do scalar load, otherwise check vectorizable
@@ -1199,26 +1199,29 @@ class CppTile1DOverrides(CppVecOverrides):
                 current_tile_index = next(iter(current_indices))
                 loop_var = self.itervars[self.tile_loop_indices[current_tile_index]]
                 if self.is_stride1_at(loop_var, index):
-                    return self.tile_loop_indices[current_tile_index]
+                    return current_tile_index
             else:
                 invariant_indices = self.current_tile_indices() - current_indices
                 assert invariant_indices
-                return self.tile_loop_indices[next(iter(invariant_indices))]
+                return next(iter(invariant_indices))
         return -1
 
     @staticmethod
     def load(name: str, index: sympy.Expr):
         self = V.kernel
-        vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx < 0:
+        vec_tile_idx = CppTile1DOverrides._get_vec_tile_idx(index)
+        if vec_tile_idx < 0:
             raise NotImplementedError
-        
+
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
+        itervar_idx = self.tile_loop_indices[vec_tile_idx]
+        tiling_factor = self.tile_sizes[vec_tile_idx]
+
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=vec_itervar_idx
+            index, tiling_factor, itervar_idx=itervar_idx
         )
 
         is_broadcast = expanded_index == new_index
@@ -1248,21 +1251,24 @@ class CppTile1DOverrides(CppVecOverrides):
     @staticmethod
     def store(name, index, value, mode=None):
         self = V.kernel
-        vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx < 0:
+        vec_tile_idx = CppTile1DOverrides._get_vec_tile_idx(index)
+        if vec_tile_idx < 0:
             raise NotImplementedError
 
         value = self.get_tile_slice(value)
         assert value.meta.rank() == 1
         assert "buf" in name
-        
+
+        itervar_idx = self.tile_loop_indices[vec_tile_idx]
+        tiling_factor = self.tile_sizes[vec_tile_idx]
+
         var = self.args.output(name)
         index = self.rename_indexing(index)
         assert mode is None
 
         expanded_index = sympy.expand(index)
         new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=vec_itervar_idx
+            index, tiling_factor, itervar_idx=itervar_idx
         )
         assert new_index != expanded_index
         line = f"{value}.store({var} + {cexpr(new_index)});"
@@ -1271,8 +1277,8 @@ class CppTile1DOverrides(CppVecOverrides):
     @staticmethod
     def reduction(name, dtype, src_dtype, reduction_type, index, value):
         self = V.kernel
-        vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx < 0:
+        vec_tile_idx = CppTile1DOverrides._get_vec_tile_idx(index)
+        if vec_tile_idx < 0:
             raise NotImplementedError
 
         value = self.get_tile_slice(value)
@@ -1381,7 +1387,7 @@ class CppTile2DOverrides:
     """Ops handle for 2D tile variable"""
 
     @staticmethod
-    def _get_tile2d_itervar_indices(index):
+    def _get_tile2d_indices(index):
         """Check if we can do 2d tiling on current tile indices"""
         self = V.kernel
         # indirect indexing, do scalar load, otherwise check vectorizable
@@ -1407,7 +1413,7 @@ class CppTile2DOverrides:
     @staticmethod
     def load(name: str, index: sympy.Expr):
         self = V.kernel
-        tile_indices = CppTile2DOverrides._get_tile2d_itervar_indices(index)
+        tile_indices = CppTile2DOverrides._get_tile2d_indices(index)
         if not tile_indices:
             raise NotImplementedError
 
@@ -1437,7 +1443,7 @@ class CppTile2DOverrides:
     @staticmethod
     def store(name, index, value, mode=None):
         self = V.kernel
-        tile_indices = CppTile2DOverrides._get_tile2d_itervar_indices(index)
+        tile_indices = CppTile2DOverrides._get_tile2d_indices(index)
         if not tile_indices:
             raise NotImplementedError
 
@@ -1687,11 +1693,16 @@ class CppTileKernel(CppKernel):
         # the line can be removed if the tile buffer is not used
         self.current_slice_store_name = None
 
-        # TODO(jgong5): following attributes will be removed after we move CppVecKernel
-        # code into 1D tile ops handler. Currently 1D tile ops handle invokes CppVeckernel
-        # directly and they are here to get CppVecKernel work.
-        self.tiling_factor = tile_sizes[0]
+        # NOTE(jgong5): Used by vectorized load (CppTile1DOverrides). We load a vector of
+        # bool/int8 as a float vector when it is used for boolean flags. This dict maps the
+        # bool/int8 vec variable to the variable name of its float counterpart. We can
+        # actually use `cse.generate` instead but current reduction logic requires the reduction
+        # variable name matches between the vector kernel and the scalar kernel. Using
+        # `cse.generate` only in the vec kernel would break this constraint.
+        # TODO(jgong5): Remove the variable below and use `cse.generate` instead.
         self.var_vec_buf_map = {}
+
+        # Used for tracking custom omp reduction for vector type
         self.reduction_omp_dec = {}
 
         # tile rank -> ops overrides that handle the tile
