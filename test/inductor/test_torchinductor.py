@@ -7445,8 +7445,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             foo_opt = torch._dynamo.optimize()(foo)
             inp = torch.zeros([4, 4], dtype=torch.float, device="cuda")
-            # self.assertEqual(foo_opt(inp), foo(inp))
-            # self.assertEqual(foo_opt(inp), foo(inp))
+            self.assertEqual(foo_opt(inp), foo(inp))
+            self.assertEqual(foo_opt(inp), foo(inp))
 
             inp.add_(1)
             out_eager = foo(inp)
@@ -7509,11 +7509,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 x = x + x + x
                 y = x + 1
+                torch._dynamo.graph_break()
                 z = x * x
                 if z.sum() > 0:
                     return y + 1
                 else:
-                    return y + 3
+                    return y
 
             foo_opt = torch._dynamo.optimize()(foo)
 
@@ -7674,7 +7675,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             )
 
         def test_separate_recordings(self):
-
             def foo_unopt(x, y):
                 return (x + 1) @ y
 

@@ -186,7 +186,7 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
-            and len(graph.device_idxs) == 1
+            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             compiled_fn = cudagraphify(
                 compiled_fn,
@@ -206,7 +206,7 @@ def compile_fx_inner(
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
                     )
-                elif len(graph.device_idxs) > 1:
+                elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
                     developer_warning(
                         "skipping cudagraphs due to multiple device indexes"
                     )
