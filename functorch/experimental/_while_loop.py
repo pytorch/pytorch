@@ -57,7 +57,7 @@ def while_loop_functionalize(interpreter, cond_fun, body_fun, init_val):
       2. Our check for above condition is not exhaustive
     """
     reapply_views = interpreter.functionalize_add_back_views()
-    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    mode = 'mutations' if reapply_views else 'mutations_and_views'
     # At this point, we will see functionalized tensors, so need to unwrap them first
     unwrapped_args = _unwrap_all_tensors_from_functional(init_val, reapply_views=reapply_views)
 

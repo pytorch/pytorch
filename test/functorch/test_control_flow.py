@@ -9,6 +9,16 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+def op_count(op, gm):
+    count = 0
+    for mod in gm.children():
+        count += op_count(op, mod)
+    for node in gm.graph.nodes:
+        if node.target == op:
+            count += 1
+    return count
+
+
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -55,7 +65,7 @@ class TestControlFlow(TestCase):
             iter, val = x
             return (iter - 1, val.sin())
 
-        iter = torch.tensor(5) 
+        iter = torch.tensor(5)
         val = torch.randn(2, 3, device="cuda")
         res_scalar = control_flow.while_loop(cond_fun, body_fun, (5, val))
         while iter > 0:
@@ -104,7 +114,7 @@ class TestControlFlow(TestCase):
             val = val + 1
             total_iter -= 1
         self.assertEqual(res_scalar, (0, val))
-    
+
     def test_while_loop_no_trace_functionalize(self):
         def cond_fun(x):
             iter, _ = x
@@ -117,7 +127,7 @@ class TestControlFlow(TestCase):
             val_ = val.view(3, 2) + 2
             val_.add_(-1)
             return (iter - 1, val_.view(2, 3))
-        
+
         def f(input):
             return control_flow.while_loop(cond_fun, body_fun, input)
 
@@ -916,7 +926,7 @@ class TestControlFlowTraced(TestCase):
             val_ = val.view(3, 2) + 2
             val_.add_(-1)
             return (iter - 1, val_.view(2, 3))
-        
+
         def f(input):
             return control_flow.while_loop(cond_fun, body_fun, input)
 
@@ -926,7 +936,7 @@ class TestControlFlowTraced(TestCase):
 
         res_eager = f(input)
 
-        ff = torch.func.functionalize(f)
+        ff = torch.func.functionalize(f, remove="mutations_and_views")
         res_ff = ff(input)
 
         gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
@@ -934,6 +944,12 @@ class TestControlFlowTraced(TestCase):
 
         gm_real = make_fx(ff, tracing_mode="real")(input)
         res_ff_real = gm_real(input)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_real), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_real), 0)
+
 
         while iter > 0:
             val = val + 1
@@ -944,7 +960,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res_ff, expected)
         self.assertEqual(res_ff_symbolic, expected)
         self.assertEqual(res_ff_real, expected)
-    
+
     def test_trace_functionalize_nested_while_loop(self):
         def inner_fun(x):
             iter, val = x
@@ -981,6 +997,13 @@ class TestControlFlowTraced(TestCase):
         ff = torch.func.functionalize(f, remove="mutations_and_views")
         gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
         gm_real = make_fx(ff, tracing_mode="real")(input)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_symbolic), 0)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_real), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_real), 0)
+
 
         res_eager = f(input)
         res_ff = ff(input)
@@ -1033,7 +1056,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res_real, expected)
 
 
-    def test_trace_while_loop_nested(self):
+    def test_trace_nested_while_loop(self):
         def inner_fun(x):
             iter, val = x
             return (iter - 1, val + 1)
