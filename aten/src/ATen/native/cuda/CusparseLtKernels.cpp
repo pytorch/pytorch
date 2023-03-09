@@ -35,6 +35,7 @@ The following source file implements a sparse linear operator using cusparseLt
 // TODO: template this class based on dtype or figure out another way to
 // make dtype variable
 struct CusparseLtLinear : torch::CustomClassHolder {
+  at::Tensor weight;
   cusparseLtHandle_t handle;
   cusparseLtMatmulAlgSelection_t alg_sel;
   cusparseLtMatmulDescriptor_t matmul;
@@ -45,14 +46,16 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   float beta{0.0};
   unsigned alignment{16};
   int  num_streams{0};
-  int n_search_iter{1};
+  int n_search_iter{5};
   int64_t num_A_rows;
   cudaStream_t stream{nullptr};
   cudaStream_t* streams{nullptr};
   void* d_workspace{nullptr};
   int* d_valid;
+  int alg_id{7777};
   cusparseOperation_t opA{CUSPARSE_OPERATION_NON_TRANSPOSE};
   cusparseLtPruneAlg_t pruning_algo ;
+
   CusparseLtLinear(): pruning_algo{CUSPARSELT_PRUNE_SPMMA_STRIP}{};
 
   void init(const at::Tensor& weight, const at::Tensor& bias);
@@ -101,7 +104,6 @@ void CusparseLtLinear::init(const at::Tensor& weight,
   auto     lda            = (is_rowmajor) ? num_A_cols : num_A_rows;
   
   dA = weight.data_ptr<c10::Half>();
-
   dBias = bias.data_ptr<c10::Half>();
 
   //--------------------------------------------------------------------------
@@ -109,12 +111,12 @@ void CusparseLtLinear::init(const at::Tensor& weight,
   
   // matrix descriptor initilization
   //--------------------------------------------------------------------------
-  CHECK_CUSPARSE(cusparseLtInit(&handle))
+  CHECK_CUSPARSE( cusparseLtInit(&handle) )
+
   CHECK_CUSPARSE( cusparseLtStructuredDescriptorInit(
       &handle, &weight_descriptor, num_A_rows, num_A_cols,
       lda, alignment, type, order, CUSPARSELT_SPARSITY_50_PERCENT))
   
-
 
 }
 
@@ -217,10 +219,25 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
   //CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(&handle, &alg_sel, CUSPARSELT_MATMUL_SEARCH_ITERATIONS, &n_search_iter, sizeof(int)))
 
-  //CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
-                                          //dA_compressed, dB, &beta,
-                                          //dC, dD, nullptr,
-                                          //streams, num_streams) )
+  if (alg_id == 7777)
+  {
+      CHECK_CUSPARSE( cusparseLtMatmulSearch(&handle, &plan, &alpha,
+                                              dA_compressed, dB, &beta,
+                                              dC, dD, nullptr,
+                                              streams, num_streams) )
+
+      CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                                      CUSPARSELT_MATMUL_ALG_CONFIG_ID,
+                                                      &alg_id, sizeof(alg_id)) )
+
+      std::cout <<"alg id: " << alg_id << std::endl;
+
+      //CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+                                                      //CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+                                                      //&alg_id, sizeof(alg_id)) )
+      //std::cout <<"max alg id: " << alg_id << std::endl;
+  }
+
 
   CHECK_CUSPARSE( cusparseLtMatmul(
       &handle,

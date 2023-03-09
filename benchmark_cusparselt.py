@@ -139,25 +139,29 @@ if __name__ == "__main__":
 
         input_tensor, pruner, sparse_linear, dense_linear = get_linear(m, k, n)
 
-        result = benchmark.Timer(
+        measurement = benchmark.Timer(
             stmt='sparse_linear(input_tensor)',
             globals={'input_tensor': input_tensor, 'sparse_linear': sparse_linear},
             label=label,
             sub_label=sub_label,
             description='sparse latency',
-        )
-        results.append(result.blocked_autorange(min_run_time=1))
+        ).blocked_autorange(min_run_time=1)
+        results.append(measurement)
+        measurement.metadata = {
+            'device': device,
+        }
+        results.append(measurement)
 
-        result = benchmark.Timer(
+        measurement = benchmark.Timer(
             stmt='dense_linear(input_tensor)',
             globals={'input_tensor': input_tensor, 'dense_linear': dense_linear},
             label=label,
             sub_label=sub_label,
             description='dense latency',
-        )
-        results.append(result.blocked_autorange(min_run_time=1))
+        ).blocked_autorange(min_run_time=1)
+        results.append(measurement)
 
-        with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU], record_shapes=True) as prof:
+        with profile(activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU], record_shapes=True, with_stack=True) as prof:
             with record_function("cusparselt"):
                 sparse_linear(input_tensor)
 
