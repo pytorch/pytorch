@@ -822,5 +822,82 @@ class TestControlFlowTraced(TestCase):
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
 
+    def test_trace_while_loop(self):
+        def cond_fun(x):
+            iter, _ = x
+            return iter > 0
+
+        def body_fun(x):
+            iter, val = x
+            return (iter - 1, val.sin())
+
+        def f(input):
+            return control_flow.while_loop(cond_fun, body_fun, input)
+
+        iter = torch.ones(1) * 6
+        val = torch.randn(2, 3)
+        input = (iter, val)
+
+        res_eager = f(input)
+
+        gm_symbolic = make_fx(f, tracing_mode="symbolic")(input)
+        res_symbolic = gm_symbolic(input)
+
+        gm_real = make_fx(f, tracing_mode="real")(input)
+        res_real = gm_real(input)
+
+        while iter > 0:
+            val = val.sin()
+            iter -= 1
+        expected = (0, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_symbolic, expected)
+        self.assertEqual(res_real, expected)
+
+
+    def test_trace_while_loop_nested(self):
+        def inner_fun(x):
+            iter, val = x
+            return (iter - 1, val + 1)
+
+        def inner_cond_fun(x):
+            iter, _ = x
+            return iter > 0
+
+        def outter_cond_fun(x):
+            iter, _, _ = x
+            return iter > 0
+
+        def outter_fun(x):
+            iter, inner_iter, val = x
+            _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
+            return (iter - 1, inner_iter, val)
+
+        iter = torch.ones(1) * 2
+        inner_iter = torch.ones(1) * 5
+        total_iter = iter * inner_iter
+        input = (iter, inner_iter, torch.zeros(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(outter_cond_fun, outter_fun, input)
+
+        res_eager = f(input)
+
+        gm_symbolic = make_fx(f, tracing_mode="symbolic")(input)
+        res_symbolic = gm_symbolic(input)
+
+        gm_real = make_fx(f, tracing_mode="real")(input)
+        res_real = gm_real(input)
+
+        val = input[2]
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+
+        expected = (0, inner_iter, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_symbolic, expected)
+        self.assertEqual(res_real, expected)
+
 if __name__ == '__main__':
     run_tests()
