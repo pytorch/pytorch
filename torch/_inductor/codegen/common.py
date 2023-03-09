@@ -331,6 +331,7 @@ class KernelArgs:
         call_args = []
         arg_defs = []
         arg_types = []
+
         def buffer_has_alias(buffer_name):
             # buffer_name may be graph input or a constant.
             if buffer_name in V.graph.graph_inputs or buffer_name in V.graph.constants:
@@ -341,7 +342,9 @@ class KernelArgs:
                     buffer_user_name = self.call_names()
                     for user in buffer_node.users:
                         # only check the user's buffer is used by current kernel.
-                        if user.get_name() in buffer_user_name and not self.is_removed(user.get_name()):
+                        if user.get_name() in buffer_user_name and not self.is_removed(
+                            user.get_name()
+                        ):
                             return True
             return False
 
@@ -350,12 +353,7 @@ class KernelArgs:
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            has_alias = False
-            for outer_name in inplaced.other_names:
-                if buffer_has_alias(outer_name):
-                    has_alias = True
-                    break
-            if has_alias:
+            if any(buffer_has_alias(outer_name) for outer_name in inplaced.other_names):
                 arg_defs.append(f"{cpp_dtype}* {inner}")
             else:
                 arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
