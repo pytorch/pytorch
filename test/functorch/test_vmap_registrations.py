@@ -279,7 +279,7 @@ xfail_not_implemented = {
     "aten::to.dtype",
     "aten::to.dtype_layout",
     "aten::to.other",
-    "aten::to_dense.dtype",
+    "aten::to_dense",
     "aten::to_dense.masked",
     "aten::to_dense_backward",
     "aten::to_mkldnn_backward",
