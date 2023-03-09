@@ -37,6 +37,7 @@ from .side_effects import SideEffects
 from .source import (
     ConstantSource,
     is_constant_source,
+    LocalInputSource,
     LocalSource,
     ParamBufferSource,
     ShapeEnvSource,
@@ -251,6 +252,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
+        # Maps the source arg position to the grapharg position
+        self.pos_to_arg: Dict[int, int] = {}
 
         # Enables creating unique node names by tracking
         # all current placeholder node names
@@ -333,7 +336,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         log.debug(f"restore_graphstate: removed {removed_nodes} nodes")
 
     def add_grapharg(self, arg: GraphArg):
+        curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
+        if isinstance(arg.source, LocalInputSource):
+            self.pos_to_arg[arg.source.pos] = curr_pos
         self.tracing_context.module_context.register(arg.source)
 
     def count_calls(self):
@@ -504,14 +510,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for n, p in target.named_parameters(recurse=False, remove_duplicate=False):
+                        for n, p in target.named_parameters(
+                            recurse=False, remove_duplicate=False
+                        ):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_buffers"):
-                        for n, p in target.named_buffers(recurse=False, remove_duplicate=False):
+                        for n, p in target.named_buffers(
+                            recurse=False, remove_duplicate=False
+                        ):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)

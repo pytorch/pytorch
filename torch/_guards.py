@@ -225,6 +225,21 @@ class GuardEnvExpr:
 
 
 """
+A class representing a pair of duplicate inputs.
+input_pos_a and input_pos_b are input positions we have deduped.
+"""
+
+
+@dataclasses.dataclass
+class DuplicateInputs(GuardEnvExpr):
+    input_pos_a: int
+    input_pos_b: int
+
+    def __post_init__(self):
+        assert self.input_pos_a != self.input_pos_b
+
+
+"""
 Checkpointable is an interface for driving state snapshotting, left purposely vague for now.
 
 copy_graphstate() -> T, a somewhat legacy name, is expected to emit a snapshot of any type that
@@ -350,7 +365,7 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
             curr_source = self.names_to_sources[name]
             assert (
                 curr_source.name() == source.name()
-            ), f"Mismatch {curr_source.name()} vs {source.name()}"
+            ), f"Mismatch {curr_source} vs {source}"
             return
         self.names_to_sources[name] = source
 
@@ -393,7 +408,6 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.module_context = ModuleContext()
-        self.aot_autograd_arg_pos_to_source = []
 
     @staticmethod
     @contextlib.contextmanager
@@ -425,18 +439,3 @@ def tracing(context: TracingContext):
         yield _CURRENT_TRACING_CONTEXT
     finally:
         _CURRENT_TRACING_CONTEXT = old_context
-
-
-"""
-A class representing a pair of duplicate inputs.
-input_pos_a and input_pos_b are input positions we have deduped.
-"""
-
-
-@dataclasses.dataclass
-class DuplicateInputs(GuardEnvExpr):
-    input_source_a: Source
-    input_source_b: Source
-
-    def __post_init__(self):
-        assert self.input_source_a != self.input_source_b

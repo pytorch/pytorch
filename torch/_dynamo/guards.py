@@ -693,9 +693,19 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                source_a = guard.input_source_a
-                source_b = guard.input_source_b
-                code_part = f"{source_a.name()} is {source_b.name()}"
+                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
+                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
+                assert (
+                    pos_b >= 0 and pos_a >= 0
+                ), "Deduped args out of bounds, cannot be negative"
+
+                assert self.output_graph.graphargs[
+                    pos_a
+                ].is_tensor, "Deduped arg must be a tensor"
+                assert self.output_graph.graphargs[
+                    pos_b
+                ].is_tensor, "Deduped arg must be a tensor"
+                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
