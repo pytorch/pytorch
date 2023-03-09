@@ -1,7 +1,7 @@
 import copy
 import operator
 import torch
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 from torch.ao.quantization import (
     default_weight_observer,
     default_weight_fake_quant,
@@ -92,20 +92,31 @@ def _get_lstm_with_individually_observed_parts(
         # to configure these ops in FX graph mode quantization today. This is because
         # the FloatFunctional modules simply disappear from the graph after tracing.
         # In the future, we should rewrite quantizable LSTM without FloatFunctionals.
-        # TODO: do not rely on node names
-        node_name_to_activation_post_process_ctr = {
-            "add": linear_output_obs_ctr,  # gates.add
-            "mul": cell_state_obs_ctr,  # fgate_cx.mul
-            "mul_1": cell_state_obs_ctr,  # igate_cgate.mul
-            "add_1": cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
-            "mul_2": hidden_state_obs_ctr,  # ogate_cy.mul
+        op_index_to_activation_post_process_ctr = {
+            (torch.add, 0): linear_output_obs_ctr,  # gates.add
+            (torch.mul, 0): cell_state_obs_ctr,  # fgate_cx.mul
+            (torch.mul, 1): cell_state_obs_ctr,  # igate_cgate.mul
+            (torch.add, 1): cell_state_obs_ctr,  # fgate_cx_igate_cgate.add
+            (torch.mul, 2): hidden_state_obs_ctr,  # ogate_cy.mul
         }
+        add_count = 0
+        mul_count = 0
         for node in cell.graph.nodes:
-            if node.name not in node_name_to_activation_post_process_ctr:
+            op_index: Optional[Tuple[Callable, int]] = None  # e.g. (torch.add, 1)
+            if node.target == torch.add:
+                op_index = (torch.add, add_count)
+                add_count += 1
+            elif node.target == torch.mul:
+                op_index = (torch.mul, mul_count)
+                mul_count += 1
+            else:
+                # Neither torch.add nor torch.mul
+                continue
+            if op_index not in op_index_to_activation_post_process_ctr:
                 continue
             assert len(node.users) == 1
             activation_post_process_name = list(node.users.keys())[0].name
-            activation_post_process_ctr = node_name_to_activation_post_process_ctr[node.name]
+            activation_post_process_ctr = op_index_to_activation_post_process_ctr[op_index]
             if activation_post_process_ctr is not None:
                 setattr(cell, activation_post_process_name, activation_post_process_ctr())
         layer.layer_fw.cell = cell

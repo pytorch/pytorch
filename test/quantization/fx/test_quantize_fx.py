@@ -4547,6 +4547,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         # Construct a BackendConfig that supports qint32 for certain ops
+        # TODO: build a BackendConfig from scratch instead of modifying an existing one
         qint32_dtype_config = DTypeConfig(input_dtype=torch.qint32, output_dtype=torch.qint32)
         my_backend_config = get_qnnpack_backend_config()
         for config in my_backend_config.configs:
