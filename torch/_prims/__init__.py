@@ -2402,14 +2402,14 @@ def _min_max_meta(
         return TensorMeta(
             shape=shape, strides=strides, dtype=self.dtype, device=self.device
         )
-    dim = utils.canonicalize_dims(self.ndim, dim)
-    shape = compute_reduction_shape(self, (dim,), keepdim)
+    dim = utils.reduction_dims(self.shape, (dim,))
+    shape = compute_reduction_shape(self, dim, keepdim)
     strides = utils.make_contiguous_strides_for(shape)
     values = TensorMeta(
         shape=shape, strides=strides, dtype=self.dtype, device=self.device
     )
     indices = TensorMeta(
-        shape=shape, strides=strides, dtype=torch.int64, device=self.device
+        shape=shape, strides=strides, dtype=torch.long, device=self.device
     )
     return values, indices
 
