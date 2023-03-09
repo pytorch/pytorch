@@ -51,11 +51,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(4)
         x = torch.nn.Parameter(torch.randn(4))
         aot_fn = torch._dynamo.optimize("aot_eager")(fn)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "a leaf Variable that requires grad is being used in an in-place operation.",
-        ):
-            aot_fn(x, y)
+        # This should not error: we mutated an autograd leaf under no_grad mode.
+        aot_fn(x, y)
 
     def test_mutation1(self):
         def fn(_stack0: torch.Tensor, diagonal_chunked_attention_scores: torch.Tensor):
@@ -179,11 +176,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
 
         # Run exported graph with AOT
         aot_fn = torch._dynamo.optimize("aot_eager")(graph)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "a leaf Variable that requires grad is being used in an in-place operation.",
-        ):
-            aot_fn(x, y)
+        # This should not error: we mutated an autograd leaf under no_grad mode.
+        aot_fn(x, y)
 
     def test_call_fn_with_non_const_inputs_aot_unsafe_control_flow(self):
         class ModuleSpecialFwd(torch.nn.Module):

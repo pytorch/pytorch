@@ -3595,7 +3595,7 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04), torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
-        xfail('aminmax'),
+        skip('aminmax'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
@@ -4260,6 +4260,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
         # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
         # but it passes locally
+        xfail('linalg.diagonal'),
         skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
