@@ -751,7 +751,7 @@ class ParsePerformanceLogs(Parser):
             cols[suite] = col
         df = pd.DataFrame(cols)
         df = df.fillna(0)
-        df.to_csv(os.path.join(self.output_dir, f"{fn.__name__}_{self.dtypes}.csv"))
+        df.to_csv(os.path.join(self.output_dir, f"{fn.__name__}.csv"))
         return df
 
     def exec_summary_text(self, caption, fn, metric):
