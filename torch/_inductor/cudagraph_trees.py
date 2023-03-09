@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+
 import dataclasses
 import functools
 import itertools
@@ -7,7 +9,7 @@ import threading
 import warnings
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Sequence, Set, Tuple
 
 import torch.fx
 from torch import Tensor
@@ -16,6 +18,8 @@ if torch.has_cuda:
     from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
 else:
     AllocatorState = Any
+
+from enum import auto, Enum
 
 from torch._dynamo.mutation_guard import GenerationTracker
 
@@ -30,6 +34,7 @@ from torch._prims_common import check
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from torch.utils import _pytree as pytree
+
 
 StorageWeakRefPointer = int
 from . import config
@@ -54,6 +59,10 @@ class WrappedFunction:
     id: FunctionID
 
 
+def clear_cublass_cache():
+    torch._C._cuda_clearCublasWorkspaces()
+
+
 class TreeManagerContainer:
     """
     Manages the lifetime of the tree manager. Like `PrivatePool` in cuda caching allocator,
@@ -73,7 +82,7 @@ class TreeManagerContainer:
     -  All the storages are dead, we deallocate the tree manager
     """
 
-    def __init__(self):
+    def __init__(self, device_index):
         # This class keeps a strong reference to tree_manager,
         # but upon all other strong references to the tree_manager will reset it to None.
         # We need a strong reference so that we can still access its attributes upon cleanup.
@@ -81,6 +90,8 @@ class TreeManagerContainer:
 
         # Number of outstanding references to the current tree manager
         self.live_cudagraphify_fns = 0
+
+        self.device_index = device_index
 
         # Following two objects are only set in the case that Tensor outputs outlive
         # the cudagraphify_fns. Reference to the Graph is needed to keep the private pool from
@@ -140,33 +151,33 @@ class TreeManagerContainer:
     def get_tree_manager(self) -> CUDAGraphTreeManager:
         with self.lock:
             if self.tree_manager is None:
-                self.tree_manager = CUDAGraphTreeManager()
+                self.tree_manager = CUDAGraphTreeManager(self.device_index)
             return self.tree_manager
 
 
 local = threading.local()
-local.tree_manager_container = TreeManagerContainer()
+local.tree_manager_containers = {}
 
 # We need to register this as an object that will be copied over as TLS when new
 # threads are created in autograd
-torch._C._stash_obj_in_tls("tree_manager_container", local.tree_manager_container)
+torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
+
+# We shouldnt be multi threading on
+def get_container(device_index: int):
+    if hasattr(local, "tree_manager_containers"):
+        container_dict = local.tree_manager_containers
+    else:
+        assert torch._C._is_key_in_tls("tree_manager_containers")
+        container_dict = torch._C._get_obj_in_tls("tree_manager_containers")
+
+    if device_index not in container_dict:
+        container_dict[device_index] = TreeManagerContainer(device_index)
+
+    return container_dict[device_index]
 
 
-# See [Deleter Fn Swapping on Reconstructed Tensors], not working yet
-def call_storage_dealloc(data_ptr):
-    print("BEING CALLED", data_ptr)
-    # assert False
-
-
-def get_container():
-    if hasattr(local, "tree_manager_container"):
-        return local.tree_manager_container
-    assert torch._C._is_key_in_tls("tree_manager_container")
-    return torch._C._get_obj_in_tls("tree_manager_container")
-
-
-def cudagraphify_impl(model, inputs, static_input_idxs=()):
-    manager = get_container().get_tree_manager()
+def cudagraphify_impl(model, inputs, static_input_idxs=(), *, device_index: int):
+    manager = get_container(device_index).get_tree_manager()
     return manager.add_function(model, inputs, static_input_idxs)
 
 
@@ -215,6 +226,109 @@ def is_cuda_tensor(x):
     return isinstance(x, torch.Tensor) and x.device.type == "cuda"
 
 
+@contextlib.contextmanager
+def _use_cuda_memory_pool_manager(device, existing_graph, mem_pool):
+    """
+    Context manager to use cuda graph pool for new allocations. If you use this manager
+    all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
+    existing_graph should already have been used in a capture, and the mem_pool must already exist.
+    """
+    capture_id = existing_graph.id()
+    torch._C._cuda_allocateThreadToPrivatePool(device, mem_pool)
+    torch._C._cuda_notifyCaptureBegin(device, capture_id, mem_pool)
+    try:
+        yield
+    finally:
+        torch._C._cuda_notifyCaptureAboutToEnd(device, capture_id)
+        torch._C._cuda_notifyCaptureEnded(device, capture_id)
+        torch._C._cuda_notifyCaptureDestroy(device, mem_pool)
+
+def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
+    if not isinstance(t, torch.Tensor):
+        assert t is None
+        return None
+    return StorageWeakRefWrapper(t)
+
+
+class CUDAWarmupNode:
+    """
+    Simplified Wrapper around A CUDA Model that wraps outputs in storage refs and exposes
+    apis to get the live storages in the current chain of warmup.
+    """
+
+    def __init__(
+        self,
+        wrapped_function: WrappedFunction,
+        parent,
+        cuda_graphs_pool: Tuple[int, int],
+        unique_capture_id: int,
+        device_index: int,
+    ):
+        self.wrapped_function = wrapped_function
+        self.parent = parent
+        self.cuda_graphs_pool = cuda_graphs_pool
+        self.outputs_weakrefs: List[Optional[StorageWeakRefWrapper]] = []
+        self.unique_capture_id = unique_capture_id
+        self.has_run = False
+        self.device_index = device_index
+
+    def run(self, new_inputs):
+        assert not self.has_run, f"Wrapped function should never be run twice"
+
+        existing_path_data_ptrs = {t.data_ptr for t in self.path_live_weakrefs() if t()}
+        non_cudagraph_inps = set()
+        for inp in new_inputs:
+            if inp.untyped_storage().data_ptr() not in existing_path_data_ptrs:
+                non_cudagraph_inps.add(inp.untyped_storage().data_ptr())
+
+        inp_weak_refs = [map_to_ref(inp) for inp in new_inputs]
+        if config.triton.debug_cudagraph_trees:
+            refs = list(self.path_live_weakrefs())
+            check_memory_pool(self.cuda_graphs_pool, refs)
+
+        clear_cublass_cache()
+
+        with _use_cuda_memory_pool_manager(
+            self.device_index, self.unique_capture_id, self.cuda_graphs_pool
+        ):
+            out = self.wrapped_function.model(new_inputs)
+
+        clear_cublass_cache()
+        assert len(new_inputs) == 0
+
+        clear_cublass_cache()
+        self._add_replayed_outputs(out)
+
+        if config.triton.debug_cudagraph_trees:
+            out_refs = self.path_live_weakrefs()
+            new_storages = [t for t in out_refs if t.data_ptr not in non_cudagraph_inps]
+            check_memory_pool(self.cuda_graphs_pool, new_storages)
+
+        x = str(out)
+
+        return out
+
+    def _add_replayed_outputs(self, outputs):
+        for out in outputs:
+            self.outputs_weakrefs.append(map_to_ref(out))
+
+    def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
+        nodes = []
+        node = self
+        while node:
+            nodes.append(node)
+            node = node.parent
+
+        nodes = reversed(nodes)
+        for node in nodes:
+            for output in node.outputs_weakrefs:
+                if is_live(output):
+                    yield output
+
+    def all_outputs_are_dead(self):
+        return not list(self.path_live_weakrefs())
+
+
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -240,11 +354,13 @@ class CUDAGraphNode:
         parent: Optional[CUDAGraphNode],
         inputs: List[Tensor],
         cuda_graphs_pool: Tuple[int, int],
+        device_index: int,
     ):
         assert isinstance(inputs, (list, tuple))
 
         self.wrapped_function = wrapped_function
         self.id = id
+        self.device = device_index
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -253,10 +369,6 @@ class CUDAGraphNode:
         # A single wrapped function may be recorded multiple times if memory patterns or
         # invariants change from one execution to the next
         self.children: Dict[FunctionID, List[CUDAGraphNode]] = defaultdict(list)
-
-        self.device: int = next(
-            (x.device.index for x in inputs if is_cuda_tensor), None
-        )
 
         # we preserve a single reference to executed outputs that is then referenced
         # in children to avoid children having to chase parent pointers in the hot path
@@ -328,7 +440,7 @@ class CUDAGraphNode:
         ]
 
         stream = torch.cuda.Stream()
-        self._warmup(wrapped_function.model, stream, recording_inputs)
+        # self._warmup(wrapped_function.model, stream, recording_inputs)
 
         # on the first invocation, return the first recorded outputs, because their memory
         # is correctly accounted for in the CUDAGraphs caching allocator, so on subsequent cudagraph
@@ -344,9 +456,6 @@ class CUDAGraphNode:
         # needed to reconstruct instead.
         for out in self.recording_outputs:
             if isinstance(out, torch.Tensor):
-                self.device = (
-                    self.device if self.device is not None else out.device.index
-                )
                 self.outputs_metadata.append(
                     self._tensor_metadata(out, ignore_storage_offset=False)
                 )
@@ -419,12 +528,25 @@ class CUDAGraphNode:
         torch.cuda.synchronize()
 
     def _record(self, model, stream, inputs):
+        clear_cublass_cache()
+        if config.triton.debug_cudagraph_trees:
+            # need to use parent live weakrefs because live_indices isnt set yet
+            memory = [] if self.parent is None else list(self.parent.path_live_weakrefs())
+            memory += [
+                StorageWeakRefWrapper(elem)
+                for i, elem in enumerate(inputs)
+                if i not in self.wrapped_function.static_input_idxs
+            ]
+            check_memory_pool(self.cuda_graphs_pool, memory)
+
         "Record the model"
         with torch.cuda.graph(self.graph, stream=stream, pool=self.cuda_graphs_pool):
             static_outputs = model(inputs)
 
         # running model should reclaim memory
         assert len(inputs) == 0
+
+        clear_cublass_cache()
 
         if not isinstance(static_outputs, (list, tuple)):
             static_outputs = (static_outputs,)
@@ -440,10 +562,12 @@ class CUDAGraphNode:
         self.expected_dead_indices_after_graph = delta
 
         assert len(self.outputs_weakrefs) == 0
-        weak_refs = [self._map_to_ref(o) for o in outputs]
+        weak_refs = [map_to_ref(o) for o in outputs]
         self.outputs_weakrefs.extend(weak_refs)
+
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
 
+        # clear_cublass_cache()
         self.checkpointed_caching_state = torch._C._cuda_getCheckpointState(
             self.device, self.cuda_graphs_pool
         )
@@ -453,17 +577,13 @@ class CUDAGraphNode:
                 if is_live(self.path_weakrefs[i][j]):
                     self.live_indices_after_graph.append((i, j))
 
+        if config.triton.debug_cudagraph_trees:
+            check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
+
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
         for out in outputs:
-            self.outputs_weakrefs.append(self._map_to_ref(out))
-
-    @staticmethod
-    def _map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
-        if not isinstance(t, torch.Tensor):
-            assert t is None
-            return None
-        return StorageWeakRefWrapper(t)
+            self.outputs_weakrefs.append(map_to_ref(out))
 
     @property
     def parent(self):
@@ -675,7 +795,32 @@ def get_cudagraph_segments(pool_id):
     return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
 
 
-def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefPointer]):
+def get_all_cudagraph_segments():
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
+
+
+def get_live_blocks():
+    blocks = []
+
+    for segment in get_all_cudagraph_segments():
+        addr = segment["address"]
+        for block in segment["blocks"]:
+            if block["state"] == "active_allocated":
+                block["address"] = addr
+                blocks.append(block)
+            addr += block["size"]
+    return blocks
+
+
+def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
+    for elem in live_storages_ptrs:
+        assert isinstance(elem, StorageWeakRefWrapper)
+
+    import gc
+
+    gc.collect()
+
     unique_storages = {stor.data_ptr for stor in live_storages_ptrs if stor()}
     segments = get_cudagraph_segments(pool_id)
 
@@ -693,8 +838,15 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefPointer]):
 
     check(
         len(unique_storages) == 0,
-        f"These storage data ptrs are not allocated but should be {unique_storages}",
+        lambda: f"These storage data ptrs are not allocated but should be {unique_storages}",
     )
+
+
+class ExecutionState(Enum):
+    NONE = auto()
+    WARMUP = auto()
+    RECORDING = auto()
+    EXECUTION = auto()
 
 
 class CUDAGraphTreeManager:
@@ -713,7 +865,7 @@ class CUDAGraphTreeManager:
     # TODO: make generation increment configurable, warn on overwrite
     """
 
-    def __init__(self):
+    def __init__(self, device_index: int):
         # roots are functions which have no dependencies on an other node. I.e.,
         # when they are first invoked, none of their inputs are outputs are outputs
         # of another node, nor are there any live outputs of another node whose
@@ -723,10 +875,43 @@ class CUDAGraphTreeManager:
         # mapping from function id to wrapped function
         self.ids_to_funcs: Dict[FunctionID, WrappedFunction] = {}
 
+        self.warmed_up_functions: Set[FunctionID] = set()
+
         self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
+
+        # Keeps Memory Pool Alive
+        self.graph = torch.cuda.CUDAGraph()
+
+        torch.cuda.synchronize()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+
+        with warnings.catch_warnings(record=False):
+            with torch.cuda.graph(
+                self.graph,
+                pool=self.cuda_graphs_thread_pool,
+                stream=stream,
+            ):
+                pass
+
+        tmp_graph = torch.cuda.CUDAGraph()
+        with warnings.catch_warnings(record=True) as w:
+            with torch.cuda.graph(
+                tmp_graph,
+                pool=self.cuda_graphs_thread_pool,
+                stream=stream,
+            ):
+                pass
+
+        self.unique_capture_id = tmp_graph
 
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
+
+        # whether we the current node is in a state of warmup, recording, execution. If
+        # there is no current node the state will be ExecutionState.None.
+        self.path_state = ExecutionState.NONE
+        self.device_index = device_index
 
         # the most recently invoked cudagraph wrapping of a function. Will be None
         # when there is no output from a previous recording or execution whose memory
@@ -739,21 +924,46 @@ class CUDAGraphTreeManager:
         # of a previous generation in checking liveness.
         self.current_gen: int = -1
 
-        # whether we currently have a current node which is in the middle of recording
-        self.in_recording = False
-
         # number of instances we are in execution and failed to match to an
         # existing child
         self.debug_fail_counter = 0
         # number of instances we had to checkpoint the function
         self.debug_checkpointing_counter = 0
 
-    def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+    def run(self, *args, **kwargs):
+        clear_cublass_cache()
+        # breakpoint()
+        out = self._run(*args, **kwargs)
+        # breakpoint()
+        clear_cublass_cache()
+        return out
+
+    def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
+
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
-        # on the hot path
+        # on the hot path, but both recording and warmup only happen once
+        # so we check up front
         if self.in_recording:
             self.try_end_curr_recording()
+
+        if self.in_warmup:
+            self.try_end_curr_warmup()
+
+        # if we are currently in a
+        if (
+            not (
+                function_id in self.warmed_up_functions
+                or config.triton.skip_cudagraph_warmup
+            )
+        ) or self.in_warmup:
+            self.warmed_up_functions.add(function_id)
+            # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state
+            # Both Recording and Warmup will be reflected in the allocator and dont need changes
+            if self.path_state == ExecutionState.EXECUTION:
+                self.checkpoint_execution_state_in_allocator()
+
+            return self.run_warmup(new_inputs, function_id)
 
         child_nodes = (
             self.roots if self.current_node is None else self.current_node.children
@@ -765,7 +975,6 @@ class CUDAGraphTreeManager:
                 # as well as things like stability of tensor locations, etc
                 # and other
                 if child.check_invariants(new_inputs):
-                    self.current_gen = self.get_curr_generation()
                     return self.execute_node(child, new_inputs)
 
             # now that we know the new function can't be run as a child of the
@@ -787,28 +996,51 @@ class CUDAGraphTreeManager:
                 self.checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
-        self.current_gen = self.get_curr_generation()
         return self.record_function(new_inputs, function_id)
 
     def record_function(self, new_inputs, function_id) -> List[Optional[Tensor]]:
+        torch.cuda.synchronize()
         node = CUDAGraphNode(
             self.ids_to_funcs[function_id],
             self.new_graph_id(),
             self.current_node,
             new_inputs,
             self.cuda_graphs_thread_pool,
+            self.device_index,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
         else:
             self.current_node.add_child(function_id, node)
         self.current_node = node
-        self.in_recording = True
+        self.path_state = ExecutionState.RECORDING
+        self.update_generation()
+        torch.cuda.synchronize()
         return node.run(new_inputs)
 
     def execute_node(self, node: CUDAGraphNode, new_inputs) -> List[Optional[Tensor]]:
         self.current_node = node
+        self.path_state = ExecutionState.EXECUTION
+        self.update_generation()
         return node.run(new_inputs)
+
+    def run_warmup(self, new_inputs, function_id: FunctionID):
+        # this is only stored on current node, because when we start a new path,
+        # we will deallocate it
+        node = CUDAWarmupNode(
+            self.ids_to_funcs[function_id],
+            self.current_node,
+            self.cuda_graphs_thread_pool,
+            self.unique_capture_id,
+            self.device_index,
+        )
+        self.current_node = node
+        self.path_state = ExecutionState.WARMUP
+        self.update_generation()
+        return node.run(new_inputs)
+
+    def update_generation(self):
+        self.current_gen = self.get_curr_generation()
 
     def new_graph_id(self) -> GraphID:
         return GraphID(next(self.graph_counter))
@@ -824,14 +1056,32 @@ class CUDAGraphTreeManager:
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies
-        get_container().add_strong_reference(fn)
+        get_container(self.device_index).add_strong_reference(fn)
 
         return fn
+
+    @property
+    def in_recording(self):
+        return self.path_state == ExecutionState.RECORDING
+
+    @property
+    def in_warmup(self):
+        return self.path_state == ExecutionState.WARMUP
 
     def get_roots(self) -> Generator[CUDAGraphNode]:
         for nodes in self.roots.values():
             for node in nodes:
                 yield node
+
+    @property
+    def current_node(self):
+        return self._current_node
+
+    @current_node.setter
+    def current_node(self, value):
+        self._current_node = value
+        if value is None:
+            self.path_state = ExecutionState.NONE
 
     @staticmethod
     def get_curr_generation() -> int:
@@ -844,27 +1094,16 @@ class CUDAGraphTreeManager:
         generation. Will set current_node to None and in_recording to False if successful.
         """
         assert self.in_recording
-
-        if self.current_node is None:
-            self.in_recording = False
-            return
+        assert self.current_node is not None
 
         # multiple invocations, allow overwriting the previous generation
         if self.current_gen != self.get_curr_generation():
-
-            # TODO: we could also allow the these weak refs to continue to be allocated,
-            # but that adds some complications.
-            for t in self.current_node.path_live_weakrefs():
-                if t():
-                    torch._C._free_And_Remove_DeleterFn(t())
-
+            self.dealloc_current_path_weakrefs()
             self.clear_current_node_outputs_and_set_to_none()
-            self.in_recording = False
             return
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_node_outputs_and_set_to_none()
-            self.in_recording = False
             return
 
     def try_end_curr_execution(self) -> None:
@@ -884,6 +1123,23 @@ class CUDAGraphTreeManager:
 
         if self.current_node.all_outputs_are_dead():
             self.clear_current_node_outputs_and_set_to_none()
+
+    def try_end_curr_warmup(self):
+        if self.current_gen != self.get_curr_generation():
+            self.dealloc_current_path_weakrefs()
+            self.current_node = None
+            return
+
+        if self.current_node.all_outputs_are_dead():
+            self.current_node = None
+            return
+
+    def dealloc_current_path_weakrefs(self):
+        # TODO: we could also allow the these weak refs to continue to be allocated,
+        # but that adds some complications.
+        for t in self.current_node.path_live_weakrefs():
+            if t():
+                torch._C._free_And_Remove_DeleterFn(t())
 
     def clear_current_node_outputs_and_set_to_none(self):
         self.current_node.clear_path_outputs()

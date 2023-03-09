@@ -186,9 +186,13 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and len(graph.device_idxs) == 1
         ):
             compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+                compiled_fn,
+                example_inputs,
+                static_input_idxs=range(num_fixed),
+                device_index=next(iter(graph.device_idxs)),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -201,6 +205,10 @@ def compile_fx_inner(
                 elif complex_memory_overlap_inputs:
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
+                    )
+                elif len(graph.device_idxs) > 1:
+                    developer_warning(
+                        "skipping cudagraphs due to multiple device indexes"
                     )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
@@ -251,13 +259,15 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 
 @dynamo_utils.dynamo_timed
-def cudagraphify(model, inputs, static_input_idxs=()):
+def cudagraphify(model, inputs, static_input_idxs=(), *, device_index: int):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )
 
     if config.triton.cudagraph_trees:
-        cudagraphify_fn = new_cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            new_cudagraphify_impl, device_index=device_index
+        )
     else:
         cudagraphify_fn = cudagraphify_impl
 

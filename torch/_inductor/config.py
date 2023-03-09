@@ -170,6 +170,9 @@ class triton:
 
     debug_cudagraph_trees = True
 
+    # skip warmup for cudagraph trees
+    skip_cudagraph_warmup = False
+
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
 
