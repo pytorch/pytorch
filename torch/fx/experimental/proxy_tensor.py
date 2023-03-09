@@ -675,6 +675,9 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 allow_fallback_kernels=True,
                 allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
+            # TODO This is bit weird as we are reusing ShapeEnv
+            # from dynamo to propagate certain flags like (assume_static_by_default)
+            # Ideally they should be put in global PT2 config.
             shape_env = _shape_env if _shape_env else ShapeEnv()
             fake_tensor_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
