@@ -2050,6 +2050,7 @@ def meta__scaled_dot_product_flash(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
+    scale: Optional[float] = None,
 ):
     # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
     # We have added logic to torch/_dynamo/variables/torch.py
@@ -2144,6 +2145,7 @@ def meta__scaled_dot_product_flash_backward(
     is_causal: bool,
     philox_seed: int,
     philox_offset: int,
+    scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
@@ -2182,6 +2184,7 @@ def meta__scaled_dot_product_efficient(
     value: Tensor,
     compute_log_sumexp: bool,
     is_causal: bool = False,
+    scale: Optional[float] = None,
 ):
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -2222,6 +2225,7 @@ def meta__scaled_dot_product_efficient_backward(
     logsumexp: Tensor,
     is_causal: bool = False,
     chunk_grad_outputs=False,
+    scale: Optional[float] = None,
 ):
     grad_out = grad_out.transpose(1, 2)
     query = query.transpose(1, 2)
