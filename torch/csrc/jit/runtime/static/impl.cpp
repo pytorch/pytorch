@@ -1312,7 +1312,7 @@ c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::run_impl_async(
     const KeywordArgs& kwargs) {
   // run the graph inline in the caller thread. Async ops will be
   // executed on taskLauncher attached to the metadata of ProcessedNodes
-  c10::IValue output = run_impl(args, kwargs);
+  c10::IValue output = run_impl(std::forward<IValueList>(args), kwargs);
 
   // If the output is of type future, return it
   if (output.isFuture()) {
