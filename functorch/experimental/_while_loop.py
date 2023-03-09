@@ -2,6 +2,7 @@ import torch
 import torch.utils._pytree as pytree
 import itertools
 from functools import partial
+from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
 from torch._ops import PyOperator
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch.utils._python_dispatch import (
@@ -15,6 +16,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
     unwrap_proxy,
 )
+from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
 """
@@ -47,12 +49,46 @@ def while_loop_cpu(cond_fun, body_fun, init_val):
         val = body_fun(val)
     return val
 
-# Required by make_fx tracing "symbolic" mode
-# We cannot directly call fallthrough here due to issue #89037.
-@while_loop.py_impl(DispatchKey.PythonDispatcher)
-def cond_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return while_loop(*args)
+@while_loop.py_impl(torch._C._functorch.TransformType.Functionalize)
+def while_loop_functionalize(interpreter, cond_fun, body_fun, init_val):
+    """
+    Functionalization implementation for torch.while_loop. Currently:
+      1. We don't allow any input mutation inside the map function
+      2. Our check for above condition is not exhaustive
+    """
+    reapply_views = interpreter.functionalize_add_back_views()
+    mode = 'mutations_and_views' if reapply_views else 'mutations'
+    # At this point, we will see functionalized tensors, so need to unwrap them first
+    unwrapped_args = _unwrap_all_tensors_from_functional(init_val, reapply_views=reapply_views)
+
+    functional_cond_fun = functionalize(cond_fun, remove=mode)
+    functional_body_fun = functionalize(body_fun, remove=mode)
+
+    with interpreter.lower():
+        inputs = (unwrapped_args,)
+        if _has_potential_branch_input_mutation(functional_cond_fun, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.ops.while_loop cond_fun mutates the input!"
+            )
+        if _has_potential_branch_input_alias(functional_cond_fun, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.ops.while_loop cond_fun is mutates the input!"
+            )
+
+        if _has_potential_branch_input_mutation(functional_body_fun, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.ops.while_loop body_fun alias the input!"
+
+            )
+        if _has_potential_branch_input_alias(functional_body_fun, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.ops.while_loop body_fun alias the input!"
+            )
+
+        out = while_loop(functional_cond_fun, functional_body_fun, unwrapped_args)
+        return _wrap_all_tensors_to_functional(out, level=interpreter.level())
+
+while_loop.fallthrough(DispatchKey.PythonDispatcher)
 while_loop.fallthrough(DispatchKey.PythonTLSSnapshot)
 
 @while_loop.py_impl(ProxyTorchDispatchMode)

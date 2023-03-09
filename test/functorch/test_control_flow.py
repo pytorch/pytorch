@@ -55,7 +55,7 @@ class TestControlFlow(TestCase):
             iter, val = x
             return (iter - 1, val.sin())
 
-        iter = 5
+        iter = torch.tensor(5) 
         val = torch.randn(2, 3, device="cuda")
         res_scalar = control_flow.while_loop(cond_fun, body_fun, (5, val))
         while iter > 0:
@@ -72,7 +72,7 @@ class TestControlFlow(TestCase):
             iter, val = x
             return (iter - 1, val.sin())
 
-        iter = 5
+        iter = torch.tensor(5)
         val = torch.randn(2, 3)
         res_scalar = control_flow.while_loop(cond_fun, body_fun, (5, val))
         while iter > 0:
@@ -104,6 +104,88 @@ class TestControlFlow(TestCase):
             val = val + 1
             total_iter -= 1
         self.assertEqual(res_scalar, (0, val))
+    
+    def test_while_loop_no_trace_functionalize(self):
+        def cond_fun(x):
+            iter, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def body_fun(x):
+            iter, val = x
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+        
+        def f(input):
+            return control_flow.while_loop(cond_fun, body_fun, input)
+
+        iter = torch.tensor(5)
+        val = torch.randn(2, 3)
+        input = (iter, val)
+        res_eager = f(input)
+        ff = torch.func.functionalize(f, remove="mutations")
+        ff_no_view = torch.func.functionalize(f, remove="mutations_and_views")
+        res_ff = ff(input)
+        res_ff_no_view = ff_no_view(input)
+        while iter > 0:
+            val = val + 1
+            iter -= 1
+        expected = (iter, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_no_view, expected)
+
+    def test_while_loop_no_trace_nested_functionalize(self):
+        def inner_fun(x):
+            iter, val = x
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def inner_cond_fun(x):
+            iter, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_cond_fun(x):
+            iter, _, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_fun(x):
+            iter, inner_iter, val = x
+            _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
+            # clone inner_iter to avoid aliasing input
+            return (iter - 1, inner_iter.clone(), val)
+
+        iter = torch.tensor(2)
+        inner_iter = torch.tensor(5)
+        total_iter = iter * inner_iter
+        input = (iter, inner_iter, torch.zeros(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(outter_cond_fun, outter_fun, input)
+
+        res_eager = f(input)
+
+        ff = torch.func.functionalize(f, remove="mutations")
+        ff_no_view = torch.func.functionalize(f, remove="mutations_and_views")
+        res_ff = ff(input)
+        res_ff_no_view = ff_no_view(input)
+
+        val = input[2]
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+
+        expected = (0, inner_iter, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_no_view, expected)
 
 
 class TestControlFlowTraced(TestCase):
@@ -822,6 +904,102 @@ class TestControlFlowTraced(TestCase):
         x = torch.ones(4, 3, 2)
         self.assertEqual(foo(x), gm(x))
 
+    def test_trace_functionalize_while_loop(self):
+        def cond_fun(x):
+            iter, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def body_fun(x):
+            iter, val = x
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+        
+        def f(input):
+            return control_flow.while_loop(cond_fun, body_fun, input)
+
+        iter = torch.tensor(5)
+        val = torch.randn(2, 3)
+        input = (iter, val)
+
+        res_eager = f(input)
+
+        ff = torch.func.functionalize(f)
+        res_ff = ff(input)
+
+        gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
+        res_ff_symbolic = gm_symbolic(input)
+
+        gm_real = make_fx(ff, tracing_mode="real")(input)
+        res_ff_real = gm_real(input)
+
+        while iter > 0:
+            val = val + 1
+            iter -= 1
+        expected = (iter, val)
+
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_symbolic, expected)
+        self.assertEqual(res_ff_real, expected)
+    
+    def test_trace_functionalize_nested_while_loop(self):
+        def inner_fun(x):
+            iter, val = x
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def inner_cond_fun(x):
+            iter, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_cond_fun(x):
+            iter, _, _ = x
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_fun(x):
+            iter, inner_iter, val = x
+            _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
+            # clone inner_iter to avoid aliasing input
+            return (iter - 1, inner_iter.clone(), val)
+
+        iter = torch.tensor(2)
+        inner_iter = torch.tensor(5)
+        total_iter = iter * inner_iter
+        input = (iter, inner_iter, torch.zeros(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(outter_cond_fun, outter_fun, input)
+
+        ff = torch.func.functionalize(f, remove="mutations_and_views")
+        gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
+        gm_real = make_fx(ff, tracing_mode="real")(input)
+
+        res_eager = f(input)
+        res_ff = ff(input)
+        res_ff_symbolic = gm_symbolic(input)
+        res_ff_real = gm_real(input)
+
+
+        val = input[2]
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+
+        expected = (0, inner_iter, val)
+
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_symbolic, expected)
+        self.assertEqual(res_ff_real, expected)
+
     def test_trace_while_loop(self):
         def cond_fun(x):
             iter, _ = x
@@ -834,7 +1012,7 @@ class TestControlFlowTraced(TestCase):
         def f(input):
             return control_flow.while_loop(cond_fun, body_fun, input)
 
-        iter = torch.ones(1) * 6
+        iter = torch.tensor(5)
         val = torch.randn(2, 3)
         input = (iter, val)
 
@@ -871,10 +1049,10 @@ class TestControlFlowTraced(TestCase):
         def outter_fun(x):
             iter, inner_iter, val = x
             _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
-            return (iter - 1, inner_iter, val)
+            return (iter - 1, inner_iter.detach().clone(), val)
 
-        iter = torch.ones(1) * 2
-        inner_iter = torch.ones(1) * 5
+        iter = torch.tensor(2)
+        inner_iter = torch.tensor(5)
         total_iter = iter * inner_iter
         input = (iter, inner_iter, torch.zeros(2, 3))
 

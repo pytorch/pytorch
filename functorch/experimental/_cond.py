@@ -205,11 +205,11 @@ def _has_potential_branch_input_alias(branch, inputs):
         if node.op == "placeholder":
             input_storages.add(StorageWeakRef(node.meta['val']._typed_storage()))
         if node.op == "output":
-            for out in node.args:
+            def alias_input(out):
                 out_storage = StorageWeakRef(out.meta["val"]._typed_storage())
-                if out_storage in input_storages:
-                    return True
-
+                return out_storage in input_storages
+            if pytree.tree_any(alias_input, node.args):
+                return True
     return False
 
 
