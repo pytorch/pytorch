@@ -1146,12 +1146,10 @@ class CppTile0DOverrides(CppOverrides):
 
     @staticmethod
     def store(name, index, value, mode=None):
-        value = V.kernel.get_tile_slice(value)
         CppKernel.store(V.kernel, name, index, value, mode)
 
     @staticmethod
     def reduction(name, dtype, src_dtype, reduction_type, index, value):
-        value = V.kernel.get_tile_slice(value)
         CppKernel.reduction(
             V.kernel, name, dtype, src_dtype, reduction_type, index, value
         )
@@ -1255,7 +1253,6 @@ class CppTile1DOverrides(CppVecOverrides):
         if vec_tile_idx < 0:
             raise NotImplementedError
 
-        value = self.get_tile_slice(value)
         assert value.meta.rank() == 1
         assert "buf" in name
 
@@ -1281,7 +1278,6 @@ class CppTile1DOverrides(CppVecOverrides):
         if vec_tile_idx < 0:
             raise NotImplementedError
 
-        value = self.get_tile_slice(value)
         assert value.meta.rank() == 1
         assert reduction_type in {"max", "min", "sum"}
         assert dtype == torch.float
