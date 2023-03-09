@@ -20,7 +20,8 @@ from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed
 from torch._dynamo.logging import AOTForwardGraphLogRec, AOTJointGraphLogRec, AOTBackwardGraphLogRec
-from torch._logging import is_initialized, init_logs
+# not sure why some lint jobs say is_initialized is unused
+from torch._logging import is_initialized, init_logs  # noqa: F401
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -2438,7 +2439,7 @@ def create_aot_dispatcher_function(
         **aot_config.decompositions,
     }
 
-    if not torch._logging.is_initialized(log):
+    if not is_initialized(log):
         init_logs([__name__])
 
     # NB: don't bother setting allow_fallback_kernels; this should not actually
