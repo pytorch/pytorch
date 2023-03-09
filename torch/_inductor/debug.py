@@ -206,7 +206,7 @@ def enable_aot_logging():
     stack.enter_context(patch("functorch.compile.config.debug_graphs", True))
     stack.enter_context(patch("functorch.compile.config.debug_joint", True))
 
-    path = os.path.join(get_debug_dir(), "torchinductor")
+    path = os.path.join(get_debug_dir(), "aot_torchinductor")
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -245,7 +245,7 @@ class DebugContext:
         for n in DebugContext._counter:
             dirname = os.path.join(
                 get_debug_dir(),
-                "torchinductor",
+                "aot_torchinductor",
                 f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
