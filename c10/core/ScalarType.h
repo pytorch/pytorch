@@ -264,8 +264,7 @@ static inline bool isFloatingType(ScalarType t) {
 }
 
 static inline bool isReducedFloatingType(ScalarType t) {
-  return (
-      t == ScalarType::Half || t == ScalarType::BFloat16);
+  return (t == ScalarType::Half || t == ScalarType::BFloat16);
 }
 
 static inline bool isComplexType(ScalarType t) {
