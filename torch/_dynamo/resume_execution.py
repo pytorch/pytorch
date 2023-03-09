@@ -10,6 +10,7 @@ from .bytecode_transformation import (
     create_jump_absolute,
     Instruction,
     transform_code_object,
+    unique_id,
 )
 from .codegen import PyCodegen
 from .utils import ExactWeakKeyDictionary
@@ -31,6 +32,79 @@ CO_ASYNC_GENERATOR = 0x0200
 class ReenterWith:
     stack_index: int = None
     target_values: Optional[Tuple] = None
+
+    # If we do not want to destroy the stack, we can do the same thing as a
+    # `SETUP_WITH` block, only that we store the context manager in a local_symbol
+    def try_except(self, code_options, cleanup: List[Instruction]):
+        load_args = []
+        if self.target_values:
+            load_args = [
+                create_instruction(
+                    "LOAD_CONST",
+                    PyCodegen.get_const_index(code_options, val),
+                    val,
+                )
+                for val in self.target_values
+            ]
+        ctx_name = unique_id(f"___context_manager_{self.stack_index}")
+        if ctx_name not in code_options["co_varnames"]:
+            code_options["co_varnames"] += (ctx_name,)
+        for name in ["__enter__", "__exit__"]:
+            if name not in code_options["co_names"]:
+                code_options["co_names"] += (name,)
+
+        except_jump_target = create_instruction("NOP")
+        cleanup_complete_jump_target = create_instruction("NOP")
+
+        setup_finally = [
+            *load_args,
+            create_instruction("CALL_FUNCTION", len(load_args)),
+            create_instruction(
+                "STORE_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction(
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction("LOAD_METHOD", "__enter__"),
+            create_instruction("CALL_METHOD", 0),
+            create_instruction("POP_TOP"),
+            create_instruction("SETUP_FINALLY", target=except_jump_target),
+        ]
+
+        reset = [
+            create_instruction(
+                "LOAD_FAST", code_options["co_varnames"].index(ctx_name), ctx_name
+            ),
+            create_instruction("LOAD_METHOD", "__exit__"),
+            create_instruction(
+                "LOAD_CONST", PyCodegen.get_const_index(code_options, None), None
+            ),
+            create_instruction("DUP_TOP"),
+            create_instruction("DUP_TOP"),
+            create_instruction("CALL_METHOD", 3),
+            create_instruction("POP_TOP"),
+        ]
+        if sys.version_info < (3, 9):
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                create_instruction("BEGIN_FINALLY"),
+                except_jump_target,
+                *reset,
+                create_instruction("END_FINALLY"),
+            ]
+        else:
+            epilogue = [
+                create_instruction("POP_BLOCK"),
+                *reset,
+                create_instruction("JUMP_FORWARD", target=cleanup_complete_jump_target),
+                except_jump_target,
+                *reset,
+                create_instruction("RERAISE"),
+                cleanup_complete_jump_target,
+            ]
+
+        cleanup[:] = epilogue + cleanup
+        return setup_finally
 
     def __call__(self, code_options, cleanup):
         load_args = []
@@ -95,7 +169,6 @@ class ReenterWith:
                 create_instruction("SETUP_WITH", target=with_except_start),
                 create_instruction("POP_TOP"),
             ]
-
         else:
             pop_top_after_with_except_start = create_instruction("POP_TOP")
             cleanup_complete_jump_target = create_instruction("NOP")
@@ -193,7 +266,7 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"<graph break in {code_options['co_name']}>"
+            code_options["co_name"] = f"<resume in {code_options['co_name']}>"
             if sys.version_info >= (3, 11):
                 code_options[
                     "co_qualname"
@@ -250,13 +323,11 @@ class ContinueExecutionCache:
     @staticmethod
     def unreachable_codes(code_options):
         """Codegen a `raise None` to make analysis work for unreachable code"""
-        if None not in code_options["co_consts"]:
-            code_options["co_consts"] = tuple(code_options["co_consts"]) + (None,)
         return [
             create_instruction(
                 "LOAD_CONST",
                 argval=None,
-                arg=code_options["co_consts"].index(None),
+                arg=PyCodegen.get_const_index(code_options, None),
             ),
             create_instruction("RAISE_VARARGS", 1),
         ]
