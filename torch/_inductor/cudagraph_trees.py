@@ -3,11 +3,11 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import functools
+import gc
 import itertools
 import threading
 import warnings
 import weakref
-import gc
 from collections import defaultdict
 
 from enum import auto, Enum
@@ -58,10 +58,10 @@ class WrappedFunction:
 
 def clear_cublass_cache():
     """
-    Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for 
-    doing warmup within a CUDAGraph private pool because we do not want persistent allocations from 
-    one one run to the next. When we begin a new run of a cudagraphs path (generation), all tensors 
-    from the previous generation are freed. This frees them from in the memory pool, but not elsewhere. 
+    Cublas keeps a persistent workspace allocation for running matmuls. This poses a problem for
+    doing warmup within a CUDAGraph private pool because we do not want persistent allocations from
+    one one run to the next. When we begin a new run of a cudagraphs path (generation), all tensors
+    from the previous generation are freed. This frees them from in the memory pool, but not elsewhere.
     A tensor in the cublas workspace would continue to be in use the workspace but would also get allocated
     in the next run. The memory would be in use in two places.
 
@@ -183,7 +183,6 @@ local.tree_manager_containers = {}
 local.tree_manager_locks = defaultdict(threading.Lock)
 
 
-
 # We need to register this as an object that will be copied over as TLS when new
 # threads are created in autograd
 torch._C._stash_obj_in_tls("tree_manager_containers", local.tree_manager_containers)
@@ -289,10 +288,10 @@ class CUDAWarmupNode:
     Simplified Wrapper around A CUDA Model that wraps outputs in storage refs and exposes
     apis to get the live storages in the current chain of warmup.
 
-    A CUDAWarmupNode may have either CUDAGraphNode or CUDAWarmupNode as a parent, but may only have 
+    A CUDAWarmupNode may have either CUDAGraphNode or CUDAWarmupNode as a parent, but may only have
     CUDAWarmupNode as children.
 
-    NB: this class and CUDAGraphNode need to expose `path_live_weakrefs`, `all_outputs_are_dead`, and 
+    NB: this class and CUDAGraphNode need to expose `path_live_weakrefs`, `all_outputs_are_dead`, and
     `self.outputs_weakrefs` for compatibility.
     """
 
@@ -371,6 +370,8 @@ class CUDAGraphNode:
 
     In order to support recording a subsequent cuda graph recording after execution of this graph,
     we checkpoint the state of the memory pool so that it may later be resumed.
+
+    WrappedFunction should have already been warmed up prior to invocation.
 
     See [setCheckpointPoolState] for further explanation.
     """
@@ -554,8 +555,9 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.cuda_graphs_pool, memory)
 
-
-        with clear_cublas_manager(), torch.cuda.graph(self.graph, stream=stream, pool=self.cuda_graphs_pool):
+        with clear_cublas_manager(), torch.cuda.graph(
+            self.graph, stream=stream, pool=self.cuda_graphs_pool
+        ):
             static_outputs = model(inputs)
 
         # running model should reclaim memory
@@ -827,6 +829,7 @@ class ExecutionState(Enum):
     Represents the state of the CUDAGraph Tree. Will be None if there is no live current memory allocated
     in the cuda graph pool. Otherwise will reflect the state of the most recently executed node.
     """
+
     NONE = auto()
     WARMUP = auto()
     RECORDING = auto()
@@ -836,7 +839,7 @@ class ExecutionState(Enum):
 class CUDAGraphTreeManager:
     """
     Groups individual recordings or executions of cuda graphs into a tree of recordings,
-    and checks required invariants.
+    and checks required invariants, and manages warmups of graphs.
 
     When graphs are recorded in the same tree, it enforces subsequent execution
     to follow the same order and have the same output tensor livespans. To remove
@@ -846,7 +849,16 @@ class CUDAGraphTreeManager:
 
     We ignore outputs from a previous generation that correspond to prior model outputs.
     Currently this is hardcoded `GenerationTracker.generation` tracked in torch dynamo.
-    # TODO: make generation increment configurable, warn on overwrite
+    # TODO: make generation increment configurable, warn on overwrite.
+
+    We run graph warmups in the cudagraph memory pool and return the result on the first invocation
+    of a function. For many models it is important to reclaim activations as you run the backward.
+    If we were to warm up the model and keep an extra copy of the inputs around to subsequently
+    use for recording, we would incur a memory penalty. Additionally, if we are part way through training
+    your model and need to recompile, memory will be allocated to the cuda graph pool, so we run this
+    warmup run in the cuda graph memory pool. As for recording, warm up needs the state of live tensors
+    to be accurately reflected so we checkpoint the allocator state if we need to warm up following graph
+    replay.
     """
 
     def __init__(self, device_index: int):
@@ -915,7 +927,11 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup()
 
-        # if we are currently in a
+        # warming up a function and subsequentally recording may use different memory addresses
+        # because both depend on the state of the caching allocator. if we warm up graph A,
+        # then warm up graph B and make more allocations, the subsequent recording of A will not
+        # necessarily use the same addresses as in the warm up. Thus any warm up of a node can only
+        # be followed by warm up runs.
         if (
             not (
                 function_id in self.warmed_up_functions
@@ -923,12 +939,12 @@ class CUDAGraphTreeManager:
             )
         ) or self.in_warmup:
             self.warmed_up_functions.add(function_id)
-            # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state
+            # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:
                 self.checkpoint_execution_state_in_allocator()
 
-            return self.run_warmup(new_inputs, function_id)
+            return self.run_eager(new_inputs, function_id)
 
         child_nodes = (
             self.roots if self.current_node is None else self.current_node.children
@@ -989,7 +1005,7 @@ class CUDAGraphTreeManager:
         self.update_generation()
         return node.run(new_inputs)
 
-    def run_warmup(self, new_inputs, function_id: FunctionID):
+    def run_eager(self, new_inputs, function_id: FunctionID):
         # this is only stored on current node, because when we start a new path,
         # we will deallocate it
         node = CUDAWarmupNode(
