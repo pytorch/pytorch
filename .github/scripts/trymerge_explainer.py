@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Pattern, Tuple, Optional
+from typing import List, Pattern, Optional
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -21,7 +21,6 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 
 class TryMergeExplainer(object):
     force: bool
-    on_green: bool
     land_checks: bool
     labels: List[str]
     pr_num: int
@@ -34,7 +33,6 @@ class TryMergeExplainer(object):
     def __init__(
         self,
         force: bool,
-        on_green: bool,
         land_checks: bool,
         labels: List[str],
         pr_num: int,
@@ -42,7 +40,6 @@ class TryMergeExplainer(object):
         project: str,
     ):
         self.force = force
-        self.on_green = on_green
         self.land_checks = land_checks
         self.labels = labels
         self.pr_num = pr_num
@@ -50,13 +47,12 @@ class TryMergeExplainer(object):
         self.project = project
         self.get_flags()
 
-    def get_flags(self) -> Tuple[bool, bool]:
+    def get_flags(self) -> bool:
         self.has_trunk_label = has_label(self.labels, CIFLOW_TRUNK_LABEL)
         self.has_ciflow_label = has_label(self.labels, CIFLOW_LABEL)
         should_check_land_branch = self.land_checks and not self.has_trunk_label
-        should_check_green = self.on_green or self.has_ciflow_label
 
-        return (should_check_green, should_check_land_branch)
+        return should_check_land_branch
 
     def _get_flag_msg(self) -> str:
         if self.force:
