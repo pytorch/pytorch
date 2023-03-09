@@ -4920,6 +4920,24 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(XorModel(), input_args=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_not(self):
+        class NotModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.logical_not(x)
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        self.run_test(NotModel(), input_args=(x,))
+
     @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
     def test_eq(self):
         class EqualModel(torch.nn.Module):

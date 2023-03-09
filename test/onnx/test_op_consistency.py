@@ -305,6 +305,7 @@ def reason_flaky() -> str:
 TESTED_OPS: frozenset[str] = frozenset(
     [
         "ceil",
+        "logical_not",
         "sqrt",
         "stft",
         "t",
