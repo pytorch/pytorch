@@ -1608,8 +1608,11 @@ class CppTileOverrides:
 
 @dataclasses.dataclass
 class CppTileCodeOrLine:
-    # name of the buffers to store, tile buffer besides in/out buffer
+    # name of the in/out buffer to store (for deferred line)
     name: str = None
+
+    # name of the tile buffer to store for a tile_slice_store
+    tile_buf_name: str = None
 
     # a set of indices into the inner tile loops
     compute_at: frozenset = None
@@ -1624,11 +1627,11 @@ class CppTileCodeGenBuffer(IndentedBuffer):
         super().__init__()
         self.lines = []
 
-    def _writeline(self, name, line):
-        self.lines.append(CppTileCodeOrLine(name, V.kernel.current_compute_at, line))
+    def _writeline(self, name, tile_buf_name, line):
+        self.lines.append(CppTileCodeOrLine(name, tile_buf_name, V.kernel.current_compute_at, line))
 
     def writeline(self, line):
-        self._writeline(V.kernel.current_slice_store_name, line)
+        self._writeline(None, V.kernel.current_slice_store_name, line)
 
     def writelines(self, lines):
         for line in lines:
@@ -1637,18 +1640,31 @@ class CppTileCodeGenBuffer(IndentedBuffer):
     def splice(self, code):
         self.lines.append(
             CppTileCodeOrLine(
-                V.kernel.current_slice_store_name, V.kernel.current_compute_at, code
+                None, V.kernel.current_slice_store_name, V.kernel.current_compute_at, code
             )
         )
 
 
 class DeferredTileCodeGenBuffer(CppTileCodeGenBuffer):
     def writeline(self, name, line):
-        self._writeline(name, line)
+        self._writeline(name, V.kernel.current_slice_store_name, line)
 
     def writelines(self, name, lines):
         for line in lines:
             self.writeline(name, line)
+
+
+class WrapDeferredBuffer:
+    """Allow writes to deferred buffer as if it is not deferred"""
+    def __init__(self, wrapped, name):
+        self.wrapped = wrapped
+        self.name = name
+
+    def writeline(self, line):
+        return self.wrapped.writeline(self.name, line)
+    
+    def writelines(self, lines):
+        return self.wrapped.writelines(self.name, lines)
 
 
 class CppTileKernel(CppKernel):
@@ -1900,15 +1916,21 @@ class CppTileKernel(CppKernel):
     def store(self, name, index, value, mode=None):
         assert "buf" in name
         index = self.rename_indexing(index)
-        self.dispatch_ops("store", (name, index, value, mode)).store(
-            name, index, value, mode
-        )
+        # make all encapsulated code lines to self.stores
+        wrapped = WrapDeferredBuffer(self.stores, name)
+        with self.swap_buffers(wrapped, wrapped, self.stores):
+            self.dispatch_ops("store", (name, index, value, mode)).store(
+                name, index, value, mode
+            )
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
         index = self.rename_indexing(index)
-        self.dispatch_ops(
-            "reduction", (name, dtype, src_dtype, reduction_type, index, value)
-        ).reduction(name, dtype, src_dtype, reduction_type, index, value)
+        # make all encapsulated code lines to self.stores
+        wrapped = WrapDeferredBuffer(self.stores, name)
+        with self.swap_buffers(wrapped, wrapped, self.stores):
+            self.dispatch_ops(
+                "reduction", (name, dtype, src_dtype, reduction_type, index, value)
+            ).reduction(name, dtype, src_dtype, reduction_type, index, value)
 
     def create_cse_var(self, *args, **kwargs):
         return CppTileCSEVariable(*args, **kwargs)
@@ -1980,12 +2002,12 @@ class CppTileKernel(CppKernel):
         self.loads.lines = [
             line
             for line in self.loads.lines
-            if line.name is None or line.name in self.tile_bufs_used
+            if line.tile_buf_name is None or line.tile_buf_name in self.tile_bufs_used
         ]
         self.compute.lines = [
             line
             for line in self.compute.lines
-            if line.name is None or line.name in self.tile_bufs_used
+            if line.tile_buf_name is None or line.tile_buf_name in self.tile_bufs_used
         ]
 
         # Declare used tile buffers
@@ -2025,10 +2047,7 @@ class CppTileKernel(CppKernel):
             loop_indices = new_loop_indices
 
             if isinstance(line.code_or_line, str):
-                name = (
-                    line.name if line.name is not None and "buf" in line.name else None
-                )
-                self.code.writeline(name, line.code_or_line)
+                self.code.writeline(line.name, line.code_or_line)
             else:
                 assert line.name is None
                 self.code.splice(line.code_or_line)
