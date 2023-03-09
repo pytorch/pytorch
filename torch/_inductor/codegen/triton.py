@@ -1224,13 +1224,7 @@ class TritonKernel(Kernel):
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
-            result.writeline(
-                "from torch._C import _cuda_getCurrentRawStream as get_cuda_stream"
-            )
-            result.writeline("from torch._dynamo.testing import rand_strided")
             result.writeline("from torch._inductor.utils import get_num_bytes")
-            result.writeline("import torch")
-            result.writeline("from torch._inductor.triton_ops.autotune import grid")
             result.writeline("from triton.testing import do_bench")
             result.writeline("")
 
@@ -1273,6 +1267,15 @@ class TritonKernel(Kernel):
                     from torch._inductor.utils import instance_descriptor
                 """
             )
+            if config.benchmark_kernel:
+                code.splice(
+                    """
+                        from torch._dynamo.testing import rand_strided
+                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                        import torch
+                        from torch._inductor.triton_ops.autotune import grid
+                    """
+                )
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1635,17 +1638,12 @@ class TritonScheduling:
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule)
-                if config.triton.descriptive_kernel_names
+                if config.triton.descriptive_names
                 else ""
             )
             kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
-            subs_name = (
-                kernel_name
-                if config.triton.ordered_kernel_names
-                or config.triton.descriptive_kernel_names
-                else "triton_"
-            )
+            subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
