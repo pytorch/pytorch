@@ -14,6 +14,7 @@ from torch._guards import (
     Checkpointable,
     Guard,
     GuardsCheckpointState,
+    ModuleCheckpointState,
     Source,
     TracingContext,
 )
@@ -71,7 +72,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
-    nn_modules_sources: Optional[Dict[str, Source]]
+    module_state: ModuleCheckpointState
     side_effects: SideEffects
     timestamp: int
 
@@ -79,6 +80,11 @@ class OutputGraphState(NamedTuple):
         for k in self._fields:
             if k == "guard_state":
                 r = self.guard_state.diff(other.guard_state)
+                if r is not None:
+                    return r
+                continue
+            if k == "module_state":
+                r = self.module_state.diff(other.module_state)
                 if r is not None:
                     return r
                 continue
@@ -223,13 +229,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
-
-        # A map of normalized names (see normalize_attr_name to their sources)
-        # There is a 1:1 relationship between the module attributes written to the root module
-        # and the names in this map.
-        self.nn_modules_sources: Optional[
-            Dict[str, Source]
-        ] = self.tracing_context.param_and_attr_names_to_sources
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -276,6 +275,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def guards(self) -> Set[Guard]:
         return self.tracing_context.guards_context.dynamo_guards
 
+    @property
+    def names_to_sources(self) -> Dict[str, Source]:
+        return self.tracing_context.module_context.names_to_sources
+
     def push_tx(self, tx):
         self._current_tx.append(tx)
 
@@ -289,14 +292,15 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        assert self.nn_modules_sources is not None
+        assert self.names_to_sources is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
+        module_context_state = self.tracing_context.module_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
-            dict(self.nn_modules_sources),
+            module_context_state,
             self.side_effects.clone(),
             self.timestamp,
         )
@@ -310,11 +314,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
-            self.nn_modules_sources,
+            names_to_sources,
             self.side_effects,
             self.timestamp,
         ) = state
         self.tracing_context.guards_context.restore_graphstate(guards_state)
+        self.tracing_context.module_context.restore_graphstate(names_to_sources)
         # FX deepcopy doesn't work for a partially created graph, so just remove new nodes
         removed_nodes = 0
         for node in reversed(list(self.graph.nodes)):
@@ -331,7 +336,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        self.tracing_context.register(
+        self.tracing_context.module_context.register(
             normalize_attr_name(arg.source.name()), arg.source
         )
         if isinstance(arg.source, LocalInputSource):
@@ -485,8 +490,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
-                assert self.nn_modules_sources is not None
-                self.nn_modules_sources[name] = source
+                assert self.names_to_sources is not None
+                self.names_to_sources[name] = source
                 if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
@@ -692,14 +697,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
             if node.op == "placeholder":
-                if (
-                    node.name
-                    not in self.tracing_context.param_and_attr_names_to_sources
-                ):
+                if node.name not in self.names_to_sources:
                     if hasattr(node, "_original_name"):
                         assert (
-                            node._original_name
-                            in self.tracing_context.param_and_attr_names_to_sources
+                            node._original_name in self.names_to_sources
                         ), f"{node._original_name} not found"
                     else:
                         raise AssertionError(f"Unknown node {node.name}")
@@ -824,8 +825,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # Note: generated fx graph will hold a reference to the nn_module,
         # So depending on the backend they may not be released
         self.nn_modules = None
-        # Lifecycle must match, see invariant at instantiation in output_graph.py
-        self.nn_modules_sources = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:

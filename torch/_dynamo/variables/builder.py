@@ -742,8 +742,6 @@ class VariableBuilder:
             assert type(value) in (torch.Tensor, torch.nn.Parameter)
             ignore_subclass = False
 
-        # Failure to normalize here leads to mismatch in output_graph
-        # when we check self.tracing_context.param_and_attr_names_to_sources
         tensor_proxy = self.tx.output.create_graph_input(
             normalize_attr_name(self.name), type(value)
         )

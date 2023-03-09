@@ -5,7 +5,7 @@ import logging
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
-from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
+from typing import Callable, Dict, Generic, List, NamedTuple, Optional, Set, TypeVar
 
 log = logging.getLogger(__name__)
 
@@ -290,6 +290,31 @@ class GuardsCheckpointState:
         return self.diff(other) is None
 
 
+class ModuleCheckpointState:
+    names_to_sources: Dict[str, Source]
+
+    def __init__(self, names_to_sources):
+        self.names_to_sources = names_to_sources
+
+    """
+    Produces a delta against another ModuleCheckpointState.
+
+    Returns None if no delta is found, otherwise, return a set() of mismatched
+    attr and parameter names.
+    """
+
+    def diff(self, other):
+        original_keys = set(self.names_to_sources.keys())
+        other_keys = set(other.names_to_sources.keys())
+        r = original_keys.difference(original_keys)
+        if len(r) == 0:
+            return None
+        return r
+
+    def __eq__(self, other):
+        return self.diff(other) is None
+
+
 """
 A GuardsContext is a checkpointable representation of all the guards in the current tracing
 context. It's lifecycle is bound 1:1 to the tracing context, and it should never be instantiated
@@ -309,6 +334,40 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
     def restore_graphstate(self, state):
         assert isinstance(state, GuardsCheckpointState)
         self.dynamo_guards = state.dynamo_guards
+
+
+class ModuleContext(Checkpointable[ModuleCheckpointState]):
+    def __init__(self):
+        self.names_to_sources: Dict[str, Source] = dict()
+
+    def copy_graphstate(self):
+        return ModuleCheckpointState(dict(self.names_to_sources))
+
+    def restore_graphstate(self, state):
+        assert isinstance(state, ModuleCheckpointState)
+        self.names_to_sources = state.names_to_sources
+
+    def register(self, name: str, source: Source):
+        """
+        Registers a source object to a given name.
+
+        :param name: A string representing the name to register the source object under.
+        :type name: str
+
+        :param source: A Source object representing the source to be registered.
+        :type source: Source
+
+        :raises AssertionError: If a source with the same name already exists but has a different source name.
+
+        :return: None.
+        """
+        if name in self.names_to_sources:
+            curr_source = self.names_to_sources[name]
+            assert (
+                curr_source.name() == source.name()
+            ), f"Mismatch {curr_source} vs {source}"
+            return
+        self.names_to_sources[name] = source
 
 
 _CURRENT_TRACING_CONTEXT = None
@@ -348,7 +407,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
-        self.param_and_attr_names_to_sources: Dict[str, Source] = dict()
+        self.module_context = ModuleContext()
 
     @staticmethod
     @contextlib.contextmanager
@@ -362,15 +421,6 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
-
-    def register(self, name: str, source: Source):
-        if name in self.param_and_attr_names_to_sources:
-            curr_source = self.param_and_attr_names_to_sources[name]
-            assert (
-                curr_source.name() == source.name()
-            ), f"Mismatch {curr_source} vs {source}"
-            return
-        self.param_and_attr_names_to_sources[name] = source
 
 
 """
