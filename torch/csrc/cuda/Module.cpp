@@ -1107,6 +1107,35 @@ static void registerCudaPluggableAllocator(PyObject* module) {
   });
 
   m.def(
+      "_cuda_notifyCaptureBegin",
+      [](int device, size_t graph_id, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::notifyCaptureBegin(
+            device, graph_id, mempool_id);
+      });
+
+  m.def("_cuda_notifyCaptureAboutToEnd", [](int device, size_t graph_id) {
+    c10::cuda::CUDACachingAllocator::notifyCaptureAboutToEnd(device, graph_id);
+  });
+
+  m.def("_cuda_notifyCaptureEnded", [](int device, size_t graph_id) {
+    c10::cuda::CUDACachingAllocator::notifyCaptureEnded(device, graph_id);
+  });
+
+  m.def(
+      "_cuda_notifyCaptureDestroy",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::notifyCaptureDestroy(
+            device, mempool_id);
+      });
+
+  m.def(
+      "_cuda_allocateThreadToPrivatePool",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        c10::cuda::CUDACachingAllocator::allocateThreadToPrivatePool(
+            device, mempool_id);
+      });
+
+  m.def(
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,

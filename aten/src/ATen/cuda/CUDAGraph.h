@@ -26,6 +26,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
+  CaptureId_t id();
 
   protected:
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
@@ -42,7 +43,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool has_graph_exec_ = false;
 
   // uuid of this instance's current capture, retrieved from Cuda
-  CaptureId_t id_;
+  CaptureId_t id_ = 0;
 
   // uuid used to request a particular private mempool from CUDACachingAllocator.
   // By default, this will be set to {id_, 0}.

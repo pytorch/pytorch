@@ -314,6 +314,17 @@ TORCH_CHECK(has_graph_exec_,
   return mempool_id_;
 }
 
+CaptureId_t CUDAGraph::id() {
+  #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+    TORCH_CHECK(id_ != 0,
+              "Called CUDAGraph::id() without a preceding successful capture.");
+  #else
+    TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
+  #endif
+    return id_;
+}
+
+
 CUDAGraph::~CUDAGraph() {
   reset();
 }
