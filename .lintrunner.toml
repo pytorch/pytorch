@@ -1,3 +1,5 @@
+merge_base_with = "master"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
@@ -918,3 +920,11 @@ init_command = [
     '--output-name=bazel',
 ]
 is_formatter = true
+
+[[linter]]
+code = 'LINTRUNNER_VERSION'
+include_patterns = ['**']
+command = [
+    'python3',
+    'tools/linter/adapters/lintrunner_version_linter.py'
+]
