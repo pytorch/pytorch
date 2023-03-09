@@ -43,25 +43,9 @@ Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
   // Need owning storage in case of the Tensor class.
   const auto hash_coeffs_storage = [&]() -> auto {
     auto strides = c10::contiguous_strides(size);
-
-    if constexpr (max_static_len > 0) {
-      std::array<int64_t, max_static_len> strides_as_array;
-      std::copy(strides.begin(), strides.end(), strides_as_array.begin());
-      return strides_as_array;
-    } else {
-      auto strides_as_tensor = at::tensor(strides, indices.options().device(kCPU).dtype(kLong));
-      strides_as_tensor = strides_as_tensor.to(indices.device());
-      return strides_as_tensor;
-    }
+    return at::sparse::TensorGeometryHolder<max_static_len>(strides, strides, indices.options());
   }();
-
-  const auto hash_coeffs = [&]() -> auto {
-    if constexpr (max_static_len > 0) {
-      return hash_coeffs_storage;
-    } else {
-      return hash_coeffs_storage.template data_ptr<int64_t>();
-    }
-  }();
+  const auto hash_coeffs = std::get<0>(*hash_coeffs_storage);
 
   const auto hash_indices = [&]() -> Tensor {
     // non-const because of gcc-5/clang-5 issues
