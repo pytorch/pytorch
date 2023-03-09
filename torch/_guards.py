@@ -350,7 +350,7 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
             curr_source = self.names_to_sources[name]
             assert (
                 curr_source.name() == source.name()
-            ), f"Mismatch {curr_source} vs {source}"
+            ), f"Mismatch {curr_source.name()} vs {source.name()}"
             return
         self.names_to_sources[name] = source
 
@@ -393,6 +393,7 @@ class TracingContext:
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
         self.module_context = ModuleContext()
+        self.aot_autograd_arg_pos_to_source = []
 
     @staticmethod
     @contextlib.contextmanager

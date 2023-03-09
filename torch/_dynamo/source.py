@@ -146,6 +146,8 @@ class ParamBufferSource(AttrSource):
     def guard_source(self):
         return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
+    def name(self):
+        return f"{self.base.name()}.{self.member}"
 
 class TensorProperty(enum.Enum):
     SIZE = 0

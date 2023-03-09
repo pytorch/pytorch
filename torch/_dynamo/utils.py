@@ -1389,8 +1389,11 @@ def tensor_always_has_static_shape(
 # and at times, with the regex `name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)` if we anticipate
 # square brackets. We did not have a consistent normalization scheme across every attribute, just a regex we
 # copy pasted. This util is meant to replace that regex. Because we were inconsistent across all locations,
-# we are implementing the smallest intersection of the various regexs here.
+# we are implementing the widest useful intersection of the various regexs here.
 def normalize_attr_name(name):
+    # e.g. replace abc[0].xyz with abc_0.xyz
+    # If we do not have this rege here, we will get inconsistent naming between 
+    name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     return name
