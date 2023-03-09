@@ -6708,10 +6708,10 @@
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
-- func: to_dense.dtype(Tensor self, ScalarType? dtype=None) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
   variants: method
 
-# The masked argument appears before dtype to avoid ambiguity with to_dense.dtype
+# In to_dense.masked, the masked argument appears before dtype to avoid ambiguity with to_dense
 - func: to_dense.masked(Tensor self, bool? masked, ScalarType? dtype=None) -> Tensor
   variants: method
 
