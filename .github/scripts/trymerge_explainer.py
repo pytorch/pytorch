@@ -21,7 +21,6 @@ def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
 
 class TryMergeExplainer(object):
     force: bool
-    land_checks: bool
     labels: List[str]
     pr_num: int
     org: str
@@ -33,53 +32,24 @@ class TryMergeExplainer(object):
     def __init__(
         self,
         force: bool,
-        land_checks: bool,
         labels: List[str],
         pr_num: int,
         org: str,
         project: str,
     ):
         self.force = force
-        self.land_checks = land_checks
         self.labels = labels
         self.pr_num = pr_num
         self.org = org
         self.project = project
-        self.get_flags()
-
-    def get_flags(self) -> bool:
-        self.has_trunk_label = has_label(self.labels, CIFLOW_TRUNK_LABEL)
-        self.has_ciflow_label = has_label(self.labels, CIFLOW_LABEL)
-        should_check_land_branch = self.land_checks and not self.has_trunk_label
-
-        return should_check_land_branch
 
     def _get_flag_msg(self) -> str:
         if self.force:
             return "Your change will be merged immediately since you used the force (-f) flag, " + \
                 "**bypassing any CI checks** (ETA: 1-5 minutes)."
-        elif self.land_checks:
-            flag_msg = \
-                "**The `-l` land checks flag is deprecated and no longer needed.** Instead we now automatically " + \
-                "add the `ciflow\\trunk` label to your PR once it's approved\n\n"
-
-            if self.has_trunk_label:
-                flag_msg += "Your change will be merged once all checks on your PR pass (ETA 0-4 Hours)."
-            else:
-                flag_msg += "Your change will be merged once the land checks pass (**ETA 4 Hours**)."
-
-            return flag_msg
         else:
             return "Your change will be merged once all checks pass (ETA 0-4 Hours)."
 
-    def _get_land_check_progress(self, commit: Optional[str]) -> str:
-        if commit is not None:
-            return (
-                " and land check "
-                + f"progress <a href=\"https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}\">here</a>"
-            )
-        else:
-            return ""
 
     def get_merge_message(self, commit: Optional[str] = None) -> str:
         title = "### Merge started"
@@ -88,7 +58,7 @@ class TryMergeExplainer(object):
         advanced_debugging = "\n".join((
             "<details><summary>Advanced Debugging</summary>",
             "Check the merge workflow status ",
-            f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>{self._get_land_check_progress(commit)}",
+            f"<a href=\"{os.getenv('GH_RUN_URL')}\">here</a>",
             "</details>"
         ))
 

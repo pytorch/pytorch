@@ -13,8 +13,6 @@ from hashlib import sha256
 
 from trymerge import (
     find_matching_merge_rule,
-    get_land_checkrun_conclusions,
-    validate_land_time_checks,
     gh_graphql,
     gh_get_team_members,
     read_merge_rules,
@@ -25,7 +23,6 @@ from trymerge import (
     PostCommentError,
     FlakyRule,
     categorize_checks,
-    get_combined_checks_from_pr_and_land_validation,
     get_rockset_results,
     main as trymerge_main,
     get_classifications,
@@ -111,7 +108,6 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.pr_num = 76123
             self.dry_run = True
             self.comment_id = 0
-            self.land_checks = False
             self.reason = 'this is for testing'
 
     return Object()
@@ -126,7 +122,6 @@ def mock_merge(pr_num: int, repo: GitRepo,
                dry_run: bool = False,
                skip_mandatory_checks: bool = False,
                comment_id: Optional[int] = None,
-               land_checks: bool = False,
                timeout_minutes: int = 400,
                stale_pr_days: int = 3) -> None:
     pass
@@ -342,20 +337,6 @@ class TestTryMerge(TestCase):
         self.assertTrue(len(lint_checks) > 0)
         self.assertTrue(all([conclusions[name].status == "SUCCESS" for name in lint_checks]))
 
-    def test_get_many_land_checks(self, *args: Any) -> None:
-        """ Tests that all checkruns can be fetched for a commit
-        """
-        conclusions = get_land_checkrun_conclusions('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684')
-        self.assertEqual(len(conclusions), 98)
-        self.assertTrue("pull / linux-docs / build-docs (cpp)" in conclusions.keys())
-
-    def test_failed_land_checks(self, *args: Any) -> None:
-        """ Tests that PR with Land Checks fail with a RunTime error
-        """
-        self.assertRaisesRegex(RuntimeError,
-                               ".*Failed to merge; some land checks failed.*",
-                               lambda: validate_land_time_checks('pytorch', 'pytorch', '6882717f73deffb692219ccd1fd6db258d8ed684'))
-
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
     @mock.patch('trymerge.try_revert', side_effect=mock_revert)
@@ -372,8 +353,7 @@ class TestTryMerge(TestCase):
                                            mock.ANY,
                                            dry_run=mock.ANY,
                                            skip_mandatory_checks=True,
-                                           comment_id=mock.ANY,
-                                           land_checks=False)
+                                           comment_id=mock.ANY)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
@@ -384,8 +364,7 @@ class TestTryMerge(TestCase):
                                            mock.ANY,
                                            dry_run=mock.ANY,
                                            skip_mandatory_checks=False,
-                                           comment_id=mock.ANY,
-                                           land_checks=False)
+                                           comment_id=mock.ANY)
 
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
     def test_revert_rules(self, *args: Any) -> None:
@@ -445,7 +424,7 @@ class TestBypassFailures(TestCase):
     def test_get_classifications(self, *args: Any) -> None:
         flaky_rules = [FlakyRule("distributed", ["##[error]The operation was canceled."])]
         pr = GitHubPR("pytorch", "pytorch", 92863)
-        checks = get_combined_checks_from_pr_and_land_validation(pr, None)
+        checks = pr.get_checkrun_conclusions()
         checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
         self.assertTrue(
             checks[

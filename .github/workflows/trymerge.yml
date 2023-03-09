@@ -36,7 +36,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PR_NUM: ${{ github.event.client_payload.pr_num }}
           FORCE: ${{ github.event.client_payload.force}}
-          LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           REBASE: ${{ github.event.client_payload.rebase }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
@@ -56,8 +55,6 @@ jobs:
             else
               python3 .github/scripts/trymerge.py --force "${PR_NUM}"
             fi
-          elif [ -n "${LAND_CHECKS}" ]; then
-            python3 .github/scripts/trymerge.py --land-checks "${PR_NUM}"
           elif [ -n "${COMMENT_ID}" ]; then
             python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else
