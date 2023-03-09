@@ -19007,6 +19007,8 @@ python_ref_db = [
                          dtypes=(torch.complex64, torch.complex128)),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex64, torch.complex128), device_type='cuda'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
