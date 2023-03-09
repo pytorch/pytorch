@@ -25,7 +25,6 @@ from ..source import (
     AttrSource,
     ConstantSource,
     GetItemSource,
-    GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
     LocalInputSource,
@@ -677,9 +676,7 @@ class VariableBuilder:
         if unspec and type(value) is torch.Size:
             return SizeVariable(
                 [
-                    VariableBuilder(
-                        self.tx, GetItemSource(self.get_source(), i)
-                    )(v)
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
                     for i, v in enumerate(value)
                 ],
                 guards=self.make_guards(GuardBuilder.LIST_LENGTH),
