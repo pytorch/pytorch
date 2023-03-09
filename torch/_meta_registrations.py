@@ -2050,6 +2050,7 @@ def meta__scaled_dot_product_flash(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
+    scale: Optional[float] = None,
 ):
     # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
     # We have added logic to torch/_dynamo/variables/torch.py
@@ -2144,6 +2145,7 @@ def meta__scaled_dot_product_flash_backward(
     is_causal: bool,
     philox_seed: int,
     philox_offset: int,
+    scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
@@ -2182,6 +2184,7 @@ def meta__scaled_dot_product_efficient(
     value: Tensor,
     compute_log_sumexp: bool,
     is_causal: bool = False,
+    scale: Optional[float] = None,
 ):
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -2222,6 +2225,7 @@ def meta__scaled_dot_product_efficient_backward(
     logsumexp: Tensor,
     is_causal: bool = False,
     chunk_grad_outputs=False,
+    scale: Optional[float] = None,
 ):
     grad_out = grad_out.transpose(1, 2)
     query = query.transpose(1, 2)
@@ -2676,6 +2680,27 @@ def meta_upsample_bilinear2d_aa(
     )
 
 
+# From aten/src/ATen/native/cuda/AmpKernels.cu
+@register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
+def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):
+    check(found_inf.numel() == 1, lambda: "found_inf must be a 1-element tensor.")
+    check(inv_scale.numel() == 1, lambda: "inv_scale must be a 1-element tensor.")
+    check(
+        found_inf.dtype.is_floating_point, lambda: "found_inf must be a float tensor."
+    )
+    check(
+        inv_scale.dtype.is_floating_point, lambda: "inv_scale must be a float tensor."
+    )
+
+
+# From aten/src/ATen/native/UnaryOps.cpp
+@register_meta([aten.nan_to_num.default, aten.nan_to_num.out])
+@out_wrapper()
+def nan_to_num(self, nan=None, posinf=None, neginf=None):
+    result_size = list(self.size())
+    return self.new_empty(result_size)
+
+
 # We must also trigger meta registrations from PrimTorch ref
 # decompositions
 import torch._refs
@@ -2749,6 +2774,13 @@ def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     out_size = list(shard.size())
     out_size[0] *= group_size
     return shard.new_empty(out_size)
+
+
+@register_meta(aten.reduce_scatter_tensor)
+def reduce_scatter_tensor_meta(input, reduce_op, scatter_dim, tag, rankset, group_size):
+    out_size = list(input.size())
+    out_size[scatter_dim] //= group_size
+    return input.new_empty(out_size)
 
 
 @register_meta(aten.wait_tensor)

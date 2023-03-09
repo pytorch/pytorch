@@ -8,6 +8,7 @@ import logging
 import operator
 import os
 import os.path
+import re
 import threading
 from typing import List
 
@@ -17,7 +18,14 @@ from torch._dynamo.utils import dynamo_timed
 from .. import config
 from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
-from ..utils import ceildiv, conditional_product, do_bench, has_triton, next_power_of_2
+from ..utils import (
+    ceildiv,
+    conditional_product,
+    do_bench,
+    get_num_bytes,
+    has_triton,
+    next_power_of_2,
+)
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -220,7 +228,7 @@ def end_graph():
     cur_file = inspect.stack()[1].filename
     print(f"SUMMARY ({cur_file})")
     print(
-        f"{overall_time:.2f}ms\t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
     )
     print()
 
@@ -238,21 +246,16 @@ class DebugAutotuner(CachingAutotuner):
         super().run(*args, grid=grid, stream=stream)
         (launcher,) = self.launchers
 
-        def get_num_bytes(*args):
-            return sum(
-                arg.numel() * arg.element_size()
-                for arg in args
-                if isinstance(arg, torch.Tensor)
-            )
-
         ms = self.bench(launcher, *args, grid=grid)[0]
         num_gb = get_num_bytes(*args) / 1e9
         gb_per_s = num_gb / (ms / 1e3)
 
-        collected_calls.append((kernel_name, ms, num_gb, 1e3 * num_gb / ms))
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
         import colorama
 
-        info_str = f"{kernel_name}\t {ms:.3f}ms\t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s"
+        info_str = (
+            f"{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s \t {kernel_name}"
+        )
         if ms > 0.012 and gb_per_s < 650:
             print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
         else:

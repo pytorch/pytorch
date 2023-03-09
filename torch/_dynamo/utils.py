@@ -954,14 +954,17 @@ def same(
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
-            ref = ref.item()
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): {ref} != {res}")
+            log.error(f"Accuracy failed (numpy): {ref} != {res}")
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1009,7 +1012,6 @@ def disable_cache_limit():
     try:
         yield
     finally:
-        pass
         config.cache_size_limit = prior
 
 
@@ -1295,6 +1297,13 @@ def ifdyn(count1, count2):
         return count2
 
 
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
+        return count1
+    else:
+        return count2
+
+
 def import_submodule(mod: types.ModuleType):
     """
     Ensure all the files in a given submodule are imported
@@ -1346,7 +1355,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
     raise AssertionError(f"Illegal reason {reason}")
 
 
-def tensor_shape_should_be_static(
+def tensor_always_has_static_shape(
     tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """
@@ -1361,8 +1370,6 @@ def tensor_shape_should_be_static(
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    from torch._dynamo.source import ParamBufferSource
-
     if source is None:
         # TODO(voz): Look into why we need this case?
         return True, TensorStaticReason.NO_SOURCE
@@ -1375,9 +1382,15 @@ def tensor_shape_should_be_static(
     return False, None
 
 
+# Note - On normalizing attr names
+#
+# Normalizing names is not new to dynamo. We have historically normalized names
+# with the regex `name = re.sub(r"[^a-zA-Z0-9]", "_", name)` in most places,
+# and at times, with the regex `name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)` if we anticipate
+# square brackets. We did not have a consistent normalization scheme across every attribute, just a regex we
+# copy pasted. This util is meant to replace that regex. Because we were inconsistent across all locations,
+# we are implementing the smallest intersection of the various regexs here.
 def normalize_attr_name(name):
-    # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
-    name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
     return name
