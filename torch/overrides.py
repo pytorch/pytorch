@@ -265,6 +265,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor.__class__,
         Tensor.__subclasshook__,
         Tensor.__hash__,
+        Tensor.cholesky,
         Tensor.as_subclass,
         Tensor.eig,
         Tensor.lstsq,
