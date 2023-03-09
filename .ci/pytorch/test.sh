@@ -332,7 +332,7 @@ test_dynamo_benchmark() {
   else
     # Check inference with --float32
     test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
-    python check_graph_breaks --actual \
+    python check_graph_breaks.py --actual \
       "$TEST_REPORTS_DIR/inference_$suite.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/inference_$suite$shard_id.csv"
     if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
