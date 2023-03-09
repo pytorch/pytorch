@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 
 import torch
 import torch.cuda.nccl as nccl
+from torch.utils._python_dispatch import TorchDispatchMode
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
@@ -60,6 +61,26 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
+
+
+class ParamCheckMode(TorchDispatchMode):
+    def __init__(self, expected_dtype):
+        self.expected_dtype = expected_dtype
+        super().__init__()
+
+    def __torch_dispatch__(self, func, types, args, kwargs):
+        if 'to' in str(func) or 'native_layer_norm_backward.default' in str(func) or 'batch_norm_backward.default' in str(func):
+            # This is the cast itself
+            return func(*args, **kwargs)
+
+        tensors = list(torch.nn.parallel.distributed._find_tensors(args))
+        tensors.extend(torch.nn.parallel.distributed._find_tensors(kwargs))
+        for t in tensors:
+            if torch.is_floating_point(t):
+                assert t.dtype == self.expected_dtype, f"{t.dtype} {self.expected_dtype}, {func}"
+
+        return func(*args, **kwargs)
+
 
 # Various mixed precision configs to test under.
 default_mp = MixedPrecision(
@@ -714,6 +735,70 @@ class TestFSDPMixedPrecisionSharded(TestFSDPMixedPrecision):
         # RuntimeError: Expected counts to have type Half but got Float
         # for syncBN
         model(inp).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_precision_in_eval(self):
+        mp_config = MixedPrecision(
+            param_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float16
+        )
+        model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
+        )
+        print(model)
+        model = FSDP(model, mixed_precision=mp_config)
+        inp = model.module.get_input(torch.device("cuda"))
+        output = model(*inp)
+
+       # with ParamCheckMode(expected_dtype=torch.float16):
+        inp = model.module.get_input(torch.device("cuda"))
+        output = model(*inp)
+        loss = model.module.get_loss(inp, output).cuda()
+        # Loss should be in fp16
+        self.assertEqual(torch.float16, loss.dtype)
+        model.module.run_backward(loss)
+
+        model.state_dict()
+       # with ParamCheckMode(expected_dtype=torch.float16):
+        inp = model.module.get_input(torch.device("cuda"))
+        output = model(*inp)
+        loss = model.module.get_loss(inp, output).cuda()
+        # Loss should be in fp16
+        self.assertEqual(torch.float16, loss.dtype)
+        model.module.run_backward(loss)
+
+        # Now in eval mode, loss should be fp32
+        # model.eval()
+
+        # with ParamCheckMode(expected_dtype=torch.float32):
+        #     inp = model.module.get_input(torch.device("cuda"))
+        #     output = model(*inp)
+        #     loss = model.module.get_loss(inp, output).cuda()
+        #     # Loss should be in fp16
+        #     self.assertEqual(torch.float32, loss.dtype)
+        #     model.module.run_backward(loss)
+
+    @skip_if_lt_x_gpu(2)
+    def test_comm_in_full_precision_in_eval(self):
+        mp_config = MixedPrecision(
+            param_dtype=torch.float32,
+            reduce_dtype=torch.float16,
+            buffer_dtype=torch.float32
+        )
+        model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                {"mixed_precision": mp_config},
+        )
+        model = FSDP(model, mixed_precision=mp_config)
+
+
+        pass
 
     @skip_if_lt_x_gpu(2)
     def test_input_grads_with_param_mixed_precision(self):
