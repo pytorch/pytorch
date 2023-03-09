@@ -625,7 +625,7 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def benchmark_all_kernels(benchmark_name):
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -642,18 +642,34 @@ def benchmark_all_kernels(benchmark_name):
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
         args = kernel_mod.get_args()
-        ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
         num_gb = get_num_bytes(*args) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
 
-        # follow what we do in DebugAutotuner
-        info_str = f"{benchmark_name:20} {kernel_key[:10]} {ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
-        import colorama
+        def get_info_str(ms, prefix=""):
+            gb_per_s = num_gb / (ms / 1e3)
+            # follow what we do in DebugAutotuner
+            info_str = f"{prefix}{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
+            import colorama
 
-        if ms > 0.012 and gb_per_s < 650:
-            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+            if ms > 0.012 and gb_per_s < 650:
+                info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+            return info_str
+
+        bench_result = []
+        if benchmark_all_configs:
+            assert hasattr(kernel_mod, "benchmark_all_configs")
+            bench_result = kernel_mod.benchmark_all_configs(args)
+            bench_result = [
+                (launcher.config, ms) for launcher, ms in bench_result.items()
+            ]
+            print(f"{benchmark_name:20} {kernel_key[:10]}")
+            for cfg, ms in bench_result:
+                print(f"  {get_info_str(ms)} @ {cfg}")
         else:
-            print(info_str)
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            assert (
+                len(kernel_mod.triton_.launchers) == 1
+            ), "Autotuner should have selected the best config"
+            print(get_info_str(ms, prefix=f"{benchmark_name:20} {kernel_key[:10]} "))
 
         nfound += 1
     if nfound == 0:
