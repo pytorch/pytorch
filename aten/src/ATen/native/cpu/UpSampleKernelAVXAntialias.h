@@ -94,11 +94,12 @@ void ImagingResampleHorizontalConvolution8u4x(
     uint8_t* C10_RESTRICT lineOut1,
     uint8_t* C10_RESTRICT lineOut2,
     uint8_t* C10_RESTRICT lineOut3,
+    int64_t out_xsize,
     const uint8_t* C10_RESTRICT lineIn0,
     const uint8_t* C10_RESTRICT lineIn1,
     const uint8_t* C10_RESTRICT lineIn2,
     const uint8_t* C10_RESTRICT lineIn3,
-    int64_t xsize,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
@@ -110,13 +111,14 @@ void ImagingResampleHorizontalConvolution8u4x(
 void ImagingResampleHorizontalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
     const uint8_t* C10_RESTRICT lineIn,
-    int64_t xsize,
+    int64_t out_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
-    int64_t num_channels);
+    int64_t num_channels,
+    bool is_last_input_line);
 
 void ImagingResampleVerticalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
@@ -145,8 +147,6 @@ void ImagingResampleHorizontal(
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   auto xin = unpacked_input.size(2);
-  // const auto num_channels = unpacked_input.size(0);
-  // TORCH_INTERNAL_ASSERT(num_channels == 3 || num_channels == 4);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
 
   const int64_t* idx_ptr_xmin = horiz_indices_weights[0].data_ptr<int64_t>();
@@ -164,18 +164,19 @@ void ImagingResampleHorizontal(
         unpacked_output_p + (yy + 1) * xout_stride,
         unpacked_output_p + (yy + 2) * xout_stride,
         unpacked_output_p + (yy + 3) * xout_stride,
+        xout,
         unpacked_input_p + yy * xin_stride,
         unpacked_input_p + (yy + 1) * xin_stride,
         unpacked_input_p + (yy + 2) * xin_stride,
         unpacked_input_p + (yy + 3) * xin_stride,
-        xout,
+        xin,
         idx_ptr_xmin,
         idx_ptr_size,
         kk,
         ksize,
         horiz_weights_precision,
         num_channels,
-        yy + 4 == yout);
+        yy + 3 == yout - 1);
   }
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
@@ -187,7 +188,8 @@ void ImagingResampleHorizontal(
         kk,
         ksize,
         horiz_weights_precision,
-        num_channels);
+        num_channels,
+        yy == yout - 1);
   }
 }
 
@@ -212,8 +214,6 @@ void ImagingResampleVertical(
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
-  // const auto num_channels = unpacked_input.size(0);
-  // TORCH_INTERNAL_ASSERT(num_channels == 3 || num_channels == 4);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
 
   auto xout_stride = xout * num_channels;
@@ -379,11 +379,12 @@ void ImagingResampleHorizontalConvolution8u4x(
     uint8_t* C10_RESTRICT lineOut1,
     uint8_t* C10_RESTRICT lineOut2,
     uint8_t* C10_RESTRICT lineOut3,
+    int64_t out_xsize,
     const uint8_t* C10_RESTRICT lineIn0,
     const uint8_t* C10_RESTRICT lineIn1,
     const uint8_t* C10_RESTRICT lineIn2,
     const uint8_t* C10_RESTRICT lineIn3,
-    int64_t xsize,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
@@ -417,11 +418,6 @@ void ImagingResampleHorizontalConvolution8u4x(
   const auto mask_low = (num_channels == 3) ? masks_low_high_c3[0] : masks_low_high_c4[0];
   const auto mask_high = (num_channels == 3) ? masks_low_high_c3[1] : masks_low_high_c4[1];
 
-  const auto mask_ch = _mm256_set_epi8(
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0,
-    -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0
-  );
-
   const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
@@ -436,97 +432,98 @@ void ImagingResampleHorizontalConvolution8u4x(
   // --> x <= xmax - 8.0 / stride
   // --> x < xmax + 1 - int(8.0 / stride)
   const auto b2_delta = int(8.0 / stride) - 1;
-
-  // xsize = output width, xx = output x index
+  // out_xsize = output width, out_x = output x index
   // xmax = interpolation size, x = interpolation index (horizontal <-> x dimension)
-  // xmin = input x start index corresponding to output x index (xx)
+  // xmin = input x start index corresponding to output x index (out_x)
 
   const auto zero = _mm256_setzero_si256();
   const auto initial = _mm256_set1_epi32(1 << (coefs_precision - 1));
 
-  for (const auto xx : c10::irange(xsize)) {
-    const auto xmin = idx_ptr_xmin[xx];
-    const auto xmax = idx_ptr_size[xx];
-    const auto * k = &kk[xx * kmax];
+  for (const auto out_x : c10::irange(out_xsize)) {
+    const auto xmin = idx_ptr_xmin[out_x];
+    const auto xmax = idx_ptr_size[out_x];
+    const auto * k = &kk[out_x * kmax];
     int64_t x = 0;
 
     auto sss0 = initial;
     auto sss1 = initial;
 
     for (; x < xmax - b4_delta; x += 4) {
-      auto mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
-      auto mmk1 = _mm256_set1_epi32(*(int32_t*)&k[x + 2]);
+      const auto mmk0 = _mm256_set1_epi32(*(int32_t*)&k[x]);
+      const auto mmk1 = _mm256_set1_epi32(*(int32_t*)&k[x + 2]);
 
       auto source = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si128((__m128i *) (lineIn0 + stride * (x + xmin)))),
           _mm_loadu_si128((__m128i *) (lineIn1 + stride * (x + xmin))), 1);
 
-      auto pix = _mm256_shuffle_epi8(source, mask_low);
-      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk0));
-      pix = _mm256_shuffle_epi8(source, mask_high);
-      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk1));
+      auto pix1 = _mm256_shuffle_epi8(source, mask_low);
+      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk0));
+      auto pix2 = _mm256_shuffle_epi8(source, mask_high);
+      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix2, mmk1));
 
-      source = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      // TODO: Possible read of out of mem bounds:
+      auto source2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si128((__m128i *) (lineIn2 + stride * (x + xmin)))),
           _mm_loadu_si128((__m128i *) (lineIn3 + stride * (x + xmin))), 1);
-      pix = _mm256_shuffle_epi8(source, mask_low);
-      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk0));
-      pix = _mm256_shuffle_epi8(source, mask_high);
-      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk1));
+      auto pix3 = _mm256_shuffle_epi8(source2, mask_low);
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix3, mmk0));
+      auto pix4 = _mm256_shuffle_epi8(source2, mask_high);
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix4, mmk1));
     }
 
     for (; x < xmax - b2_delta; x += 2) {
-      auto mmk = _mm256_set1_epi32(*(int32_t*)&k[x]);
+      const auto mmk = _mm256_set1_epi32(*(int32_t*)&k[x]);
 
-      auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      auto pix1 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si64(lineIn0 + stride * (x + xmin))),
           _mm_loadu_si64(lineIn1 + stride * (x + xmin)), 1);
-      pix = _mm256_shuffle_epi8(pix, mask_low);
-      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
+      pix1 = _mm256_shuffle_epi8(pix1, mask_low);
+      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
-      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      // TODO: Possible read of out of mem bounds:
+      // - out_x= 223, xmax= 2, b4_delta= 4, b2_delta= 1
+      // _mm_loadu_si64(lineIn3 + stride * (x + xmin)) will read 8 bytes of 6 bytes possible.
+      auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si64(lineIn2 + stride * (x + xmin))),
           _mm_loadu_si64(lineIn3 + stride * (x + xmin)), 1);
-      pix = _mm256_shuffle_epi8(pix, mask_low);
-      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk));
+      pix2 = _mm256_shuffle_epi8(pix2, mask_low);
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
     for (; x < xmax - 1; x++) {
-      auto mmk = _mm256_set1_epi32(k[x]);
-      auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      const auto mmk = _mm256_set1_epi32(k[x]);
+      auto pix1 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           mm_cvtepu8_epi32(lineIn0 + stride * (x + xmin))),
           mm_cvtepu8_epi32(lineIn1 + stride * (x + xmin)), 1);
-      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
+      sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
-      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin))),
           mm_cvtepu8_epi32(lineIn3 + stride * (x + xmin)), 1);
-      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk));
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
     if (x == xmax - 1) {
       // last element x = xmax - 1
       auto mmk = _mm256_set1_epi32(k[x]);
-      __m256i pix;
-      __m128i p0, p1;
       // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
       // lines 0, 1 and 2 wont go out of allocated memory bounds
-      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
+      auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
           mm_cvtepu8_epi32(lineIn0 + stride * (x + xmin))),
           mm_cvtepu8_epi32(lineIn1 + stride * (x + xmin)), 1);
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
 
-      p0 = mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin));
-
-      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line)) {
+      auto p0 = mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin));
+      __m128i p1;
+      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line && stride * (x + xmin) + 4 >= stride * in_xsize)) {
         uint8_t output1[4];
         std::memcpy(output1, lineIn3 + stride * (x + xmin), 3);
         p1 = mm_cvtepu8_epi32(output1);
       } else {
         p1 = mm_cvtepu8_epi32(lineIn3 + stride * (x + xmin));
       }
-      pix = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
-      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix, mmk));
+      auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
+      sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
     sss0 = _mm256_srai_epi32(sss0, coefs_precision);
@@ -535,27 +532,37 @@ void ImagingResampleHorizontalConvolution8u4x(
     sss1 = _mm256_packs_epi32(sss1, zero);
     sss0 = _mm256_packus_epi16(sss0, zero);
     sss1 = _mm256_packus_epi16(sss1, zero);
-    if (num_channels == 3) {
-      // Remove data from the 4th byte: R G B X 0 0 0 0 ... -> R G B 0 0 0 0 0 ...
-      sss0 = _mm256_shuffle_epi8(sss0, mask_ch);
-      sss1 = _mm256_shuffle_epi8(sss1, mask_ch);
-    }
 
     auto o0 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss0));
     auto o1 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss0, 1));
     auto o2 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss1));
     auto o3 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 1));
 
-    if (num_channels == 3 && C10_UNLIKELY(stride * xx + 4 >= xsize * stride)) {
-      std::memcpy(lineOut0 + stride * xx, (unsigned char *) &o0, num_channels);
-      std::memcpy(lineOut1 + stride * xx, (unsigned char *) &o1, num_channels);
-      std::memcpy(lineOut2 + stride * xx, (unsigned char *) &o2, num_channels);
-      std::memcpy(lineOut3 + stride * xx, (unsigned char *) &o3, num_channels);
+    if (num_channels == 3 && C10_UNLIKELY(stride * out_x + 4 >= out_xsize * stride)) {
+      auto n0 = *(uint32_t *)(lineOut0 + stride * (out_x + 1));
+      *(uint32_t *)(lineOut0 + stride * out_x) = o0;
+      *(uint32_t *)(lineOut0 + stride * (out_x + 1)) = n0;
+
+      auto n1 = *(uint32_t *)(lineOut1 + stride * (out_x + 1));
+      *(uint32_t *)(lineOut1 + stride * out_x) = o1;
+      *(uint32_t *)(lineOut1 + stride * (out_x + 1)) = n1;
+
+      auto n2 = *(uint32_t *)(lineOut2 + stride * (out_x + 1));
+      *(uint32_t *)(lineOut2 + stride * out_x) = o2;
+      *(uint32_t *)(lineOut2 + stride * (out_x + 1)) = n2;
+
+      if (C10_UNLIKELY(is_last_input_line)) {
+        std::memcpy(lineOut3 + stride * out_x, (unsigned char *) &o3, num_channels);
+      } else {
+        auto n3 = *(uint32_t *)(lineOut3 + stride * (out_x + 1));
+        *(uint32_t *)(lineOut3 + stride * out_x) = o3;
+        *(uint32_t *)(lineOut3 + stride * (out_x + 1)) = n3;
+      }
     } else {
-      *(uint32_t *)(lineOut0 + stride * xx) = o0;
-      *(uint32_t *)(lineOut1 + stride * xx) = o1;
-      *(uint32_t *)(lineOut2 + stride * xx) = o2;
-      *(uint32_t *)(lineOut3 + stride * xx) = o3;
+      *(uint32_t *)(lineOut0 + stride * out_x) = o0;
+      *(uint32_t *)(lineOut1 + stride * out_x) = o1;
+      *(uint32_t *)(lineOut2 + stride * out_x) = o2;
+      *(uint32_t *)(lineOut3 + stride * out_x) = o3;
     }
   }
 }
@@ -563,13 +570,14 @@ void ImagingResampleHorizontalConvolution8u4x(
 void ImagingResampleHorizontalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
     const uint8_t* C10_RESTRICT lineIn,
-    int64_t xsize,
+    int64_t out_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
-    int64_t num_channels) {
+    int64_t num_channels,
+    bool is_last_input_line) {
 
   // Define various shuffling masks
   const auto kmask_low = _mm256_set_epi8(
@@ -581,9 +589,6 @@ void ImagingResampleHorizontalConvolution8u(
   const auto kmask_hl = _mm256_set_epi8(
       7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4,
       3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0);
-
-  const auto mask_ch = _mm_set_epi8(
-      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0);
 
   const __m256i masks_low_high_c4[2] = {
     _mm256_set_epi8(
@@ -630,9 +635,9 @@ void ImagingResampleHorizontalConvolution8u(
   const auto mask_hl = (num_channels == 3) ? masks_lh_c3_c4[0] : masks_lh_c3_c4[1];
   const auto mask_low128 = (num_channels == 3) ? masks_low128_c3_c4[0] : masks_low128_c3_c4[1];
 
-  // xsize = output width, xx = output x index
+  // out_xsize = output width, out_x = output x index
   // xmax = interpolation size, x = interpolation index (horizontal <-> x dimension)
-  // xmin = input x start index corresponding to output x index (xx)
+  // xmin = input x start index corresponding to output x index (out_x)
 
   const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
   const auto zero = _mm_setzero_si128();
@@ -655,11 +660,11 @@ void ImagingResampleHorizontalConvolution8u(
   // --> x < xmax + 1 - int(8.0 / stride)
   const auto b2_delta = int(8.0 / stride) - 1;
 
-  for (const auto xx : c10::irange(xsize)) {
+  for (const auto out_x : c10::irange(out_xsize)) {
     __m128i sss;
-    const auto xmin = idx_ptr_xmin[xx];
-    const auto xmax = idx_ptr_size[xx];
-    const auto * k = &kk[xx * kmax];
+    const auto xmin = idx_ptr_xmin[out_x];
+    const auto xmax = idx_ptr_size[out_x];
+    const auto * k = &kk[out_x * kmax];
     int64_t x = 0;
 
     if (xmax < 8) {
@@ -720,7 +725,7 @@ void ImagingResampleHorizontalConvolution8u(
       auto mmk = _mm_set1_epi32(k[x]);
       __m128i pix;
       auto p = lineIn + stride * (x + xmin);
-      if (num_channels == 3) {
+      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line)) {
         unsigned char output[4];
         std::memcpy(output, p, 3);
         pix = mm_cvtepu8_epi32(output);
@@ -732,15 +737,12 @@ void ImagingResampleHorizontalConvolution8u(
     sss = _mm_srai_epi32(sss, coefs_precision);
     sss = _mm_packs_epi32(sss, zero);
     sss = _mm_packus_epi16(sss, zero);
-    if (num_channels == 3) {
-      sss = _mm_shuffle_epi8(sss, mask_ch);
-    }
 
     auto o = _mm_cvtsi128_si32(sss);
-    if (num_channels == 3 && C10_UNLIKELY(stride * xx + 4 >= xsize * stride)) {
-      std::memcpy(lineOut + stride * xx, (unsigned char *) &o, num_channels);
+    if (num_channels == 3 && C10_UNLIKELY(stride * out_x + 4 >= out_xsize * stride)) {
+      std::memcpy(lineOut + stride * out_x, (unsigned char *) &o, num_channels);
     } else {
-      *(uint32_t *)(lineOut + stride * xx) = o;
+      *(uint32_t *)(lineOut + stride * out_x) = o;
     }
   }
 }
@@ -755,7 +757,7 @@ void ImagingResampleVerticalConvolution8u(
     unsigned int coefs_precision,
     int64_t num_channels) {
 
-  // xsize = output width and input width, xx = output x index
+  // xsize = output width, also equals to input width
   // ymax = interpolation size, y = interpolation index (vertical <-> y dimension)
   // ymin = input y start index
 
@@ -771,9 +773,6 @@ void ImagingResampleVerticalConvolution8u(
   const auto initial_256 = _mm256_set1_epi32(1 << (coefs_precision - 1));
   const auto zero = _mm_setzero_si128();
   const auto zero_256 = _mm256_setzero_si256();
-
-  const auto mask_ch = _mm_set_epi8(
-      -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 2, 1, 0);
 
   int64_t i = 0;
   const auto b8_usable_vec_stride = (vec_size / data_stride) * data_stride;
@@ -900,14 +899,10 @@ void ImagingResampleVerticalConvolution8u(
     sss = _mm_packs_epi32(sss, zero);
     sss = _mm_packus_epi16(sss, zero);
 
-    if (num_channels == 3) {
-      sss = _mm_shuffle_epi8(sss, mask_ch);
-    }
-
     auto o = _mm_cvtsi128_si32(sss);
 
-    // Here we write 4 bytes to the output even if num_channels < 4, e.g o = {r,g,b,0} for num_channels=3
-    // It is OK to write 4th byte (e.g. 0) as on the next step we will overwrite it with new data.
+    // Here we write 4 bytes to the output even if num_channels < 4, e.g o = {r,g,b,X} for num_channels=3
+    // It is OK to write 4th byte (e.g. X) as on the next step we will overwrite it with new data.
     // We also wont go out of bounds of lineOut memory allocation
     *(uint32_t *)(lineOut + i) = o;
   }
@@ -935,7 +930,7 @@ void ImagingResampleVerticalConvolution8u(
       __m128i pix;
       // TODO: Update condition to apply on the last pixel only
       if (num_channels == 3) {
-        unsigned char output[4];
+        uint8_t output[4];
         std::memcpy(output, p, 3);
         pix = mm_cvtepu8_epi32(output);
       } else {
@@ -947,9 +942,6 @@ void ImagingResampleVerticalConvolution8u(
     sss = _mm_srai_epi32(sss, coefs_precision);
     sss = _mm_packs_epi32(sss, zero);
     sss = _mm_packus_epi16(sss, zero);
-    if (num_channels == 3) {
-      sss = _mm_shuffle_epi8(sss, mask_ch);
-    }
 
     auto o = _mm_cvtsi128_si32(sss);
     if (num_channels == 3 && C10_UNLIKELY(i + 4 >= data_size)) {
