@@ -24,6 +24,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 from torch.cuda._memory_viz import profile_plot
 from torch.cuda._memory_viz import trace_plot
+from torch.cuda._memory_viz import segment_plot
 
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
@@ -31,7 +32,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -47,7 +48,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
@@ -5009,7 +5010,7 @@ class TestCudaComm(TestCase):
         self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    def test_memory_trace_plot(self):
+    def test_memory_plots(self):
         for record_context in (True, False):
             try:
                 torch.cuda.memory.empty_cache()
@@ -5025,9 +5026,12 @@ class TestCudaComm(TestCase):
 
                 run()
                 ss = torch.cuda.memory._snapshot()
-                plot = trace_plot(ss)
-                self.assertTrue(record_context == ("test_memory_trace_plot" in plot))
-                self.assertTrue(str(128 * 128 * 4) in plot)
+                tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(str(128 * 128 * 4) in tplot)
+                splot = segment_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
                 torch.cuda.memory._record_memory_history(False)
             finally:
                 torch.cuda.memory._record_memory_history(False)
