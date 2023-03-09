@@ -367,7 +367,8 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         lines.append("# Setup the output directory")
         if not args.keep_output_dir:
             lines.append(f"rm -rf {output_dir}")
-            lines.append(f"mkdir {output_dir}")
+        # It's ok if the output directory already exists
+        lines.append(f"mkdir -p {output_dir}")
         lines.append("")
 
         for testing in ["performance", "accuracy"]:
