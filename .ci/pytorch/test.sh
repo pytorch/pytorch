@@ -314,7 +314,7 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_csv.py \
       -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-    python check_graph_breaks.py \
+    python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
       --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}${shard_id}.csv"
   fi
