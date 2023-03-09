@@ -1,3 +1,4 @@
+import copy
 import operator
 import torch
 from typing import Any, Optional, Tuple
@@ -73,7 +74,7 @@ def _get_lstm_with_individually_observed_parts(
 
     # Build QConfigMapping for the LSTM cell
     # Note: FloatFunctional qconfigs will be configured separately below
-    cell_qm = QConfigMapping().set_global(float_lstm.qconfig)
+    cell_qm = QConfigMapping().set_global(float_lstm.qconfig)  # type: ignore[arg-type]
     if sigmoid_obs_ctr is not None:
         cell_qm.set_module_name("input_gate", make_qconfig(sigmoid_obs_ctr))
         cell_qm.set_module_name("forget_gate", make_qconfig(sigmoid_obs_ctr))
@@ -91,7 +92,8 @@ def _get_lstm_with_individually_observed_parts(
         # to configure these ops in FX graph mode quantization today. This is because
         # the FloatFunctional modules simply disappear from the graph after tracing.
         # In the future, we should rewrite quantizable LSTM without FloatFunctionals.
-        node_name_to_activation_post_process_ctr = { 
+        # TODO: do not rely on node names
+        node_name_to_activation_post_process_ctr = {
             "add": linear_output_obs_ctr,  # gates.add
             "mul": cell_state_obs_ctr,  # fgate_cx.mul
             "mul_1": cell_state_obs_ctr,  # igate_cgate.mul
@@ -128,9 +130,15 @@ def _get_reference_quantized_lstm_module(
     Return:
         A reference `torch.ao.nn.quantized.LSTM` module.
     """
-    for layer in observed_lstm.layers:
-        cell = layer.layer_fw.cell
-        cell = convert_to_reference_fx(cell, backend_config=backend_config)
+    quantized_lstm = torch.ao.nn.quantized.LSTM(
+        observed_lstm.input_size, observed_lstm.hidden_size, observed_lstm.num_layers,
+        observed_lstm.bias, observed_lstm.batch_first, observed_lstm.dropout,
+        observed_lstm.bidirectional)
+
+    for i, layer in enumerate(quantized_lstm.layers):
+        cell = copy.deepcopy(observed_lstm.layers.get_submodule(str(i)).layer_fw.cell)  # type: ignore[union-attr]
+        cell = convert_to_reference_fx(cell, backend_config=backend_config)  # type: ignore[arg-type]
+        assert isinstance(cell, torch.fx.GraphModule)
         # HACK: Manually remove input quantize nodes and output dequantize nodes,
         # since custom modules expect quint8 inputs and outputs for now. Note that
         # this functionality is supposedly handled through PrepareCustomConfig's
@@ -155,6 +163,4 @@ def _get_reference_quantized_lstm_module(
         cell.graph.eliminate_dead_code()
         cell.recompile()
         layer.layer_fw.cell = cell
-    quantized_lstm = observed_lstm
-    quantized_lstm.__class__ = torch.ao.nn.quantized.LSTM
     return quantized_lstm

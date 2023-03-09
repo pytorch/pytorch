@@ -4627,7 +4627,7 @@ class TestQuantizeFx(QuantizationTestCase):
             "add": (2 ** -11, 2 ** 15, torch.qint32),  # gates.add
             "input_gate": (2 ** -16, 0, torch.qint32),
             "forget_gate": (2 ** -16, 0, torch.qint32),
-            "cell_gate": (2** -15, 2 ** 15, torch.qint32),
+            "cell_gate": (2 ** -15, 2 ** 15, torch.qint32),
             "output_gate": (2 ** -16, 0, torch.qint32),
             "mul": (2 ** -11, 0, torch.qint32),  # fgate_cx.mul
             "mul_1": (2 ** -11, 0, torch.qint32),  # igate_cgate.mul
