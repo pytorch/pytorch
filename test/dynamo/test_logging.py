@@ -1,4 +1,5 @@
 import contextlib
+import functools
 import logging
 import os
 import unittest.mock
@@ -8,6 +9,10 @@ import torch._dynamo.logging as td_logging
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging
+
+from torch.testing._internal.inductor_utils import HAS_CUDA
+
+requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
 
 def check_log_result():
@@ -29,6 +34,11 @@ def dynamo_error_fn(a):
 
 def inductor_error_fn(a):
     output = torch.round(a)
+    return output
+
+
+def inductor_schedule_fn(a):
+    output = a.add(torch.ones(1000, 1000, device="cuda"))
     return output
 
 
@@ -146,6 +156,14 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
     test_bytecode = multi_record_test("bytecode", td_logging.ByteCodeLogRec, 2)
     test_output_code = multi_record_test("output_code", td_logging.OutputCodeLogRec, 2)
 
+    @requires_cuda()
+    @make_test("schedule")
+    def test_schedule(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertEqual(len(records), 1)
+        self.assertIsInstance(records[0].msg, td_logging.ScheduleLogRec)
+
     test_dynamo_debug = within_range_record_test("+dynamo", str, 30, 50)
     test_dynamo_info = within_range_record_test("dynamo", str, 2, 10)
 
@@ -154,7 +172,7 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
             fn_opt(*ARGS)
-        except:
+        except Exception:
             pass
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
@@ -168,7 +186,7 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         import torch._inductor.lowering
 
         def throw(x):
-            assert False
+            raise AssertionError()
 
         # inject an error in the lowerings
         for x in list(torch._inductor.lowering.lowerings.keys()):
@@ -178,14 +196,14 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(inductor_error_fn)
             fn_opt(*ARGS)
-        except:
+        except Exception:
             pass
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
 
 
 # single record tests
-exclusions = {"bytecode", "output_code"}
+exclusions = {"bytecode", "output_code", "schedule"}
 for name, ty in torch._logging.NAME_TO_RECORD_TYPE.items():
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))

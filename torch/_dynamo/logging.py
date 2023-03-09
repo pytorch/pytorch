@@ -146,7 +146,7 @@ class ScheduleLogRec(typing.NamedTuple):
     schedule: typing.List[typing.Any]
 
     def __str__(self):
-        return f"Schedule:\n {schedule}"
+        return f"Schedule:\n {self.schedule}"
 
 
 # initialize torchdynamo loggers
