@@ -364,7 +364,9 @@ void Reducer::point_grads_to_bucket() {
           // The grad is modified and need to be written back.
           return true;
         }
-      })
+        // Grad is not none
+        return false;
+      });
     };
   }
 }
