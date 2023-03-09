@@ -209,8 +209,10 @@ def _fill_tensor_meta(
     ):
         # Only set shape for now as we don't need type information.
         # import pdb; pdb.set_trace()
-        onnxscript_value.shape = tuple(expected_value.size())
+        # onnxscript_value.shape = tuple(expected_value.size())
+        onnxscript_value.shape = tuple(len(expected_value.size()) * [None])
         onnxscript_value.type = expected_value.dtype
+        # print(f"expected values shape: {expected_value.size()} and dtype: {expected_value.dtype}")
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
@@ -526,10 +528,11 @@ def _export(
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
+    # import pdb; pdb.set_trace()
     decomposed_module = proxy_tensor.make_fx(
         module,
         decomposition_table=export_options.decomposition_table,
-        tracing_mode="fake",
+        tracing_mode="symbolic",
         _allow_non_fake_inputs=True,
     )(*args)
     # Rename placeholder targets to match the original module's signature since
@@ -539,7 +542,7 @@ def _export(
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
     decomposed_module = _shape_inference_with_fake_tensor(decomposed_module, *args)
-
+    # print("\nfx.graph: ", decomposed_module.print_readable())
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based
@@ -626,6 +629,7 @@ def export_after_normalizing_args_and_kwargs(
 
     # We hope the input kwargs will be mapped to bound.args after binding.
     # If not, we will raise an error.
+    # import pdb; pdb.set_trace()
     bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
     # keyword-only arguments are not handled.

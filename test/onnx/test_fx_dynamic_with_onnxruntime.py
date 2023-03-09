@@ -135,19 +135,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
         test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
-        # self.run_test(
-        #     model,
-        #     (dummy_input,),
-        #     additional_test_inputs=[(dummy_input,), (test_inputs,)],
-        #     input_names=["input_images"],
-        #     output_names=["outputs"],
-        #     dynamic_axes={
-        #         "input_images": {0: "batch_size"},
-        #         "output": {0: "batch_size"},
-        #     },
-        #     rtol=1e-3,
-        #     atol=1e-5,
-        # )
+
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             model,
             (dummy_input,),
@@ -156,27 +144,41 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
-    def test_dynamic_axes_on_add(self):
+    def test_add(self):
         class DynamicAdd(torch.nn.Module):
             def forward(self, x, y):
                 return torch.ops.aten.add(x, y)
 
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
-        input_x = torch.randn(2, 4)
-        input_y = torch.randn(2, 4)
+        input_x = torch.randn(3, 4)
+        input_y = torch.randn(3, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    unittest.skip(
-        "The decomposed module introduces aten::expand right after inputs, "
-        "which raises error that graph_building not yet supports List[fx.Node, ...]."
-        "https://github.com/microsoft/onnx-script/issues/481"
-    )
+    def test_sigmoid_add(self):
+        class DynamicAdd(torch.nn.Module):
+            def __init__(self, *args, **kwargs) -> None:
+                super().__init__(*args, **kwargs)
+                self.sigmoid = torch.nn.Sigmoid()
 
-    def test_dynamic_axes_on_matmul(self):
+            def forward(self, x, y):
+                z = torch.ops.aten.add(x, y)
+                return self.sigmoid(z)
+
+        x = torch.randn(2, 3)
+        y = torch.randn(2, 3)
+        input_x = torch.randn(3, 4)
+        input_y = torch.randn(3, 4)
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+        )
+
+    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
+    def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
                 return torch.ops.aten.matmul(x, y)
@@ -188,6 +190,177 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicMatMul(), (x, y), additional_test_inputs=[(input_x, input_y)]
+        )
+
+    @unittest.skip(
+        "fx.graph: doesn't handle scalar like normal tensor, so this is not yet "
+        "supported! TypeError: forward() takes 1 positional argument but 2 were given"
+    )
+    def test_scalar_tensor(self):
+        class test(torch.nn.Module):
+            def forward(self, x):
+                return torch.scalar_tensor(x.size(0)), torch.scalar_tensor(
+                    x.size(1), dtype=torch.int64
+                )
+
+        x = torch.randn(2, 3, 4)
+        y = torch.randn(7, 8, 9)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            test(),
+            (x,),
+            additional_test_inputs=[(y,)],
+        )
+
+    def test_transpose_infer_shape(self):
+        class TransposeModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 1, 3, stride=2)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x.transpose(0, 1)
+
+        x = torch.randn(32, 3, 64, 64)
+        y = torch.randn(16, 3, 8, 64)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            TransposeModule(),
+            (x,),
+            additional_test_inputs=[(y,)],
+        )
+
+    @unittest.skip("torch._dynamo error")
+    def test_squeeze_runtime_dim(self):
+        class Squeeze(torch.nn.Module):
+            def forward(self, d1, d2):
+                t = torch.zeros(d1[0], d2[0])
+                return t.squeeze(0)
+
+        d1 = torch.tensor([1])
+        d3 = torch.tensor([3])
+        d4 = torch.tensor([4])
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)]
+        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
+        )
+
+    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
+    def test_slice(self):
+        class DynamicSliceExportMod(torch.nn.Module):
+            def forward(self, x):
+                results = []
+                for i in range(4):
+                    results.append(x[: x.size(0) - i, i : x.size(2), i:3])
+                return tuple(results)
+
+        x = torch.rand(5, 5, 5)
+        y = torch.randn(6, 7, 8)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            DynamicSliceExportMod(),
+            (x,),
+            additional_test_inputs=[(y,)],
+        )
+
+    @unittest.skip(
+        "fx.graph: doesn't handle scalar like normal tensor, so this is not yet"
+        "supported! TypeError: forward() takes 1 positional argument but 2 were given"
+    )
+    def test_arange(self):
+        class ArangeModel(torch.nn.Module):
+            def forward(self, input):
+                return (
+                    torch.arange(input.shape[0]),
+                    torch.arange(12),
+                    torch.arange(start=input.shape[0], end=input.shape[0] + 5),
+                )
+
+        x = torch.randn(5, 3, 2)
+        y = torch.randn(8, 3, 2)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            ArangeModel(),
+            (x,),
+            additional_test_inputs=[(y,)],
+        )
+
+    @unittest.skip(
+        "fx.graph: torch._subclasses.fake_tensor.DataDependentOutputException: "
+        "aten._local_scalar_dense.default"
+    )
+    def test_expand_as_fill_zero(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x[:, x.size(0) :] = 0
+                return x
+
+        x = torch.ones(2, 5)
+        x2 = torch.randn(3, 4)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Model(),
+            (x,),
+            additional_test_inputs=[(x2,)],
+        )
+
+    @unittest.skip(
+        "ATenLib: INVALID_ARGUMENT : Failed to load model with error: "
+        "ONNX Schema aten_copy: failed validating the check: !(it.GetName().empty())"
+    )
+    def test_expand_as_fill_tensor(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                x[:, x.size(0) :] = torch.tensor([1, 2, 3])
+                return x
+
+        x = torch.ones(2, 5, 3)
+        x2 = torch.randn(3, 4, 3)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Model(),
+            (x,),
+            additional_test_inputs=[(x2,)],
+        )
+
+    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
+    def test_expand_as_fill_seperate_tensor(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                aa = torch.tensor([[0], [1], [2]])
+                return aa.expand_as(x)
+
+        x = torch.ones(3, 2)
+        x2 = torch.randn(3, 5)
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            Model(),
+            (x,),
+            additional_test_inputs=[(x2,)],
+        )
+
+    def test_view_dynamic_zero_dim(self):
+        class ViewModel(torch.nn.Module):
+            def forward(self, input):
+                input = input.view(-1, 2)
+                return input.view(1, -1)
+
+        x = torch.ones(2)
+        another_x = torch.empty((0,))
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            ViewModel(),
+            (x,),
+            additional_test_inputs=[(another_x,)],
+        )
+
+    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
+    def test_flatten_dynamic_axes(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                return torch.flatten(x, start_dim=2, end_dim=3)
+
+        batch_size = 3
+        x = torch.randn(batch_size, 5, 4, 5)
+        y = torch.randn(5, 5, 4, 5)
+        model = MyModule()
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            model, (x,), additional_test_inputs=[(y,)]
         )
 
 
