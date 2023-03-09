@@ -689,7 +689,8 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask) {
+    bool return_debug_mask,
+    c10::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
@@ -716,7 +717,8 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           max_seqlen_batch_kv,
           dropout_p,
           is_causal,
-          return_debug_mask);
+          return_debug_mask,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
@@ -737,7 +739,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
-    bool is_causal) {
+    bool is_causal,
+    c10::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
@@ -760,7 +763,8 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
           cumulative_sequence_length_kv,
           max_seqlen_batch_q,
           compute_log_sumexp,
-          is_causal);
+          is_causal,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = std::get<0>(attention_and_logsumexp);
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
