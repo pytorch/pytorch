@@ -177,7 +177,7 @@ def parse_args():
     parser.add_argument(
         "--keep-output-dir",
         action="store_true",
-        help="Do not cleanup the output directory before running"
+        help="Do not cleanup the output directory before running",
     )
 
     # Choose either generation of commands, pretty parsing or e2e runs
