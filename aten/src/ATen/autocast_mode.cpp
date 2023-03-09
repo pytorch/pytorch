@@ -526,6 +526,18 @@ TORCH_LIBRARY_IMPL(aten, AutocastXLA, m) {
   KERNEL_XLA(conv3d, lower_precision_fp)
   KERNEL_XLA2(conv3d, padding, lower_precision_fp)
   KERNEL_XLA(matmul, lower_precision_fp)
+  KERNEL_XLA(linear, lower_precision_fp)
+  KERNEL_XLA(conv_tbc, lower_precision_fp)
+  KERNEL_XLA(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_XLA(conv_transpose1d, lower_precision_fp)
+  KERNEL_XLA2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_XLA2(conv_transpose3d, input, lower_precision_fp)
+  KERNEL_XLA(prelu, lower_precision_fp)
+  KERNEL_XLA(addmm, lower_precision_fp)
+  // promote
+  KERNEL_XLA(dot, promote)
+  // fp 32 cast policy
+  KERNEL_XLA(batch_norm, fp32)
 }
 
 
