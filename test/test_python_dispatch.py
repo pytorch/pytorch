@@ -1731,7 +1731,7 @@ class TestDebugMode(TestCase):
                 e = torch.nn.EmbeddingBag(10, 2)
                 x = torch.tensor([[100, 0, 9, 101]])
                 err_msg = "embedding_bag: Received invalid indices"
-                with self.assertRaisesRegex(RuntimeError, err_msg):
+                with self.assertRaisesRegex(IndexError, err_msg):
                     e(x)
 
     def test_embedding(self):
@@ -1741,7 +1741,7 @@ class TestDebugMode(TestCase):
                 e = torch.nn.Embedding(100, 10)
                 x = torch.tensor([[100, 0, 9, 101]])
                 err_msg = "embedding: Received invalid indices"
-                with self.assertRaisesRegex(RuntimeError, err_msg):
+                with self.assertRaisesRegex(IndexError, err_msg):
                     e(x)
 
 if __name__ == '__main__':
