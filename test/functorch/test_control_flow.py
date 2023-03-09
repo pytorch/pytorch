@@ -45,6 +45,66 @@ class TestControlFlow(TestCase):
 
         self.assertEqual(res, control_flow.map(f, torch.ones(3, 2, 2), torch.ones(2)))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA.")
+    def test_while_loop_no_trace_gpu(self):
+        def cond_fun(x):
+            iter, _ = x
+            return iter > 0
+
+        def body_fun(x):
+            iter, val = x
+            return (iter - 1, val.sin())
+
+        iter = 5
+        val = torch.randn(2, 3, device="cuda")
+        res_scalar = control_flow.while_loop(cond_fun, body_fun, (5, val))
+        while iter > 0:
+            val = val.sin()
+            iter -= 1
+        self.assertEqual(res_scalar, (0, val))
+
+    def test_while_loop_no_trace(self):
+        def cond_fun(x):
+            iter, _ = x
+            return iter > 0
+
+        def body_fun(x):
+            iter, val = x
+            return (iter - 1, val.sin())
+
+        iter = 5
+        val = torch.randn(2, 3)
+        res_scalar = control_flow.while_loop(cond_fun, body_fun, (5, val))
+        while iter > 0:
+            val = val.sin()
+            iter -= 1
+        self.assertEqual(res_scalar, (0, val))
+
+    def test_while_loop_no_trace_nested(self):
+
+        def fun(x):
+            iter, val = x
+            return (iter - 1, val + 1)
+
+        def cond_fun(x):
+            iter, _ = x
+            return iter > 0
+
+        def body_fun(x):
+            iter, val = x
+            _, val = control_flow.while_loop(cond_fun, fun, (inner_iter, val))
+            return (iter - 1, val)
+
+        iter = 5
+        inner_iter = 2
+        total_iter = iter * inner_iter
+        val = torch.randn(2, 3)
+        res_scalar = control_flow.while_loop(cond_fun, body_fun, (iter, val))
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+        self.assertEqual(res_scalar, (0, val))
+
 
 class TestControlFlowTraced(TestCase):
     def test_cond_traced_not_nested(self):
