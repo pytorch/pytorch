@@ -382,6 +382,9 @@ def _compile(
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
 
+        if hooks.expose_shape_env_fn is not None:
+            hooks.expose_shape_env_fn(output.shape_env)
+
         return guarded_code
     except (
         Unsupported,

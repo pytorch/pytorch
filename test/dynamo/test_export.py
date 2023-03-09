@@ -2190,6 +2190,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+    @config.patch(assume_static_by_default=False, dynamic_shapes=True)
+    def test_propagate_assume_static_by_default(self):
+        def f(x):
+            if x.shape[0] > 3:
+                return x.sin()
+            return x.cos()
+
+        gm, _ = torch._dynamo.export(
+            f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
+        )
+
+        for node in gm.graph.nodes:
+            if "val" in node.meta:
+                fake_val = node.meta["val"]
+                for shape in fake_val.shape:
+                    # dim should be concrete int as we wouldn't allocate symbols
+                    self.assertTrue(isinstance(shape, int))
+
 
 common_utils.instantiate_parametrized_tests(ExportTests)
 

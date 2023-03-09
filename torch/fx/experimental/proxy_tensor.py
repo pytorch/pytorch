@@ -657,7 +657,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, _shape_env=None):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -675,7 +675,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
                 allow_fallback_kernels=True,
                 allow_non_fake_inputs=_allow_non_fake_inputs)
         elif tracing_mode == "symbolic":
-            shape_env = ShapeEnv()
+            shape_env = _shape_env if _shape_env else ShapeEnv()
             fake_tensor_mode = FakeTensorMode(
                 allow_fallback_kernels=False,
                 allow_non_fake_inputs=_allow_non_fake_inputs,

@@ -7,3 +7,4 @@ from typing import Callable, Optional, Set, Tuple
 class Hooks:
     guard_export_fn: Optional[Callable[[Set["Guard"]], None]] = None
     guard_fail_fn: Optional[Callable[[Tuple["GuardFail"]], None]] = None
+    expose_shape_env_fn: Optional[Callable[["ShapeEnv"], None]] = None
