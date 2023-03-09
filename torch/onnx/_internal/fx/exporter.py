@@ -208,11 +208,7 @@ def _fill_tensor_meta(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
         # Only set shape for now as we don't need type information.
-        # import pdb; pdb.set_trace()
-        # onnxscript_value.shape = tuple(expected_value.size())
         onnxscript_value.shape = tuple(len(expected_value.size()) * [None])
-        onnxscript_value.type = expected_value.dtype
-        # print(f"expected values shape: {expected_value.size()} and dtype: {expected_value.dtype}")
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
