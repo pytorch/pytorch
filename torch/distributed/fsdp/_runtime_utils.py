@@ -710,6 +710,10 @@ def _post_backward_hook(
             if (
                 not _low_precision_hook_enabled(state)
                 and flat_param.grad.dtype != handle._reduce_dtype
+                # TODO (rohan-varma) add test when in eval mode, but only
+                # reduction is in reduced dtype, comm should still be in fp32
+                # due to this check.
+                and not handle._force_full_precision
             ):
                 flat_param.grad.data = flat_param.grad.to(handle._reduce_dtype)
 
@@ -1376,4 +1380,5 @@ def _cast_buffers_to_dtype_and_device(
         if not torch.is_floating_point(buffer) or buffer_dtype is None:
             buffer.data = buffer.to(device=device)
         else:
+            print(f" -- casting buffer {buffer.shape} to {buffer_dtype}")
             buffer.data = buffer.to(device=device, dtype=buffer_dtype)

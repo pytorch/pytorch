@@ -233,10 +233,12 @@ class TransformerWithSharedParams(FSDPTestModel):
         self.register_buffer(
             "vocab_bias", self.embed_tokens.weight.new_ones((d_model,))
         )
+        print(f"vocab_bias dtype {self.vocab_bias.dtype}")
         self.register_buffer(
             "long_buffer",
             torch.zeros_like(self.vocab_bias, dtype=torch.long),
         )  # type: ignore[arg-type]
+        print(f"long_buffer dtype {self.long_buffer.dtype}")
 
         self.bs = 2
         self.bn = torch.nn.BatchNorm1d(self.bs) if add_bn else torch.nn.Identity()
@@ -253,6 +255,7 @@ class TransformerWithSharedParams(FSDPTestModel):
 
     def forward(self, src_ids, tgt_ids):
         src = self.embed_tokens(src_ids)
+        print(f"in fwd: {self.vocab_bias.dtype}")
         src = src + self.vocab_bias + self.long_buffer.type_as(src)  # type: ignore[operator]
         tgt = self.embed_tokens(tgt_ids)
         tgt = self.bn(tgt)
