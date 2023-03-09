@@ -78,12 +78,14 @@ class OutputGraphState(NamedTuple):
 
     def diff(self, other: "OutputGraphState", *, prefix: str = "") -> Optional[str]:
         for k in self._fields:
+            # TODO(voz): We should move this to an enum, or a field mapping of
+            # name : fn, if this grows past 3 checks
             if k == "guard_state":
                 r = self.guard_state.diff(other.guard_state)
                 if r is not None:
                     return r
                 continue
-            if k == "module_state":
+            elif k == "module_state":
                 r = self.module_state.diff(other.module_state)
                 if r is not None:
                     return r
@@ -481,6 +483,16 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         # create a new unique name
         name = "_".join(map(str, names))
+
+        # NOTE! This code used to strip square brackets,
+        # but we no longer do so in favor of a single uniformly used
+        # normalize_attr_name. We used to need this because of things we did with module
+        # lookups where we would eval with a name, and the square brackets would throw it off.
+        # We no longer do this.
+        #
+        # The reason we need this uniform is that we need all the names to be the same, so that
+        # all the sources can be the same, because when we eventually call .register into the
+        # context_module, we need to make sure elements match.
         name = normalize_attr_name(name)
         if not name or not name[0].isalpha():
             name = "sub" + name

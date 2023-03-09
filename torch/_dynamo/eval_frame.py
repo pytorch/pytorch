@@ -77,7 +77,7 @@ def enable_cache_lookup_profiler(enable: bool):
 
 
 # TODO can we enable by default? (check perf CI) otherwise, guard behind config
-# enable_cache_lookup_profiler(config.profile_cache_lookup)
+enable_cache_lookup_profiler(config.profile_cache_lookup)
 
 unset = Unset.token
 
