@@ -174,6 +174,11 @@ def parse_args():
         help="Choose the output directory to save the logs",
         default=DEFAULT_OUTPUT_DIR,
     )
+    parser.add_argument(
+        "--keep-output-dir",
+        action="store_true",
+        help="Do not cleanup the output directory before running"
+    )
 
     # Choose either generation of commands, pretty parsing or e2e runs
     group = parser.add_mutually_exclusive_group(required=False)
@@ -360,8 +365,9 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         lines.append("#!/bin/bash")
         lines.append("set -x")
         lines.append("# Setup the output directory")
-        lines.append(f"rm -rf {output_dir}")
-        lines.append(f"mkdir {output_dir}")
+        if not args.keep_output_dir:
+            lines.append(f"rm -rf {output_dir}")
+            lines.append(f"mkdir {output_dir}")
         lines.append("")
 
         for testing in ["performance", "accuracy"]:
@@ -744,7 +750,7 @@ class ParsePerformanceLogs(Parser):
             cols[suite] = col
         df = pd.DataFrame(cols)
         df = df.fillna(0)
-        df.to_csv(os.path.join(self.output_dir, f"{fn.__name__}.csv"))
+        df.to_csv(os.path.join(self.output_dir, f"{fn.__name__}_{self.dtypes}.csv"))
         return df
 
     def exec_summary_text(self, caption, fn, metric):
