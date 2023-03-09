@@ -1045,7 +1045,8 @@ void CreateOwnedRefsForSpecialValuesHelper(Graph& graph, Block* block) {
   auto outputs = block->outputs();
   // Create owned refs for inputs. Otherwise, the input cleanup process
   // will destroy our outputs before we return.
-  c10::FastSet<Value*> inputs = {block->inputs().begin(), block->inputs().end()};
+  c10::FastSet<Value*> inputs = {
+      block->inputs().begin(), block->inputs().end()};
 
   for (const auto i : c10::irange(outputs.size())) {
     auto* output = outputs[i];
