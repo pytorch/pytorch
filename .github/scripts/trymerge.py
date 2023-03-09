@@ -288,20 +288,6 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
-GH_GET_COMMIT_CHECKSUITES = GH_CHECKSUITES_FRAGMENT + """
-query ($owner: String!, $name: String!, $commit: String) {
-  repository(name: $name, owner: $owner) {
-    object(expression: $commit) {
-      ... on Commit {
-        checkSuites {
-          ...PRCheckSuites
-        }
-      }
-    }
-  }
-}
-"""
-
 GH_GET_PR_NEXT_CHECK_RUNS = """
 query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_cursor: String!) {
   repository(name: $name, owner: $owner) {
