@@ -11,8 +11,6 @@ from .bytecode_transformation import (
     create_instruction,
     create_jump_absolute,
     Instruction,
-    instruction_size,
-    offset_exception_table,
     transform_code_object,
     unique_id,
 )
@@ -331,17 +329,6 @@ class ContinueExecutionCache:
 
             # TODO(jansel): add dead code elimination here
             instructions[:] = prefix + instructions
-
-            # update exception table for Python 3.11
-            if sys.version_info >= (3, 11):
-                prefix_size = 0
-                for inst in prefix:
-                    prefix_size += instruction_size(inst)
-                # TODO transform_code_object deletes this
-                code_options["co_exceptiontable"] = offset_exception_table(
-                    code_options["co_exceptiontable"], prefix_size
-                )
-
 
         new_code = transform_code_object(code, update)
         ContinueExecutionCache.generated_code_metadata[new_code] = meta

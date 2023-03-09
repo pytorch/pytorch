@@ -588,8 +588,8 @@ inline static PyObject* eval_custom_code(
   PyFrameObject* shadow_obj = PyFrame_New(tstate, code, frame->f_globals, NULL);
   #if IS_PYTHON_3_11_PLUS
   THP_EVAL_API_FRAME_OBJECT* shadow = shadow_obj->f_frame;
-  printf("original frame addr: %p\n", (void *) frame->frame_obj);
-  printf("shadow frame addr: %p\n", (void *) shadow_obj);
+  // printf("original frame addr: %p\n", (void *) frame->frame_obj);
+  // printf("shadow frame addr: %p\n", (void *) shadow_obj);
   Py_XINCREF(frame->f_func->func_closure);
   shadow->f_func->func_closure = frame->f_func->func_closure;
   #else
@@ -656,6 +656,7 @@ inline static PyObject* eval_custom_code(
   #endif
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
+  // PyObject* result = eval_frame_default(tstate, frame, throw_flag);
   Py_DECREF(shadow_obj);
   return result;
 }

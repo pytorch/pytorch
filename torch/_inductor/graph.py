@@ -291,10 +291,6 @@ class GraphLowering(torch.fx.Interpreter):
             expr = example.node.expr
             self.graph_inputs[target] = expr
             return expr
-        elif isinstance(example, int):
-            expr = sympy.Integer(example)
-            self.graph_inputs[target] = expr
-            return expr
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with

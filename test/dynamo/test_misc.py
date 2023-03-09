@@ -11,6 +11,7 @@ import os
 import sys
 import typing
 import unittest
+import unittest.mock as mock
 import weakref
 from unittest.mock import patch
 
@@ -3402,6 +3403,9 @@ def fn():
             def forward(self, query, key, value):
                 out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
                 out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
                     query=query,
                     key=key,
                     value=value,
@@ -3420,6 +3424,7 @@ def fn():
                 out = F.scaled_dot_product_attention(
                     query, key, value, None, dropout_p=0, is_causal=True
                 )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
                 return out
 
         device = "cuda"
@@ -4693,6 +4698,58 @@ def fn():
             dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
             self.assertEqual(dummy_opt(), test[3])
 
+    def test_encode_varint(self):
+        nums = [
+            0b111_101010_000000,
+            0b1100_111000_010101_101010,
+        ]
+        b = bytecode_transformation.encode_exn_tab_varint(nums[0]) + bytecode_transformation.encode_exn_tab_varint(nums[1])
+        nums_new = []
+        b_iter = iter(bytes(b))
+        while True:
+            try:
+                nums_new.append(bytecode_transformation.decode_exn_tab_varint(b_iter))
+            except StopIteration:
+                break
+        self.assertEqual(nums, nums_new)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    def test_exceptiontable_parsing(self):
+        def fn():
+            try:
+                with a():
+                    b()
+                c()
+            except:
+                d()
+            finally:
+                e()
+            f()
+
+        tab = bytecode_transformation.parse_exception_table(fn.__code__.co_exceptiontable)
+        b = bytecode_transformation.assemble_exception_table(tab)
+        self.assertEqual(b, fn.__code__.co_exceptiontable)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
+    def test_exceptiontable_e2e(self):
+        def fn():
+            try:
+                with a():
+                    b()
+                c()
+            except:
+                d()
+            finally:
+                e()
+            f()
+
+        def nothing(*args):
+            pass
+
+        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
+        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
+
+
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
 
@@ -4956,6 +5013,74 @@ def fn():
         model.training_step = compiled_model.dynamo_ctx(model.training_step)
 
         model.training_step()
+
+    def test_torch_guards_stack_frame_register(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param)
+
+        e = encoder(y)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
+        self.assertEqual(len(seen_frames), 1)
+        self.assertEqual(seen_frames[0].line, "def forward(self, a, *args):")
+
+    def test_torch_guards_stack_frame_register_inlining(self):
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([0.75, 0.75, 0.75, 0.75])
+        z = torch.tensor([0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
+
+        def uwu_inline_me(x, y, z):
+            r = torch.cat((x, x)) + y
+            r2 = torch.cat((y, y)) + z
+            return r, r2
+
+        def fn(x, y, z):
+            r, r2 = uwu_inline_me(x, y, z)
+            return torch.mul(r, r), torch.mul(r2, r2)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(fn)(x, y, z)
+
+        self.assertEqual(len(seen_frames), 2)
+        self.assertEqual(seen_frames[0].name, "fn")
+        self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
 
 
 class CustomFunc1(torch.autograd.Function):
