@@ -27,16 +27,7 @@ import copy
 import dataclasses
 import unittest
 import warnings
-from typing import (
-    Any,
-    Callable,
-    Collection,
-    Iterable,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Collection, Iterable, Optional, Sequence, Tuple, Union
 
 import onnx_test_common
 import parameterized
@@ -121,9 +112,7 @@ class DecorateMeta:
         if self.opsets is None:
             return True
         return any(
-            opset == opset_spec
-            if isinstance(opset_spec, int)
-            else opset_spec(opset)
+            opset == opset_spec if isinstance(opset_spec, int) else opset_spec(opset)
             for opset_spec in self.opsets
         )
 
@@ -235,16 +224,12 @@ def add_decorate_info(
         opset: The opset to decorate for.
         skip_or_xfails: DecorateMeta's.
     """
-    ops_mapping = {
-        (info.name, info.variant_test_name): info for info in all_opinfos
-    }
+    ops_mapping = {(info.name, info.variant_test_name): info for info in all_opinfos}
     for decorate_meta in skip_or_xfails:
         if not decorate_meta.contains_opset(opset):
             # Skip does not apply to this opset
             continue
-        opinfo = ops_mapping.get(
-            (decorate_meta.op_name, decorate_meta.variant_name)
-        )
+        opinfo = ops_mapping.get((decorate_meta.op_name, decorate_meta.variant_name))
         assert (
             opinfo is not None
         ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
@@ -362,9 +347,7 @@ OPS_DB = copy.deepcopy(common_methods_invocations.op_db)
 OP_WITH_SKIPPED_SUBTESTS = frozenset(meta.op_name for meta in SKIP_SUBTESTS)
 ALL_OPS_IN_DB = frozenset(op_info.name for op_info in OPS_DB)
 # Assert all ops in OPINFO_FUNCTION_MAPPING are in the OPS_DB
-assert TESTED_OPS.issubset(
-    ALL_OPS_IN_DB
-), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
+assert TESTED_OPS.issubset(ALL_OPS_IN_DB), f"{TESTED_OPS - ALL_OPS_IN_DB} not in OPS_DB"
 
 
 class SingleOpModel(torch.nn.Module):
@@ -386,9 +369,7 @@ def _should_skip_test_sample(op_name: str, sample) -> Optional[str]:
     for decorator_meta in SKIP_SUBTESTS:
         # Linear search on SKIP_SUBTESTS. That's fine because the list is small.
         if decorator_meta.op_name == op_name:
-            assert (
-                decorator_meta.matcher is not None
-            ), "Matcher must be defined"
+            assert decorator_meta.matcher is not None, "Matcher must be defined"
             if decorator_meta.matcher(sample):
                 return decorator_meta.reason
     return None
@@ -433,7 +414,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
             requires_grad=False,
         )
 
-        for (i, cpu_sample) in enumerate(samples):
+        for i, cpu_sample in enumerate(samples):
             inputs = (cpu_sample.input, *cpu_sample.args)
             # Provide the repr to subtest because tensors are not serializable in parallel test runs
 
@@ -452,8 +433,16 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
                 model = SingleOpModel(op, cpu_sample.kwargs)
                 model.eval()
 
+                if dtype == torch.float32:
+                    # Relax atol and rtol for float32 based on empirical results
+                    # The current most relaxed values are for aten::stft
+                    rtol = 1e-5
+                    atol = 1e-4
+                else:
+                    rtol = None
+                    atol = None
                 # Run the test
-                self.run_test(model, inputs)
+                self.run_test(model, inputs, rtol=rtol, atol=atol)
 
 
 for opset in TESTED_OPSETS:
