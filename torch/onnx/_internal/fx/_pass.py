@@ -18,13 +18,17 @@ from torch.onnx._internal.fx import diagnostics
 
 @contextlib.contextmanager
 def _patch_difflib_sequence_matcher_init():
-    """Patched `unified_diff` for fx readable graph.
+    """Context patching `difflib.SequenceMatcher` for fx readable graph.
 
-    The only difference between this and official `difflib.unified_diff` is the `autojunk`
-    argument for `difflib.SequenceMatcher` class. In this class, `autojunk` is set
-    to `False`. This is to prevent `difflib.SequenceMatcher` recognizing stacktrace
-    messages in fx readable graph as junk, as these messages tend to be long (>200)
+    Under this context, the `autojunk` argument of `difflib.SequenceMatcher` will always
+    be considered as `False`. This is to prevent `difflib.SequenceMatcher` recognizing
+    stacktrace messages in fx readable graph as junk, as these messages tend to be long (>200)
     and repeat multiple times, which falls under the junk filter criteria.
+
+    `difflib.SequenceMatcher` is used underneath by all sorts of diffing functions
+    in `difflib`, including `difflib.unified_diff`, `difflib.ndiff`, `difflib.context_diff`.
+    Unfortunately, there is no way to pass `autojunk` argument to these functions, and
+    they all default to `True`. This context patching will affect all of them.
 
     `Reference: Automatic junk heuristic <https://docs.python.org/3/library/difflib.html>`_
     """
