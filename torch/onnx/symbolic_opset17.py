@@ -20,7 +20,7 @@ from typing import Optional, Sequence
 
 import torch
 from torch import _C
-from torch.onnx import errors, symbolic_helper, _type_utils
+from torch.onnx import _type_utils, errors, symbolic_helper
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
