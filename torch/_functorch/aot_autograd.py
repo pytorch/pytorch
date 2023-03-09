@@ -18,7 +18,7 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import dynamo_timed, normalize_attr_name
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -1800,22 +1800,16 @@ def aot_wrapper_dedupe(
     deduped_flat_args = remove_dupe_args(flat_args)
 
     tracing_context = TracingContext.get()
-    if tracing_context:
+    if tracing_context and len(tracing_context.aot_autograd_arg_pos_to_source) > 0:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
-            kept_arg_dict = flat_args[kept_pos].__dict__
-            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
-                d_positions = dupe_arg_dict['graph_arg_pos']
-                k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
-                if len(d_positions) > 1:
-                    for i in range(1, len(d_positions)):
-                        pos = d_positions[i]
-                        pre_pos = d_positions[i - 1]
-                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            # There is an identity record we do not care about
+            if dupe_arg_pos != kept_pos:
+                dupe_arg_source = tracing_context.aot_autograd_arg_pos_to_source[dupe_arg_pos]
+                kept_arg_source = tracing_context.aot_autograd_arg_pos_to_source[kept_pos]
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -2819,6 +2813,19 @@ def aot_module_simplified(
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
+
+    tracing_context = TracingContext.get()
+    if tracing_context:
+        for name, _ in params.items():
+            name = normalize_attr_name(name)
+            tracing_context.aot_autograd_arg_pos_to_source.append(tracing_context.module_context.names_to_sources[name])
+
+        if hasattr(mod, "graph"):
+            for node in mod.graph.nodes:
+                if node.op == "placeholder":
+                    name = normalize_attr_name(node.name)
+                    tracing_context.aot_autograd_arg_pos_to_source.append(tracing_context.module_context.names_to_sources[name])
+
     params_flat, params_spec = pytree.tree_flatten(params)
     params_flat = tuple(params_flat)
     params_len = len(params_flat)
