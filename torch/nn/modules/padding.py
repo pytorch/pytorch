@@ -602,11 +602,11 @@ class ZeroPad3d(ConstantPad3d):
 
     Examples::
 
-        >>> m = nn.ConstantPad3d(3)
+        >>> m = nn.ZeroPad3d(3)
         >>> input = torch.randn(16, 3, 10, 20, 30)
         >>> output = m(input)
         >>> # using different paddings for different sides
-        >>> m = nn.ConstantPad3d((3, 3, 6, 6, 0, 1))
+        >>> m = nn.ZeroPad3d((3, 3, 6, 6, 0, 1))
         >>> output = m(input)
 
     """
