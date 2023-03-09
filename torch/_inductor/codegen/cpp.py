@@ -1094,129 +1094,6 @@ class CppKernel(Kernel):
         (self.loads, self.compute, self.stores, self.cse) = prior
 
 
-class CppVecKernel(CppKernel):
-    overrides = CppVecOverrides
-
-    def __init__(self, args, num_threads, tiling_factor=0):
-        super().__init__(args, num_threads)
-        assert codecache.pick_vec_isa()
-        if tiling_factor == 0:
-            tiling_factor = codecache.pick_vec_isa().nelements()
-        self.tiling_factor = tiling_factor
-        self.reduction_omp_dec: Dict[str, str] = {}
-        self.var_vec_buf_map: Dict[str, str] = {}
-        metrics.generated_cpp_vec_kernel_count += 1
-        # TODO(jgong5): hack to make tile work, will be cleaned up later
-        self.vec_itervar_idx = -1
-
-    def load(self, name: str, index: sympy.Expr):
-        var = self.args.input(name)
-        index = self.rename_indexing(index)
-
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.vec_itervar_idx
-        )
-
-        is_broadcast = expanded_index == new_index
-
-        var_expr = (
-            f"{var}[{cexpr(index)}]" if is_broadcast else f"&{var}[{cexpr(new_index)}]"
-        )
-
-        if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
-            nelements = codecache.pick_vec_isa().nelements()
-            if var not in self.var_vec_buf_map:
-                self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
-                self.loads.writeline(
-                    f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
-                )
-            self.loads.writeline(
-                f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
-            )
-            line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
-        elif is_broadcast:
-            line = f"at::vec::Vectorized<float>({var_expr})"
-        else:
-            line = f"at::vec::Vectorized<float>::loadu({var_expr})"
-
-        return self.cse.generate(self.loads, line)
-
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        var = self.args.output(name)
-        index = self.rename_indexing(index)
-        assert mode is None
-
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            index, self.tiling_factor, itervar_idx=self.vec_itervar_idx
-        )
-        assert new_index != expanded_index
-        line = f"{value}.store({var} + {cexpr(new_index)});"
-        self.stores.writeline(name, line)
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        assert reduction_type in {"max", "min", "sum"}
-        assert dtype == torch.float
-        assert src_dtype == torch.float
-        reduce_map = {"max": "maximum", "min": "minimum"}
-
-        vec_ns = "at::vec"
-        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
-
-        if reduction_type not in self.reduction_omp_dec:
-            vec_reduc_prefix = "#pragma omp declare reduction("
-            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
-            if reduction_type == "sum":
-                vec_reduc_prefix += "omp_out += omp_in"
-            else:
-                vec_reduc_prefix += (
-                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
-                )
-            vec_reduc_prefix += ")"
-            vec_reduc_prefix += " initializer("
-            vec_reduc_prefix += "omp_priv={{"
-            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
-            vec_reduc_prefix += "}})"
-            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
-            self.reduction_prefix.writeline(vec_reduc_prefix)
-
-        tmpvar = self.cse.generate(
-            self.loads, f"reduction {name} {cexpr(index)}", write=False
-        )
-        tmpvar_vec = f"{tmpvar}_vec"
-
-        index = self.rename_indexing(index)
-        self.reduction_var_map[tmpvar_vec] = reduction_type
-        self.reduction_prefix.writeline(
-            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-        )
-        self.reduction_prefix.writeline(
-            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
-        )
-        self.stores.writeline(
-            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
-        )
-
-        reduce_all_body = "{"
-        if reduction_type == "sum":
-            reduce_all_body += "return x + y;"
-        else:
-            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
-        reduce_all_body += "}"
-        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
-        next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
-        self.reduction_suffix.writeline(
-            name,
-            f"{reduction_combine(reduction_type, tmpvar, next_value)};",
-        )
-        # NOTE(jgong5): we do not generate the real stores here with the assumption that
-        # the scalar kernel that handles the loop tail would be generated and generates
-        # the stores there.
-        self.cse.store_cache[name] = tmpvar
-
-
 @dataclasses.dataclass
 class TileMeta:
     """
@@ -1333,34 +1210,131 @@ class CppTile1DOverrides(CppVecOverrides):
     def load(name: str, index: sympy.Expr):
         self = V.kernel
         vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx >= 0:
-            self.vec_itervar_idx = vec_itervar_idx
-            return CppVecKernel.load(self, name, index)
-        raise NotImplementedError
+        if vec_itervar_idx < 0:
+            raise NotImplementedError
+        
+        var = self.args.input(name)
+        index = self.rename_indexing(index)
+
+        expanded_index = sympy.expand(index)
+        new_index = self.scale_index_with_offset(
+            index, self.tiling_factor, itervar_idx=vec_itervar_idx
+        )
+
+        is_broadcast = expanded_index == new_index
+
+        var_expr = (
+            f"{var}[{cexpr(index)}]" if is_broadcast else f"&{var}[{cexpr(new_index)}]"
+        )
+
+        if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            nelements = codecache.pick_vec_isa().nelements()
+            if var not in self.var_vec_buf_map:
+                self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
+                self.loads.writeline(
+                    f"float {self.var_vec_buf_map[var]}[{nelements}] = {{0}};"
+                )
+            self.loads.writeline(
+                f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
+            )
+            line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
+        elif is_broadcast:
+            line = f"at::vec::Vectorized<float>({var_expr})"
+        else:
+            line = f"at::vec::Vectorized<float>::loadu({var_expr})"
+
+        return self.cse.generate(self.loads, line)
 
     @staticmethod
     def store(name, index, value, mode=None):
         self = V.kernel
         vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx >= 0:
-            self.vec_itervar_idx = vec_itervar_idx
-            value = self.get_tile_slice(value)
-            assert value.meta.rank() == 1
-            return CppVecKernel.store(V.kernel, name, index, value, mode)
-        raise NotImplementedError
+        if vec_itervar_idx < 0:
+            raise NotImplementedError
+
+        value = self.get_tile_slice(value)
+        assert value.meta.rank() == 1
+        assert "buf" in name
+        
+        var = self.args.output(name)
+        index = self.rename_indexing(index)
+        assert mode is None
+
+        expanded_index = sympy.expand(index)
+        new_index = self.scale_index_with_offset(
+            index, self.tiling_factor, itervar_idx=vec_itervar_idx
+        )
+        assert new_index != expanded_index
+        line = f"{value}.store({var} + {cexpr(new_index)});"
+        self.stores.writeline(name, line)
 
     @staticmethod
     def reduction(name, dtype, src_dtype, reduction_type, index, value):
         self = V.kernel
         vec_itervar_idx = CppTile1DOverrides._get_vec_itervar_idx(index)
-        if vec_itervar_idx >= 0:
-            self.vec_itervar_idx = vec_itervar_idx
-            value = self.get_tile_slice(value)
-            assert value.meta.rank() == 1
-            return CppVecKernel.reduction(
-                V.kernel, name, dtype, src_dtype, reduction_type, index, value
-            )
-        raise NotImplementedError
+        if vec_itervar_idx < 0:
+            raise NotImplementedError
+
+        value = self.get_tile_slice(value)
+        assert value.meta.rank() == 1
+        assert reduction_type in {"max", "min", "sum"}
+        assert dtype == torch.float
+        assert src_dtype == torch.float
+        reduce_map = {"max": "maximum", "min": "minimum"}
+
+        vec_ns = "at::vec"
+        vec = f"{vec_ns}::Vectorized<{DTYPE_TO_CPP[dtype]}>"
+
+        if reduction_type not in self.reduction_omp_dec:
+            vec_reduc_prefix = "#pragma omp declare reduction("
+            vec_reduc_prefix += f"{RTYPE_TO_CPP[reduction_type]}:{vec}:"
+            if reduction_type == "sum":
+                vec_reduc_prefix += "omp_out += omp_in"
+            else:
+                vec_reduc_prefix += (
+                    f"omp_out = {vec_ns}::{reduce_map[reduction_type]}(omp_out, omp_in)"
+                )
+            vec_reduc_prefix += ")"
+            vec_reduc_prefix += " initializer("
+            vec_reduc_prefix += "omp_priv={{"
+            vec_reduc_prefix += f"{reduction_init(reduction_type, dtype)}"
+            vec_reduc_prefix += "}})"
+            self.reduction_omp_dec[reduction_type] = RTYPE_TO_CPP[reduction_type]
+            self.reduction_prefix.writeline(vec_reduc_prefix)
+
+        tmpvar = self.cse.generate(
+            self.loads, f"reduction {name} {cexpr(index)}", write=False
+        )
+        tmpvar_vec = f"{tmpvar}_vec"
+
+        index = self.rename_indexing(index)
+        self.reduction_var_map[tmpvar_vec] = reduction_type
+        self.reduction_prefix.writeline(
+            f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+        )
+        self.reduction_prefix.writeline(
+            f"auto {tmpvar_vec} = at::vec::Vectorized<{DTYPE_TO_CPP[dtype]}>({tmpvar});"
+        )
+        self.stores.writeline(
+            None, f"{reduction_combine_vec(reduction_type, tmpvar_vec, value)};"
+        )
+
+        reduce_all_body = "{"
+        if reduction_type == "sum":
+            reduce_all_body += "return x + y;"
+        else:
+            reduce_all_body += f"return {vec_ns}::{reduce_map[reduction_type]}(x, y);"
+        reduce_all_body += "}"
+        vec_reduce_all_func = f"{vec_ns}::vec_reduce_all<{DTYPE_TO_CPP[dtype]}>"
+        next_value = f"{vec_reduce_all_func}([]({vec}& x, {vec}&y) {reduce_all_body}, {tmpvar_vec})"
+        self.reduction_suffix.writeline(
+            name,
+            f"{reduction_combine(reduction_type, tmpvar, next_value)};",
+        )
+        # NOTE(jgong5): we do not generate the real stores here with the assumption that
+        # the scalar kernel that handles the loop tail would be generated and generates
+        # the stores there.
+        self.cse.store_cache[name] = tmpvar
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -1719,7 +1693,6 @@ class CppTileKernel(CppKernel):
         self.tiling_factor = tile_sizes[0]
         self.var_vec_buf_map = {}
         self.reduction_omp_dec = {}
-        self.vec_itervar_idx = self.tile_loop_indices[-1]
 
         # tile rank -> ops overrides that handle the tile
         self.tile_ops_tbl = {}
@@ -2059,192 +2032,13 @@ class CppTileKernel(CppKernel):
         super().__exit__(*args)
 
 
-class CppTile2DKernel(CppVecKernel):
-    """
-    A vector kernel that handles the 2d tiles with the tile size defined in `tiling_factor` on
-    the inner-most loop level and one of the outer loop level (`outer_tiling_idx`). When the data
-    tile is accessed in a contiguous way from the outer loop axis, a transposition is applied on the
-    tile to make the access contiguous from the inner-most loop axis. Then, the same vectorization
-    logic from its parent `CppVecKernel` is leveraged for load/store/compute. The transposed tile load
-    and store are generated into kernel.preloads and kernel.poststores buffers.
-
-    The loop structure looks like below:
-    for ...
-      for i_outer ...
-        for ...
-          for inner_most ...
-            // generated by CppTile2DKernel
-            float tmp0[16*16]; at::vec::transpose_mxn<...>(tmp0, in_ptr0 + ..., ...); // into kernel.preloads
-            float tmp1[16*16]; // into kernel.preloads
-            for i_inner ... { // the kernel inner loop
-              vectorized loads/compute/stores (e.g., load tmp0, store tmp1) // into kernel.loads/compute/stores
-            }
-            at::vec::transpose_mxn(out_ptr0 + ..., tmp1, ...) // into kernel.poststores
-          for inner_most ... (tail)
-            // generated by CppTile2DTailKernel
-            ...
-      for i_outer ... (tail)
-        for ...
-          for ...
-            // generated by CppKernel
-            ...
-    """
-
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
-        super().__init__(args, num_threads, tiling_factor)
-        self.outer_tiling_idx = outer_tiling_idx
-
-    def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
-
-    def need_vec_transpose(self, index):
-        return self.is_stride1_at(
-            self.itervars[self.outer_tiling_idx], index
-        ) and not self.is_invariant_under(self.itervars[-1], index)
-
-    def gen_transposed_tile_load_store(self, name, var, index, is_store):
-        # transposed tile load/store outside the kernel inner loop
-        factor = self.tiling_factor
-        new_index = self.scale_index_with_offset(index, factor, itervar_idx=-1)
-        new_index = self.scale_index_with_offset(
-            new_index, factor, itervar_idx=self.outer_tiling_idx
-        )
-
-        src = f"{var} + {cexpr(new_index)}"
-        dst = "__place_holder__"
-        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
-        ld_dst = f"{factor}"
-        if is_store:
-            src, dst = dst, src
-            ld_src, ld_dst = ld_dst, ld_src
-
-        need_define = True
-        load_or_store = f"at::vec::transpose_mxn<float,{factor},{factor}>({src}, {ld_src}, {dst}, {ld_dst});"
-        if is_store:
-            tile_var = self.cse.newvar()
-        elif load_or_store not in self.cse.cache:
-            tile_var = self.cse.generate(self.preloads, load_or_store, write=False)
-        else:
-            need_define = False
-            tile_var = self.cse.cache[load_or_store]
-
-        if need_define:
-            define_line = f"float {tile_var}[{factor}*{factor}] __attribute__ ((aligned ({factor})));"
-            self.preloads.writeline(define_line)
-
-        load_or_store = load_or_store.replace("__place_holder__", str(tile_var))
-        if is_store:
-            self.poststores.writeline(name, load_or_store)
-        else:
-            self.preloads.writeline(load_or_store)
-
-        return tile_var
-
-    def load(self, name: str, index: sympy.Expr):
-        var = self.args.input(name)
-        index = self.rename_indexing(index)
-
-        inner = self.inner_itervar()
-        expanded_index = sympy.expand(index)
-        if self.need_vec_transpose(expanded_index):
-            tile_var = self.gen_transposed_tile_load_store(
-                name, var, expanded_index, is_store=False
-            )
-            # vector load inside the kernel inner loop
-            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr(inner * self.tiling_factor)})"
-            return self.cse.generate(self.loads, line)
-        else:
-            new_index = self.scale_index_with_offset(
-                expanded_index,
-                self.tiling_factor,
-                itervar_idx=self.outer_tiling_idx,
-                offset=inner,
-            )
-            return super().load(name, new_index)
-
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        var = self.args.output(name)
-
-        inner = self.inner_itervar()
-        index = self.rename_indexing(index)
-        assert mode is None
-        # TODO(jgong5): assert the index is an affine expression on the itervars in concern
-        expanded_index = sympy.expand(index)
-        if self.need_vec_transpose(expanded_index):
-            tile_var = self.gen_transposed_tile_load_store(
-                name, var, expanded_index, is_store=True
-            )
-            # vector store inside the kernel inner loop
-            line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
-            self.stores.writeline(name, line)
-        else:
-            new_index = self.scale_index_with_offset(
-                expanded_index,
-                self.tiling_factor,
-                itervar_idx=self.outer_tiling_idx,
-                offset=inner,
-            )
-            super().store(name, new_index, value, mode)
-
-    def codegen_inner_loops(self, code):
-        inner = self.inner_itervar()
-        code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
-        )
-
-
-class CppTile2DTailKernel(CppKernel):
-    """
-    A scalar kernel that handles the tail of inner-most loop split from a 2d tiling. The tile of the outer
-    loop axis is handled with a kernel inner loop (see method `codegen_inner_loops`).
-    """
-
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
+class CppVecKernelChecker(CppKernel):
+    def __init__(self, args, num_threads):
         super().__init__(args, num_threads)
-        self.outer_tiling_idx = outer_tiling_idx
-        self.tiling_factor = tiling_factor
-
-    def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
-
-    def transform_index(self, index):
-        index = self.rename_indexing(index)
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            expanded_index,
-            self.tiling_factor,
-            itervar_idx=self.outer_tiling_idx,
-            offset=self.inner_itervar(),
-        )
-        return new_index
-
-    def load(self, name: str, index: sympy.Expr):
-        new_index = self.transform_index(index)
-        return super().load(name, new_index)
-
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        var = self.args.output(name)
-        assert mode is None
-        new_index = self.transform_index(index)
-        super().store(name, new_index, value, mode)
-
-    def codegen_inner_loops(self, code):
-        inner = self.inner_itervar()
-        code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
-        )
-
-
-class CppVecKernelChecker(CppVecKernel):
-    def __init__(self, args, num_threads, tiling_factor):
-        super().__init__(args, num_threads, tiling_factor)
 
         # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
-        metrics.generated_cpp_vec_kernel_count -= 1
 
         # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
@@ -2639,8 +2433,8 @@ class CppTile2DKernelChecker(CppVecKernelChecker):
     3. No reduction.
     """
 
-    def __init__(self, args, num_threads, tiling_factor):
-        super().__init__(args, num_threads, tiling_factor)
+    def __init__(self, args, num_threads):
+        super().__init__(args, num_threads)
         self.can_tile2d = True
         self.outer_tiling_idx = -1
 
@@ -2765,12 +2559,12 @@ class CppKernelProxy(CppKernel):
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
             with CppVecKernelChecker(
-                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
+                deepcopy(self.kernel_group.args), parallel_num_threads()
             ) as vec_checker:
                 run(vec_checker)
 
             with CppTile2DKernelChecker(
-                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
+                deepcopy(self.kernel_group.args), parallel_num_threads()
             ) as tile2d_checker:
                 run(tile2d_checker)
 
