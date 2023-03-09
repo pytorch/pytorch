@@ -795,8 +795,6 @@ class DeviceCachingAllocator {
   // cudaStreamGetCaptureInfo in the hot path.
   int captures_underway = 0;
 
-  bool check_stream_in_private_pool_alloc = true;
-
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events

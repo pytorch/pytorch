@@ -5455,11 +5455,10 @@ class TestBlockStateAbsorption(TestCase):
                 torch._C._cuda_notifyCaptureAboutToEnd(device, capture_id)
                 torch._C._cuda_notifyCaptureEnded(device, capture_id)
                 torch._C._cuda_notifyCaptureDestroy(device, mem_pool)
-    
-        
+
+
         segments = get_cudagraph_segments(pool)
         self.assertEqual(len(get_cudagraph_segments(pool)), 1)
-
 
         def use_pool():
             def alloc_three():
@@ -5500,8 +5499,6 @@ class TestBlockStateAbsorption(TestCase):
         torch.cuda.empty_cache()
 
         self.assertEqual(len(get_cudagraph_segments(pool)), 0)
-
-
 
 
 instantiate_parametrized_tests(TestCuda)
