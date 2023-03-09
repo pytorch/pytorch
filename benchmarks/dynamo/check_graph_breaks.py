@@ -9,16 +9,15 @@ def get_field(csv, model_name: str, field: str, typ=float):
     return typ(csv.loc[csv["name"] == model_name][field])
 
 
-def main(args):
-    actual = pd.read_csv(args.actual)
-    expected = pd.read_csv(args.expected)
+def check_graph_breaks(actual_csv, expected_csv, expected_filename):
+
     failed = []
     improved = []
 
-    for model in actual["name"]:
+    for model in actual_csv["name"]:
 
-        graph_breaks = get_field(actual, model, "graph_breaks", typ=int)
-        expected_graph_breaks = get_field(expected, model, "graph_breaks", typ=int)
+        graph_breaks = get_field(actual_csv, model, "graph_breaks", typ=int)
+        expected_graph_breaks = get_field(expected_csv, model, "graph_breaks", typ=int)
 
         if graph_breaks == expected_graph_breaks:
             status = "PASS"
@@ -37,8 +36,8 @@ def main(args):
             """
         )
 
+    msg = ""
     if failed or improved:
-        msg = ""
         if failed:
             msg += textwrap.dedent(
                 f"""
@@ -57,19 +56,28 @@ def main(args):
             )
         msg += textwrap.dedent(
             f"""
-        If this change is expected, you can update `{args.expected}` to reflect the new baseline.
-        This can either be done manually, or by downloading artifacts from your PR CI job."
+        If this change is expected, you can update `{expected_filename}` to reflect the new baseline.
+        This can either be done manually, or by downloading artifacts from your PR CI job.
+        (Search artifacts files for test-reports-test-inductor_torchbench, _timm, _huggingface)
         """
         )
+    return failed or improved, msg
 
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--actual", type=str, required=True)
+    parser.add_argument("--expected", type=str, required=True)
+    args = parser.parse_args()
+
+    actual = pd.read_csv(args.actual)
+    expected = pd.read_csv(args.expected)
+
+    failed, msg = check_graph_breaks(actual, expected, args.expected)
+    if failed:
         print(msg)
         sys.exit(1)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--actual", type=str, required=True)
-parser.add_argument("--expected", type=str, required=True)
-args = parser.parse_args()
-
 if __name__ == "__main__":
-    main(args)
+    main()
