@@ -207,6 +207,7 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
     return gm
 
+@compatibility(is_backward_compatible=False)
 def erase_nodes(gm: GraphModule, nodes: NodeList):
 
     # erase original nodes in inversed topological order
@@ -214,6 +215,7 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
         gm.graph.erase_node(node)
 
 
+@compatibility(is_backward_compatible=False)
 def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         sorted_nodes = topo_sort(nodes)
