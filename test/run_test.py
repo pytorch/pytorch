@@ -902,15 +902,10 @@ CUSTOM_HANDLERS = {
 
 
 PYTEST_BLOCKLIST = [
-    "test_package",
-    "inductor/test_torchinductor",
-    "test_quantization",
-    "test_fx",
     "profiler/test_profiler",
     "dynamo/test_repros",  # skip_if_pytest
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
-    "dynamo/test_unspec",  # imports repros
 ]
 
 
