@@ -6,8 +6,9 @@ import contextlib
 import difflib
 
 import io
+import sys
 
-from typing import Any, Callable, Dict, Generator, Sequence, Tuple
+from typing import Any, Callable, Dict, Tuple
 
 import torch
 import torch.fx
@@ -15,10 +16,11 @@ from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import diagnostics
 
 
-class FxReadableGraphDiffer(difflib.Differ):
-    """Differ specialized for fx readable graph.
+@contextlib.contextmanager
+def _patch_difflib_sequence_matcher_init():
+    """Patched `unified_diff` for fx readable graph.
 
-    The only difference between this and official `difflib.Differ` is the `autojunk`
+    The only difference between this and official `difflib.unified_diff` is the `autojunk`
     argument for `difflib.SequenceMatcher` class. In this class, `autojunk` is set
     to `False`. This is to prevent `difflib.SequenceMatcher` recognizing stacktrace
     messages in fx readable graph as junk, as these messages tend to be long (>200)
@@ -26,26 +28,67 @@ class FxReadableGraphDiffer(difflib.Differ):
 
     `Reference: Automatic junk heuristic <https://docs.python.org/3/library/difflib.html>`_
     """
+    original_init = difflib.SequenceMatcher.__init__
 
-    def compare(self, a: Sequence[str], b: Sequence[str]) -> Generator[str, None, None]:
+    def patched_init(self, isjunk=None, a="", b="", autojunk=True):
+        original_init(self, isjunk, a, b, autojunk=False)
 
-        # Patch `difflib.SequenceMatcher` to set `autojunk` to `False`.
-        # More details are in the class docstring.
-        @contextlib.contextmanager
-        def patch_sequence_matcher_init():
-            original_init = difflib.SequenceMatcher.__init__
+    difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]
+    try:
+        yield
+    finally:
+        difflib.SequenceMatcher.__init__ = original_init  # type: ignore[assignment]
 
-            def patched_init(self, isjunk=None, a="", b="", autojunk=True):
-                original_init(self, isjunk, a, b, autojunk=False)
 
-            difflib.SequenceMatcher.__init__ = patched_init  # type: ignore[assignment]
-            try:
-                yield
-            finally:
-                difflib.SequenceMatcher.__init__ = original_init  # type: ignore[assignment]
+def _unified_diff(a: str, b: str) -> str:
+    """Return a string containing the unified diff of two strings.
 
-        with patch_sequence_matcher_init():
-            yield from super().compare(a, b)
+    This function calls a patched version of `difflib.unified_diff` with `autojunk` set
+    to `False` for `difflib.SequenceMatcher` class. More details can be found in
+    `_patch_difflib_sequence_matcher_init` function.
+
+    Args:
+        a: The first string.
+        b: The second string.
+
+    Returns:
+        The unified diff of the two strings. If there is no diff, return "<no diff>".
+
+    Example::
+
+        >>> a = '''class GraphModule(torch.nn.Module):
+        ...     def forward(self, input_ids : torch.Tensor, attention_mask : torch.Tensor):
+        ...         # File: /modeling.py:770, code: input_ids = input_ids.view(-1, input_shape[-1])
+        ...         view = input_ids.view(-1, 3);  input_ids = None
+        ... '''
+        >>> b = '''class <lambda>(torch.nn.Module):
+        ...     def forward(self, input_ids: i64[1, 3], attention_mask: i64[1, 3]):
+        ...         # File: /modeling.py:770, code: input_ids = input_ids.view(-1, input_shape[-1])
+        ...         view: i64[1, 3] = torch.ops.aten.view.default(input_ids, [-1, 3]);  input_ids = None
+        ... '''
+        >>> print(_unified_diff(a, b))
+        ---
+        +++
+        @@ -1,4 +1,4 @@
+        -class GraphModule(torch.nn.Module):
+        -    def forward(self, input_ids : torch.Tensor, attention_mask : torch.Tensor):
+        +class <lambda>(torch.nn.Module):
+        +    def forward(self, input_ids: i64[1, 3], attention_mask: i64[1, 3]):
+                # File: /modeling.py:770, code: input_ids = input_ids.view(-1, input_shape[-1])
+        -        view = input_ids.view(-1, 3);  input_ids = None
+        +        view: i64[1, 3] = torch.ops.aten.view.default(input_ids, [-1, 3]);  input_ids = None
+    """
+
+    a_list = a.splitlines(keepends=True)
+    b_list = b.splitlines(keepends=True)
+
+    with _patch_difflib_sequence_matcher_init():
+        # Set `n` to `sys.maxsize` to show entire graph when there is a diff.
+        diff = "".join(difflib.unified_diff(a_list, b_list, n=sys.maxsize))
+
+    if not diff:
+        return "<no diff>"
+    return diff
 
 
 @_beartype.beartype
@@ -146,20 +189,10 @@ class Transform(abc.ABC):
         new_readable_graph = module.print_readable(print_output=False)
         new_tabular = fx_graph_tabular(module.graph)
 
-        graph_diff = "".join(
-            FxReadableGraphDiffer().compare(
-                old_readable_graph.splitlines(keepends=True),
-                new_readable_graph.splitlines(keepends=True),
-            )
-        )
+        graph_diff = _unified_diff(old_readable_graph, new_readable_graph)
         diagnostic.with_additional_message(f"### Graph diff:\n```\n{graph_diff}\n```")
 
-        tabular_diff = "".join(
-            FxReadableGraphDiffer().compare(
-                old_tabular.splitlines(keepends=True),
-                new_tabular.splitlines(keepends=True),
-            )
-        )
+        tabular_diff = _unified_diff(old_tabular, new_tabular)
         diagnostic.with_additional_message(
             f"### Tabular diff:\n```\n{tabular_diff}\n```"
         )
