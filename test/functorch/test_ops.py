@@ -1195,6 +1195,7 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
         xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
+        xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
