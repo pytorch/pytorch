@@ -19066,6 +19066,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
         torch_opinfo_name="maximum",
+        aliases=('_refs.max',),
         supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
@@ -19074,6 +19075,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.minimum",
         torch_opinfo_name="minimum",
+        aliases=('_refs.min',),
         supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
@@ -19772,6 +19774,30 @@ python_ref_db = [
         "_refs.amin",
         torch_opinfo_name="amin",
         error_inputs_func=partial(error_inputs_aminmax_amax_amin, is_ref=True),
+    ),
+    PythonRefInfo(
+        "_refs.min",
+        torch_opinfo_name="min",
+        torch_opinfo_variant_name="reduction_no_dim",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.max",
+        torch_opinfo_name="max",
+        torch_opinfo_variant_name="reduction_no_dim",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.min",
+        torch_opinfo_name="min",
+        torch_opinfo_variant_name="reduction_with_dim",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.max",
+        torch_opinfo_name="max",
+        torch_opinfo_variant_name="reduction_with_dim",
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.any",

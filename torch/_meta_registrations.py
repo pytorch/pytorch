@@ -9,6 +9,7 @@ from torch._ops import OpOverload
 from torch._prims import _elementwise_meta, ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND
 from torch._prims_common import (
     check,
+    compute_reduction_shape,
     corresponding_complex_dtype,
     corresponding_real_dtype,
     elementwise_dtypes,
@@ -146,38 +147,6 @@ def meta_index_select(self, dim, index):
 def meta_index_select_out(self, dim, index, out):
     torch._resize_output_(out, self.size(), self.device)
     return out.copy_(torch.index_select(self, dim, index))
-
-
-@register_meta([aten.max.default, aten.max.unary_out])
-@out_wrapper()
-def meta_max(self):
-    return self.new_empty(())
-
-
-@register_meta(aten.max.dim)
-def meta_max_dim(self, dim, keepdim=False):
-    dim = utils.reduction_dims(self.shape, (dim,))
-    output_shape = _compute_reduction_shape(self, dim, keepdim)
-    return (
-        self.new_empty(output_shape),
-        self.new_empty(output_shape, dtype=torch.long),
-    )
-
-
-@register_meta([aten.min.default, aten.min.unary_out])
-@out_wrapper()
-def meta_min(self):
-    return self.new_empty(())
-
-
-@register_meta(aten.min.dim)
-def meta_min_dim(self, dim, keepdim=False):
-    dim = utils.reduction_dims(self.shape, (dim,))
-    output_shape = _compute_reduction_shape(self, dim, keepdim)
-    return (
-        self.new_empty(output_shape),
-        self.new_empty(output_shape, dtype=torch.long),
-    )
 
 
 @register_meta(aten.angle.default)
@@ -457,13 +426,6 @@ def meta_mm(a, b):
     M2, P = b.shape
     check(M1 == M2, lambda: "a and b must have same reduction dim")
     return a.new_empty(N, P)
-
-
-def _compute_reduction_shape(self, dims, keepdim):
-    if keepdim:
-        return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
-
-    return utils.compute_reduction_output_shape(self.shape, dims)
 
 
 # FakeTensors (meta tensors with a device) will report device as meta
@@ -1353,7 +1315,7 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
     dims = utils.reduction_dims(input.shape, dims)
-    output_shape = _compute_reduction_shape(input, dims, keepdim)
+    output_shape = compute_reduction_shape(input, dims, keepdim)
     return input.new_empty(output_shape, dtype=output_dtype)
 
 
@@ -1369,7 +1331,7 @@ def meta_nanmedian(input):
 @out_wrapper("values", "indices")
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
-    output_shape = _compute_reduction_shape(input, dim, keepdim)
+    output_shape = compute_reduction_shape(input, dim, keepdim)
     return (
         input.new_empty(output_shape),
         input.new_empty(output_shape, dtype=torch.long),
@@ -2542,7 +2504,7 @@ def check_argmax_argmin(name, self, dim):
 def argmax_argmin_meta(self, dim=None, keepdim=False):
     check_argmax_argmin("argmax", self, dim)
     dims = utils.reduction_dims(self.shape, (dim,) if dim is not None else None)
-    shape = _compute_reduction_shape(self, dims, keepdim)
+    shape = compute_reduction_shape(self, dims, keepdim)
     return self.new_empty(shape, dtype=torch.int64)
 
 

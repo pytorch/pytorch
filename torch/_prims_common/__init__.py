@@ -1525,6 +1525,13 @@ def compute_reduction_output_shape(
     return tuple(new_shape)
 
 
+def compute_reduction_shape(self, dims, keepdim):
+    if keepdim:
+        return tuple(self.shape[i] if i not in dims else 1 for i in range(self.ndim))
+
+    return compute_reduction_output_shape(self.shape, dims)
+
+
 def validate_no_repeating_dims(dims: Sequence):
     if len(dims) != len(set(dims)):
         raise RuntimeError("duplicate value in the list of dims")

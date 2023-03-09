@@ -194,6 +194,8 @@ __all__ = [
     "all",
     "amax",
     "amin",
+    "max",
+    "min",
     "any",
     "mean",
     "std",
@@ -323,7 +325,7 @@ def _broadcast_shapes(*_shapes):
     # Computes common shape
     common_shape = [
         1,
-    ] * reduce(max, (len(shape) for shape in shapes))
+    ] * reduce(builtins.max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
             if common_shape[idx] == 1:
@@ -1537,6 +1539,79 @@ def maximum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 )
 def minimum(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.minimum(a, b)
+
+
+def _min_max_out(
+    result: TensorLikeType,
+    out: TensorLikeType,
+) -> TensorLikeType:
+    assert isinstance(out, TensorLike)
+    out = _maybe_resize_out(out, result.shape)
+    _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type])
+    return out
+
+
+def _min_max_out_tuple(
+    result: Tuple[TensorLikeType, TensorLikeType],
+    out: Tuple[TensorLikeType, TensorLikeType],
+) -> Tuple[TensorLikeType, TensorLikeType]:
+    rv, ri = result
+    ov, oi = out
+    assert isinstance(ov, TensorLike)
+    assert isinstance(oi, TensorLike)
+    ov = _maybe_resize_out(ov, rv.shape)
+    oi = _maybe_resize_out(oi, ri.shape)
+    _safe_copy_out(copy_from=rv, copy_to=ov)  # type: ignore[arg-type]
+    _safe_copy_out(copy_from=ri, copy_to=oi)  # type: ignore[arg-type]
+    return ov, oi
+
+
+@register_decomposition([aten.max.default, aten.max.dim])
+def max(
+    self: TensorLikeType,
+    other_or_dim: Union[TensorLikeType, int] = None,
+    keepdim: bool = False,
+    *,
+    out: Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]] = None,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]]:
+    if other_or_dim is None:
+        result = prims.max(self)
+        if out is None:
+            return result
+        # Cannot use out_wrapper because of the overloads
+        return _min_max_out(result, out)
+    elif isinstance(other_or_dim, Tensor):
+        return torch.maximum(self, other_or_dim, out=out)
+    assert isinstance(other_or_dim, Dim)
+    result = prims.max_dim(self, other_or_dim, keepdim=keepdim)
+    if out is None:
+        return result
+    # Cannot use out_wrapper because of the overloads
+    return _min_max_out_tuple(result, out)
+
+
+@register_decomposition([aten.min.default, aten.min.dim])
+def min(
+    self: TensorLikeType,
+    other_or_dim: Union[TensorLikeType, int] = None,
+    keepdim: bool = False,
+    *,
+    out: Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]] = None,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]]:
+    if other_or_dim is None:
+        result = prims.min(self)
+        if out is None:
+            return result
+        # Cannot use out_wrapper because of the overloads
+        return _min_max_out(result, out)
+    elif isinstance(other_or_dim, Tensor):
+        return torch.minimum(self, other_or_dim, out=out)
+    assert isinstance(other_or_dim, Dim)
+    result = prims.min_dim(self, other_or_dim, keepdim=keepdim)
+    if out is None:
+        return result
+    # Cannot use out_wrapper because of the overloads
+    return _min_max_out_tuple(result, out)
 
 
 # TODO: add docstring
@@ -3144,7 +3219,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     for dim, dim_size in enumerate(padded_shape):
         # repeat each dimension by using unfold_copy operation
         urtensor_shape, urtensor_stride = _get_unfold_shape_stride(
-            urtensor_shape, urtensor_stride, dim, dim_size, max(dim_size, 1)
+            urtensor_shape, urtensor_stride, dim, dim_size, builtins.max(dim_size, 1)
         )
 
     # derive permute order by sorting urtensor strides
@@ -3804,9 +3879,13 @@ def diagonal(
     storage_offset = self.storage_offset()
 
     if offset >= 0:
-        diag_size = max(min(self.size()[dim1], self.size()[dim2] - offset), 0)
+        diag_size = builtins.max(
+            builtins.min(self.size()[dim1], self.size()[dim2] - offset), 0
+        )
     else:
-        diag_size = max(min(self.size()[dim1] + offset, self.size()[dim2]), 0)
+        diag_size = builtins.max(
+            builtins.min(self.size()[dim1] + offset, self.size()[dim2]), 0
+        )
 
     if diag_size > 0:
         if offset >= 0:
@@ -5102,16 +5181,16 @@ def _get_tril_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
 
-    m_first_row = min(col, 1 + offset) if offset > 0 else int(row + offset > 0)
-    m_last_row = max(0, min(col, row + offset))
-    n_row_all = max(0, min(row, row + offset))
+    m_first_row = builtins.min(col, 1 + offset) if offset > 0 else int(row + offset > 0)
+    m_last_row = builtins.max(0, builtins.min(col, row + offset))
+    n_row_all = builtins.max(0, builtins.min(row, row + offset))
     n_row_trapezoid = m_last_row - m_first_row + 1
 
     # Number of elements in top trapezoid
     trapezoid_size = (m_first_row + m_last_row) * n_row_trapezoid // 2
     # Number of elements in bottom rectangle
     diff_row = n_row_all - n_row_trapezoid
-    rectangle_size = max(0, diff_row * col)
+    rectangle_size = builtins.max(0, diff_row * col)
 
     return trapezoid_size, rectangle_size, m_first_row
 
@@ -5147,7 +5226,7 @@ def tril_indices(
     _trilu_checks("tril_indices", row, col, dtype, layout, pin_memory)
 
     trapezoid_size, rectangle_size, m_first_row = _get_tril_sizes(row, col, offset)
-    row_offset = max(0, -offset)
+    row_offset = builtins.max(0, -offset)
 
     arange_kw = partial(
         torch.arange, layout=layout, device=device, pin_memory=pin_memory
@@ -5179,10 +5258,10 @@ def _get_triu_sizes(row: int, col: int, offset: int) -> Tuple[int, int, int]:
     if row == 0 or col == 0:
         return 0, 0, 0
 
-    m_first_row = max(0, col - offset) if offset > 0 else col
+    m_first_row = builtins.max(0, col - offset) if offset > 0 else col
 
     # Number of elements in top rectangle
-    rectangle_size = max(0, min(row, -offset) * col)
+    rectangle_size = builtins.max(0, builtins.min(row, -offset) * col)
 
     # Number of elements in bottom trapezoid
     trapezoid_size_tril, rectangle_size_tril, _ = _get_tril_sizes(row, col, offset - 1)
@@ -5206,7 +5285,7 @@ def triu_indices(
     _trilu_checks("triu_indices", row, col, dtype, layout, pin_memory)
 
     trapezoid_size, rectangle_size, m_first_row = _get_triu_sizes(row, col, offset)
-    col_offset = max(0, offset)
+    col_offset = builtins.max(0, offset)
 
     arange_kw = partial(
         torch.arange, layout=layout, device=device, pin_memory=pin_memory

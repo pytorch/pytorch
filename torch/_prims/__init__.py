@@ -1,3 +1,4 @@
+import builtins
 import contextlib
 import itertools
 import math
@@ -16,6 +17,7 @@ from torch._C import _get_default_device
 from torch._prims.nvfuser_prims import register_nvprims
 from torch._prims_common import (
     check,
+    compute_reduction_shape,
     Dim,
     DimsSequenceType,
     DimsType,
@@ -186,6 +188,10 @@ __all__ = [
     #
     "amax",
     "amin",
+    "max",
+    "min",
+    "max_dim",
+    "min_dim",
     "prod",
     "sum",
     "var",
@@ -1280,7 +1286,7 @@ broadcast_in_dim = _make_prim(
 
 def _validate_collapse_args(a: Tensor, start: int, end: int) -> None:
     # Special-case for zero dimensional tensors
-    ndim = max(1, a.dim())
+    ndim = builtins.max(1, a.dim())
     utils.validate_idx(ndim, start)
     utils.validate_idx(ndim, end)
 
@@ -1337,7 +1343,7 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
-        stride = min(stride, strides[idx])
+        stride = builtins.min(stride, strides[idx])
 
         if (
             a.numel() > 0
@@ -2385,6 +2391,81 @@ amin = _make_reduction_prim(
 )
 
 
+def _min_max_meta(
+    self: TensorLikeType,
+    dim: int = None,
+    keepdim: bool = False,
+) -> Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]]:
+    if dim is None:
+        shape = []
+        strides = utils.make_contiguous_strides_for(shape)
+        return TensorMeta(
+            shape=shape, strides=strides, dtype=self.dtype, device=self.device
+        )
+    dim = utils.canonicalize_dims(self.ndim, dim)
+    shape = compute_reduction_shape(self, (dim,), keepdim)
+    strides = utils.make_contiguous_strides_for(shape)
+    values = TensorMeta(
+        shape=shape, strides=strides, dtype=self.dtype, device=self.device
+    )
+    indices = TensorMeta(
+        shape=shape, strides=strides, dtype=torch.int64, device=self.device
+    )
+    return values, indices
+
+
+def _max_aten(
+    self: TensorLikeType, dim: int = None, keepdim: bool = False
+) -> Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]]:
+    if dim is None:
+        return torch.max(self)
+    return torch.max(self, dim, keepdim=keepdim)
+
+
+def _min_aten(
+    self: TensorLikeType, dim: int = None, keepdim: bool = False
+) -> Union[TensorLikeType, Tuple[TensorLikeType, TensorLikeType]]:
+    if dim is None:
+        return torch.min(self)
+    return torch.min(self, dim, keepdim=keepdim)
+
+
+max = _make_prim(
+    schema="max(Tensor self) -> Tensor",
+    meta=_min_max_meta,
+    impl_aten=_max_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc="",
+)
+
+
+min = _make_prim(
+    schema="min(Tensor self) -> Tensor",
+    meta=_min_max_meta,
+    impl_aten=_min_aten,
+    return_type=RETURN_TYPE.NEW,
+    doc="",
+)
+
+
+max_dim = _make_prim(
+    schema="max_dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
+    meta=_min_max_meta,
+    impl_aten=_max_aten,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    doc="",
+)
+
+
+min_dim = _make_prim(
+    schema="min_dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)",
+    meta=_min_max_meta,
+    impl_aten=_min_aten,
+    return_type=(RETURN_TYPE.NEW, RETURN_TYPE.NEW),
+    doc="",
+)
+
+
 _iota_doc = """
     Constructs a 1-D tensor t where ``t[i] == start + i * step``.
 """
@@ -2683,7 +2764,7 @@ def _svd_meta(
     A_shape = A.shape
     batch = A_shape[:-2]
     m, n = A_shape[-2:]
-    k = min(m, n)
+    k = builtins.min(m, n)
 
     shape_U = batch + (m, m if full_matrices else k)
     strides_U = utils.make_contiguous_strides_for(shape_U, row_major=False)
