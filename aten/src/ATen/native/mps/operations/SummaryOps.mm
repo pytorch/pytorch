@@ -25,20 +25,18 @@ enum BIN_SELECTION_ALGORITHM {
 };
 
 template<typename T>
-thread T * upper_bound(thread T * first, thread T * last, T val) {
-  thread T * middle;
-  int64_t half_ = 0;
-  int64_t len = (int64_t)(last - first);
+int64_t upper_bound(constant T * arr, int64_t first, int64_t len, T val) {
+  int64_t middle;
+  int64_t half_;
 
   while (len > 0) {
     half_ = len >> 1;
     middle = first + half_;
 
-    if (val < *middle) {
+    if (val < arr[middle]) {
       len = half_;
     } else {
-      first = middle;
-      ++first;
+      first = ++middle;
       len = len - half_ - 1;
     }
   }
@@ -66,21 +64,22 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
   int64_t bin_seq_offset = 0;
 
   for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = *(constant T*)((constant uint8_t*)input_ + offsets[tid * num_dims + dim]);
+    T element = *(constant T*)((constant uint8_t*)input_ + tid * num_dims + dim); //+ offsets[tid * num_dims + dim]);
 
     // Skips elements which fall outside the specified bins and NaN elements
-    if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) { // 0 2 / 0 2
+    if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) {
         skip_element = true;
         break;
     }
     int64_t pos = -1;
     
     if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
-      pos = (int64_t)(upper_bound(
-        (thread T*)(int64_t)(bin_seq + bin_seq_offset),
-        (thread T*)(int64_t)(bin_seq + bin_seq_offset + num_bin_edges[dim]),
+      pos = upper_bound(
+        bin_seq,
+        bin_seq_offset,
+        num_bin_edges[dim],
         element
-      ) - (bin_seq + bin_seq_offset) - 1);
+      ) - bin_seq_offset - 1;
     } else if (
       algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION ||
       algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
@@ -90,11 +89,11 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
       if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
           int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
           int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
-          pos = (int64_t)(upper_bound(
-            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
-            (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
-            element
-          ) - (bin_seq + bin_seq_offset) - 1);
+          //pos = (int64_t)(upper_bound(
+          //  (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
+          //  (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
+          //  element
+          //) - (bin_seq + bin_seq_offset) - 1);
       }
     }
 
@@ -108,7 +107,7 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
     // In the unweighted case, the default weight is 1
     local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
   }
-  local_out[local_out_strides[0] * tid] += 1;
+  //local_out[local_out_strides[0] * tid] += (T)hist_index;
 
 }
 
@@ -209,7 +208,7 @@ void histogramdd_kernel_impl(
       return;
   }
 
-  std::vector<input_t> bin_seq;
+  std::vector<input_t> bin_seq(bin_edges_numel);
   std::vector<int64_t> num_bin_edges(D);
   std::vector<input_t> leftmost_edge(D);
   std::vector<input_t> rightmost_edge(D);
@@ -217,13 +216,15 @@ void histogramdd_kernel_impl(
 
   for (const auto dim : c10::irange(D)) {
     for (const auto elem_idx : c10::irange(bin_edges[dim].numel())) {
-      bin_seq.push_back(bin_edges[dim][elem_idx].item().to<input_t>());
+      bin_seq[bin_seq_offset + elem_idx] = (bin_edges[dim][elem_idx].item().to<input_t>());
     }
     num_bin_edges[dim] = bin_edges[dim].numel();
     leftmost_edge[dim] = bin_seq[bin_seq_offset];
     rightmost_edge[dim] = bin_seq[bin_seq_offset + num_bin_edges[dim] - 1];
     
     std::cout << "LME RME" << leftmost_edge[dim] << " " << rightmost_edge[dim] << std::endl; 
+    std::cout << bin_seq << std::endl;
+    std::cout << bin_seq_offset << std::endl;
     bin_seq_offset += num_bin_edges[dim];
   }
 
@@ -246,6 +247,7 @@ void histogramdd_kernel_impl(
   std::cout << "algorithm" << algorithm << std::endl;
   std::cout << "thread hist sizes" << thread_hist_sizes << std::endl;
   std::cout << "thread hist strides" << thread_histograms.strides() << std::endl;
+  std::cout << "input" << input << std::endl;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
