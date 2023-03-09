@@ -34,7 +34,7 @@ LOG_NAME_TO_NAMES = collections.defaultdict(set)
 VERBOSE_NAMES = set()
 
 # Set by user-facing API
-name_to_level: Dictionary[str, int] = {}
+name_to_level: Dict[str, int] = {}
 enabled_artifact_names: Set[str] = set()
 
 
@@ -56,7 +56,8 @@ def set_logs(**kwargs):
         if key in NAME_TO_LOG_NAME:
             if val not in logging._levelToName:
                 raise ValueError(
-                    f"Unrecognized log level for log {key}: {val}, valid level values are: {','.join(list(logging._levelToName.keys()))}"
+                    f"Unrecognized log level for log {key}: {val}, valid level values "
+                    f"are: {','.join(list(logging._levelToName.keys()))}"
                 )
             name_to_level[key] = val
 
