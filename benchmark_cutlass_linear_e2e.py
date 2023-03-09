@@ -1,3 +1,5 @@
+#! /usr/bin/env python
+
 import torch
 import torch.utils.benchmark as benchmark
 from torch import nn
@@ -24,9 +26,9 @@ class CUTLASSSparseLinear(nn.Module):
         self.weight_tensor = linear_model.weight.data.masked_select(mask).view(m, k // 2)
         self.bias_tensor = linear_model.bias.data
         self.meta, self.meta_reordered = torch._cutlass_create_meta(mask)
-    
+
     def forward(self, x):
-        return torch._cutlass_linear(self.weight_tensor, x.T.contiguous(), self.meta, self.meta_reordered).T + self.bias_tensor
+        return torch._cutlass_linear(self.weight_tensor, x.T, self.meta, self.meta_reordered).T + self.bias_tensor
 
 
 def get_linear(m, k, n):
@@ -89,7 +91,7 @@ shapes = [
     (2048, 1024, 1024),
     (2048, 2048, 2048),
 ]
-batch_sizes = [1] # [1, 4, 16, 64, 256]
+batch_sizes = [1]  # [1, 4, 16, 64, 256]
 
 for batch_size, (m, k, n) in product(batch_sizes, shapes):
     # label and sub_label are the rows
@@ -97,7 +99,7 @@ for batch_size, (m, k, n) in product(batch_sizes, shapes):
     label = 'CUTLASS based Linear vs. nn.Linear'
     sub_label = f'batch_size: {batch_size:2d} | m:{m:6d} | k:{k:6d} | n:{n:6d}'
 
-    try: 
+    try:
         input_tensor, sparse_linear, dense_linear = get_linear(m, k, n)
 
         result = benchmark.Timer(
