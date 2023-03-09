@@ -23,7 +23,7 @@ import warnings
 import itertools
 from functools import partial
 from torch.nn.utils.rnn import PackedSequence
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, toleranceOverride, tol
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch.testing._internal.common_modules import module_db, modules
 from functorch import (
@@ -245,6 +245,7 @@ class TestAOTAutograd(AOTTestCase):
         *,
         test_mutation: bool = False,
         decompositions: Optional[Dict] = None,
+        dynamic: bool = False,
     ):
         for keep_input_mutations in [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
@@ -294,7 +295,8 @@ class TestAOTAutograd(AOTTestCase):
                     fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                     bw_compiler=nop,
                     decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations
+                    keep_inference_input_mutations=keep_input_mutations,
+                    dynamic=dynamic
                 )
             else:
                 compiled_f = aot_function(
@@ -302,7 +304,8 @@ class TestAOTAutograd(AOTTestCase):
                     fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                     bw_compiler=nop,
                     decompositions=decompositions,
-                    keep_inference_input_mutations=keep_input_mutations
+                    keep_inference_input_mutations=keep_input_mutations,
+                    dynamic=dynamic
                 )
             ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
             test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
@@ -366,8 +369,6 @@ class TestAOTAutograd(AOTTestCase):
         self.verify_aot_autograd(f, inp)
 
     # Test for bug occurring at the intersection of fake tensors & functionalization.
-    @patch("torch._functorch.config.use_dynamic_shapes", True)
-    @patch("torch._functorch.config.use_fake_tensor", True)
     def test_squeeze_mutation(self):
         def f(a):
             b = a.clone().squeeze(-1)
@@ -375,12 +376,24 @@ class TestAOTAutograd(AOTTestCase):
             return a + b
 
         inp = [torch.randn(3, 1, requires_grad=True)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, dynamic=True)
         inp = [torch.randn(3, 1, requires_grad=False)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, dynamic=True)
 
-    @patch("torch._functorch.config.use_dynamic_shapes", True)
-    @patch("torch._functorch.config.use_fake_tensor", True)
+    def test_complex_linear(self):
+        # https://github.com/pytorch/pytorch/issues/93424
+        inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10, dtype=torch.complex64)
+
+            def forward(self, x):
+                return self.linear(x).sum().abs()
+
+        self.verify_aot_autograd(F(), inp)
+
     def test_embedding_bag_view(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
@@ -395,7 +408,7 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
-        self.verify_aot_autograd(F(), [x, y])
+        self.verify_aot_autograd(F(), [x, y], dynamic=True)
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):
@@ -485,6 +498,44 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_detach(self):
+        # Here, "a" requires grad, and gets mutated, so we append a copy_() to the end of the graph.
+        # Its mutation doesn't take part in autograd though, because we mutated a detach'd view.
+        # Need to make sure that this copy_() doesn't error, and doesn't participate in autograd either.
+        def f(a):
+            a.detach().mul_(2)
+            return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=False)
+        inp = [torch.ones(4, requires_grad=True)]
+        # test_mutation=True will first do some compute on inp, so it is no longer an autograd leaf
+        # by the time it becomes a graph input. Good to test both cases.
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_no_grad(self):
+        def f(a):
+            with torch.no_grad():
+                a.mul_(2)
+            return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_no_grad_detach_mixed(self):
+        # Perform a mix of mutations on a:
+        # 1 normal, 1 in no_grad, 1 on a detach'd tensor.
+        # Only the first should participate in gradient computation.
+        def f(a):
+            a.detach().mul_(2)
+            a.mul_(3)
+            with torch.no_grad():
+                a.mul_(4)
+            return a + 5
+        inp = [torch.ones(4, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_metadata2(self):
@@ -1332,6 +1383,31 @@ def forward(self, primals_1, primals_2):
     return [t, as_strided_2, view_1, t_1, unsqueeze, add]""")  # noqa: B950
 
     @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_dynamic_shape_output_not_in_bw_graph(self):
+        def f(x):
+            return [x + 1, x.shape[0]]
+        inp = torch.ones(5, requires_grad=True)
+        bw_graph_cell = [None]
+        compiled_f = aot_function(
+            f,
+            fw_compiler=nop,
+            bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
+            decompositions={},
+            keep_inference_input_mutations=False,
+            dynamic=True,
+        )
+        out = compiled_f(inp)
+        out[0].sum().backward()
+        # The important bit: the forward fn returns 2 outputs,
+        # but one of them is a symint so we should only see
+        # 1 grad_output as an input to the backward graph.
+        # (Otherwise, autograd will plumb a None as the value of the grad_output,
+        # which causes inductor to complain).
+        self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
+def forward(self, arg0_1):
+    return (arg0_1,)""")
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_no_grad_input_output(self):
         def f(a, b):
             return a.cos(), b.cos(), a * b
@@ -1714,8 +1790,6 @@ def forward(self, primals_1, primals_2):
         for a, b in zip(ref, res):
             assert torch.allclose(a, b)
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_output_op_depending_on_symint(self):
         """
         It won't be obvious from reading this test what it's testing for.  We should probably make it into a more
@@ -1738,12 +1812,10 @@ def forward(self, primals_1, primals_2):
         # TODO: assert outputs of fwd graph trace to correct symint
 
         # e2e test that fails without symint clone fix
-        af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"))
+        af = aot_function(f, nop, partition_fn=partial(min_cut_rematerialization_partition, compiler="inductor"), dynamic=True)
         out = af(inp)
         self.assertEqual(out, f(inp))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_default_partitioner_saves_symints_not_tensors_for_bw(self):
         """
         In this test, the important thing is that primals_1 is **only** needed in the backward
@@ -1764,7 +1836,7 @@ def forward(self, primals_1, primals_2):
             d = b.masked_fill_(c, 0)
             return d
 
-        compiled_f = aot_function(f, nop)
+        compiled_f = aot_function(f, nop, dynamic=True)
         inp_ref = torch.ones(2, 2, requires_grad=True)
         inp_test = torch.ones(2, 2, requires_grad=True)
 
@@ -1859,14 +1931,15 @@ def get_num_ins_outs(fx_g):
     return tuple(len(i) for i in get_ins_outs(fx_g))
 
 
-def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition):
+def get_fw_bw_graph(f, inps, partitioner=min_cut_rematerialization_partition, dynamic=False):
     fw_graph_cell = [None]
     bw_graph_cell = [None]
     aot_function(f,
                  fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
                  bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
                  partition_fn=partitioner,
-                 decompositions=default_decompositions)(*inps).sum().backward()
+                 decompositions=default_decompositions,
+                 dynamic=dynamic)(*inps).sum().backward()
     return (fw_graph_cell[0], bw_graph_cell[0])
 
 
@@ -1933,8 +2006,6 @@ class TestPartitioning(AOTTestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 6))
         self.assertEqual(get_num_ins_outs(bw_graph), (6, 3))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_save_shape(self):
 
@@ -1943,7 +2014,7 @@ class TestPartitioning(AOTTestCase):
             return s
 
         inp = [torch.ones([10, 10], requires_grad=True)]
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
         _, fw_output = get_ins_outs(fw_graph)
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
         self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
@@ -1968,14 +2039,12 @@ class TestPartitioning(AOTTestCase):
             x = sb[0] + sc[0]
             a_sz = (x, a.size(0))
             return torch.cat([a.expand(a_sz), b, c])
-        fw_graph, bw_graph = get_fw_bw_graph(f, inp)
+        fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
         self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
         self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     def test_default_partitioner_output_tensor_shape_tensor(self):
 
         inp = [
@@ -2004,7 +2073,8 @@ class TestPartitioning(AOTTestCase):
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
             partition_fn=default_partition,
-            decompositions=default_decompositions)(*inp)
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
         fw_graph = fw_graph_cell[0]
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
@@ -2013,11 +2083,12 @@ class TestPartitioning(AOTTestCase):
         # - 5 original outputs (sb is a tuple, gets expanded to 2 symints)
         # - 8 saved outputs for backward: 5 tensors, 3 symints
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        # in the bwd graph, 12 inputs (grad outs) because:
+        # in the bwd graph, 10 inputs (grad outs) because:
         # - The fwd graph had 13 outputs
         # - 1 was a view of an input, which gets regenerated outside of the graph
         #   and doesn't participate in the backward
-        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
+        # - 2 user outs were symints (b.size()), which don't get tangents in the backward
+        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
@@ -2037,8 +2108,6 @@ class TestPartitioning(AOTTestCase):
         # TODO(whc) we should learn to return torch.Sizes
         self.assertFalse(isinstance(compiled_outs[1], torch.Size))
 
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @unittest.skipIf(not USE_NETWORKX, "networkx not available")
     def test_min_cut_partitioner_output_tensor_shape_tensor(self):
 
@@ -2068,13 +2137,14 @@ class TestPartitioning(AOTTestCase):
             fw_compiler=partial(extract_graph, graph_cell=fw_graph_cell),
             bw_compiler=partial(extract_graph, graph_cell=bw_graph_cell),
             partition_fn=min_cut_rematerialization_partition,
-            decompositions=default_decompositions)(*inp)
+            decompositions=default_decompositions,
+            dynamic=True)(*inp)
         fw_graph = fw_graph_cell[0]
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
 
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (12, 4))
+        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
@@ -2394,8 +2464,6 @@ aot_autograd_failures = {
     skip('linalg.householder_product'),  # flaky
     decorate('matmul', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
     decorate('__rmatmul__', decorator=unittest.skipIf(IS_ARM64, 'flaky')),
-    # overrides atol=1e-4, rtol=1e-5 would do as well
-    decorate('svd_lowrank', decorator=toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-05)})),
 }
 
 symbolic_aot_autograd_failures = {
@@ -2441,6 +2509,7 @@ symbolic_aot_autograd_failures = {
     xfail('gradient', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('hsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
+    xfail('index_fill', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('inner', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kron', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('kthvalue', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2552,7 +2621,6 @@ symbolic_aot_autograd_failures = {
     xfail('special.i1', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
     xfail('special.polygamma', 'special_polygamma_n_0'),  # aten.polygamma.default - couldn't find symbolic ...
     xfail('stft', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('sum_to_size', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('svd_lowrank', ''),  # could not find kernel
     xfail('take_along_dim', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2562,7 +2630,6 @@ symbolic_aot_autograd_failures = {
     xfail('trapezoid', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('trapz', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
-    xfail('unflatten', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
@@ -2617,7 +2684,7 @@ def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
     except DynamicOutputShapeException:
         self.skipTest("Dynamic output shape operation in trace")
 
-def _test_aot_autograd_helper(self, device, dtype, op):
+def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
     if not op.supports_autograd:
         self.skipTest("Op does not support autograd")
 
@@ -2639,7 +2706,7 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             return op.op(*c_args, **c_kwargs)
 
-        compiled_f = compiled_function(f, nop, nop)
+        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic)
         try:
             _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
         except GuardOnDataDependentSymNode:
@@ -2651,7 +2718,7 @@ def _test_aot_autograd_helper(self, device, dtype, op):
             else:
                 raise
 
-def _test_aot_autograd_module_helper(self, device, dtype, training, module_info):
+def _test_aot_autograd_module_helper(self, device, dtype, training, module_info, *, dynamic=False):
     module_cls = module_info.module_cls
     module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                    requires_grad=True, training=training)
@@ -2696,7 +2763,7 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
         named_params = dict(m.named_parameters(remove_duplicate=False))
         named_buffers = dict(m.named_buffers(remove_duplicate=False))
         num_params_buffers = len(named_params) + len(named_buffers)
-        compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers)
+        compiled_f = aot_function(f, nop, num_params_buffers=num_params_buffers, dynamic=dynamic)
         params_buffers_args = [named_params, named_buffers, args]
         _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, params_buffers_args)
 
@@ -2708,13 +2775,11 @@ class TestEagerFusionOpInfo(AOTTestCase):
         _test_aot_autograd_helper(self, device, dtype, op)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):
-        _test_aot_autograd_helper(self, device, dtype, op)
+        _test_aot_autograd_helper(self, device, dtype, op, dynamic=True)
 
 
 aot_autograd_module_failures = set({
@@ -2738,8 +2803,6 @@ aot_autograd_module_failures = set({
 symbolic_aot_autograd_module_failures = {
     torch.nn.Transformer,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
     torch.nn.TransformerEncoder,  # DataDependentOutputException: aten.equal compares a mask input to a mask producing a bool
-    torch.nn.TransformerEncoderLayer,  # RuntimeError: tried to get Double out of SymFloat
-    torch.nn.TransformerDecoderLayer,  # RuntimeError: tried to get Double out of SymFloat
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2754,13 +2817,11 @@ class TestEagerFusionModuleInfo(AOTTestCase):
         _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
 
     @modules(module_db, allowed_dtypes=(torch.float,))
-    @patch("functorch.compile.config.use_dynamic_shapes", True)
-    @patch("functorch.compile.config.use_fake_tensor", True)
     @patch("functorch.compile.config.use_functionalize", True)
     @decorateForModules(unittest.expectedFailure,
                         aot_autograd_module_failures | symbolic_aot_autograd_module_failures)
     def test_aot_autograd_symbolic_module_exhaustive(self, device, dtype, training, module_info):
-        _test_aot_autograd_module_helper(self, device, dtype, training, module_info)
+        _test_aot_autograd_module_helper(self, device, dtype, training, module_info, dynamic=True)
 
 
 only_for = ("cpu")
