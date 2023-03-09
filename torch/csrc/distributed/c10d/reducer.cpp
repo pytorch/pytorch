@@ -316,7 +316,7 @@ void Reducer::check_grad_layout(
   REDUCER_CHECK(
       grad.options().dtype().toScalarType() == type,
       logger_,
-      c10::str("Expected ", type, ", got ", grad.toString()));
+      c10::str("Expected ", type, ", got ", grad.options().dtype().toScalarType()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());

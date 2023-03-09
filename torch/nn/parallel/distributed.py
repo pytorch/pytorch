@@ -112,7 +112,7 @@ def _setup_mixed_precision_params(mixed_precision_config, root_module):
 
         if not hasattr(param, '_mp_param'):
             param._mp_param = torch.zeros_like(
-                param.data,
+                param,
                 device=param.device,
                 dtype=mixed_precision_config.param_dtype,
                 requires_grad=param.requires_grad,
