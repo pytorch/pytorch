@@ -21,6 +21,17 @@ def example_fn(a):
     return output
 
 
+def dynamo_error_fn(a):
+    output = a.mul(torch.ones(1000, 1000))
+    output = output.add(torch.ones(10, 10))
+    return output
+
+
+def inductor_error_fn(a):
+    output = torch.round(a)
+    return output
+
+
 ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
@@ -62,6 +73,18 @@ def multi_record_test(name, ty, num_records):
     return fn
 
 
+def within_range_record_test(name, ty, num_records_lower, num_records_higher):
+    @make_test(name)
+    def fn(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(example_fn)
+        fn_opt(*ARGS)
+        self.assertGreaterEqual(len(records), num_records_lower)
+        self.assertLessEqual(len(records), num_records_higher)
+        self.assertIsInstance(records[0].msg, ty)
+
+    return fn
+
+
 def single_record_test(name, ty):
     return multi_record_test(name, ty, 1)
 
@@ -72,6 +95,9 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
         super().setUpClass()
         cls._exit_stack.enter_context(
             unittest.mock.patch.dict(os.environ, {"___LOG_TESTING": ""})
+        )
+        cls._exit_stack.enter_context(
+            unittest.mock.patch("torch._dynamo.config.suppress_errors", True)
         )
 
     @classmethod
@@ -102,16 +128,16 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
                 if num_handlers == 0:
                     continue
 
-                handler = logger.handlers[0]
-                old_emit = handler.emit
+                for handler in logger.handlers:
+                    old_emit = handler.emit
 
-                def new_emit(record):
-                    old_emit(record)
-                    emit_post_hook(record)
+                    def new_emit(record):
+                        old_emit(record)
+                        emit_post_hook(record)
 
-                exit_stack.enter_context(
-                    unittest.mock.patch.object(handler, "emit", new_emit)
-                )
+                    exit_stack.enter_context(
+                        unittest.mock.patch.object(handler, "emit", new_emit)
+                    )
 
         exit_stack.enter_context(init_logging_post_hook(patch_emit))
 
@@ -120,26 +146,42 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
     test_bytecode = multi_record_test("bytecode", td_logging.ByteCodeLogRec, 2)
     test_output_code = multi_record_test("output_code", td_logging.OutputCodeLogRec, 2)
 
-    def test_dynamo_debug(self):
-        pass
+    test_dynamo_debug = within_range_record_test("+dynamo", str, 30, 50)
+    test_dynamo_info = within_range_record_test("dynamo", str, 2, 10)
 
-    def test_dynamo_info(self):
-        pass
+    @make_test("-dynamo")
+    def test_dynamo_error(self, records):
+        try:
+            fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
+            fn_opt(*ARGS)
+        except:
+            pass
+        self.assertEqual(len(records), 1)
+        self.assertIsInstance(records[0].msg, str)
 
-    def test_dynamo_error(self):
-        pass
+    test_aot = multi_record_test("aot", td_logging.AOTJointGraphLogRec, 3)
+    test_inductor_debug = within_range_record_test("+inductor", str, 5, 15)
+    test_inductor_info = within_range_record_test("inductor", str, 2, 4)
 
-    def test_aot(self):
-        pass
+    @make_test("-inductor")
+    def test_inductor_error(self, records):
+        import torch._inductor.lowering
 
-    def test_inductor_debug(self):
-        pass
+        def throw(x):
+            assert False
 
-    def test_inductor_info(self):
-        pass
+        # inject an error in the lowerings
+        for x in list(torch._inductor.lowering.lowerings.keys()):
+            if "round" in x.__name__:
+                torch._inductor.lowering.lowerings[x] = throw
 
-    def test_inductor_error(self):
-        pass
+        try:
+            fn_opt = torch._dynamo.optimize("inductor")(inductor_error_fn)
+            fn_opt(*ARGS)
+        except:
+            pass
+        self.assertEqual(len(records), 1)
+        self.assertIsInstance(records[0].msg, str)
 
 
 # single record tests

@@ -35,6 +35,11 @@ VERBOSE_NAMES = set()
 name_to_level = {}
 enabled_artifact_names = {}
 
+
+def is_initialized(log):
+    return any([_is_torch_handler(h) for h in log.handlers])
+
+
 # User API for setting log properties
 # ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
 # ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
@@ -96,8 +101,13 @@ def _get_loggable_names():
     return list(NAME_TO_LOG_NAME.keys()) + list(NAME_TO_RECORD_TYPE.keys())
 
 
-VERBOSITY_CHAR = "+"
-VERBOSITY_REGEX = re.escape(VERBOSITY_CHAR) + "?"
+INCR_VERBOSITY_CHAR = "+"
+DECR_VERBOSITY_CHAR = "-"
+VERBOSITY_REGEX = (
+    "("
+    + "|".join([re.escape(INCR_VERBOSITY_CHAR), re.escape(DECR_VERBOSITY_CHAR)])
+    + "?)"
+)
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def gen_settings_regex(loggable_names):
@@ -126,11 +136,14 @@ def _parse_log_settings(settings):
     log_names = settings.split(",")
 
     def get_name_level_pair(name):
-        clean_name = name.replace(VERBOSITY_CHAR, "")
+        clean_name = name.replace(INCR_VERBOSITY_CHAR, "")
+        clean_name = clean_name.replace(DECR_VERBOSITY_CHAR, "")
         level = None
         if clean_name in VERBOSE_NAMES:
-            if name[0] == VERBOSITY_CHAR:
+            if name[0] == INCR_VERBOSITY_CHAR:
                 level = logging.DEBUG
+            elif name[0] == DECR_VERBOSITY_CHAR:
+                level = logging.ERROR
             else:
                 level = logging.INFO
 
@@ -240,7 +253,7 @@ def init_logs(log_names, log_file_name=None, formatter=None):
             )  # allow all messages through logger
             # ensure log_name is in the dictionary
             rec_types = log_to_enabled_types[log_name]
-            if level == logging.DEBUG:
+            if level == logging.DEBUG or name not in VERBOSE_NAMES:
                 rec_types.update(LOG_NAME_TO_REC_TYPES[log_name])
         else:
             log_to_enabled_types[NAME_TO_LOG_NAME[name]].add(NAME_TO_RECORD_TYPE[name])

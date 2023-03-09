@@ -1565,8 +1565,8 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        if dynamo_config.output_code:
-            log.info("schedule: %s", node_schedule)
+        # if dynamo_config.output_code:
+        # log.info("schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod

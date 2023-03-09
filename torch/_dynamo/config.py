@@ -8,7 +8,6 @@ from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
 
-# log level (levels print what it says + all levels listed below it)
 # logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
 # logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
 # logging.WARN print warnings (including graph breaks)
@@ -17,18 +16,11 @@ log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
 
-# log compiled function + graphs at level INFO
-output_code = False
-
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = False
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
