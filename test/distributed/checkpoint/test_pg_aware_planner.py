@@ -11,15 +11,15 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.fully_sharded_data_parallel import StateDictType
 from torch.testing._internal.common_utils import run_tests
-from torch.distributed.checkpoint.pg_aware_planner import (
+from torch.distributed.checkpoint._pg_aware_planner import (
     ProcessGroupAwareSavePlanner,
     ProcessGroupAwareLoadPlanner,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
-    skip_unless_torch_gpu,
 )
 
 
@@ -83,7 +83,7 @@ class TestProcessGroupAwarePlanner(DTensorTestBase):
 
 
     @with_comms
-    @skip_unless_torch_gpu
+    @skip_if_lt_x_gpu(2)
     @with_temp_dir
     def test_process_group_aware_planner(self) -> None:
         CHECKPOINT_DIR = self.temp_dir
@@ -117,7 +117,11 @@ class TestProcessGroupAwarePlanner(DTensorTestBase):
             cp.save_state_dict(
                 state_dict=state_dict,
                 storage_writer=cp.FileSystemWriter(path=CHECKPOINT_DIR),
-                planner=ProcessGroupAwareSavePlanner(),
+                planner=ProcessGroupAwareSavePlanner(
+                    flatten_state_dict=False,
+                    flatten_sharded_tensors=False,
+                    dedup_replicated_tensors=False,
+                ),
             )
 
         model = MyModule(
@@ -149,7 +153,10 @@ class TestProcessGroupAwarePlanner(DTensorTestBase):
             cp.load_state_dict(
                 state_dict=state_dict,
                 storage_reader=cp.FileSystemReader(path=CHECKPOINT_DIR),
-                planner=ProcessGroupAwareLoadPlanner(),
+                planner=ProcessGroupAwareLoadPlanner(
+                    flatten_state_dict=False,
+                    flatten_sharded_tensors=False,
+                ),
             )
 
             model.load_state_dict(state_dict)
