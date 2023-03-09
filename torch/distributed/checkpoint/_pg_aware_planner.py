@@ -1,9 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import io
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import torch
-import torch.distributed.distributed_c10d as c10d
 from torch import distributed as dist
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
