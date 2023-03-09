@@ -96,7 +96,7 @@ class TORCH_API DistEngine {
   // traverse the GraphTask instead of using the GraphTask embedded
   // cpu_ready_queue, this is because dist engine might run the same GraphTask
   // from different SendFunctions concurrently in different threads. The method
-  // will only mark the GraphTask as completed when it needes to, which means it
+  // will only mark the GraphTask as completed when it needs to, which means it
   // might not mark as completed for every call as dist engine would like to
   // keep the GraphTask alive when it not receives all gradients.
   //
