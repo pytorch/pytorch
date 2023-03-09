@@ -16,6 +16,9 @@ namespace c10 {
 class C10_CUDA_API FreeMemoryCallback {
  public:
   virtual ~FreeMemoryCallback() = default;
+  virtual bool FreeMemory(int device) {
+    return Execute();
+  }
   virtual bool Execute() = 0;
 };
 

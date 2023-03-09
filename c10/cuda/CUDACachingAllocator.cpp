@@ -22,6 +22,8 @@
 #include <set>
 #include <utility>
 #include <vector>
+#include <shared_mutex>
+#include <iostream>
 
 namespace c10 {
 
@@ -107,6 +109,10 @@ constexpr size_t kMinLargeAlloc =
     10485760; // allocations between 1 and 10 MiB may use kLargeBuffer
 constexpr size_t kRoundLarge = 2097152; // round up large allocations to 2 MiB
 constexpr size_t kRoundUpPowerOfTwoIntervals = 16;
+
+
+bool free_memory_native(int device);
+
 
 namespace {
 
@@ -1608,9 +1614,9 @@ class DeviceCachingAllocator {
     bool freed_memory = false;
     for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
-          FreeCudaMemoryCallbacksRegistry()->Create(name)->Execute();
+          FreeCudaMemoryCallbacksRegistry()->Create(name)->FreeMemory(p.device());
     }
-    return freed_memory;
+    return freed_memory || free_memory_native(p.device());
   }
 
   void garbage_collect_cached_blocks() {
@@ -2002,6 +2008,19 @@ static void uncached_delete(void* ptr) {
 }
 
 void local_raw_delete(void* ptr);
+void local_block_delete(void* ptr);
+
+struct AllocatorCache {
+  std::mutex mutex_;
+  size_t n_ = 0;
+  size_t to_evict_ = 0;
+  std::array<Block*, 64> blocks_;
+};
+struct AllocatorCacheRecord {
+  cudaStream_t stream_;
+  int device_;
+  std::unique_ptr<AllocatorCache> cache_;
+};
 
 class NativeCachingAllocator : public CUDAAllocator {
  private:
@@ -2014,6 +2033,10 @@ class NativeCachingAllocator : public CUDAAllocator {
     std::lock_guard<std::mutex> lock(mutex);
     allocated_blocks[block->ptr] = block;
   }
+
+
+  std::shared_timed_mutex per_device_cache_rw_mutex_;
+  std::vector<AllocatorCacheRecord> per_device_cache_;
 
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocator;
@@ -2075,7 +2098,89 @@ class NativeCachingAllocator : public CUDAAllocator {
       (*interp)->trace_gpu_memory_deallocation(
           reinterpret_cast<uintptr_t>(block->ptr));
     }
-    device_allocator[block->device]->free(block);
+    block_free(block);
+  }
+
+  // empty the cache, registered with memory freeing stuff...
+  bool FreeMemory(int device) {
+    std::shared_lock<std::shared_timed_mutex> lock(per_device_cache_rw_mutex_);
+    bool freed = false;
+    for (const auto& e : per_device_cache_) {
+      if (e.device_ == device) {
+        auto c = e.cache_.get();
+        std::lock_guard<std::mutex> lockd(c->mutex_);
+        for (auto i : c10::irange(c->n_)) {
+          freed = true;
+          Block* block = c->blocks_[i];
+          device_allocator[block->device]->free(block);
+          c->blocks_[i] = nullptr;
+        }
+        c->n_ = 0;
+      }
+    }
+    return freed;
+  }
+
+  AllocatorCache* get_or_create_cache(int device, cudaStream_t stream) {
+    {
+      std::shared_lock<std::shared_timed_mutex> lock(per_device_cache_rw_mutex_);
+      for (const auto& e : per_device_cache_) {
+        if (e.stream_ == stream) {
+          return e.cache_.get();
+        }
+      }
+    }
+    // after releasing shared lock someone else might have added an entry for this
+    // device, so check again...
+    std::lock_guard<std::shared_timed_mutex> lock(per_device_cache_rw_mutex_);
+    for (const auto& e : per_device_cache_) {
+      if (e.stream_ == stream) {
+        return e.cache_.get();
+      }
+    }
+    per_device_cache_.emplace_back(AllocatorCacheRecord {stream, device, std::make_unique<AllocatorCache>()});
+    return per_device_cache_.back().cache_.get();
+  }
+
+  void block_free(Block* block) {
+    // std::cout << "FREE\n";
+    if (block->event_count > 0) {
+      device_allocator[block->device]->free(block);
+      return;
+    }
+    auto cache = get_or_create_cache(block->device, block->stream);
+    Block* to_free = nullptr;
+    {
+      std::lock_guard<std::mutex> lock(cache->mutex_);
+      if (cache->n_ >= cache->blocks_.size()) {
+        auto idx = cache->to_evict_++ % cache->blocks_.size();
+        to_free = cache->blocks_[idx];
+        cache->blocks_[idx] = block;
+      } else {
+        //std::cout << "STORE\n";
+        cache->blocks_[cache->n_++] = block;
+      }
+    }
+    if (to_free) {
+      device_allocator[to_free->device]->free(to_free);
+    }
+  }
+  Block* local_alloc(int device, cudaStream_t stream, size_t size) {
+    auto cache = get_or_create_cache(device, stream);
+    std::lock_guard<std::mutex> lock(cache->mutex_);
+    for (auto i : c10::irange(cache->n_)) {
+      Block* candidate = cache->blocks_[i];
+      if (size == candidate->requested_size) {
+        --cache->n_;
+        if (cache->n_ > 0) {
+          cache->blocks_[i] = cache->blocks_[cache->n_];
+        }
+        // std::cout << "REUSE\n";
+        return candidate;
+      }
+    }
+    // std::cout << "ALLOC\n";
+    return nullptr;
   }
 
   void setMemoryFraction(double fraction, int device) override {
@@ -2130,6 +2235,16 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[block->device]->getBaseAllocation(block, outSize);
   }
 
+  Block* get_allocated_block(const DataPtr& ptr) {
+    if (ptr.get_deleter() == &local_raw_delete) {
+      return get_allocated_block(ptr.get());
+    } else if (ptr.get_deleter() == &local_block_delete) {
+      return (Block*) ptr.get_context();
+    } else {
+      return nullptr;
+    }
+  }
+
   void recordStream(const DataPtr& ptr, cuda::CUDAStream stream) override {
     // Empty tensor's storage().data() might be a null ptr. As there is no
     // blocks associated with those tensors, it is fine to do nothing here.
@@ -2142,10 +2257,12 @@ class NativeCachingAllocator : public CUDAAllocator {
     // we have implemented reference counting based sharing mechanism to
     // guarantee tensors won't be accidentally freed by one process while
     // they are still being used in another
-    if (ptr.get_deleter() != &local_raw_delete)
-      return;
 
-    Block* block = get_allocated_block(ptr.get());
+    Block* block = get_allocated_block(ptr);
+    if (!block) {
+      return;
+    }
+
     // block must not be null reaching here
     TORCH_INTERNAL_ASSERT(block != nullptr, "No allocated block can be found");
     device_allocator[block->device]->recordStream(block, stream);
@@ -2180,12 +2297,17 @@ class NativeCachingAllocator : public CUDAAllocator {
       return {r, r, &uncached_delete, Device(DeviceType::CUDA, device)};
     }
     if (size != 0) {
+      auto stream = cuda::getCurrentCUDAStream(device);
+      Block* block = const_cast<NativeCachingAllocator*>(this)->local_alloc(device, stream, size);
+      if (!block) {
+        block = device_allocator[device]->malloc(device, size, stream);
+      }
       // Allocator declars allocate const!?
-      const_cast<NativeCachingAllocator*>(this)->malloc(
-          &r, device, size, cuda::getCurrentCUDAStream(device));
+      return {block->ptr, block, local_block_delete, Device(DeviceType::CUDA, device)};
     }
     return {r, r, &local_raw_delete, Device(DeviceType::CUDA, device)};
   }
+
   DeleterFnPtr raw_deleter() const override {
     if (forceUncachedAllocator()) {
       return &uncached_delete;
@@ -2321,6 +2443,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
     return sp;
   }
+
   std::string name() override {
     return "native";
   }
@@ -2330,6 +2453,16 @@ NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);
+}
+
+void local_block_delete(void* ptr) {
+  Block* blk = (Block*) ptr;
+  allocator.block_free(blk);
+}
+
+
+bool free_memory_native(int device) {
+  return allocator.FreeMemory(device);
 }
 
 void setAllocatorSettings(const std::string& env) {
