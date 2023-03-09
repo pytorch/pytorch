@@ -1,6 +1,6 @@
 import os
 import re
-from typing import List, Pattern, Tuple, Optional
+from typing import List, Pattern, Optional
 
 
 BOT_COMMANDS_WIKI = "https://github.com/pytorch/pytorch/wiki/Bot-commands"
@@ -47,7 +47,7 @@ class TryMergeExplainer(object):
         self.project = project
         self.get_flags()
 
-    def get_flags(self) -> Tuple[bool, bool]:
+    def get_flags(self) -> bool:
         self.has_trunk_label = has_label(self.labels, CIFLOW_TRUNK_LABEL)
         self.has_ciflow_label = has_label(self.labels, CIFLOW_LABEL)
         should_check_land_branch = self.land_checks and not self.has_trunk_label
