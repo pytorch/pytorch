@@ -301,6 +301,7 @@ def reason_flaky() -> str:
 ALLOWLIST_OP: AbstractSet[str] = frozenset(
     [
         "ceil",
+        "logical_not",
         "sqrt",
         "t",
     ]
