@@ -13,6 +13,8 @@ import itertools
 import logging
 import os
 import re
+from typing import Dict, Set
+
 
 DEFAULT_LOG_LEVEL = logging.WARN
 DEFAULT_FORMATTER = logging.Formatter(
@@ -32,8 +34,8 @@ LOG_NAME_TO_NAMES = collections.defaultdict(set)
 VERBOSE_NAMES = set()
 
 # Set by user-facing API
-name_to_level = {}
-enabled_artifact_names = {}
+name_to_level: Dictionary[str, int] = {}
+enabled_artifact_names: Set[str] = set()
 
 
 def is_initialized(log):
@@ -47,16 +49,16 @@ def set_logs(**kwargs):
     global log_name_to_level
     global enabled_artifact_types
 
-    log_name_to_level = {}
+    name_to_level = {}
     enabled_artifact_types = set()
 
     for key, val in kwargs.items():
         if key in NAME_TO_LOG_NAME:
             if val not in logging._levelToName:
                 raise ValueError(
-                    f"Unrecognized log level for log {key}: {val}, valid level values are: {','.join(logging._levelToName.keys())}"
+                    f"Unrecognized log level for log {key}: {val}, valid level values are: {','.join(list(logging._levelToName.keys()))}"
                 )
-            log_name_to_level[key] = val
+            name_to_level[key] = val
 
         elif key in NAME_TO_RECORD_TYPE:
             enabled_artifact_names.add(key)
