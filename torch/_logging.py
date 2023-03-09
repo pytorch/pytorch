@@ -13,7 +13,7 @@ import itertools
 import logging
 import os
 import re
-from typing import Dict, Set
+from typing import DefaultDict, Dict, Set
 
 
 DEFAULT_LOG_LEVEL = logging.WARN
@@ -47,17 +47,17 @@ def is_initialized(log):
 # ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
 def set_logs(**kwargs):
     global log_name_to_level
-    global enabled_artifact_types
+    global enabled_artifact_names
 
     name_to_level = {}
-    enabled_artifact_types = set()
+    enabled_artifact_names = set()
 
     for key, val in kwargs.items():
         if key in NAME_TO_LOG_NAME:
             if val not in logging._levelToName:
                 raise ValueError(
                     f"Unrecognized log level for log {key}: {val}, valid level values "
-                    f"are: {','.join(list(logging._levelToName.keys()))}"
+                    f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                 )
             name_to_level[key] = val
 
@@ -233,7 +233,7 @@ def init_logs(log_names, log_file_name=None, formatter=None):
         _clear_handlers(log)
 
     name_to_levels = _get_log_settings()
-    log_to_enabled_types = collections.defaultdict(set)
+    log_to_enabled_types: DefaultDict[str, Set[type]] = collections.defaultdict(set)
     log_name_to_level = dict()
     # only configure names associated with
     # log_names (ie, logs and artifacts associated with those log_names)
