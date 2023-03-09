@@ -331,12 +331,34 @@ class KernelArgs:
         call_args = []
         arg_defs = []
         arg_types = []
+        def buffer_has_alias(buffer_name):
+            # buffer_name may be graph input or a constant.
+            if buffer_name in V.graph.graph_inputs or buffer_name in V.graph.constants:
+                return False
+            if V.graph.scheduler:
+                buffer_node = V.graph.scheduler.name_to_node[buffer_name]
+                if len(buffer_node.users) > 1:
+                    buffer_user_name = self.call_names()
+                    for user in buffer_node.users:
+                        # only check the user's buffer is used by current kernel.
+                        if user.get_name() in buffer_user_name and not self.is_removed(user.get_name()):
+                            return True
+            return False
+
         for inplaced in unique(self.inplace_buffers.values()):
             outer = inplaced.other_names[-1]
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            has_alias = False
+            for outer_name in inplaced.other_names:
+                if buffer_has_alias(outer_name):
+                    has_alias = True
+                    break
+            if has_alias:
+                arg_defs.append(f"{cpp_dtype}* {inner}")
+            else:
+                arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.input_buffers.items():
@@ -344,7 +366,10 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+            if buffer_has_alias(outer):
+                arg_defs.append(f"const {cpp_dtype}* {inner}")
+            else:
+                arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
@@ -352,7 +377,10 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            if buffer_has_alias(outer):
+                arg_defs.append(f"{cpp_dtype}* {inner}")
+            else:
+                arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
