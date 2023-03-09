@@ -1684,7 +1684,7 @@ Tensor cholesky_jvp(const Tensor& dA, const Tensor& L, bool upper) {
   // L^{-1}dA(L^{-H}) = L^{-1}dL + (L^{-1}dL)^H
   //               = sym(L^{-1}dL)
   // where sym(X) = X + X^H
-  // A short computaiton gives that the inverse of sym is given by
+  // A short computation gives that the inverse of sym is given by
   // \pi(X) = X.tril() - 0.5*diag(X)
   // so
   // dL = L\pi(L^{-1}dA(L^{-H}))
@@ -1787,8 +1787,8 @@ Tensor cholesky_inverse_jvp(
 // of Ap^i, A^j, dA^k with i, j, k in {1, H}, where X^H = X.mH(). To prove that,
 // note (A Ap)^H = A Ap and (Ap A)^H = Ap A, which could be shown by taking the
 // product between the SVD decompositions of A and Ap. Consider the
-// conjugate-tranposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating it
-// we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
+// conjugate-transposed [2]: (A Ap A)^H = A^H (A Ap) = A^H. By differentiating
+// it we get: dA^H A Ap + A^H dA Ap + A^H A dAp = dA^H. By multiplying from the
 // left by Ap^H and using Ap^H A^H = (A Ap)^H = A Ap: Ap^H dA^H A Ap + A Ap dA
 // Ap + A Ap A dAp = Ap^H dA^H. By multiplying from the left by Ap and by
 // applying [1] and [2] repeatedly until impossible we get: Ap Ap^H dA^H A Ap +
@@ -2368,7 +2368,7 @@ Tensor softplus_double_backward(
 //           this later)
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
-// In step (2), if the output tensor does't have overlapping memory, we can
+// In step (2), if the output tensor doesn't have overlapping memory, we can
 // safely scatter (`storage.as_strided(output_geometry).copy_(grad)`);
 // otherwise, we must use `index_add` as gradients at different indices may need
 // to be summed to a single location.
@@ -2501,12 +2501,12 @@ Tensor softplus_double_backward(
 //
 //        Note that all values in `S(n)` are the same (they point to the same
 //        memory location anyways, so this step doesn't change anything, but
-//        effectively avoids having the denpendency on the layout of `input`.
+//        effectively avoids having the dependency on the layout of `input`.
 //        I.e., the result holds fixed regardless of the layout of `input`, as
 //        long as `input_stride` is fixed.
 //
-//      NOTE: for forward pass, we can equivalently simply selet any one of
-//            `S(n)` as `storage[n]`. However, cosnidering this as an average
+//      NOTE: for forward pass, we can equivalently simply select any one of
+//            `S(n)` as `storage[n]`. However, considering this as an average
 //            operation makes backward easier (so all values in set
 //            `{ grad_input[i] : i in S(n) }` are the same, and it can use the
 //            same geometry as input).
@@ -2645,7 +2645,7 @@ Tensor softplus_double_backward(
 //                                stride[B[j]]
 //
 //              Then the invariant is obviously satisfied at every dimension
-//              in this block if it is satisfied at dimnesion B[-1]. It only
+//              in this block if it is satisfied at dimension B[-1]. It only
 //              remains to show that it is satisfied at the last dimension in
 //              each block.
 //
@@ -3212,7 +3212,7 @@ Tensor svd_backward(
   // where CP(n-1) is the complex projective space of dimension n-1.
   // In other words, M is just the complex projective space, and pi is (pretty
   // similar to) the usual principal bundle from S^{2n-1} to CP(n-1). The case k
-  // > 1 is the same, but requiring a linear inependence condition between the
+  // > 1 is the same, but requiring a linear independence condition between the
   // vectors from the different S^{2n-1} or CP(n-1).
   //
   // Note that this is a U(1)^k-bundle. In plain words, this means that the
@@ -3672,14 +3672,14 @@ Tensor linalg_qr_backward(
     const Tensor& Q,
     const Tensor& R,
     const c10::string_view mode) {
-  // Nb. We won't be too formal below, as writing this proof formaly is a pain
+  // Nb. We won't be too formal below, as writing this proof formally is a pain
   // We'll link here a formal writing of all this at some point in the future
   //
   // Case m >= n
   // dQ = dAR^{-1} - Qsyminv(sym(Q^H dA R^{-1}))
   // dR = syminv(sym(Q^H dA R^{-1}))R
   //
-  // With the notation from the JVP formla, the only two computations that we
+  // With the notation from the JVP formula, the only two computations that we
   // need are syminv*(R) = 0.5 * (R.triu() + R.triu()^H - Re diag(R)) sym*(X) =
   // 2 * X Using these, after a few simplifications we get that gA = (gQ +
   // syminvadj(triu(gR R^H - Q^H gQ)))R^{-H}
@@ -4712,14 +4712,14 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
 }
 
 Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
-  // We must conditionally initalize this using to_dense if sparse, sparse
+  // We must conditionally initialize this using to_dense if sparse, sparse
   // addition is not supported without exact shape match
   Tensor self_p1_conj;
   if (self.layout() == c10::kSparse || self.layout() == c10::kSparseCsr ||
       self.layout() == c10::kSparseCsc || self.layout() == c10::kSparseBsr ||
       self.layout() == c10::kSparseBsc) {
     // The warning only applies to the sparsity of self, dense grad is never
-    // materialized so if self is strided and grad is sparse nothing unepected
+    // materialized so if self is strided and grad is sparse nothing unexpected
     // happens memory wise
     TORCH_WARN(
         "log1p_backward: received self with sparse layout, but backward requires materialization of a dense tensor with this shape");
@@ -4959,7 +4959,7 @@ std::tuple<Tensor, Tensor> householder_product_backward(
   // better performance
   bool modify_K_in_place = !at::GradMode::is_enabled();
 
-  // This method exploites that at k-th iteration vector v_k has only elements
+  // This method exploits that at k-th iteration vector v_k has only elements
   // v_k[k:] which are non-zero.
   auto update_grad = [&m](
                          int64_t k,
@@ -5217,7 +5217,7 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
   if (self_requires_grad || tau_requires_grad) {
     if (left ^ transpose) {
       // Assume left = true and transpose = false. The case with
-      // left = false and tranpose = true is very much similar with just
+      // left = false and transpose = true is very much similar with just
       // transposed arguments passed into householder_product_backward.
       // Ormqr computes B = H_1 * ... * H_k * A.
       // The sensivity wrt H_i is given by (see notes in
@@ -6068,7 +6068,7 @@ Tensor gather_with_keepdimed_indices(
 // P^T dA1 = dL U1 + L dU1 => [left-multiply by L^{-1}, right-multiply by
 // U1^{-1}] L^{-1} P^T dA1 U1^{-1} = L^{-1} dL + dU1 U1^{-1} (**). Note, L is
 // lower-triangular, and so is its inverse, hence L^{-1} dL is lower-triangular.
-// Also, since the diagonal of L (all ones) is never exposed explicity (packed
+// Also, since the diagonal of L (all ones) is never exposed explicitly (packed
 // representation), the diagonal of dL is zero, and hence diag(L^{-1} dL) = 0.
 // Assuming that U1 is full-rank, similarly, dU1 U1^{-1} is upper-triangular.
 // Combining these observations we conclude:
@@ -6351,7 +6351,7 @@ Tensor logsumexp_jvp(
     const Tensor& self_t,
     IntArrayRef dim,
     bool keepdim) {
-  // NB: for simplicitly, we recompute some values that can be reused from
+  // NB: for simplicity, we recompute some values that can be reused from
   // forward
   auto self_p_exp = [&self_p, &dim]() {
     if (self_p.sym_numel() > 0) {

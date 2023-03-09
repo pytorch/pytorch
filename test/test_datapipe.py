@@ -30,6 +30,7 @@ from unittest import skipIf
 import numpy as np
 
 import torch
+import torch.nn as nn
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
@@ -661,6 +662,16 @@ def _mod_3_test(x):
 lambda_fn1 = lambda x: x  # noqa: E731
 lambda_fn2 = lambda x: x % 2  # noqa: E731
 lambda_fn3 = lambda x: x >= 5  # noqa: E731
+
+
+class Add1Module(nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+class Add1Callable:
+    def __call__(self, x):
+        return x + 1
 
 
 class TestFunctionalIterDataPipe(TestCase):
@@ -1325,6 +1336,10 @@ class TestFunctionalIterDataPipe(TestCase):
         # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
         _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
         _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
+
+        # Handle nn.Module and Callable (without __name__ implemented)
+        _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Module(), 0)
+        _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):
