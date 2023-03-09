@@ -168,7 +168,9 @@ def stft(
             torch_window = torch.ones((n_fft))
         assert torch_window.shape[0] == n_fft
         window = g.op("Constant", value_t=torch_window)
-    window = g.op("Cast", window, to_i=_type_utils.JitScalarType.from_value(signal).onnx_type())
+    window = g.op(
+        "Cast", window, to_i=_type_utils.JitScalarType.from_value(signal).onnx_type()
+    )
 
     # Run STFT
     result = g.op(
