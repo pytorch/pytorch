@@ -20,6 +20,7 @@ import sympy
 import torch
 
 import torch._dynamo
+import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
@@ -1009,6 +1010,7 @@ class CommonTemplate:
                 x.argmax(-1),
                 x.amin(-1),
                 x.amax(-1),
+                x.aminmax(),
             )
 
         with config.patch(unroll_reductions_threshold=8):
@@ -1043,9 +1045,35 @@ class CommonTemplate:
 
     def test_min_max_reduction(self):
         def fn(a, b):
-            return ((a + b).max(), (a + b).min(), torch.amax(a + 1, keepdim=True))
+            return (
+                (a + b).max(),
+                (a + b).min(),
+                torch.amax(a + 1, keepdim=True),
+                torch.amin(b + 1, keepdim=True),
+            )
 
-        self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+        for dtype in [torch.float, torch.bfloat16, torch.float16]:
+            self.common(fn, (torch.randn(8, 8).to(dtype), torch.randn(8, 8).to(dtype)))
+
+    def test_fmin_fmax(self):
+        def fn(a, b):
+            return (
+                torch.fmin(a, b),
+                torch.fmax(a, b),
+                torch.fmax(a + 1, torch.tensor(0.0)),
+            )
+
+        self.common(
+            fn,
+            (
+                torch.tensor(
+                    [-10.0, 10.0, float("nan"), float("nan"), float("nan"), 3, 4]
+                ),
+                torch.tensor(
+                    [float("nan"), float("nan"), -10.0, 10.0, float("nan"), 4, 3]
+                ),
+            ),
+        )
 
     def test_sum_int(self):
         def fn(x):
@@ -2454,13 +2482,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device="cpu:0")
-        y0 = torch.randn(1024, 1024, device="cpu:0")
+        x0 = torch.randn(1024, 1024, device="cuda:0")
+        y0 = torch.randn(1024, 1024, device="cuda:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device="cpu:1")
-        y1 = torch.randn(1024, 1024, device="cpu:1")
+        x1 = torch.randn(1024, 1024, device="cuda:1")
+        y1 = torch.randn(1024, 1024, device="cuda:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -4020,7 +4048,7 @@ class CommonTemplate:
         self.assertTrue(same(out, out_eager))
 
     @config.patch(
-        {"triton.ordered_kernel_names": True, "triton.descriptive_kernel_names": False}
+        {"triton.unique_kernel_names": True, "triton.descriptive_names": False}
     )
     def test_kernel_names(self):
         @torch._dynamo.optimize("inductor")
@@ -4263,22 +4291,25 @@ class CommonTemplate:
         self.common(fn, [torch.randn(64) * 10])
 
     def test_baddbmm(self):
-        def fn(a, b, c):
-            return aten.baddbmm(a, b, c)
+        def fn(a, b, c, beta):
+            return aten.baddbmm(a, b, c, beta=beta)
 
-        self.common(
-            fn,
-            [
-                torch.randn(6, 1, 100),
-                torch.randn(6, 128, 64),
-                torch.randn(6, 64, 100),
-            ],
-            # Mismatched elements: 1212 / 76800 (1.6%)
-            # Greatest absolute difference: 0.001953125 at index (0, 0, 93) (up to 1e-05 allowed)
-            # Greatest relative difference: 1.0 at index (3, 19, 4) (up to 0.001 allowed)
-            atol=0.002,
-            rtol=0.001,
+        b = torch.randn(6, 128, 64)
+        c = torch.randn(6, 64, 100)
+        options = itertools.product(
+            [torch.randn(6, 1, 100), torch.randn(6, 1, 100).fill_(torch.nan)],
+            [0.0, 1.0],
         )
+        for a, beta in options:
+            self.common(
+                fn,
+                [a, b, c, beta],
+                # Mismatched elements: 1212 / 76800 (1.6%)
+                # Greatest absolute difference: 0.001953125 at index (0, 0, 93) (up to 1e-05 allowed)
+                # Greatest relative difference: 1.0 at index (3, 19, 4) (up to 0.001 allowed)
+                atol=0.002,
+                rtol=0.001,
+            )
 
     @config.patch({"triton.max_tiles": 2})
     def test_fuse_tiled(self):
@@ -4454,7 +4485,11 @@ class CommonTemplate:
 
     def test_narrow(self):
         def fn(x):
-            return aten.narrow(x, 1, 10, 16), aten.narrow(x + 2, 0, 10, 16) + 1
+            return (
+                aten.narrow(x, 1, 10, 16),
+                aten.narrow(x + 2, 0, 10, 16) + 1,
+                aten.narrow_copy(x, 1, 10, 16),
+            )
 
         self.common(fn, [torch.randn(64, 64)])
 
@@ -6616,6 +6651,32 @@ if HAS_CPU:
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
+            assert metrics.generated_cpp_vec_kernel_count == 0
+
+        def test_invalid_index_of_empty_tensor(self):
+            def fn(a):
+                b = a[[0]]
+                return b
+
+            a = torch.tensor([])
+            with self.assertRaises(RuntimeError):
+                torch.compile(fn)(a)
+
+        def test_ir_node_str(self):
+            @torch.compile
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin(), torch.nn.Softmax(dim=1)(x.cos())
+
+            def run_node_alt(*args, **kwargs):
+                rv = run_node(*args, **kwargs)
+                strings.append(str(rv))
+                return rv
+
+            strings = []
+            run_node = GraphLowering.run_node
+            with patch.object(GraphLowering, "run_node", run_node_alt):
+                fn(torch.randn([8, 128]))
+            self.assertGreater(len(strings), 3)
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:
@@ -6658,27 +6719,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_linear_permute_fusion(self):
             class TestModule(torch.nn.Module):
-                def __init__(self, k: int, n: int):
+                def __init__(self, k: int, n: int, has_bias: bool):
                     super().__init__()
                     self.weight = torch.nn.Parameter(torch.randn(n, k))
-                    self.bias = torch.nn.Parameter(torch.randn(n))
+                    self.has_bias = has_bias
+                    if has_bias:
+                        self.bias = torch.nn.Parameter(torch.randn(n))
 
                 def forward(self, input: torch.Tensor):
-                    a0 = torch.nn.functional.linear(input, self.weight, self.bias)
+                    if self.has_bias:
+                        a0 = torch.nn.functional.linear(input, self.weight, self.bias)
+                    else:
+                        a0 = torch.nn.functional.linear(input, self.weight)
                     b0 = a0.permute(0, 2, 1)
                     return b0
 
             m, k, n = 16, 8, 4
             trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
-            module = TestModule(k, n).eval()
-            input = torch.randn(6, m, k)
-            traced = trace_func(module, [input])
-            num_linear = count_call_function(traced, torch.nn.functional.linear)
-            num_linear_transpose = count_call_function(traced, linear_transpose)
-            self.assertEqual(num_linear, 0)
-            self.assertEqual(num_linear_transpose, 1)
+            for has_bias in [True, False]:
+                module = TestModule(k, n, has_bias).eval()
+                input = torch.randn(6, m, k)
+                traced = trace_func(module, [input])
+                num_linear = count_call_function(traced, torch.nn.functional.linear)
+                num_linear_transpose = count_call_function(traced, linear_transpose)
+                self.assertEqual(num_linear, 0)
+                self.assertEqual(num_linear_transpose, 1)
 
-            self.assertTrue(torch.allclose(module(input), traced(input)))
+                self.assertTrue(torch.allclose(module(input), traced(input)))
 
         @config.patch(permute_fusion=True)
         def test_permute_fusion(self):
@@ -6743,28 +6810,34 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         def test_permute_linear_fusion(self):
             class TestModule(torch.nn.Module):
-                def __init__(self, k: int, n: int):
+                def __init__(self, k: int, n: int, has_bias: bool):
                     super().__init__()
                     self.weight = torch.nn.Parameter(torch.randn(n, k))
-                    self.bias = torch.nn.Parameter(torch.randn(n))
+                    self.has_bias = has_bias
+                    if has_bias:
+                        self.bias = torch.nn.Parameter(torch.randn(n))
 
                 def forward(self, input: torch.Tensor):
                     input1 = input.permute(0, 2, 1)
-                    output = torch.nn.functional.linear(input1, self.weight, self.bias)
-                    return output
+                    if self.has_bias:
+                        return torch.nn.functional.linear(
+                            input1, self.weight, self.bias
+                        )
+                    return torch.nn.functional.linear(input1, self.weight)
 
             m, k, n = 16, 8, 4
 
             trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
-            module = TestModule(k, n).eval()
-            input = torch.randn(6, k, m)
-            traced = trace_func(module, [input])
-            num_linear = count_call_function(traced, torch.nn.functional.linear)
-            num_transpose_linear = count_call_function(traced, transpose_linear)
-            self.assertEqual(num_linear, 0)
-            self.assertEqual(num_transpose_linear, 1)
+            for has_bias in [True, False]:
+                module = TestModule(k, n, has_bias).eval()
+                input = torch.randn(6, k, m)
+                traced = trace_func(module, [input])
+                num_linear = count_call_function(traced, torch.nn.functional.linear)
+                num_transpose_linear = count_call_function(traced, transpose_linear)
+                self.assertEqual(num_linear, 0)
+                self.assertEqual(num_transpose_linear, 1)
 
-            self.assertTrue(torch.allclose(module(input), traced(input)))
+                self.assertTrue(torch.allclose(module(input), traced(input)))
 
         def test_permute_bmm_fusion(self):
             class TestModule(torch.nn.Module):
@@ -7340,17 +7413,72 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 self.assertEqual(fn_opt(), fn())
 
+        def test_kernel_names_descriptive(self):
+            @torch._dynamo.optimize("inductor")
+            def fn1(x):
+                return x.cos().sin()
+
+            @torch._dynamo.optimize("inductor")
+            def fn2(x):
+                x = torch.mm(x, x)
+                x = torch.softmax(x, dim=1)
+                return x
+
+            mod = nn.Sequential(
+                nn.Linear(4, 4),
+                nn.LayerNorm(4),
+                nn.ReLU(),
+            ).cuda()
+
+            @torch._dynamo.optimize("inductor")
+            def fn3(x):
+                return mod(x)
+
+            func_and_kernel_aten = [
+                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
+                (
+                    fn3,
+                    "triton_fused_native_layer_norm_relu",
+                    (torch.randn(4, 4, device="cuda"),),
+                ),
+            ]
+            func_and_kernel_torch = [
+                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
+                (
+                    fn3,
+                    "triton_fused_LayerNorm_ReLU",
+                    (torch.randn(4, 4, device="cuda"),),
+                ),
+            ]
+
+            def test_funcs(func_and_kernel):
+                with torch.no_grad():
+                    for fn, kernel_name, inps in func_and_kernel:
+                        code = run_and_get_triton_code(fn, *inps)
+                        if kernel_name not in code:
+                            print(code)
+                        self.assertTrue(kernel_name in code)
+
+            test_funcs(func_and_kernel_aten)
+            patch.object(config.triton, "descriptive_names", "torch")(test_funcs)(
+                func_and_kernel_torch
+            )
+
         def test_split_op_with_sym(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
+                return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
+
             for dynamic_shapes in [True, False]:
-                torch._dynamo.config.dynamic_shapes = dynamic_shapes
-
-                def fn(x: torch.Tensor) -> torch.Tensor:
-                    # split(tensor, sympy.Integer), split(tensor, sympy.Expr)
-                    return torch.split(x, x.shape[0]), torch.split(x, x.shape[0] // 2)
-
-                fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(fn)
-                inps = torch.randn([5, 5])
-                fn_opt(inps)
+                with torch._dynamo.config.patch(dynamic_shapes=dynamic_shapes):
+                    torch._dynamo.reset()
+                    fn_opt = torch._dynamo.optimize("inductor", dynamic=dynamic_shapes)(
+                        fn
+                    )
+                    inps = torch.randn([5, 5])
+                    fn_opt(inps)
 
 
 class ExprPrinterTests(TestCase):
@@ -7364,18 +7492,25 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                "((-1)*(1/(((-1) + (2*foo))))) + (foo*(1/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
             ),
-            (s1 / (s2 - s3), "foo*(1/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
             # Test Pow directly.
-            (sympy.Pow(s1 + s2, 0), "1"),  # note: simplified before _print_Pow
-            (sympy.Pow(s1 + s2, -3), "1/((bar + foo)*(bar + foo)*(bar + foo))"),
-            (sympy.Pow(s1 + s2, 2), "(bar + foo)*(bar + foo)"),
+            (
+                sympy.Pow(s1 + s2, 0),
+                lambda _: "1",
+            ),  # note: simplified before _print_Pow
+            (
+                sympy.Pow(s1 + s2, -3),
+                lambda c: f"{c}/((bar + foo)*(bar + foo)*(bar + foo))",
+            ),
+            (sympy.Pow(s1 + s2, 2), lambda _: "(bar + foo)*(bar + foo)"),
         )
 
         for expr, result in cases:
-            self.assertEqual(cexpr(expr), result)
-            self.assertEqual(texpr(expr), result)
+            self.assertEqual(cexpr(expr), result(1.0))  # 1.0 for FP div
+            self.assertEqual(texpr(expr), result(1))
+            self.assertEqual(pexpr(expr), result(1))
 
     def test_print_floor(self):
         s1 = sympy.Symbol("s1", integer=False)

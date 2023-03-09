@@ -140,12 +140,14 @@ def is_copy_node(node, modules):
 
 def is_general_tensor_shape_node(node, modules):
     func_list = [
+        torch.narrow,
         torch.transpose,
         torch.repeat_interleave,
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
         torch.nn.functional.pixel_shuffle,
+        torch.nn.functional.pixel_unshuffle,
     ]
     method_list = [
         "contiguous",

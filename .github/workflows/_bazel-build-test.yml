@@ -26,18 +26,38 @@ on:
         required: true
         type: string
         description: |
-          An option JSON description of what test configs to run later on.
-          We provide all test configs at build time to be able to only do the necessary work.
+          A JSON description of what configs to run later on.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
 jobs:
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   build-and-test:
+    needs: filter
     # Don't run on forked repos.
-    if: github.repository_owner == 'pytorch'
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
     strategy:
-      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
       fail-fast: false
     runs-on: ${{ matrix.runner }}
     steps:
@@ -63,6 +83,10 @@ jobs:
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        if: ${{ inputs.cuda-version != 'cpu' }}
 
       - name: Output disk space left
         run: |
@@ -98,7 +122,9 @@ jobs:
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
+          # shellcheck disable=SC2086
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -116,9 +142,8 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .ci/pytorch/build.sh'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
-      # !{{ common_android.upload_android_binary_size("", "")}}
       - name: Test
         id: test
         # Time out the test phase after 3.5 hours
@@ -155,7 +180,9 @@ jobs:
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
@@ -179,7 +206,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
 
       - name: Print remaining test logs
         shell: bash

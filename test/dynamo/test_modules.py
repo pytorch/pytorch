@@ -682,6 +682,22 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModuleGuardNameIsValid(torch.nn.ModuleDict):
+    # Guard names should be valid python identifier as we use eval() to get
+    # corresponding guard value. Some guard names come from source(module path)
+    # where special symbols are valid. But they are not valid python identifier,
+    # we should identify these pattern and rewrite them with getattr.
+    def __init__(self):
+        super().__init__()
+        for i in range(2):
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
+
+    def forward(self, x):
+        for _, layer in self.items():
+            x = layer(x)
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -746,6 +762,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1255,7 +1272,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("forward_hooks.keys" in failure_reason)
+        self.assertTrue("hooks" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
