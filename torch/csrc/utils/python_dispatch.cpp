@@ -537,6 +537,16 @@ void initDispatchBindings(PyObject* module) {
       .def("__sub__", &c10::DispatchKeySet::operator-)
       .def("__and__", &c10::DispatchKeySet::operator&)
       .def("highestPriorityTypeId", &c10::DispatchKeySet::highestPriorityTypeId)
+      .def(
+          "remove",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.remove(k);
+          })
+      .def(
+          "add",
+          [](c10::DispatchKeySet self, c10::DispatchKey k) {
+            return self.add(k);
+          })
       .def("has", &c10::DispatchKeySet::has)
       .def("__repr__", [](c10::DispatchKeySet d) { return c10::toString(d); });
 
@@ -549,6 +559,10 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_dispatch_keyset_full_after", [](c10::DispatchKey t) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL_AFTER, t);
+  });
+
+  m.def("_dispatch_keyset_full", []() {
+    return c10::DispatchKeySet(c10::DispatchKeySet::FULL);
   });
 
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
