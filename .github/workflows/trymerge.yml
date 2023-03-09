@@ -57,8 +57,6 @@ jobs:
             else
               python3 .github/scripts/trymerge.py --force "${PR_NUM}"
             fi
-          elif [ -n "${ON_GREEN}" ]; then
-            python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
           elif [ -n "${LAND_CHECKS}" ]; then
             python3 .github/scripts/trymerge.py --land-checks "${PR_NUM}"
           elif [ -n "${COMMENT_ID}" ]; then

@@ -111,8 +111,6 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.pr_num = 76123
             self.dry_run = True
             self.comment_id = 0
-            self.on_mandatory = False
-            self.on_green = False
             self.land_checks = False
             self.reason = 'this is for testing'
 
@@ -128,8 +126,6 @@ def mock_merge(pr_num: int, repo: GitRepo,
                dry_run: bool = False,
                skip_mandatory_checks: bool = False,
                comment_id: Optional[int] = None,
-               mandatory_only: bool = False,
-               on_green: bool = False,
                land_checks: bool = False,
                timeout_minutes: int = 400,
                stale_pr_days: int = 3) -> None:
@@ -377,9 +373,7 @@ class TestTryMerge(TestCase):
                                            dry_run=mock.ANY,
                                            skip_mandatory_checks=True,
                                            comment_id=mock.ANY,
-                                           on_green=False,
-                                           land_checks=False,
-                                           mandatory_only=False)
+                                           land_checks=False)
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
@@ -391,9 +385,7 @@ class TestTryMerge(TestCase):
                                            dry_run=mock.ANY,
                                            skip_mandatory_checks=False,
                                            comment_id=mock.ANY,
-                                           on_green=False,
-                                           land_checks=False,
-                                           mandatory_only=False)
+                                           land_checks=False)
 
     @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
     def test_revert_rules(self, *args: Any) -> None:

@@ -600,8 +600,6 @@ def parse_args() -> Any:
     from argparse import ArgumentParser
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--on-green", action="store_true")
-    parser.add_argument("--on-mandatory", action="store_true")
     parser.add_argument("--land-checks", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -1596,8 +1594,6 @@ def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
           skip_mandatory_checks: bool = False,
           comment_id: Optional[int] = None,
-          mandatory_only: bool = False,
-          on_green: bool = False,
           land_checks: bool = False,
           timeout_minutes: int = 400,
           stale_pr_days: int = 3) -> None:
@@ -1607,8 +1603,8 @@ def merge(pr_num: int, repo: GitRepo,
     initial_commit_sha = pr.last_commit()['oid']
     print(f"Attempting merge of {initial_commit_sha}")
 
-    explainer = TryMergeExplainer(skip_mandatory_checks, on_green, land_checks, pr.get_labels(), pr.pr_num, org, project)
-    on_green, land_checks = explainer.get_flags()
+    explainer = TryMergeExplainer(skip_mandatory_checks, land_checks, pr.get_labels(), pr.pr_num, org, project)
+    land_checks = explainer.get_flags()
     land_check_commit = None
 
     if pr.is_ghstack_pr():
@@ -1792,8 +1788,6 @@ def main() -> None:
               dry_run=args.dry_run,
               skip_mandatory_checks=args.force,
               comment_id=args.comment_id,
-              on_green=args.on_green,
-              mandatory_only=args.on_mandatory,
               land_checks=args.land_checks)
     except Exception as e:
         handle_exception(e)
