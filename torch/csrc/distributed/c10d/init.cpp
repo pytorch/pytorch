@@ -498,6 +498,12 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           },
           py::call_guard<py::gil_scoped_release>())
       .def(
+        "_point_grads_to_bucket",
+        [](::c10d::Reducer& reducer) {
+            reducer.point_grads_to_bucket();
+        },
+        py::call_guard<py::gil_scoped_release>())
+      .def(
           "set_logger",
           [](::c10d::Reducer& reducer,
              const std::shared_ptr<::c10d::Logger> logger) {

@@ -1093,6 +1093,11 @@ class DistributedDataParallel(Module, Joinable):
                 assert self.logger is not None
                 self.logger.set_runtime_stats_and_log()
                 self.num_iterations += 1
+                if self.num_iterations > 1 and any(
+                    p.grad is None for p in self.module.parameters()
+                ):
+                    self.reducer._point_grads_to_bucket()
+
                 self.reducer.prepare_for_forward()
 
             # Notify the join context that this process has not joined, if

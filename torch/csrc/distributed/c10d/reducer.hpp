@@ -167,6 +167,8 @@ class TORCH_API Reducer {
   // refcycle between reducer and logger.
   void set_logger(std::weak_ptr<c10d::Logger> logger);
 
+  void point_grads_to_bucket();
+
   // When graph is not explicitly set by user as static and has unused
   // parameters, this will return whether the graph has been static until the
   // current iteration, which means unused params set has not changed.
