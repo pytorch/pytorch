@@ -1652,7 +1652,9 @@ class CppTileCodeGenBuffer(IndentedBuffer):
         self.lines = []
 
     def _writeline(self, name, tile_buf_name, line):
-        self.lines.append(CppTileCodeOrLine(name, tile_buf_name, V.kernel.current_compute_at, line))
+        self.lines.append(
+            CppTileCodeOrLine(name, tile_buf_name, V.kernel.current_compute_at, line)
+        )
 
     def writeline(self, line):
         self._writeline(None, V.kernel.current_slice_store_name, line)
@@ -1664,7 +1666,10 @@ class CppTileCodeGenBuffer(IndentedBuffer):
     def splice(self, code):
         self.lines.append(
             CppTileCodeOrLine(
-                None, V.kernel.current_slice_store_name, V.kernel.current_compute_at, code
+                None,
+                V.kernel.current_slice_store_name,
+                V.kernel.current_compute_at,
+                code,
             )
         )
 
@@ -1680,13 +1685,14 @@ class DeferredTileCodeGenBuffer(CppTileCodeGenBuffer):
 
 class WrapDeferredBuffer:
     """Allow writes to deferred buffer as if it is not deferred"""
+
     def __init__(self, wrapped, name):
         self.wrapped = wrapped
         self.name = name
 
     def writeline(self, line):
         return self.wrapped.writeline(self.name, line)
-    
+
     def writelines(self, lines):
         return self.wrapped.writelines(self.name, lines)
 
@@ -2041,7 +2047,6 @@ class CppTileKernel(CppKernel):
 
         # Sorting for maximum loop fusion
         self.loads.lines.sort(reverse=False, key=lambda line: len(line.compute_at))
-        self.stores.lines.sort(reverse=True, key=lambda line: len(line.compute_at))
 
         # Generate inner loops
         self.indent = 0
