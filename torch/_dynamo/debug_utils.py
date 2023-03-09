@@ -39,9 +39,12 @@ if use_buck:
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
+BUCK_CMD_PREFIX = ["buck2", "run", "@mode/dev-nosan"]
+
+
 class BuckTargetWriter:
     def __init__(self, filename):
-        self.subdir, self.py_file = os.path.split(filename)
+        self.subdir, self.py_file = os.path.split(os.path.abspath(filename))
         self.target = self.py_file.replace(".py", "")
 
         # Get main_module path from fbcode
@@ -82,12 +85,12 @@ python_binary(
         with open(target_file, "w") as fd:
             fd.write(self.build())
         # log.warning(f"Wrote isolation TARGETS file at {target_file}")
-        cmd = ["buck2", "run", "@mode/dev-nosan", self.cmd_line_path]
+        cmd_split = BUCK_CMD_PREFIX + [self.cmd_line_path]
         if print_msg:
             log.warning(
-                f'Found an example that reproduces the error. Run this cmd to repro - {" ".join(cmd)}'
+                f"Found an example that reproduces the error. Run this cmd to repro - {' '.join(cmd_split)}"
             )
-        return cmd
+        return cmd_split
 
 
 def minifier_dir():
@@ -1004,7 +1007,17 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     def debug_wrapper(gm, example_inputs, **kwargs):
         compiler_fn = functools.partial(unconfigured_compiler_fn, **kwargs)
         assert config.repro_after in ("dynamo", "aot", None)
+
         if config.repro_after == "dynamo":
+
+            def add_paths(exc):
+                exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")
+                if use_buck:
+                    exc.buck_command = " ".join(
+                        BUCK_CMD_PREFIX
+                        + [BuckTargetWriter(exc.minifier_path).cmd_line_path]
+                    )
+
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
@@ -1022,9 +1035,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                         compiler_name,
                     )
                     exc = AccuracyError("Bad accuracy detected.")
-                    exc.minifier_path = os.path.join(
-                        minifier_dir(), "minifier_launcher.py"
-                    )
+                    add_paths(exc)
                     raise exc
             else:
                 try:
@@ -1047,9 +1058,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
                             example_inputs,
                             compiler_name,
                         )
-                    exc.minifier_path = os.path.join(
-                        minifier_dir(), "minifier_launcher.py"
-                    )
+                    add_paths(exc)
                     raise
         else:
             compiled_gm = compiler_fn(gm, example_inputs)

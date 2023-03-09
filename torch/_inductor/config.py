@@ -186,10 +186,16 @@ class triton:
     tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
-    ordered_kernel_names = False
+    # Note: This is orthogonal to descriptive_names - this is deciding whether
+    # our triton kernel names should all be `triton_` (to maximize caching) or
+    # whether they should be unique.
+    unique_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    # False: No special names (just triton__1, triton__2, etc.)
+    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
+    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    descriptive_names = "aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
