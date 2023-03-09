@@ -3,7 +3,7 @@ name: Upload contribution stats
 on:
   schedule:
     # Choose a random time near midnight PST because it may be delayed if there are high loads
-    - cron:  37 7 * * *
+    - cron:  37 10 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'schedule' || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
