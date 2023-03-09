@@ -141,6 +141,14 @@ class OutputCodeLogRec(typing.NamedTuple):
         return f"Output code:\n {self.output_code}"
 
 
+@loggable("schedule", TORCHINDUCTOR_LOG_NAME, off_by_default=True)
+class ScheduleLogRec(typing.NamedTuple):
+    schedule: typing.List[typing.Any]
+
+    def __str__(self):
+        return f"Schedule:\n {schedule}"
+
+
 # initialize torchdynamo loggers
 def init_logging(log_file_name=None):
     in_test = "PYTEST_CURRENT_TEST" in os.environ and "___LOG_TESTING" not in os.environ

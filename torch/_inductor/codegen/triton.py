@@ -13,6 +13,7 @@ import sympy
 import torch
 
 from ..._dynamo import config as dynamo_config
+from ..._dynamo.logging import ScheduleLogRec
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint
@@ -1565,8 +1566,7 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        # if dynamo_config.output_code:
-        # log.info("schedule: %s", node_schedule)
+        log.debug(ScheduleLogRec(node_schedule))
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
