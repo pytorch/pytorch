@@ -338,9 +338,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        self.tracing_context.module_context.register(arg.source)
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
+        self.tracing_context.module_context.register(arg.source)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -476,10 +476,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 )
 
         assert self.nn_modules is not None
-        for k, v in self.nn_modules.items():
-            if v is target:
-                # it already exists
-                return wrap_name(k)
+        # Each param has a source, and even if they have the same tensor value, it needs to
+        # be reachable. So, for ParamBufferSource, which is the leaf node source initialized below
+        # we can skip this value check. It's wrap_name is a no op anyway, so this is safe.
+        if not isinstance(source, ParamBufferSource):
+            for k, v in self.nn_modules.items():
+                if v is target:
+                    # it already exists, but register it anyway
+                    return wrap_name(k)
 
         # create a new unique name
         name = "_".join(map(str, names))
@@ -506,14 +510,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for n, p in target.named_parameters():
+                        for n, p in target.named_parameters(recurse=False, remove_duplicate=False):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_buffers"):
-                        for n, p in target.named_buffers():
+                        for n, p in target.named_buffers(recurse=False, remove_duplicate=False):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
