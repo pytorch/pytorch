@@ -504,14 +504,18 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for n, p in target.named_parameters(recurse=False, remove_duplicate=False):
+                        for n, p in target.named_parameters(
+                            recurse=False, remove_duplicate=False
+                        ):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_buffers"):
-                        for n, p in target.named_buffers(recurse=False, remove_duplicate=False):
+                        for n, p in target.named_buffers(
+                            recurse=False, remove_duplicate=False
+                        ):
                             new_source = ParamBufferSource(source, n)
                             new_name = new_source.name()
                             self.register_attr_or_module(p, new_name, source=new_source)
