@@ -25,10 +25,16 @@ class CUTLASSSparseLinear(nn.Module):
 
         self.weight_tensor = linear_model.weight.data.masked_select(mask).view(m, k // 2)
         self.bias_tensor = linear_model.bias.data
-        self.meta, self.meta_reordered = torch._cutlass_create_meta(mask)
+        self.mask = mask
+        self.meta = None
 
     def forward(self, x):
-        return torch._cutlass_linear(self.weight_tensor, x.T, self.meta, self.meta_reordered).T + self.bias_tensor
+        if self.mask is not None:
+            prod, self.meta = torch._cutlass_linear(self.weight_tensor, x.T, self.mask)
+            self.mask = None
+        else:
+            prod, _ = torch._cutlass_linear(self.weight_tensor, x.T, self.meta)
+        return prod.T + self.bias_tensor
 
 
 def get_linear(m, k, n):

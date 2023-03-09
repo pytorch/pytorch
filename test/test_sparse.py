@@ -4514,11 +4514,10 @@ class TestSparseAny(TestCase):
 
                 c1 = torch.mm(a_dense, b)
 
-                meta, meta_reordered = torch._cutlass_create_meta(mask)
-                c0 = torch._cutlass_linear(a_sparse, b, meta, meta_reordered)
+                c0, meta_reordered = torch._cutlass_linear(a_sparse, b, mask)
                 torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
 
-                # sparse_t = benchmark_torch_function_in_microseconds(torch._cutlass_linear, a_sparse, b, meta, meta_reordered)
+                # sparse_t, _ = benchmark_torch_function_in_microseconds(torch._cutlass_linear, a_sparse, b, meta_reordered)
                 # dense_t = benchmark_torch_function_in_microseconds(torch.mm, a, b)
                 # print(f"sparse_t: {sparse_t:.0f}us dense_t: {dense_t:.0f}us speedup: {dense_t/sparse_t:.2f}x")
 
