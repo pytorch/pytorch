@@ -18,16 +18,6 @@ log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class ZeroGuard:
-    """
-    An expression we should check equals zero.
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
-@dataclasses.dataclass
 class PositiveGuard:
     """
     An expression we should check for > 0
