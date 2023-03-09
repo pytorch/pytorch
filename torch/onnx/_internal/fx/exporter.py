@@ -532,7 +532,7 @@ def _export(
     decomposed_module = proxy_tensor.make_fx(
         module,
         decomposition_table=export_options.decomposition_table,
-        tracing_mode="symbolic",
+        tracing_mode="fake",
         _allow_non_fake_inputs=True,
     )(*args)
     # Rename placeholder targets to match the original module's signature since
