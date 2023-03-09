@@ -392,7 +392,6 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             bucket_view.copy_(div_result);
           }
         } else {
-          LOG(INFO) << "RV: copy to grad iteration " << num_iterations_;
             RECORD_FUNCTION(
               "torch::distributed::reducer::copy_", std::vector<c10::IValue>({bucket_view})
             )
@@ -406,7 +405,6 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
           return true;
         }
       } else {
-        LOG(INFO) << "RV: grad and bucket view point to the same";
         // If grad and bucket view point to the same storage, no need to copy.
         if (comm_hook_ == nullptr) {
           bucket_view.div_(div_factor_);
