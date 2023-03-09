@@ -1458,7 +1458,7 @@ def merge(pr_num: int, repo: GitRepo,
     if pr.is_ghstack_pr():
         get_ghstack_prs(repo, pr)  # raises error if out of sync
 
-    # check_for_sev(org, project, skip_mandatory_checks)
+    check_for_sev(org, project, skip_mandatory_checks)
 
     if skip_mandatory_checks or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
@@ -1489,7 +1489,7 @@ def merge(pr_num: int, repo: GitRepo,
     elapsed_time = 0.0
     flaky_rules = read_flaky_rules()
     while elapsed_time < timeout_minutes * 60:
-        # check_for_sev(org, project, skip_mandatory_checks)
+        check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
