@@ -347,12 +347,9 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
         assert isinstance(state, ModuleCheckpointState)
         self.names_to_sources = state.names_to_sources
 
-    def register(self, name: str, source: Source):
+    def register(self, source: Source):
         """
-        Registers a source object to a given name.
-
-        :param name: A string representing the name to register the source object under.
-        :type name: str
+        Registers a source object to it's given name.
 
         :param source: A Source object representing the source to be registered.
         :type source: Source
@@ -361,6 +358,9 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
 
         :return: None.
         """
+        from torch._dynamo.utils import normalize_attr_name
+
+        name = normalize_attr_name(source.name())
         if name in self.names_to_sources:
             curr_source = self.names_to_sources[name]
             assert (

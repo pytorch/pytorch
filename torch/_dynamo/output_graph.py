@@ -336,9 +336,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        self.tracing_context.module_context.register(
-            normalize_attr_name(arg.source.name()), arg.source
-        )
+        self.tracing_context.module_context.register(arg.source)
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
 
@@ -491,7 +489,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
                 assert self.names_to_sources is not None
-                self.names_to_sources[name] = source
+                self.tracing_context.module_context.register(source)
                 if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
