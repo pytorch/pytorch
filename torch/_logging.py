@@ -1,3 +1,13 @@
+# Top level logging module for torch logging
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
+# Simple setup for onboarding (see above doc for more detail):
+# 1. register_log for all logs you'd like to have contorl for
+# 2. @loggable any classes you'd like to register as artifacts can be toggled as logged/not logged
+#    Only requirement here is that it has a __str__ method, and then instances of this class can be passed directly
+#    to log.debug(<instance here>)
+# 3. call init_logging([.. your log names .. ]) somewhere in your code
+# (before the user may attempt to set logs, but after you've executed 1. and 2.)
+
 import collections
 import itertools
 import logging

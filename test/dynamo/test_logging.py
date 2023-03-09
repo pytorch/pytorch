@@ -95,8 +95,8 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
                 num_handlers = len(logger.handlers)
                 self.assertLessEqual(
                     len(logger.handlers),
-                    1,
-                    "All pt2 loggers should only have at most one handler (right now at least).",
+                    2,
+                    "All pt2 loggers should only have at most two handlers (debug artifacts and messages above debug level).",
                 )
 
                 if num_handlers == 0:
@@ -120,22 +120,29 @@ class LoggingTests(torch._dynamo.test_case.TestCase):
     test_bytecode = multi_record_test("bytecode", td_logging.ByteCodeLogRec, 2)
     test_output_code = multi_record_test("output_code", td_logging.OutputCodeLogRec, 2)
 
-    def test_dynamo(self):
+    def test_dynamo_debug(self):
         pass
 
     def test_dynamo_info(self):
         pass
 
+    def test_dynamo_error(self):
+        pass
+
     def test_aot(self):
         pass
 
-    def test_inductor(self):
+    def test_inductor_debug(self):
         pass
 
     def test_inductor_info(self):
         pass
 
+    def test_inductor_error(self):
+        pass
 
+
+# single record tests
 exclusions = {"bytecode", "output_code"}
 for name, ty in torch._logging.NAME_TO_RECORD_TYPE.items():
     if name not in exclusions:
