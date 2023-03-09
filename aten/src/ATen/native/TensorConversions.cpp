@@ -498,18 +498,28 @@ std::vector<Tensor> _to_cpu(TensorList tensors) {
     return cpu_tensors;
 }
 
-Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional<bool> masked) {
+Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional<bool> masked_) {
+  /*
+    For historical reasons, to_dense backward implements masked
+    semantics for sparse tensors, that is, gradients with respect to
+    unspecified elements are ignored.  The masked kw argument of
+    to_dense is introduced to allow to_dense to be used in the
+    non-masked semantics context. However, for BC reasons, the default
+    value to masked kw argument is set True as a first instance. But
+    eventually, we should eliminate the masked kw argument altogether
+    and let to_dense backward to behave according to non-masked
+    semantics. Masked semantics of tensors is implemented in the
+    framework of masked tensors.
+  */
   const auto input_layout = input_.layout();
+  const bool masked = masked_.value_or(true);
   switch (input_layout) {
     case kStrided:
-      if (masked.value_or(false)) {
-        TORCH_WARN("strided tensor to dense backward ignores masked=true");
-      }
       // TODO: return grad as it is
-      return grad.to_dense(c10::nullopt, masked);
+      return grad.to_dense(masked, input_.scalar_type());
     case kSparse:
       // Autograd operates on the coalesced assumption, i.e. no duplicate values.
-      if (masked.value_or(false)) {
+      if (masked) {
         return grad.sparse_mask(input_.coalesce());
       } else {
         // TODO: return grad as it is
@@ -518,17 +528,17 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
     case kSparseCsr:
     case kSparseCsc:
       // TODO: add efficient CSR/CSC support for sparse_mask
-      if (masked.value_or(false)) {
+      if (masked) {
         return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout);
       } else {
         // TODO: return grad as it is
-        return grad.to_sparse(input_layout, c10::nullopt, input_.dense_dim());
+        return grad.to_sparse(input_layout, /*blocksize=*/c10::nullopt, /*dense_dim=*/input_.dense_dim());
       }
     case kSparseBsr:
     case kSparseBsc: {
       // TODO: add efficient BSR/BSC support for sparse_mask
       const auto blocksize = at::sparse_csr::getBlockSize(input_);
-      if (masked.value_or(false)) {
+      if (masked) {
         return grad.sparse_mask(input_.to_sparse(input_.sparse_dim())).to_sparse(input_layout, blocksize);
       } else {
         // TODO: return grad as it is
@@ -536,9 +546,6 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
       }
     }
     case kMkldnn:
-      if (masked.value_or(false)) {
-        TORCH_WARN("mkldnn tensor to dense backward ignores masked=true");
-      }
       return grad.to_mkldnn(input_.scalar_type());
     default:
       AT_ERROR("to_dense_backward: Unsupported input layout: ", input_layout);
@@ -551,7 +558,7 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
-Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype, c10::optional<bool> masked) {
+Tensor to_dense(const Tensor& tensor, c10::optional<bool> masked, c10::optional<c10::ScalarType> dtype) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype, masked);
   }
@@ -574,6 +581,10 @@ Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype, c10:
   return tensor;
 }
 
+Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype) {
+  return to_dense(tensor, c10::nullopt, dtype);
+}
+
 Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
@@ -583,7 +594,8 @@ Tensor sparse_to_dense(const Tensor& self, c10::optional<ScalarType> dtype, c10:
 
 Tensor sparse_compressed_to_dense(
     const Tensor& self,
-    c10::optional<ScalarType> dtype, c10::optional<bool> masked) {
+    c10::optional<ScalarType> dtype,
+    c10::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(),
       "dtype argument is not supported by sparse_csr_to_dense");
@@ -1778,7 +1790,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, c10::optional<c10::Layout
   }
   switch (layout_) {
   case kStrided:
-    return sparse_compressed_to_dense(self);
+    return sparse_compressed_to_dense(self, /*dtype=*/c10::nullopt, /*masked=*/c10::nullopt);
   case kSparse:
     return sparse_compressed_to_sparse(self, 2);
   case kSparseCsr:

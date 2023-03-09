@@ -27,9 +27,6 @@ Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dt
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
               "mkldnn_to_dense expects float or bfloat16 tensor input");
-  if (masked.value_or(false)) {
-    TORCH_WARN("mkldnn tensor to dense conversion ignores masked=true");
-  }
   ideep::tensor& stensor = itensor_from_mkldnn(mkldnn_tensor);
   auto dims = stensor.get_dims();
   auto data_type = dtype.has_value() ? dtype.value() : mkldnn_tensor.scalar_type();
@@ -345,4 +342,9 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+  return mkldnn_to_dense(mkldnn_tensor, dtype, c10::nullopt);
+}
+
 }}
