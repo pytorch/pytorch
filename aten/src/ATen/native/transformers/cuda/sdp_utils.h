@@ -15,8 +15,6 @@
 #include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #include <functional>
-#include <unordered_set>
-#include <vector>
 #include <cmath>
 #include <c10/util/string_view.h>
 
