@@ -22,18 +22,35 @@ LOG_NAME_TO_NAMES = collections.defaultdict(set)
 VERBOSE_NAMES = set()
 
 # Set by user-facing API
-settings = {}
+name_to_level = {}
+enabled_artifact_names = {}
 
 # User API for setting log properties
 # ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
 # ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
 def set_logs(**kwargs):
-    pass
+    global log_name_to_level
+    global enabled_artifact_types
+
+    log_name_to_level = {}
+    enabled_artifact_types = set()
+
+    for key, val in kwargs.items():
+        if key in NAME_TO_LOG_NAME:
+            if val not in logging._levelToName:
+                raise ValueError(
+                    f"Unrecognized log level for log {key}: {val}, valid level values are: {','.join(logging._levelToName.keys())}"
+                )
+            log_name_to_level[key] = val
+
+        elif key in NAME_TO_RECORD_TYPE:
+            enabled_artifact_names.add(key)
+        else:
+            raise ValueError(
+                f"Unrecognized log or artifact name passed to set_logs: {key}"
+            )
 
 
-# register a record type to be loggable
-# setting name is the name used in the configuration env var
-# log_name is the log that it belongs to
 def loggable(setting_name, log_name, off_by_default=False):
     def register(cls):
         NAME_TO_LOG_NAME[setting_name] = log_name
@@ -55,7 +72,7 @@ def register_log(setting_name, log_name, has_levels=False):
     Enables a log to be controlled by the env var and user API with the setting_name
     Args:
         setting_name:  the shorthand name used in the env var and user API
-        log_name:  the log name that the name is associated with
+        log_name:  the log name that the setting_name is associated with
         has_levels: whether the log supports different verbosity levels
     """
     NAME_TO_LOG_NAME[setting_name] = log_name
@@ -143,15 +160,19 @@ def _setup_handlers(create_handler_fn, log, enabled_types, formatter, level=None
     debug_handler = create_handler_fn()
     debug_handler.setFormatter(formatter)
     debug_handler.setLevel(logging.DEBUG)
+
+    if level == logging.DEBUG:
+        enabled_types = enabled_types.union({str})
+
     filter = FilterByType(enabled_types)
     debug_handler.addFilter(filter)
     log.addHandler(debug_handler)
 
-    if level == logging.INFO:
-        info_handler = create_handler_fn()
-        info_handler.setFormatter(formatter)
-        info_handler.setLevel(logging.INFO)
-        log.addHandler(info_handler)
+    if level is not None and level > logging.DEBUG:
+        generic_handler = create_handler_fn()
+        generic_handler.setFormatter(formatter)
+        generic_handler.setLevel(level)
+        log.addHandler(generic_handler)
 
 
 # mark handlers that we've created
@@ -207,11 +228,10 @@ def init_logs(log_names, log_file_name=None, formatter=None):
             logging.getLogger(log_name).setLevel(
                 logging.DEBUG
             )  # allow all messages through logger
-            rec_types = []
+            # ensure log_name is in the dictionary
+            rec_types = log_to_enabled_types[log_name]
             if level == logging.DEBUG:
-                rec_types = LOG_NAME_TO_REC_TYPES[log_name]
-                rec_types.add(str)
-            log_to_enabled_types[log_name].update(rec_types)
+                rec_types.update(LOG_NAME_TO_REC_TYPES[log_name])
         else:
             log_to_enabled_types[NAME_TO_LOG_NAME[name]].add(NAME_TO_RECORD_TYPE[name])
 
