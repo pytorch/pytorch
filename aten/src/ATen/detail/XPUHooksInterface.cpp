@@ -1,5 +1,6 @@
 #include <ATen/detail/XPUHooksInterface.h>
 
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 
 #include <cstddef>
@@ -12,8 +13,8 @@ namespace detail {
 static XPUHooksInterface *xpu_hooks = nullptr;
 
 const XPUHooksInterface &getXPUHooks() {
-  static std::once_flag once;
-  std::call_once(once, [] {
+  static c10::once_flag once;
+  c10::call_once(once, [] {
     xpu_hooks =
         XPUHooksRegistry()->Create("XPUHooks", XPUHooksArgs{}).release();
     if (!xpu_hooks) {
