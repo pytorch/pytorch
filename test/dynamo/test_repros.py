@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import collections
+import contextlib
 import copy
 import inspect
 import itertools
@@ -2238,6 +2239,81 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x)
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_exception_in_dynamo_handling(self):
+        hit_handler = False
+
+        # See https://github.com/pytorch/pytorch/pull/96488
+        @contextlib.contextmanager
+        def ctx():
+            try:
+                yield
+            except RuntimeError:
+                nonlocal hit_handler
+                hit_handler = True
+
+        @torch._dynamo.optimize("eager")
+        def f():
+            with ctx():
+                h()
+
+        def h():
+            raise RuntimeError("boof")
+
+        # Should not error
+        f()
+        self.assertTrue(hit_handler)
+
+    def test_generator_dealloc(self):
+        # See https://github.com/pytorch/pytorch/pull/96488
+        #
+        # NB: yes, [(...)] is intentional, this is a list containing a
+        # generator
+        generator_box = [(x for x in [1, 2, 3])]
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def g(x):
+            return x + 2
+
+        # TODO: This test is pretty delicate.  To test if it's actually doing
+        # anything, rebuild eval_frame.c with '#define TORCHDYNAMO_DEBUG 1'
+        # and then look at the logs for:
+        #
+        # TRACE[_custom_eval_frame:650] begin <genexpr> test_repros.py 2276 -1 0 0
+        # TRACE[_custom_eval_frame:664] throw <genexpr>
+        #
+        # This means we're actually hitting the relevant codepath
+
+        # NB: Make sure we don't actually Dynamo this frame; if we do Dynamo
+        # this frame, Dynamo actually DOES understand list.clear and will
+        # arrange for the generator deallocation to happen when the eval frame
+        # handler is disabled, which will prevent the bug from happening (we
+        # specifically want to trigger the generator deallocation WHILE the
+        # dynamo eval frame handler is active), as that will cause the
+        # generator to become exhausted and trigger the throw_flag == TRUE
+        # case.
+        @torch._dynamo.skip
+        def f(x):
+            generator_box.clear()
+            return g(x)
+
+        self.assertNoUnraisable(
+            lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
+        )
+
+        # Make sure the x + 2 is captured (a previous incorrect implementation
+        # of this fix would have disabled the eval frame callback, which means
+        # g wouldn't get traced
+        self.assertEqual(counter.op_count, 1)
+
+    def test_error_return_without_exception_set(self):
+        # https://github.com/pytorch/pytorch/issues/93781
+        @torch.compile
+        def f():
+            _generator_type = type((_ for _ in ()))
+
+        self.assertNoUnraisable(f)
 
     @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
