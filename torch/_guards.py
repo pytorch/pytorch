@@ -334,7 +334,7 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
 
     def register(self, source: Source):
         """
-        Registers a source object to it's given name.
+        Registers a source object.
 
         :param source: A Source object representing the source to be registered.
         :type source: Source
@@ -347,12 +347,7 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
 
         name = normalize_attr_name(source.name())
         if name in self.names_to_sources:
-            curr_source = self.names_to_sources[name]
-            curr_source_name = normalize_attr_name(curr_source.name())
-            assert (
-                curr_source_name == name
-            ), f"Mismatch {curr_source_name} vs {name}"
-            return
+            raise AssertionError("Illegal, unreachable state. ")
         self.names_to_sources[name] = source
 
 

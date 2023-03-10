@@ -2008,6 +2008,9 @@ class TestMPS(TestCaseMPS):
             helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/96113
+        torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
