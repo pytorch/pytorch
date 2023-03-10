@@ -40,7 +40,6 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       record_stream_fn_(other.record_stream_fn_),
       capture_begin_fn_(other.capture_begin_fn_),
       capture_about_to_end_fn_(other.capture_about_to_end_fn_),
-      capture_ended_fn_(other.capture_ended_fn_),
       capture_destroy_fn_(other.capture_destroy_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
@@ -67,19 +66,14 @@ void CUDAPluggableAllocator::set_record_stream_fn(
 }
 
 void CUDAPluggableAllocator::set_capture_begin_fn(
-    std::function<void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t)>
+    std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
         capture_begin_fn) {
   capture_begin_fn_ = capture_begin_fn;
 }
 
 void CUDAPluggableAllocator::set_capture_about_to_end_fn(
-    std::function<void(int, c10::cuda::CaptureId_t)> capture_about_to_end_fn) {
+    std::function<void(int, cudaStream_t)> capture_about_to_end_fn) {
   capture_about_to_end_fn_ = capture_about_to_end_fn;
-}
-
-void CUDAPluggableAllocator::set_capture_ended_fn(
-    std::function<void(int, c10::cuda::CaptureId_t)> capture_ended_fn) {
-  capture_ended_fn_ = capture_ended_fn;
 }
 
 void CUDAPluggableAllocator::set_capture_destroy_fn(
@@ -231,32 +225,24 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 }
 
 // CUDAGraph interactions
-void CUDAPluggableAllocator::notifyCaptureBegin(
+void CUDAPluggableAllocator::beginAllocateStreamToPool(
     int device,
-    c10::cuda::CaptureId_t graph_id,
+    cudaStream_t stream,
     c10::cuda::MempoolId_t mempool_id) {
   if (capture_begin_fn_) {
-    capture_begin_fn_(device, graph_id, mempool_id);
+    capture_begin_fn_(device, stream, mempool_id);
   }
 }
 
-void CUDAPluggableAllocator::notifyCaptureAboutToEnd(
+void CUDAPluggableAllocator::endAllocateStreamToPool(
     int device,
-    c10::cuda::CaptureId_t graph_id) {
+    cudaStream_t stream) {
   if (capture_about_to_end_fn_) {
-    capture_about_to_end_fn_(device, graph_id);
+    capture_about_to_end_fn_(device, stream);
   }
 }
 
-void CUDAPluggableAllocator::notifyCaptureEnded(
-    int device,
-    c10::cuda::CaptureId_t graph_id) {
-  if (capture_ended_fn_) {
-    capture_ended_fn_(device, graph_id);
-  }
-}
-
-void CUDAPluggableAllocator::notifyCaptureDestroy(
+void CUDAPluggableAllocator::destroyPool(
     int device,
     c10::cuda::MempoolId_t mempool_id) {
   if (capture_destroy_fn_) {

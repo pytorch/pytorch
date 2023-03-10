@@ -1009,7 +1009,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
             using FuncType =
-                void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t);
+                void(int, cudaStream_t, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_capture_begin_fn(func);
@@ -1018,19 +1018,10 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           "set_capture_about_to_end_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
+            using FuncType = void(int, cudaStream_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
             self.set_capture_about_to_end_fn(func);
-          })
-      .def(
-          "set_capture_ended_fn",
-          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
-             uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
-            std::function<FuncType> func =
-                reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_ended_fn(func);
           })
       .def(
           "set_capture_destroy_fn",
