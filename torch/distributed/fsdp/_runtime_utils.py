@@ -1019,15 +1019,27 @@ def _grad_alloc_hook(
     *unused: Any,
 ):
     """
-    ``param`` should be one of ``handle`` 's original parameters.
+    The goal of the hook is simply to ensure that the original parameters'
+    gradients are written to contiguous memory and to save a reference to that
+    memory so that FSDP can reduce-scatter without copies.
 
-    NOTE: The goal of this hook is to emulate the autograd engine's existing
-    behavior for flat gradient allocation and write.
+    The current implementation pre-allocates the unsharded flat gradient for
+    ``handle`` 's ``FlatParameter`` and sets the original parameters' ``.grad``
+    to be the appropriate views. This hook should be registered on every
+    original parameter, but only the first to run performs the logic. This hook
+    also expects that :func:`_pre_backward_hook` runs first.
+
+    ``param`` should be one of ``handle`` 's original parameters.
     """
     if handle._ran_grad_alloc_hook:
+        # if state.rank == 0:
+        #     print(f"already ran grad alloc hook {handle}")
         return
-    # This is the first invocation of the hook among the handle's parameters
-    # in this backward pass
+    # if state.rank == 0:
+    #     print(f"running grad alloc hook {handle}")
+    # Track that this is the first invocation of the hook among the handle's
+    # parameters in the current backward pass -- the flat gradient should only
+    # need to be pre-allocated once per backward
     handle._ran_grad_alloc_hook = True
     # Remove hooks to avoid additional overhead of running them on the other
     # parameters since they are no longer needed for this backward pass
@@ -1039,11 +1051,23 @@ def _grad_alloc_hook(
     # simplicity now, we just pad in post-backward if needed.
     # TODO: We require an extra zero fill kernel since the original parameters'
     # gradients are accumulated into the flat gradient.
+    unsharded_size = handle.flat_param._unpadded_unsharded_size
     _p_assert(
-        handle.flat_param.shape == handle.flat_param._unpadded_unsharded_size,
-        f"Expected {handle.flat_param._unpadded_unsharded_size} but got {handle.flat_param.shape}",
+        handle.flat_param.shape == unsharded_size,
+        f"Expects flat parameter size {unsharded_size} but got {handle.flat_param.shape}",
     )
-    handle.flat_param.grad = torch.zeros_like(handle.flat_param)
+    if handle.flat_param.grad is None:
+        # The pre-backward hook registered on forward output tensors runs
+        # before this hook, so `flat_param.grad` should already be set to
+        # `None` in `prepare_gradient_for_backward()` if needed
+        handle.flat_param.grad = torch.zeros_like(handle.flat_param)
+    else:
+        # Accumulated an unsharded gradient in `no_sync()`
+        grad_size = handle.flat_param.grad.size()
+        _p_assert(
+            grad_size == unsharded_size,
+            f"Expects unsharded gradient size {unsharded_size} but got {grad_size}",
+        )
     handle._use_unsharded_grad_views()
 
 

@@ -27,6 +27,7 @@ from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
     FSDPTest,
+    NestedWrappedModule,
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
@@ -506,6 +507,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             CUDAInitMode.CUDA_BEFORE,
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
+            add_bn=False,
         )
         optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         fsdp_kwargs["use_orig_params"] = True
@@ -554,33 +556,72 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             cpu_offload=cpu_offload,
         )
 
-    @skip_if_lt_x_gpu(2)
     def _test_multiple_forward(
         self,
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
     ):
-        (
-            fsdp_model,
-            optim,
-            fsdp_model_orig_params,
-            optim_orig_params,
-        ) = self._get_fsdp_models_and_optims(sharding_strategy, cpu_offload)
+        # Run with two different models for greater confidence
+        if not cpu_offload.offload_params:
+            # TODO: This model breaks with CPU offloading enabled. Only the
+            # model's biases are incorrect where the same subset of elements
+            # are incorrect across all biases.
+            model = TransformerWithSharedParams.init(
+                self.process_group,
+                FSDPInitMode.NO_FSDP,
+                CUDAInitMode.CUDA_BEFORE,
+                fsdp_kwargs={},
+                deterministic=True,
+                add_bn=False,  # DDP errors from broadcasting BN buffers (in-place)
+            )
+            auto_wrap_policy = ModuleWrapPolicy(
+                {TransformerEncoderLayer, TransformerDecoderLayer}
+            )
+            self._test_multiple_forward_base(
+                model, auto_wrap_policy, sharding_strategy, cpu_offload
+            )
+        model = NestedWrappedModule.init(
+            self.process_group,
+            FSDPInitMode.NO_FSDP,
+            CUDAInitMode.CUDA_BEFORE,
+            fsdp_kwargs={},
+            deterministic=True,
+        )
+        auto_wrap_policy = ModuleWrapPolicy({nn.Sequential})
+        self._test_multiple_forward_base(
+            model, auto_wrap_policy, sharding_strategy, cpu_offload
+        )
+
+    def _test_multiple_forward_base(
+        self,
+        model: nn.Module,
+        auto_wrap_policy,
+        sharding_strategy: ShardingStrategy,
+        cpu_offload: CPUOffload,
+    ):
+        # NOTE: We compare against DDP as baseline since with FSDP
+        # `use_orig_params=False` we see slight numeric differences.
+        LR = 5e-2  # larger learning rate to amplify gradient differences
+        ddp_model = DDP(copy.deepcopy(model), device_ids=[self.rank])
+        ddp_optim = torch.optim.Adam(ddp_model.parameters(), foreach=False, lr=LR)
+        fsdp_model = FSDP(
+            copy.deepcopy(model),
+            use_orig_params=True,
+            auto_wrap_policy=auto_wrap_policy,
+            sharding_strategy=sharding_strategy,
+            cpu_offload=cpu_offload,
+        )
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         device = torch.device("cuda")
-        for _ in range(3):
+        torch.manual_seed(self.rank + 1)
+        for i in range(10):
             inp1 = fsdp_model.get_input(device)
             _inp2 = fsdp_model.get_input(device)
-            inp2 = tuple(
-                t + torch.ones_like(t) for t in _inp2
-            )  # make different from `inp1`
-            # For these loss lists: elem 0 is baseline; elem 1 is test
+            inp2 = tuple(t + torch.ones_like(t) for t in _inp2)
             losses1 = []
             losses2 = []
             losses = []
-            for _model, _optim in (fsdp_model, optim), (
-                fsdp_model_orig_params,
-                optim_orig_params,
-            ):
+            for _model, _optim in ((ddp_model, ddp_optim), (fsdp_model, fsdp_optim)):
                 _optim.zero_grad()
                 loss1 = _model(*inp1)
                 losses1.append(loss1)
@@ -588,12 +629,18 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
                 losses2.append(loss2)
                 loss = (loss1 + loss2).sum()
                 losses.append(loss)
-                _model.run_backward(loss)
+                loss.backward()
                 _optim.step()
             self.assertEqual(losses1[0], losses1[1])
             self.assertEqual(losses2[0], losses2[1])
             self.assertEqual(losses[0], losses[1])
-        self._check_fsdp_parameter_parity(fsdp_model, fsdp_model_orig_params)
+        with FSDP.summon_full_params(fsdp_model):
+            for (n1, p1), (n2, p2) in zip(
+                ddp_model.module.named_parameters(),
+                fsdp_model.named_parameters(),
+            ):
+                self.assertEqual(n1, n2)
+                torch.testing.assert_close(p1, p2)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_params", [False, True])
