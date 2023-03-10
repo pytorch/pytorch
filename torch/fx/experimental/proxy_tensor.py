@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import contextlib
+import copy
 import functools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import torch
@@ -689,7 +690,15 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", *, _allow_non_fake
         else:
             for inp in _example_inputs:
                 if isinstance(fake_tensor_mode, nullcontext) and isinstance(inp, FakeTensor):
+                    # TODO this is kinda ugly, but once we use AOTAutograd functionalization
+                    # the params will be lifted anyways, so we won't need this flag anymore in export
                     fake_tensor_mode = inp.fake_mode
+                    if _allow_non_fake_inputs:
+                        fake_tensor_mode = FakeTensorMode(
+                            allow_fallback_kernels=inp.fake_mode.allow_fallback_kernels,
+                            allow_non_fake_inputs=_allow_non_fake_inputs,
+                            shape_env=inp.fake_mode.shape_env,
+                        )
             # if example inputs are not fake tensors, we just use default logic
             if fake_tensor_mode == nullcontext():
                 fake_tensor_mode = get_default_fake_tensor_mode(tracing_mode)
