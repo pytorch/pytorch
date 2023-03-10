@@ -1,12 +1,14 @@
+import argparse
 import os
 import urllib
 from io import BytesIO
 from urllib.request import urlopen
 from zipfile import ZipFile
 
-from rockset import RocksetClient
-import argparse
 import pandas as pd
+
+from rockset import RocksetClient
+
 
 def query_job_sha(repo, sha, api_key):
     rs = RocksetClient(api_key=api_key, host="https://api.usw2a1.rockset.com")
@@ -52,36 +54,39 @@ def get_artifacts_urls(results, suites):
                 print(f"{suite} {shard_id}, {num_shards}: {s3_url}")
     return urls
 
+
 def normalize_suite_filename(suite_name):
     assert suite_name.find("inductor_") == 0
     subsuite = suite_name.split("_")[1]
     if "timm" in subsuite:
-      subsuite = f"{subsuite}_models"
+        subsuite = f"{subsuite}_models"
     return subsuite
 
+
 def download_artifacts_and_extract_csvs(urls):
-  dataframes = {}
-  try:
-    for (suite, shard), url in urls.items():
-        resp = urlopen(url)
-        subsuite = normalize_suite_filename(suite)
-        artifact = ZipFile(BytesIO(resp.read()))
-        for phase in ("training", "inference"):
-          name = f"test/test-reports/{phase}_{subsuite}.csv"
-          df = pd.read_csv(artifact.open(name))
-          dataframes[(suite, phase, shard)] = df
-  except urllib.error.HTTPError:
-    print(f"Unable to download {url}, perhaps the CI job isn't finished?")
-  return dataframes
+    dataframes = {}
+    try:
+        for (suite, shard), url in urls.items():
+            resp = urlopen(url)
+            subsuite = normalize_suite_filename(suite)
+            artifact = ZipFile(BytesIO(resp.read()))
+            for phase in ("training", "inference"):
+                name = f"test/test-reports/{phase}_{subsuite}.csv"
+                df = pd.read_csv(artifact.open(name))
+                dataframes[(suite, phase, shard)] = df
+    except urllib.error.HTTPError:
+        print(f"Unable to download {url}, perhaps the CI job isn't finished?")
+    return dataframes
+
 
 def write_filtered_csvs(root_path, dataframes):
-  for (suite, phase, shard), df in dataframes.items():
-    suite_fn = normalize_suite_filename(suite)
-    if "timm" in suite:
-      out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
-    else:
-      out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
-    df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
+    for (suite, phase, shard), df in dataframes.items():
+        suite_fn = normalize_suite_filename(suite)
+        if "timm" in suite:
+            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
+        else:
+            out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
+        df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
 
 
 parser = argparse.ArgumentParser()
