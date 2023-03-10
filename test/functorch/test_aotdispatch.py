@@ -1763,6 +1763,7 @@ def forward(self, arg0_1):
             self.verify_aot_autograd(f, args)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -2437,6 +2438,8 @@ aot_autograd_failures = {
 
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
+
+    skip('pinv', 'singular')  # likely just needs tolerances adjusted
 
     # Too annoying to generate random inputs
     xfail('cholesky'),

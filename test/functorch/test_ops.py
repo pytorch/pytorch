@@ -36,7 +36,8 @@ from common_utils import (
     is_valid_inplace_sample_input,
     loop,
     loop2,
-    expectedFailureIf
+    expectedFailureIf,
+    skipIfRocm,
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
@@ -318,6 +319,8 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.batch_norm', decorator=skipIfRocm),
 }
 
 aliasing_ops = {

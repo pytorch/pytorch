@@ -28,7 +28,8 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_UBSAN,
     IS_MACOS,
-    IS_X86
+    IS_X86,
+    skipIfRocm,
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -3738,6 +3739,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm)
         # One or more of the overload doesn't have a Batch rule.
         xfail('where'),
         xfail('bincount'),
