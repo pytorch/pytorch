@@ -50,6 +50,8 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
+# Here for bw compat, will be removed (mlazos)
+output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"

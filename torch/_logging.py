@@ -38,8 +38,12 @@ name_to_level: Dict[str, int] = {}
 enabled_artifact_names: Set[str] = set()
 
 
-def is_initialized(log):
-    return any([_is_torch_handler(h) for h in log.handlers])
+def is_initialized():
+    for log_name in LOG_NAME_TO_NAMES.keys():
+        if any([_is_torch_handler(h) for h in logging.getLogger(log_name).handlers]):
+            return True
+
+    return False
 
 
 # User API for setting log properties
