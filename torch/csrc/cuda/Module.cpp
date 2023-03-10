@@ -25,13 +25,13 @@
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/THCP.h>
 #include <torch/csrc/cuda/python_comm.h>
+#include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/cuda_lazy_init.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-
 #include <array>
 #include <chrono>
 #include <iostream>
@@ -620,39 +620,49 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
   std::vector<Frame> frames;
   // Empty if cpp traces weren't enabled
   std::string cpp_frames;
+  std::vector<jit::StackEntry> script_frames;
 
   ~StackContext() {
     std::lock_guard lock(to_free_frames_mutex);
     to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
-  static std::shared_ptr<StackContext> _gather() {
-    py::gil_scoped_acquire acquire;
-    {
-      std::lock_guard lock(to_free_frames_mutex);
-      for (Frame f : to_free_frames) {
-        Py_XDECREF(f.code);
-      }
-      to_free_frames.clear();
-    }
+  static std::shared_ptr<StackContext> _gather(
+      bool python,
+      bool script,
+      bool cpp) {
     auto r = std::make_shared<StackContext>();
-    PyFrameObject* f = PyEval_GetFrame();
-    Py_XINCREF(f);
-    while (f) {
-      r->frames.emplace_back(Frame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
-      auto f_back = PyFrame_GetBack(f);
-      Py_XDECREF(f);
-      f = f_back;
+    if (python) {
+      py::gil_scoped_acquire acquire;
+      {
+        std::lock_guard lock(to_free_frames_mutex);
+        for (Frame f : to_free_frames) {
+          Py_XDECREF(f.code);
+        }
+        to_free_frames.clear();
+      }
+      PyFrameObject* f = PyEval_GetFrame();
+      Py_XINCREF(f);
+      while (f) {
+        r->frames.emplace_back(Frame{PyFrame_GetCode(f), PyFrame_GetLasti(f)});
+        auto f_back = PyFrame_GetBack(f);
+        Py_XDECREF(f);
+        f = f_back;
+      }
+    }
+    if (script) {
+      r->script_frames = torch::jit::currentCallstack();
+    }
+    if (cpp) {
+      r->cpp_frames = c10::get_backtrace();
     }
     return r;
   }
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
-    return _gather();
+    return _gather(true, true, false);
   }
   static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>
   gather_with_cpp() {
-    auto r = _gather();
-    r->cpp_frames = c10::get_backtrace();
-    return std::move(r);
+    return _gather(true, true, true);
   }
 };
 
@@ -695,14 +705,50 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       return it->second;
     }
     py::list frames;
-    for (auto& f : sc->frames) {
+
+    auto append_python = [&](const Frame& f) {
       py::dict frame;
       frame[filename_s] =
           py::reinterpret_borrow<py::object>(f.code->co_filename);
       frame[name_s] = py::reinterpret_borrow<py::object>(f.code->co_name);
       frame[line_s] = PyCode_Addr2Line(f.code, f.lasti);
       frames.append(std::move(frame));
+    };
+
+    bool script_appended = false;
+    auto append_script = [&]() {
+      if (script_appended) {
+        return;
+      }
+      script_appended = true;
+      for (const auto& f : sc->script_frames) {
+        py::dict frame;
+        frame[name_s] = f.filename;
+        auto flc = f.range.file_line_col();
+        if (flc) {
+          std::string filename;
+          size_t line;
+          size_t col;
+          std::tie(filename, line, col) = *flc;
+          frame[filename_s] = filename;
+          frame[line_s] = line;
+        } else {
+          frame[filename_s] = "??";
+          frame[line_s] = 0;
+        }
+        frames.append(std::move(frame));
+      }
+    };
+
+    // until C++ stack frames are present we don't actually know the order
+    // between python/script frames. However, script frames being called
+    // by python is much more likely than the opposite.
+    append_script();
+
+    for (const auto& f : sc->frames) {
+      append_python(f);
     }
+
     cached_frames.insert({sc, frames});
     return frames;
   };
@@ -754,6 +800,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   };
 
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot();
+
   py::list segments;
 
   for (const auto& segmentInfo : snapshot.segments) {
@@ -801,9 +848,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
         // without further compression frames can get really large on dump
         auto sc = (StackContext*)te.context_.get();
         trace_entry[frames_s] = get_frames(sc);
-        if (!sc->cpp_frames.empty()) {
-          trace_entry[cpp_frames_s] = py::cast(sc->cpp_frames);
-        }
       }
       trace_entry[action_s] = action_to_str(te.action_);
       trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
