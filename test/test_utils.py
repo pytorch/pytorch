@@ -784,6 +784,26 @@ class DummyXPUModule:
     def is_available():
         return True
 
+    @staticmethod
+    def is_autocast_foo_enabled():
+        return True
+
+    @staticmethod
+    def get_autocast_foo_dtype():
+        return torch.float16
+
+    @staticmethod
+    def set_autocast_foo_enabled(enable):
+        pass
+
+    @staticmethod
+    def set_autocast_foo_dtype(dtype):
+        pass
+
+    @staticmethod
+    def get_amp_supported_dtype():
+        return [torch.float16]
+
 
 class TestExtensionUtils(TestCase):
     def test_external_module_register(self):
@@ -815,11 +835,16 @@ class TestExtensionUtils(TestCase):
         self.assertEqual(custom_backend_name, 'foo')
 
         with self.assertRaises(AttributeError):
-            eval('torch.{}.is_available()'.format(custom_backend_name))
+            torch.foo.is_available()
 
+        with self.assertRaisesRegex(AssertionError, "Tried to use AMP with the"):
+            with torch.autocast(device_type=custom_backend_name):
+                pass
         torch._register_device_module('foo', DummyXPUModule)
 
-        eval('torch.{}.is_available()'.format(custom_backend_name))
+        torch.foo.is_available()
+        with torch.autocast(device_type=custom_backend_name):
+            pass
 
 
 class TestDeviceUtils(TestCase):

@@ -45,7 +45,8 @@ bool is_autocast_eligible(const Tensor& tensor, DeviceType device_type) {
     case DeviceType::HPU:
       return tensor.is_hpu() && tensor.is_floating_point();
     case DeviceType::PrivateUse1:
-      return tensor.is_privateuse1() && tensor.is_floating_point();
+      return tensor.device().type() == DeviceType::PrivateUse1 &&
+          tensor.is_floating_point();
     default:
       return false;
   }
