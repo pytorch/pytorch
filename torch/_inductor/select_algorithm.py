@@ -12,13 +12,13 @@ from typing import Any, List
 from unittest.mock import patch
 
 import sympy
-import sys
 
 import torch
+from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
-from . import config, ir, codecache
+from . import codecache, config, ir
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -26,8 +26,6 @@ from .codegen.triton import config_of, signature_of, texpr, TritonKernel, Triton
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
-from torch import multiprocessing
-from cloudpickle import dumps, loads
 
 log = logging.getLogger(__name__)
 
@@ -47,17 +45,24 @@ class KernelNamespace:
 template_kernels = KernelNamespace()
 extern_kernels = KernelNamespace()
 
-def benchmark_choice_in_sub_process(all_template_kernels, choice, args, out, expected_out, timings):
+
+def benchmark_choice_in_sub_process(
+    all_template_kernels, choice, args, out, expected_out, timings
+):
+    # import cloudpickle only when needed
+    from cloudpickle import loads
+
     global template_kernels
     template_kernels = loads(all_template_kernels)
     choice = loads(choice)
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
-        torch.testing.assert_close(out, expected_out) 
+        torch.testing.assert_close(out, expected_out)
 
     # use a tensor since the mutation to a python list in a sub process
     # is not synced back to the parent process
     timings.copy_(torch.tensor(result))
+
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(
@@ -754,7 +759,7 @@ class AlgorithmSelectorCache(PersistentCache):
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return min(result)
+            return result[0]
 
         def benchmark_in_sub_process(choice):
             out.zero_()
@@ -775,21 +780,40 @@ class AlgorithmSelectorCache(PersistentCache):
             # is not synced back to the parent process
             timings = torch.zeros(3, dtype=torch.float32)
 
-            child = multiprocessing.Process(target=benchmark_choice_in_sub_process, args=(dumps(template_kernels), dumps(choice), inputs, output, expected_output, timings))
+            # import cloudpickle only when needed
+            from cloudpickle import dumps
+
+            child = multiprocessing.Process(
+                target=benchmark_choice_in_sub_process,
+                args=(
+                    dumps(template_kernels),
+                    dumps(choice),
+                    inputs,
+                    output,
+                    expected_output,
+                    timings,
+                ),
+            )
             child.start()
             child.join()
 
             # child process fail
             if child.exitcode != 0:
-                warnings.warn(f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains.")
+                warnings.warn(
+                    f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."
+                )  # noqa: B950 line too long
 
                 # return a large value to this choice will be ignored
                 return 1e10
 
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return timings.min().item()
+            return timings[0].item()
 
-        benchmark = benchmark_in_sub_process if config.autotune_in_subproc else benchmark_in_current_process
+        benchmark = (
+            benchmark_in_sub_process
+            if config.autotune_in_subproc
+            else benchmark_in_current_process
+        )
 
         def debug_str():
             def tensor_repr(x):

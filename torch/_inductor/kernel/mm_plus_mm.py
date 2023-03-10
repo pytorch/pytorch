@@ -1,6 +1,7 @@
 import functools
 
 import torch
+from ..ir import StorageBox
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -9,7 +10,6 @@ from ..select_algorithm import (
 )
 from ..utils import use_triton_template
 from ..virtualized import V
-from ..ir import StorageBox
 from .mm_common import mm_args, mm_grid, mm_options
 
 aten = torch.ops.aten

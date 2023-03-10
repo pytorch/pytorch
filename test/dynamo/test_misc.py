@@ -11,6 +11,7 @@ import os
 import sys
 import typing
 import unittest
+import unittest.mock as mock
 import weakref
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -2003,6 +2005,48 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_profiler_cache_lookup(self):
+        def fn(x):
+            y = x**2
+            y = y + 2
+            z = y**3
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        # warmup
+        opt_fn(x)
+
+        enable_cache_lookup_profiler(True)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(
+            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
+        )
+
+        enable_cache_lookup_profiler(False)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(len(events) == 0, "Expected disabled profiling")
+
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
         def fn(x):
@@ -3296,6 +3340,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def forward(self, query, key, value):
                 out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
                 out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
                     query=query,
                     key=key,
                     value=value,
@@ -3314,6 +3361,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 out = F.scaled_dot_product_attention(
                     query, key, value, None, dropout_p=0, is_causal=True
                 )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
                 return out
 
         device = "cuda"
@@ -4850,6 +4898,74 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         model.training_step = compiled_model.dynamo_ctx(model.training_step)
 
         model.training_step()
+
+    def test_torch_guards_stack_frame_register(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param)
+
+        e = encoder(y)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
+        self.assertEqual(len(seen_frames), 1)
+        self.assertEqual(seen_frames[0].line, "def forward(self, a, *args):")
+
+    def test_torch_guards_stack_frame_register_inlining(self):
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([0.75, 0.75, 0.75, 0.75])
+        z = torch.tensor([0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
+
+        def uwu_inline_me(x, y, z):
+            r = torch.cat((x, x)) + y
+            r2 = torch.cat((y, y)) + z
+            return r, r2
+
+        def fn(x, y, z):
+            r, r2 = uwu_inline_me(x, y, z)
+            return torch.mul(r, r), torch.mul(r2, r2)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(fn)(x, y, z)
+
+        self.assertEqual(len(seen_frames), 2)
+        self.assertEqual(seen_frames[0].name, "fn")
+        self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
 
 
 class CustomFunc1(torch.autograd.Function):
