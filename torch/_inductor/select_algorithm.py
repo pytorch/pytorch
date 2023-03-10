@@ -7,6 +7,7 @@ import sys
 import textwrap
 import warnings
 from io import StringIO
+from pickle import dumps, loads
 
 from typing import Any, List
 from unittest.mock import patch
@@ -46,9 +47,6 @@ extern_kernels = KernelNamespace()
 def benchmark_choice_in_sub_process(
     all_template_kernels, choice, args, out, expected_out, timings
 ):
-    # import cloudpickle only when needed
-    from cloudpickle import loads
-
     global template_kernels
     template_kernels = loads(all_template_kernels)
     choice = loads(choice)
@@ -335,6 +333,69 @@ def _jinja2_env():
         return None
 
 
+class MakeKernelRender:
+    """
+    This is previously a local function in TritonTemplate.generate. Change to a
+    class to make it pickle'able.
+    """
+
+    def __init__(self, kernel_options, source, kwargs):
+        self.kernel_options = kernel_options
+        self.source = source
+        self.kwargs = kwargs
+
+    def __call__(self, out_node):
+        kernel = TritonTemplateKernel(
+            kernel_name="KERNEL_NAME",
+            output_node=out_node,
+            use_jit=False,
+            **self.kernel_options,
+        )
+        template = TritonTemplate._template_from_string(self.source)
+        render = functools.partial(
+            template.render,
+            **kernel.template_env(),
+            **self.kwargs,
+        )
+        return kernel, render
+
+
+class TritonTemplateCallFunction:
+    """
+    This is previously a local function in TritonTemplate.generate. Change to a
+    class to make it pickle'able.
+    """
+
+    def __init__(
+        self, code, extra, kernel_name, kwargs, extra_args, num_stages, num_warps, grid
+    ):
+        self.code = code
+        self.extra = extra
+        self.kernel_name = kernel_name
+        self.kwargs = kwargs
+        self.extra_args = extra_args
+        self.num_stages = num_stages
+        self.num_warps = num_warps
+        self.grid = grid
+        self.run = None
+
+    def __call__(self, *args, out):
+        if self.run is None:
+            mod = PyCodeCache.load(self.code, self.extra)
+
+            # set run only when used so we don't need pickle it.
+            # Pickle run fail with error: TypeError: cannot pickle 'PyCapsule' object
+            self.run = getattr(mod, self.kernel_name).run
+        return self.run(
+            *args,
+            out,
+            *self.extra_args,
+            grid=self.grid(*out.size(), self.kwargs),
+            num_stages=self.num_stages,
+            num_warps=self.num_warps,
+        )
+
+
 class TritonTemplate:
     index_counter = itertools.count()
     all_templates = dict()
@@ -447,24 +508,16 @@ class TritonTemplate:
         )
         assert not extra_args, "TODO: dynamic shapes"
 
-        run = None
-
-        def call(*args, out):
-            # set run only when used to we don't need pickle it.
-            # Pickle run fail with error: TypeError: cannot pickle 'PyCapsule' object
-            nonlocal run
-
-            if run is None:
-                mod = PyCodeCache.load(code, extra)
-                run = getattr(mod, kernel_name).run
-            return run(
-                *args,
-                out,
-                *extra_args,
-                grid=self.grid(*out.size(), kwargs),
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
+        call = TritonTemplateCallFunction(
+            code,
+            extra,
+            kernel_name,
+            kwargs,
+            extra_args,
+            num_stages,
+            num_warps,
+            self.grid,
+        )
 
         key, path = codecache.write(code, "py", extra)
         call.key = key
@@ -473,19 +526,7 @@ class TritonTemplate:
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
         setattr(template_kernels, kernel_hash_name, call)
 
-        def make_kernel_render(out_node):
-            kernel = TritonTemplateKernel(
-                kernel_name="KERNEL_NAME",
-                output_node=out_node,
-                use_jit=False,
-                **kernel_options,
-            )
-            render = functools.partial(
-                self.template.render,
-                **kernel.template_env(),
-                **kwargs,
-            )
-            return kernel, render
+        make_kernel_render = MakeKernelRender(kernel_options, self.source, kwargs)
 
         return TritonTemplateCaller(
             kernel_hash_name,
@@ -777,9 +818,6 @@ class AlgorithmSelectorCache(PersistentCache):
             # use a tensor since the mutation to a python list in a sub process
             # is not synced back to the parent process
             timings = torch.zeros(3, dtype=torch.float32)
-
-            # import cloudpickle only when needed
-            from cloudpickle import dumps
 
             # cuda runtime does not work with "fork", use "spawn" to start processes.
             ctx = multiprocessing.get_context("spawn")
