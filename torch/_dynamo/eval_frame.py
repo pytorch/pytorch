@@ -775,6 +775,10 @@ def export(
     # Make dynamo graph to have same input/output spec as user code
     def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
         call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+
+        if hasattr(f, "__wrapped__"):
+            call_to_inspect = f.__wrapped__
+
         fullargspec = inspect.getfullargspec(call_to_inspect)
         if inspect.ismethod(call_to_inspect):
             fullargspec.args.pop(0)

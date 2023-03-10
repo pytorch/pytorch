@@ -1911,6 +1911,49 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             wrapped_fn, expected_argument_names, *args, **kwargs
         )
 
+    def test_export_with_decorated_method(self):
+
+        def TestDecorator(fn):
+            fn.tag = "tagged"
+            return fn
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            @TestDecorator
+            def method_to_test(self, pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+                out = pos0
+                out += pos1
+                out += kw0
+                out += kw1
+                for arg in args:
+                    out += arg
+                for kwarg in kwargs.values():
+                    out += kwarg
+                return out
+
+        m = TestModule()
+        pos0 = torch.randn(4)
+        pos1 = torch.randn(4)
+        unnamed_pos = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, pos1, unnamed_pos)
+        kwargs = {
+            "kw0": kw0,
+            "kw2": torch.randn(4),
+            "unnamed_kw": torch.randn(4)
+        }
+        expected_argument_names = [
+            "pos0",
+            "pos1",
+            "args_0"  # 3rd unnamed positional argument
+        ] + list(kwargs.keys())
+
+        self._test_export_preserving_original_signature(
+            m.method_to_test, expected_argument_names, *args, **kwargs
+        )
+
     def _test_export_preserving_original_signature(
         self, fn, expected_argument_names: Sequence[str], *args, **kwargs
     ):
