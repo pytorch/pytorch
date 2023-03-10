@@ -24,6 +24,7 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -585,7 +586,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
                       .transpose(1, 2);
 
       auto y = at::scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, false);
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
 
       auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
@@ -689,7 +690,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, T
     const Tensor& value,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask) {
+    bool return_debug_mask,
+    c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -746,7 +748,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, T
           max_seqlen_batch_k,
           dropout_p,
           is_causal,
-          return_debug_mask);
+          return_debug_mask,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
@@ -759,7 +762,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
-    bool is_causal) {
+    bool is_causal,
+    c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
@@ -778,13 +782,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
       c10::nullopt,
       c10::nullopt,
       compute_log_sumexp,
-      is_causal);
+      is_causal,
+      scale);
   attention = attention.transpose(1,2);
   return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -823,7 +828,8 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
     const int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
-    bool return_debug_mask) {
+    bool return_debug_mask,
+    c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension
@@ -832,7 +838,7 @@ std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
   benchmarking. We will hard code it to 0 for now
   */
   constexpr int num_splits{0};
-  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
 
   Tensor logsumexp, debug_attn_mask;
@@ -877,7 +883,8 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     // (Mode 1MHK only) Maximum sequence length across batches
     const c10::optional<int64_t> max_seqlen_q_,
     bool compute_logsumexp,
-    bool causal) {
+    bool causal,
+    c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
@@ -985,6 +992,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     TORCH_CHECK(B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
   }
 
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.num_heads = num_heads;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
