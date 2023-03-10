@@ -21,6 +21,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
+from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -2002,6 +2003,48 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_profiler_cache_lookup(self):
+        def fn(x):
+            y = x**2
+            y = y + 2
+            z = y**3
+            return z
+
+        x = torch.randn((2, 2), requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        # warmup
+        opt_fn(x)
+
+        enable_cache_lookup_profiler(True)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(
+            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
+        )
+
+        enable_cache_lookup_profiler(False)
+        with torch.autograd.profiler.profile() as prof:
+            res = opt_fn(x)
+        events = list(
+            filter(
+                lambda event: event.name == "TorchDynamo Cache Lookup",
+                prof.function_events,
+            )
+        )
+
+        self.assertTrue(same(ref, res))
+        self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
