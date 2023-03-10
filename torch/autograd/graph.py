@@ -395,6 +395,86 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     return Handle(tuple(handles))
 
 
+def _register_multi_post_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequence[Optional[torch.Tensor]]], None]):
+    r"""Registers a multi-post-grad backward hook.
+
+    This is similar to :meth:`register_multi_grad_hook` except the hook runs
+    after each tensor's gradient has been accumulated, not just computed.
+    """
+    # TODO: Consider refactoring commonality with `register_multi_grad_hook()`
+    # if landing.
+    count: Dict[int, int] = dict()
+    nb_calls = None
+    buffer: Dict[int, List[Optional[torch.Tensor]]] = dict()
+
+    def get_grad_fn(t):
+        # or grad accumulator
+        if t.requires_grad and t.grad_fn is None:
+            return t.expand_as(t).grad_fn.next_functions[0][0]
+        else:
+            return t.grad_fn
+
+    grad_fns = list(map(get_grad_fn, tensors))
+
+    def get_inner_hook(idx):
+        def inner_hook(*args):
+            # TODO: `args` looks like ((), grad) parameters' `AccumulateGrad`.
+            # Check if we need to generalize and if so, how.
+            assert len(args) == 2 and len(args[0]) == 0
+            grad = args[1]
+            nonlocal count, nb_calls, buffer
+            id = torch._C._current_graph_task_id()
+            assert id != -1, "expected this hook to be called inside a backward call"
+            count[id] = count.get(id, 0)
+            buffer[id] = buffer.get(id, [None] * len(tensors))
+
+            if count[id] == 0:
+                # On the first call, compute the actual nb_calls and buffer
+                nb_calls = sum(
+                    torch._C._will_engine_execute_node(g)  # type: ignore[attr-defined]
+                    for g in grad_fns if g is not None
+                )
+
+            buffer[id][idx] = grad
+            count[id] += 1
+
+            if count[id] == nb_calls:
+                fn(buffer[id])
+                del count[id]
+                del buffer[id]
+        return inner_hook
+
+    class Handle(RemovableHandle):
+        handles: Tuple[RemovableHandle, ...]
+
+        def __init__(self, handles: Tuple[RemovableHandle, ...], grad_fns):
+            self.handles = handles
+            self.grad_fns: Optional[Tuple] = grad_fns
+
+        def remove(self):
+            for handle in self.handles:
+                handle.remove()
+            self.grad_fns = None
+
+        def __getstate__(self):
+            return self.handles
+
+        def __setstate__(self, state):
+            self.handles = state
+
+    # Save reference to the grad functions (in particular the `AccumulateGrad`
+    # functions) to ensure validity since otherwise they are only stored as
+    # weak pointers in the autograd metadata
+    handles: List[RemovableHandle] = []
+    non_none_grad_fns = []
+    for i, grad_fn in enumerate(grad_fns):
+        if grad_fn is not None:
+            handles.append(grad_fn.register_hook(get_inner_hook(i)))
+            non_none_grad_fns.append(grad_fn)
+
+    return Handle(tuple(handles), tuple(non_none_grad_fns))
+
+
 # NOTE [Allow mutation on tensors saved for backward]
 #
 # 1. Tensor gets saved for backward
