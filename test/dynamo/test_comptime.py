@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import re
+import sys
 from io import StringIO
 
 import torch._dynamo.test_case
@@ -76,7 +77,10 @@ def forward(self, x : torch.Tensor):
         self.assertIn("-->", out)
         # Check that the bytecode resembles what we expect
         self.assertIn("STORE_FAST", out)
-        self.assertIn("BINARY_MULTIPLY", out)
+        if sys.version_info < (3, 11):
+            self.assertIn("BINARY_MULTIPLY", out)
+        else:
+            self.assertIn("BINARY_OP", out)
 
     def test_print_value_stack(self):
         global FILE
