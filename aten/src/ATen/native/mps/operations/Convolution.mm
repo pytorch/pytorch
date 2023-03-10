@@ -180,7 +180,7 @@ Tensor _mps_convolution_impl(
 
           MPSGraphTensor* biasTensor = nil;
           if(bias_defined) {
-            biasTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType((bias_opt.value()).scalar_type()));
+            biasTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(bias_opt.value()));
           }
 
           MPSGraphTensor* outputTensor;

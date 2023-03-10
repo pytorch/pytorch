@@ -133,7 +133,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
     const Tensor& y_,
-    const std::vector<int64_t> broadcasted_shape,
+    const std::vector<int64_t>& broadcasted_shape,
     const bool restrict_indices_to_rhs = false,
     const bool distributive_with_sum = true
 ) {

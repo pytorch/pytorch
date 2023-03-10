@@ -5,6 +5,7 @@ import itertools
 import logging
 import sys
 import textwrap
+import time
 import warnings
 from io import StringIO
 
@@ -746,18 +747,20 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
             return timing
 
+        autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
             choices[0].name,
             repr([self.key_of(x) for x in input_nodes]),
             autotune,
         )
+        autotune_elapse = time.time() - autotune_start_ts
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
-            self.log_results(choices[0].name, input_nodes, timings)
+            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -869,7 +872,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return benchmark
 
     @staticmethod
-    def log_results(name, input_nodes, timings):
+    def log_results(name, input_nodes, timings, elapse):
         if not config.max_autotune or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
@@ -885,6 +888,7 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+        sys.stderr.write(f"AUTOTUNE takes {elapse} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):
