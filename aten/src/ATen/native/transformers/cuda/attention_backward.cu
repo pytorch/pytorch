@@ -10,6 +10,7 @@
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 
 #ifdef USE_FLASH_ATTENTION
@@ -85,7 +86,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     double dropout_p,
     bool is_causal,
     const int64_t philox_seed,
-    const int64_t philox_offset) {
+    const int64_t philox_offset,
+    c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension
@@ -94,7 +96,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   benchmarking. We will hard code it to 0 for now
   */
   constexpr int num_splits{0};
-  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
@@ -144,7 +146,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     bool causal,
-    bool chunk_grad_outputs) {
+    bool chunk_grad_outputs,
+    c10::optional<double> scale) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
@@ -247,6 +250,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
     p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
     p.delta_ptr = (float*)delta.data_ptr();
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = query.size(1);
@@ -341,7 +345,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     double dropout_p,
     bool is_causal,
     const int64_t philox_seed,
-    const int64_t philox_offset){
+    const int64_t philox_offset,
+    c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -381,7 +386,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     dropout_p,
     is_causal,
     philox_seed,
-    philox_offset);
+    philox_offset,
+    scale);
 
   grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
   grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
@@ -399,7 +405,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     bool causal,
-    bool chunk_grad_outputs){
+    bool chunk_grad_outputs,
+    c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -410,7 +417,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   auto v_t = value.transpose(1, 2);
 
   Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal, chunk_grad_outputs);
+  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal, chunk_grad_outputs, scale);
   return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
 
