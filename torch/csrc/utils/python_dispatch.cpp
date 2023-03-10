@@ -565,6 +565,8 @@ void initDispatchBindings(PyObject* module) {
     return c10::DispatchKeySet(c10::DispatchKeySet::FULL);
   });
 
+  m.def("_dispatch_is_alias_key", c10::isAliasDispatchKey);
+
   m.def("_dispatch_keyset_to_string", [](c10::DispatchKeySet keyset) {
     return c10::toString(keyset);
   });
