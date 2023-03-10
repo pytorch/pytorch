@@ -59,16 +59,14 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@map.py_impl(DispatchKey.CUDA)
-@map.py_impl(DispatchKey.CPU)
+@map.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_cpu(f, xs, *args):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
     return torch.stack([f(x, *args) for x in xs])
 
 
-@map.py_impl(DispatchKey.AutogradCUDA)
-@map.py_impl(DispatchKey.AutogradCPU)
+@map.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, *args):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([f, xs, args])
@@ -115,29 +113,16 @@ def map_functionalize(interpreter, f, xs, *args):
     functional_map_fn = functionalize(f, remove=mode)
 
     with interpreter.lower():
-        fake_tensor_mode = FakeTensorMode()
-        with fake_tensor_mode as ft_mode:
+        inputs = (unwrapped_xs,) + unwrapped_args
+        if _has_potential_branch_input_mutation(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is mutating the input!"
+            )
 
-            # Returns fake inputs for a single map function call
-            def get_fake_inputs(unwrapped_xs, unwrapped_args):
-                fake_xs = ft_mode.fake_tensor_converter(ft_mode, unwrapped_xs)
-                fake_args = pytree.tree_map_only(
-                    torch.Tensor,
-                    lambda x: ft_mode.fake_tensor_converter(ft_mode, x),
-                    unwrapped_args,
-                )
-                return (fake_xs[0],) + fake_args
-
-            fake_inputs = get_fake_inputs(unwrapped_xs, unwrapped_args)
-            if _has_potential_branch_input_mutation(functional_map_fn, fake_inputs):
-                raise UnsupportedAliasMutationException(
-                    "torch.map is mutating the input!"
-                )
-
-            if _has_potential_branch_input_alias(functional_map_fn, fake_inputs):
-                raise UnsupportedAliasMutationException(
-                    "torch.map is aliasing the input!"
-                )
+        if _has_potential_branch_input_alias(functional_map_fn, inputs):
+            raise UnsupportedAliasMutationException(
+                "torch.map is aliasing the input!"
+            )
 
         map_return = map(functional_map_fn, unwrapped_xs, *unwrapped_args)
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
