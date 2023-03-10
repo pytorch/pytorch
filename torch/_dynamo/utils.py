@@ -957,11 +957,10 @@ def same(
             log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        if relax_numpy_equality:
-            if is_numpy_int_type(ref):
-                ref = ref.item()
-            if is_numpy_int_type(res):
-                res = res.item()
+        if relax_numpy_equality and not (
+            is_numpy_int_type(res) or is_numpy_float_type(res)
+        ):
+            ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
             log.error(f"Accuracy failed (numpy): {ref} != {res}")
@@ -1391,8 +1390,15 @@ def tensor_always_has_static_shape(
 # copy pasted. This util is meant to replace that regex. Because we were inconsistent across all locations,
 # we are implementing the widest useful intersection of the various regexs here.
 def normalize_attr_name(name):
+    from torch._guards import TracingContext
+
     # e.g. replace abc[0].xyz with abc_0.xyz
     name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    base = name
+    for i in itertools.count():
+        if name not in TracingContext.get().module_context.names_to_sources:
+            return name
+        name = f"{base}_{i}"
     return name

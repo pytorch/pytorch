@@ -155,8 +155,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
-    def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+    def benchmark_all_configs(self, *args, **kwargs):
         from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -171,9 +170,14 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
+        return timings
+
+    def autotune_to_one_config(self, *args, **kwargs):
+        """Do the actual autotuning"""
+        timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
@@ -313,8 +317,13 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
+    # The autotune cache will simply replace the list of candidate configs with
+    # the best config cached. We don't want that when we benchmark triton kernels.
+    # We need the perf for each of the candidate config instead.
+    cache_autotune_result = not config.benchmark_kernel
+
     # on disk caching logic
-    if filename is not None and len(configs) > 1:
+    if cache_autotune_result and filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)

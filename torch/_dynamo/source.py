@@ -149,6 +149,7 @@ class ParamBufferSource(AttrSource):
     def name(self):
         return f"{self.base.name()}.{self.member}"
 
+
 class TensorProperty(enum.Enum):
     SIZE = 0
     STRIDE = 1
