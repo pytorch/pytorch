@@ -9422,7 +9422,7 @@ class DistributedTest:
                 @staticmethod
                 def forward(ctx, input):
                     return input
-                
+
                 @staticmethod
                 def backward(ctx, grad_output):
                     raise RuntimeError()
@@ -9432,7 +9432,7 @@ class DistributedTest:
                     super(MyModel, self).__init__()
                     self.error = True
                     self.fc1 = nn.Linear(10, 10).cuda(device)
-                
+
                 def forward(self, inp):
                     if self.error:
                         return self.fc1(SimulateError.apply(inp))
@@ -9440,8 +9440,8 @@ class DistributedTest:
                         return self.fc1(inp)
 
 
-            # Run with error to trigger backward pass that marks fc1 as being marked 
-            # ready. If we don't remove autograd hooks before running below it would 
+            # Run with error to trigger backward pass that marks fc1 as being marked
+            # ready. If we don't remove autograd hooks before running below it would
             # fail on the old autograd hook.
             model = MyModel(self.rank)
             input = torch.rand(10, 10, requires_grad=True).cuda(self.rank)
@@ -9452,7 +9452,7 @@ class DistributedTest:
 
             with self.assertRaises(RuntimeError):
                 model_ddp1(input).sum().backward()
-            
+
             # Remove autograd hooks on old instance.
             model_ddp1._remove_autograd_hooks()
 
