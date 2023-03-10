@@ -175,7 +175,12 @@ def _all_gather_into_tensor(shard, tag, ranks, group_size):
     out_size[0] *= group_size
     out_tensor = shard.new_empty(out_size)
     assert out_tensor.is_contiguous()
-    work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
+    # FIXME gloo doesn't support _allgather_base
+    if shard.is_cpu:
+        tensor_list = list(torch.chunk(out_tensor, group_size))
+        work = dist.all_gather(tensor_list, shard, group=group, async_op=True)
+    else:
+        work = dist.all_gather_into_tensor(out_tensor, shard, group=group, async_op=True)
     _register_tensor_work(out_tensor, work)
 
     return out_tensor
