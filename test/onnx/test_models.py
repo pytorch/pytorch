@@ -70,17 +70,23 @@ class TestModels(pytorch_test_common.ExportTestCase):
                 opset_version=self.opset_version,
             )
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_ops(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(DummyNet()), toC(x))
 
-    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_3) Op (aten_gt) [ShapeInferenceError] (op_type:Greater, node name: n0): B has inconsistent type tensor(int64)")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_3) Op (aten_gt) [ShapeInferenceError] (op_type:Greater, node name: n0): B has inconsistent type tensor(int64)")  # noqa: B950
+    # fmt: on
     def test_prelu(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
-    @skipFxTest(reason="TypeError: forward() missing 1 required positional argument: 'inputs_1_'")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="TypeError: forward() missing 1 required positional argument: 'inputs_1_'")  # noqa: B950
+    # fmt: on
     @skipScriptTest()
     def test_concat(self):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
@@ -110,16 +116,23 @@ class TestModels(pytorch_test_common.ExportTestCase):
         )
 
     @skipIfNoLapack
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.pixel_shuffle.default")  # noqa: B950
+    # fmt: on
     def test_super_resolution(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0))
         self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # noqa: B950
+    # fmt: on
     def test_alexnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(alexnet()), toC(x))
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.max_pool2d_with_indices.default")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.max_pool2d_with_indices.default")  # noqa: B950
+    # fmt: on
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
@@ -148,19 +161,25 @@ class TestModels(pytorch_test_common.ExportTestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_resnet(self):
         # ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # noqa: B950
+    # fmt: on
     def test_squeezenet(self):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
         # <0.5MB model size
@@ -174,13 +193,17 @@ class TestModels(pytorch_test_common.ExportTestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # noqa: B950
+    # fmt: on
     @skipScriptTest()
     def test_dcgan_netD(self):
         netD = _netD(1)
@@ -188,7 +211,9 @@ class TestModels(pytorch_test_common.ExportTestCase):
         input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     @skipScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
@@ -246,23 +271,31 @@ class TestModels(pytorch_test_common.ExportTestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_mnasnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_mobilenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     @skipScriptTest()  # prim_data
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -288,17 +321,23 @@ class TestModels(pytorch_test_common.ExportTestCase):
             atol=1e-5,
         )
 
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # noqa: B950
+    # fmt: on
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # noqa: B950
+    # fmt: on
     def test_mc3_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
+    # fmt: off
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # noqa: B950
+    # fmt: on
     def test_r2plus1d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)

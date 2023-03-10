@@ -45,7 +45,7 @@ def exportTest(
 ):
     opset_versions = opset_versions if opset_versions else [7, 8, 9, 10, 11, 12, 13, 14]
 
-    if self.is_fx:
+    if getattr(self, "is_fx", False):
         # PIN opset version for fx tests.
         self.opset_version = _constants.FX_ONNX_OPSET
         if isinstance(inputs, torch.Tensor):
