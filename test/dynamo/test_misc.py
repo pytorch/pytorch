@@ -3341,6 +3341,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def forward(self, query, key, value):
                 out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
                 out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
                     query=query,
                     key=key,
                     value=value,
@@ -3359,6 +3362,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 out = F.scaled_dot_product_attention(
                     query, key, value, None, dropout_p=0, is_causal=True
                 )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
                 return out
 
         device = "cuda"

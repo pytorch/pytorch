@@ -444,8 +444,10 @@ class IndentedBuffer:
         @contextlib.contextmanager
         def ctx():
             self._indent += offset
-            yield
-            self._indent -= offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
 
         return ctx()
 
