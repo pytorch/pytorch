@@ -88,9 +88,11 @@ def validate_ir(node_or_nodes):
         assert isinstance(
             node,
             (
+                DynamicScalar,
                 TensorBox,
                 RandSeedBuffer,
                 sympy.Symbol,
+                sympy.core.relational.Relational,
                 Expr,
             ),
         ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -325,8 +327,10 @@ class IRNode:
     def current_origins(origins: Set[torch.fx.Node]):
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
-        yield
-        IRNode._current_origins = old
+        try:
+            yield
+        finally:
+            IRNode._current_origins = old
 
     def __post_init__(self):
         self.origins = set(self._current_origins)
@@ -394,12 +398,8 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(self._index(self.ranges))
-            return formatter.getvalue(result)
+        index = self._index(self.ranges)
+        return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -515,15 +515,13 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(
-                self._index(self.ranges),
-                self._index(self.reduction_ranges, "r"),
-            )
-            return formatter.getvalue(result)
+        index = self._index(self.ranges)
+        rindex = self._index(self.reduction_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+        )
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
