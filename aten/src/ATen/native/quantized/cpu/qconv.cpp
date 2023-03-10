@@ -1525,6 +1525,13 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   // Weight
   auto packed_weight = at::native::itensor_from_mkldnn(weight);
 
+  // Bias
+  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  bool with_bias = bias.has_value();
+  if (with_bias) {
+    onednn_bias = at::native::itensor_from_mkldnn(bias.value());
+  }
+  const auto& expected_bias = with_bias ? onednn_bias.value() : ideep::tensor();
 
   /*********************************/
   /*        Computation            */
@@ -1589,27 +1596,20 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   // Here we check weight desc and reorder weight if necessary
   // because input shape may change and so does weight layout
   // auto op_attr = ideep::attr_t();
-  ideep::scale_t bias_scales, op_scales;
-  std::tie(bias_scales, op_scales) = ideep::utils::compute_scales(
-      src_scales[0], inv_output_scale, weights_scales);
-  int scale_size = weights_scales.size();
-  op_attr.set_output_scales(ideep::utils::op_scale_mask(scale_size), op_scales);
+  // ideep::scale_t bias_scales, op_scales;
+  // std::tie(bias_scales, op_scales) = ideep::utils::compute_scales(
+  //     src_scales[0], inv_output_scale, weights_scales);
+  // int scale_size = weights_scales.size();
+  // op_attr.set_output_scales(ideep::utils::op_scale_mask(scale_size), op_scales);
   op_attr.set_zero_points(DNNL_ARG_SRC, 0, src_zero_points);
-  op_attr.set_zero_points(DNNL_ARG_DST, 0, dst_zero_points);
-  auto w_desc = ideep::convolution_forward::expected_weights_desc(
-      weight.sizes().vec(), dnnl::memory::data_type::s8,
-      stride.vec(), padding.vec(), padding.vec(), dilation.vec(), groups,
-      dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
-      dnnl::memory::data_type::u8, act.sizes().vec(), op_attr, /*is_channels_last=*/true);
-  ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(w_desc);
+  // op_attr.set_zero_points(DNNL_ARG_DST, 0, dst_zero_points);
+  // auto w_desc = ideep::convolution_forward::expected_weights_desc(
+  //     weight.sizes().vec(), dnnl::memory::data_type::s8,
+  //     stride.vec(), padding.vec(), padding.vec(), dilation.vec(), groups,
+  //     dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+  //     dnnl::memory::data_type::u8, act.sizes().vec(), op_attr, /*is_channels_last=*/true);
+  // ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(w_desc);
 
-  // Bias
-  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
-  bool with_bias = bias.has_value();
-  if (with_bias) {
-    onednn_bias = at::native::itensor_from_mkldnn(bias.value());
-  }
-  const auto& expected_bias = with_bias ? onednn_bias.value() : ideep::tensor();
 
   // // Leslie: Debug Start
   // // Get src
@@ -1673,7 +1673,7 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
 
     ConvParams params;
     ideep::convolution_forward::prepare(
-        params, src, expected_weight, expected_bias, dst_dims, dst,
+        params, src, packed_weight, expected_bias, dst_dims, dst,
         stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups,
         src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
         src_zero_points, dst_zero_points,
@@ -1681,7 +1681,7 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
         dnnl::prop_kind::forward_inference,
         ideep::u8s8, ideep::engine::cpu_engine());
     auto expected_weight_desc = ideep::tensor::desc(params.pd.weights_desc(), groups);
-    expected_weight = expected_weight.reorder_if_differ_in(expected_weight_desc);
+    ideep::tensor expected_weight = packed_weight.reorder_if_differ_in(expected_weight_desc);
     ideep::convolution_forward::compute<false, false>(params, src, expected_weight, expected_bias, dst);
 
 
