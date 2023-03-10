@@ -6,8 +6,8 @@
 #include <functional>
 
 #include <c10/core/DeviceGuard.h>
-#include <c10/core/StreamGuard.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
@@ -311,12 +311,14 @@ void Reducer::check_grad_layout(
     const at::Tensor& bucket_view) {
   // Ensure that the gradient type matches the bucket type, or mixed precision
   // type if we are training with mixed precision.
-  auto type = mixed_precision_param_dtype_ ?
-    *mixed_precision_param_dtype_ : bucket_view.options().dtype().toScalarType();
+  auto type = mixed_precision_param_dtype_
+      ? *mixed_precision_param_dtype_
+      : bucket_view.options().dtype().toScalarType();
   REDUCER_CHECK(
       grad.options().dtype().toScalarType() == type,
       logger_,
-      c10::str("Expected ", type, ", got ", grad.options().dtype().toScalarType()));
+      c10::str(
+          "Expected ", type, ", got ", grad.options().dtype().toScalarType()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
@@ -1094,8 +1096,9 @@ void Reducer::initialize_buckets(
       }
 
       // Allocate the bucket's flattened `gradients` tensor.
-      // Make gradient type in the reduced precision if mixed precision is enabled.
-      // This ensures that the type is correct when e.g. rebuilding buckets.
+      // Make gradient type in the reduced precision if mixed precision is
+      // enabled. This ensures that the type is correct when e.g. rebuilding
+      // buckets.
       if (mixed_precision_param_dtype_) {
         options = options.dtype(*mixed_precision_param_dtype_);
       }

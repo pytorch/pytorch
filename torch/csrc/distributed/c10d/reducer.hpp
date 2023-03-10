@@ -6,7 +6,7 @@
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-#include "c10/core/ScalarType.h"
+#include <c10/core/ScalarType.h>
 
 #include <ATen/core/ivalue_inl.h>
 #include <c10/macros/Macros.h>

@@ -1,7 +1,6 @@
 import copy
 import functools
 from collections import defaultdict, deque
-from enum import Enum, auto
 import inspect
 import itertools
 import logging
@@ -791,7 +790,7 @@ class DistributedDataParallel(Module, Joinable):
             _cast_buffers(self.mixed_precision, self.module)
             # Stream used for async low precision copies.
             self._mp_stream = torch.cuda.Stream()
-            self._submodule_to_event = defaultdict(deque)
+            self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
             # Add forward pre-hook to root module to kick off copies to lower
             # precision.
             self.module.register_forward_pre_hook(
@@ -928,7 +927,9 @@ class DistributedDataParallel(Module, Joinable):
                         # is saved and .grad field is set to None, bypassing
                         # this issue.
                         if param.grad is not None:
-                            param.grad.data = param.grad.to(self.mixed_precision.param_dtype)
+                            param.grad.data = param.grad.to(
+                                self.mixed_precision.param_dtype  # type: ignore[var-annotated]
+                            )
                     param.data = param._mp_param
                 copy_event = torch.cuda.Event()
                 copy_event.record()
