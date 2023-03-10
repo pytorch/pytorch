@@ -563,11 +563,11 @@ class CppVecOverrides(OpOverrides):
 
         if other == float("-inf"):
             other_code = (
-                f"at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
+                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
             )
         elif other == float("inf"):
             other_code = (
-                f"at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
             )
         else:
             other_code = f"at::vec::Vectorized<float>({other!r})"
@@ -575,7 +575,7 @@ class CppVecOverrides(OpOverrides):
         type = f"decltype({var}())"
         zero_val = "at::vec::Vectorized<float>(0)"
         float_mask = f"to_float_mask({mask})"
-        return f"{type}::blendv({var}(), {other_code}, {float_mask} != {zero_val})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -820,7 +820,7 @@ class CppOverrides(OpOverrides):
         if other == float("-inf"):
             other_code = f"-std::numeric_limits<{type}>::infinity()"
         elif other == float("inf"):
-            other_code = "std::numeric_limits<{type}>::infinity()"
+            other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
         else:
