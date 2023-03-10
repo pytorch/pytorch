@@ -1267,10 +1267,10 @@ torch.cuda.synchronize()
         )) + list(product(
             (torch.optim.SGD,),
             [
-                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n}
+                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
                 for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
             ] + [
-                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n}
+                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
                 for d, w, n in product((0.0,), (0.0, 0.5), (True,))
             ],
             (False, True),

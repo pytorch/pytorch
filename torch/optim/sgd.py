@@ -225,15 +225,18 @@ def sgd(params: List[Tensor],
     See :class:`~torch.optim.SGD` for details.
     """
 
-    if fused is None:
-        fused = False
-    if foreach is None:
+    if foreach is None and fused is None:
         # why must we be explicit about an if statement for torch.jit.is_scripting here?
         # because JIT can't handle Optionals nor fancy conditionals when scripting
         if not torch.jit.is_scripting():
-            _, foreach = _default_to_fused_or_foreach(params, differentiable=False, use_fused=False)
+            fused, foreach = _default_to_fused_or_foreach(params, differentiable=False, use_fused=False)
         else:
             foreach = False
+            fused = False
+    if fused is None:
+        fused = False
+    if foreach is None:
+        foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
