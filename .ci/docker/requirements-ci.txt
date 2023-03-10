@@ -144,11 +144,6 @@ pytest
 #Pinned versions:
 #test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
 
-pytest-xdist
-#Description: plugin for running pytest in parallel
-#Pinned versions:
-#test that import:
-
 pytest-shard
 #Description: plugin spliting up tests in pytest
 #Pinned versions:
