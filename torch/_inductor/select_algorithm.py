@@ -351,7 +351,8 @@ class TritonTemplate:
 
     def __getstate__(self):
         state = self.__dict__.copy()
-        # jinja template can not be pickled
+        # jinja template can not be pickled. Remove it from the state here.
+        # It will be recreated in __setstate__
         del state["template"]
         return state
 
@@ -800,9 +801,8 @@ class AlgorithmSelectorCache(PersistentCache):
             # child process fail
             if child.exitcode != 0:
                 warnings.warn(
-                    f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."
-                )  # noqa: B950 line too long
-
+                    f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
+                )
                 # return a large value to this choice will be ignored
                 return 1e10
 
