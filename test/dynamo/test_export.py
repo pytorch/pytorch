@@ -1,17 +1,19 @@
 # Owner(s): ["module: dynamo"]
+import inspect
 import operator
 import unittest
 from enum import Enum
-from typing import Dict, List
+from typing import Dict, List, Sequence
 from unittest.mock import patch
 
 import torch
-
+import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal import common_utils
 
 
 class ExportTests(torch._dynamo.test_case.TestCase):
@@ -935,6 +937,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
                 self.assertTrue(node.meta["source_fn"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
+                self.assertTrue(node.meta["original_aten"] is not None)
 
     def test_export_preserves_nn_module_stack_for_get_attr(self):
         inp = torch.randn(4, 4)
@@ -1750,21 +1753,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         pos0 = torch.randn(4)
         myargs = [torch.randn(4), torch.randn(4)]
 
-        torch._dynamo.reset()
-        exported = torch._dynamo.export(
+        expected_argument_names = [
+            "pos0",
+            "tuple0",
+            "myargs_0",
+            "myargs_1",
+            "mykw0",
+            "input0",
+            "input1",
+        ]
+        self._test_export_preserving_original_signature(
             fn_with_kwargs,
+            expected_argument_names,
             pos0,
             tuple0,
             *myargs,
-            aten_graph=False,
             mykw0=mykw0,
             **mykwargs,
         )
-
-        out_graph = exported[0]
-        dynamo_result = out_graph(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
-        real_result = fn_with_kwargs(pos0, tuple0, *myargs, mykw0=mykw0, **mykwargs)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_export_with_kwargs_and_empty_args(self):
         def fn_with_kwargs(mykw0=None, **mykwargs):
@@ -1775,18 +1781,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         mykwargs = {"input0": torch.randn(4), "input1": torch.randn(4)}
         mykw0 = torch.randn(4)
 
-        torch._dynamo.reset()
-        exported = torch._dynamo.export(
-            fn_with_kwargs,
-            aten_graph=False,
-            mykw0=mykw0,
-            **mykwargs,
+        expected_argument_names = ["mykw0"] + list(mykwargs.keys())
+        self._test_export_preserving_original_signature(
+            fn_with_kwargs, expected_argument_names, mykw0, **mykwargs
         )
-
-        out_graph = exported[0]
-        dynamo_result = out_graph(mykw0=mykw0, **mykwargs)
-        real_result = fn_with_kwargs(mykw0=mykw0, **mykwargs)
-        self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
 
     def test_export_with_args_and_empty_kwargs(self):
         def fn_with_kwargs(pos0, tuple0, *myargs):
@@ -1801,15 +1799,138 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         pos0 = torch.randn(4)
         myargs = [torch.randn(4), torch.randn(4)]
 
+        expected_argument_names = ["pos0", "tuple0", "myargs_0", "myargs_1"]
+        self._test_export_preserving_original_signature(
+            fn_with_kwargs, expected_argument_names, pos0, tuple0, *myargs
+        )
+
+    @common_utils.parametrize(
+        "default_value",
+        [
+            common_utils.subtest(None, name="None"),
+            common_utils.subtest(42.0, name="float"),
+            common_utils.subtest(
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                torch.randn(4),
+                name="tensor",
+                decorators=[unittest.expectedFailure],
+            ),
+            common_utils.subtest(
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                (torch.randn(4),),
+                name="tuple",
+                decorators=[unittest.expectedFailure],
+            ),
+        ],
+    )
+    def test_export_with_args_with_default(self, default_value):
+        def fn(pos0, pos1_default=default_value):
+            out = pos0
+            if pos1_default is None:
+                pos1_default = torch.randn(4)
+            if isinstance(pos1_default, tuple):
+                pos1_default = pos1_default[0]
+            out *= pos1_default
+            return out
+
+        pos0 = torch.randn(4)
+        expected_argument_names = ["pos0"]
+        self._test_export_preserving_original_signature(
+            fn, expected_argument_names, pos0
+        )
+
+    @common_utils.parametrize(
+        "default_value",
+        [
+            common_utils.subtest(None, name="None"),
+            common_utils.subtest(42.0, name="float"),
+            common_utils.subtest(
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                torch.randn(4),
+                name="tensor",
+                decorators=[unittest.expectedFailure],
+            ),
+            common_utils.subtest(
+                # FIXME: AssertionError: Dynamo input and output is a strict subset of traced input/output
+                (torch.randn(4),),
+                name="tuple",
+                decorators=[unittest.expectedFailure],
+            ),
+        ],
+    )
+    def test_export_with_kwargs_with_default(self, default_value):
+        def fn(pos0, *, kw0, kw1_default=default_value, **kwargs):
+            out = pos0
+            out += kw0
+            if kw1_default is None:
+                kw1_default = torch.randn(4)
+            elif isinstance(kw1_default, tuple):
+                kw1_default = kw1_default[0]
+            out += kw1_default
+            out += kwargs["kw2"]
+            return out
+
+        pos0 = torch.randn(4)
+        kw0 = torch.randn(4)
+        kw2 = torch.randn(4)
+
+        args = (pos0,)
+        kwargs = {"kw0": kw0, "kw2": kw2}
+        expected_argument_names = ["pos0", "kw0", "kw2"]
+        self._test_export_preserving_original_signature(
+            fn, expected_argument_names, *args, **kwargs
+        )
+
+    def test_export_with_wrapped_fn(self):
+        # To ensure dynamo.export is robust to wrapped functions
+        # when it cannot use `inspect` to retrieve original signature
+        # info.
+        def _fn(pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+            out = pos0
+            out += pos1
+            out += kw0
+            out += kw1
+            for arg in args:
+                out += arg
+            for kwarg in kwargs.values():
+                out += kwarg
+            return out
+
+        def wrapped_fn(*args, **kwargs):
+            return _fn(*args, **kwargs)
+
+        pos0 = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, torch.randn(4), torch.randn(4))
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4)}
+        expected_argument_names = [f"args_{i}" for i in range(len(args))] + list(
+            kwargs.keys()
+        )
+
+        self._test_export_preserving_original_signature(
+            wrapped_fn, expected_argument_names, *args, **kwargs
+        )
+
+    def _test_export_preserving_original_signature(
+        self, fn, expected_argument_names: Sequence[str], *args, **kwargs
+    ):
         torch._dynamo.reset()
         exported = torch._dynamo.export(
-            fn_with_kwargs, pos0, tuple0, *myargs, aten_graph=False
+            fn,
+            *args,
+            **kwargs,
+            aten_graph=False,
         )
 
         out_graph = exported[0]
-        dynamo_result = out_graph(pos0, tuple0, *myargs)
-        real_result = fn_with_kwargs(pos0, tuple0, *myargs)
+        dynamo_result = out_graph(*args, **kwargs)
+        real_result = fn(*args, **kwargs)
         self.assertTrue(torch._dynamo.utils.same(real_result, dynamo_result))
+
+        # Check that the exported graph preserves same argument names.
+        self.assertEqual(
+            inspect.getfullargspec(out_graph.forward).args[1:], expected_argument_names
+        )
 
     def test_export_meta(self):
         class MyModule(torch.nn.Module):
@@ -2069,6 +2190,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+
+common_utils.instantiate_parametrized_tests(ExportTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
