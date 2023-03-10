@@ -559,7 +559,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         return False
 
                 # NB: OK to pass torch.tensor(tensor), this will trace fine
-                if isinstance(args[0], ListVariable) and check_any_unspec(args[0]):
+                # TODO: But torch.tensor(unspec) would not trace fine.  Not
+                # handled right now.
+                data_arg = None
+                if args:
+                    data_arg = args[0]
+                elif "data" in kwargs:
+                    data_arg = kwargs["data"]
+
+                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(

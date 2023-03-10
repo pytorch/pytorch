@@ -2482,13 +2482,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device="cpu:0")
-        y0 = torch.randn(1024, 1024, device="cpu:0")
+        x0 = torch.randn(1024, 1024, device="cuda:0")
+        y0 = torch.randn(1024, 1024, device="cuda:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device="cpu:1")
-        y1 = torch.randn(1024, 1024, device="cpu:1")
+        x1 = torch.randn(1024, 1024, device="cuda:1")
+        y1 = torch.randn(1024, 1024, device="cuda:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -4460,6 +4460,14 @@ class CommonTemplate:
                 True,
             ),
         )
+
+    def test_index_put_index(self):
+        def fn(ind, x, src):
+            y = torch.ops.aten.index_put.default(x, [ind], src)
+            return torch.ops.aten.index.Tensor(y, [ind])
+
+        args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
+        self.common(fn, args)
 
     @config.patch(fallback_random=True)
     def test_bernoulli1(self):
