@@ -140,6 +140,7 @@ __all__ = [
     "log1p",
     "log2",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "logsumexp",
@@ -2293,6 +2294,12 @@ def logical_or(g: jit_utils.GraphContext, input, other):
 @_beartype.beartype
 def logical_xor(g: jit_utils.GraphContext, input, other):
     return g.op("Xor", input, other)
+
+
+@_onnx_symbolic("aten::logical_not")
+@_beartype.beartype
+def logical_not(g: jit_utils.GraphContext, input):
+    return g.op("Not", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL))
 
 
 @_onnx_symbolic("aten::__rshift_")
