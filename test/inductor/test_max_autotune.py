@@ -79,7 +79,8 @@ class TestDoBench(TestCase):
             # use a tensor since the mutation to a python list in a sub process
             # is not synced back to the parent process
             timings = torch.zeros(3, dtype=torch.float32)
-            child = mp.Process(
+            ctx = mp.get_context("spawn")
+            child = ctx.Process(
                 target=benchmark_choice,
                 args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
             )
@@ -115,7 +116,8 @@ class TestDoBench(TestCase):
 
             # use a tensor since python list is not synced back
             timings = torch.zeros(3, dtype=torch.float32)
-            child = mp.Process(
+            ctx = mp.get_context("spawn")
+            child = ctx.Process(
                 target=benchmark_choice,
                 args=(choice, (mat1, mat2, mat3, mat4), out, expected_out, timings),
             )
