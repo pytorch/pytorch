@@ -1236,7 +1236,6 @@ class ShapeEnv:
         # range may contain ints which may not actually appear in
         # practice
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
-        # var_to_range entries which were modified by manual user directive
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
         # Maps from sympy ints to expressions representing them
@@ -1280,10 +1279,9 @@ class ShapeEnv:
         for i, val in enumerate(ex.size()):
             is_dynamic = _is_dim_dynamic(ex, i)
             if _should_allocate(is_dynamic, self.assume_static_by_default):
-                new_sym = self.create_symbol(
+                size.append(self.create_symbol(
                     val, TensorPropertySource(source, TensorProperty.SIZE, i), is_dynamic
-                )
-                size.append(new_sym)
+                ))
             else:
                 size.append(sympy.Integer(val))
         return size
