@@ -125,6 +125,12 @@ function get_pinned_commit() {
   cat .github/ci_commit_pins/"${1}".txt
 }
 
+function install_torchaudio() {
+  local commit
+  commit=$(get_pinned_commit audio)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
+}
+
 function install_torchtext() {
   local commit
   commit=$(get_pinned_commit text)
@@ -208,9 +214,11 @@ function install_timm() {
 }
 
 function checkout_install_torchbench() {
+  local commit
+  commit=$(get_pinned_commit torchbench)
   git clone https://github.com/pytorch/benchmark torchbench
   pushd torchbench
-  git checkout no_torchaudio
+  git checkout "$commit"
 
   if [ "$1" ]; then
     python install.py --continue_on_fail models "$@"
