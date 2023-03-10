@@ -1608,55 +1608,55 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   }
 
 
-  // Leslie: Debug Start
-  // Get src
-  auto debug_src_dims = src.get_dims();
-  auto debug_src_data_type = act.scalar_type();
-  at::Tensor src_cpu_tensor = at::empty(
-    std::vector<int64_t>(debug_src_dims.begin(), debug_src_dims.end()),
-    act.options().layout(c10::kStrided).dtype(debug_src_data_type));
+  // // Leslie: Debug Start
+  // // Get src
+  // auto debug_src_dims = src.get_dims();
+  // auto debug_src_data_type = act.scalar_type();
+  // at::Tensor src_cpu_tensor = at::empty(
+  //   std::vector<int64_t>(debug_src_dims.begin(), debug_src_dims.end()),
+  //   act.options().layout(c10::kStrided).dtype(debug_src_data_type));
 
-  auto src_pub_tensor = src.to_public(src_cpu_tensor.template data_ptr<uint8_t>(),
-                          ideep::tensor::data_type::u8);
-  src_cpu_tensor.as_strided_(debug_src_dims, src_pub_tensor.get_strides());
-  std::cout<<"src is: "<<src_cpu_tensor.contiguous()<<std::endl;  
+  // auto src_pub_tensor = src.to_public(src_cpu_tensor.template data_ptr<uint8_t>(),
+  //                         ideep::tensor::data_type::u8);
+  // src_cpu_tensor.as_strided_(debug_src_dims, src_pub_tensor.get_strides());
+  // std::cout<<"src is: "<<src_cpu_tensor.contiguous()<<std::endl;  
 
-  // Get accum
-  auto debug_dst_dims = dst.get_dims();
-  auto debug_dst_data_type = debug_src_data_type;
-  at::Tensor dst_cpu_tensor = at::empty(
-    std::vector<int64_t>(debug_dst_dims.begin(), debug_dst_dims.end()),
-    output.options().layout(c10::kStrided).dtype(debug_dst_data_type));
+  // // Get accum
+  // auto debug_dst_dims = dst.get_dims();
+  // auto debug_dst_data_type = debug_src_data_type;
+  // at::Tensor dst_cpu_tensor = at::empty(
+  //   std::vector<int64_t>(debug_dst_dims.begin(), debug_dst_dims.end()),
+  //   output.options().layout(c10::kStrided).dtype(debug_dst_data_type));
 
-  auto dst_pub_tensor = dst.to_public(dst_cpu_tensor.template data_ptr<uint8_t>(),
-                          ideep::tensor::data_type::u8);
-  dst_cpu_tensor.as_strided_(debug_dst_dims, dst_pub_tensor.get_strides());
-  std::cout<<"accum is: "<<dst_cpu_tensor.contiguous()<<std::endl;
+  // auto dst_pub_tensor = dst.to_public(dst_cpu_tensor.template data_ptr<uint8_t>(),
+  //                         ideep::tensor::data_type::u8);
+  // dst_cpu_tensor.as_strided_(debug_dst_dims, dst_pub_tensor.get_strides());
+  // std::cout<<"accum is: "<<dst_cpu_tensor.contiguous()<<std::endl;
 
-  // Get weight
-  auto dims = expected_weight.get_dims();
-  auto data_type = weight.scalar_type();
-  at::Tensor cpu_tensor = at::empty(
-    std::vector<int64_t>(dims.begin(), dims.end()),
-    weight.options().layout(c10::kStrided).dtype(data_type));
+  // // Get weight
+  // auto dims = expected_weight.get_dims();
+  // auto data_type = weight.scalar_type();
+  // at::Tensor cpu_tensor = at::empty(
+  //   std::vector<int64_t>(dims.begin(), dims.end()),
+  //   weight.options().layout(c10::kStrided).dtype(data_type));
 
-  auto pub_tensor = expected_weight.to_public(cpu_tensor.template data_ptr<int8_t>(),
-                          ideep::tensor::data_type::s8);
-  cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
-  std::cout<<"expected_weight is: "<<cpu_tensor.contiguous()<<std::endl;
+  // auto pub_tensor = expected_weight.to_public(cpu_tensor.template data_ptr<int8_t>(),
+  //                         ideep::tensor::data_type::s8);
+  // cpu_tensor.as_strided_(dims, pub_tensor.get_strides());
+  // std::cout<<"expected_weight is: "<<cpu_tensor.contiguous()<<std::endl;
 
-  std::cout<<"dst_dims is: "<<dst_dims<<std::endl;
-  std::cout<<"stride.vec() is: "<<stride.vec()<<std::endl;
-  std::cout<<"dilation.vec() is: "<<dilation.vec()<<std::endl;
-  std::cout<<"padding.vec() is: "<<padding.vec()<<std::endl;
-  std::cout<<"groups is: "<<groups<<std::endl;
-  std::cout<<"src_scales is: "<<src_scales<<std::endl;
-  std::cout<<"weights_scales is: "<<weights_scales<<std::endl;
-  std::cout<<"ideep::scale_t(1, inv_output_scale) is: "<<ideep::scale_t(1, inv_output_scale)<<std::endl;
-  std::cout<<"src_zero_points is: "<<src_zero_points<<std::endl;
-  std::cout<<"dst_zero_points is: "<<dst_zero_points<<std::endl;
-  // std::cout<<"op_attr: "<<op_attr<<std::endl;
-  // Leslie: Debug End
+  // std::cout<<"dst_dims is: "<<dst_dims<<std::endl;
+  // std::cout<<"stride.vec() is: "<<stride.vec()<<std::endl;
+  // std::cout<<"dilation.vec() is: "<<dilation.vec()<<std::endl;
+  // std::cout<<"padding.vec() is: "<<padding.vec()<<std::endl;
+  // std::cout<<"groups is: "<<groups<<std::endl;
+  // std::cout<<"src_scales is: "<<src_scales<<std::endl;
+  // std::cout<<"weights_scales is: "<<weights_scales<<std::endl;
+  // std::cout<<"ideep::scale_t(1, inv_output_scale) is: "<<ideep::scale_t(1, inv_output_scale)<<std::endl;
+  // std::cout<<"src_zero_points is: "<<src_zero_points<<std::endl;
+  // std::cout<<"dst_zero_points is: "<<dst_zero_points<<std::endl;
+  // // std::cout<<"op_attr: "<<op_attr<<std::endl;
+  // // Leslie: Debug End
 
   // Weight and bias are prepacked, so set reorder_weight as false here
   ideep::convolution_forward::compute<true, false>(
