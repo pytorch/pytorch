@@ -229,6 +229,9 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     "fastNLP_Bert",  # AssertionError: 1900: <class 'torch.Tensor'>, 256: <class 'int'>
     "speech_transformer",  # AssertionError: 2040: <class 'torch.Tensor'>, 256: <class 'int'>
     "yolov3",  # AssertionError: 2304: <class 'torch.Tensor'>, 32: <class 'int'>
+    # huggingface
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # ceiling is not defined
