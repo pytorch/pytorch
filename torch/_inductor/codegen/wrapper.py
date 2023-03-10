@@ -275,6 +275,33 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
+
+        self.set_header()
+        self.write_prefix()
+
+        for name, value in V.graph.constants.items():
+            # include a hash so our code cache gives different constants different files
+            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
+            self.header.writeline(f"{name} = None  # {hashed}")
+
+        self.allocated = set()
+        self.freed = set()
+
+        # maps from reusing buffer to reused buffer
+        self.reuses = dict()
+
+        self.write_get_cuda_stream = functools.lru_cache(None)(
+            self.write_get_cuda_stream
+        )
+
+        @functools.lru_cache(None)
+        def add_import_once(line):
+            self.header.writeline(line)
+
+        self.add_import_once = add_import_once
+        self._metas = {}
+
+    def set_header(self):
         self.header.splice(
             f"""
                 from ctypes import c_void_p, c_long
@@ -301,30 +328,6 @@ class WrapperCodeGen(CodeGen):
                 from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                 """
             )
-
-        self.write_prefix()
-
-        for name, value in V.graph.constants.items():
-            # include a hash so our code cache gives different constants different files
-            hashed = hashlib.sha256(repr(value).encode("utf-8")).hexdigest()
-            self.header.writeline(f"{name} = None  # {hashed}")
-
-        self.allocated = set()
-        self.freed = set()
-
-        # maps from reusing buffer to reused buffer
-        self.reuses = dict()
-
-        self.write_get_cuda_stream = functools.lru_cache(None)(
-            self.write_get_cuda_stream
-        )
-
-        @functools.lru_cache(None)
-        def add_import_once(line):
-            self.header.writeline(line)
-
-        self.add_import_once = add_import_once
-        self._metas = {}
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -661,6 +664,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     call_func_id = count()
+    decl_str = None
 
     def __init__(self):
         self._call_func_id = next(CppWrapperCodeGen.call_func_id)
@@ -680,7 +684,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             for x in V.graph.graph_outputs
         ]
 
-    def write_prefix(self):
+    def write_prefix_header(self):
         self.prefix.splice(
             """
             async_compile.wait(globals())
@@ -702,21 +706,30 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             """
         )
-        with self.wrapper_call.indent():
-            inputs_len = len(V.graph.graph_inputs.keys())
-            output_refs = self.get_output_refs()
-            if output_refs:
-                if len(output_refs) == 1:
-                    output_types = "at::Tensor"
-                else:
-                    output_types = "std::vector<at::Tensor>"
-            else:
-                output_types = "void"
 
-            inputs_types = "std::vector<at::Tensor>"
-            self.wrapper_call.writeline(
-                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
-            )
+    def call_func_name(self):
+        return f"call_{self._call_func_id}"
+
+    def write_prefix(self):
+        self.write_prefix_header()
+
+        inputs_len = len(V.graph.graph_inputs.keys())
+        output_refs = self.get_output_refs()
+        if output_refs:
+            if len(output_refs) == 1:
+                output_types = "at::Tensor"
+            else:
+                output_types = "std::vector<at::Tensor>"
+        else:
+            output_types = "void"
+
+        inputs_types = "std::vector<at::Tensor>"
+
+        CppWrapperCodeGen.decl_str = (
+            f"{output_types} {self.call_func_name()}({inputs_types} args)"
+        )
+        self.prefix.splice(f"{CppWrapperCodeGen.decl_str} {{")
+        with self.wrapper_call.indent():
             if inputs_len != 0:
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
@@ -778,18 +791,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
 
+    def return_end_str(self):
+        return "\n}\n'''\n)"
+
     def generate_return(self, output_refs):
         if output_refs:
             if len(output_refs) == 1:
-                self.wrapper_call.writeline("return " + output_refs[0] + "; }''' )")
+                self.wrapper_call.writeline(
+                    f"return {output_refs[0]};{self.return_end_str()}"
+                )
             else:
                 self.wrapper_call.writeline(
                     "return std::vector<at::Tensor>({"
                     + ", ".join(output_refs)
-                    + "}); }''' )"
+                    + "});"
+                    + self.return_end_str()
                 )
         else:
-            self.wrapper_call.writeline("return; }''' )")
+            self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
     def generate_end(self, result):
         shared = codecache.get_shared()
@@ -839,3 +858,36 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
+
+
+class CppAotWrapperCodeGen(CppWrapperCodeGen):
+    """
+    The AOT-version outer wrapper that calls the kernels in C++
+    """
+
+    def set_header(self):
+        return
+
+    def write_prefix_header(self):
+        self.prefix.splice("\n#include <ATen/ATen.h>")
+
+    def call_func_name(self):
+        return "aot_inductor_entry"
+
+    def define_kernel(self, name: str, kernel: str):
+        self.header.splice(f"\n{kernel}\n")
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        return
+
+    def wrap_kernel_call(self, name, call_args):
+        return f"{name}({', '.join(call_args)});"
+
+    def return_end_str(self):
+        return "\n}"
+
+    def generate_end(self, result):
+        return
+
+    def add_benchmark_harness(self, output):
+        return
