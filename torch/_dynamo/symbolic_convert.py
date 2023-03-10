@@ -1009,6 +1009,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         else:
             unimplemented("CALL_FUNCTION_EX")
         fn = self.pop()
+        if sys.version_info >= (3, 11):
+            null = self.pop()
+            assert isinstance(null, NullVariable)
         self.output.guards.update(argsvars.guards)
         self.output.guards.update(kwargsvars.guards)
 
@@ -1926,7 +1929,7 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
 
         if new_code.co_freevars:
-            cg.make_function_with_closure(name, new_code, stack_len)
+            cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             self.output.install_global(
                 name, types.FunctionType(new_code, self.f_globals, name)
