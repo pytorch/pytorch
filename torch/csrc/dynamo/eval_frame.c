@@ -647,14 +647,20 @@ static PyObject* _custom_eval_frame(
       frame->f_iblock,
       frame->f_executing);
 
-  // In obscure situations, we can enter the eval frame with an exception
-  // already set (the most common situation this when we hit a generator
-  // expression which is exiting with GeneratorExit).  In this case, there
-  // isn't really any chance that Dynamo will be able to successfully handle
-  // it.  Immediately propagate it out.
-  if (PyErr_Occurred() != NULL) {
-    DEBUG_TRACE("propagate error %s", name(frame));
-    return NULL;
+  if (throw_flag) {
+    // When unwinding generators, eval frame is called with throw_flag ==
+    // true.  Frame evaluation is supposed to continue unwinding by propagating
+    // the exception.  Dynamo doesn't really know how to do this, nor does it
+    // really want to do this, because there's literally no code to
+    // capture (you're going to immediately quit out of the frame).  So we
+    // just run the default handler in this case.
+    //
+    // NB: A previous version of this patch returned NULL.  This is wrong,
+    // because returning NULL is *different* from unwinding an exception.
+    // In particular, you will not execute things like context manager
+    // __exit__ if you just return NULL.
+    DEBUG_TRACE("throw %s", name(frame));
+    return eval_frame_default(tstate, frame, throw_flag);
   }
 
   CacheEntry* extra = get_extra(frame->f_code);
