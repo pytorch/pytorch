@@ -42,7 +42,7 @@ class StorageGroup {
 TORCH_API std::vector<StorageGroup> assignStorageToManagedTensors(
     graph_node_list nodes,
     const ManagedTensorRanges& ranges,
-    const FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor);
+    const c10::FastMap<const Value*, at::Tensor*>& tensor_value_to_tensor);
 
 // There are three types of ops in a processed graph in Static Runtime:
 //   1. op with _out variant
