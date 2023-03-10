@@ -1,5 +1,7 @@
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/Resize.h>
+#include <ATen/ExpandUtils.h>
+#include <ATen/ops/logical_not_native.h>
 #include <fmt/format.h>
 #include <torch/library.h>
 
