@@ -787,6 +787,10 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            # NB: We do not do float.  For motivation, see
+            # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
+            # but the general idea is that we generate kernels that can
+            # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
                 and isinstance(value, int)
@@ -799,11 +803,7 @@ class VariableBuilder:
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float?
-                # Not entirely clear we want to do this, as float inputs don't
-                # work with inductor codegen at the moment
             else:
-                # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
