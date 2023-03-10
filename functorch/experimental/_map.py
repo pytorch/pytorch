@@ -59,16 +59,14 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@map.py_impl(DispatchKey.CUDA)
-@map.py_impl(DispatchKey.CPU)
+@map.py_impl(DispatchKey.CompositeExplicitAutograd)
 def map_cpu(f, xs, *args):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
     return torch.stack([f(x, *args) for x in xs])
 
 
-@map.py_impl(DispatchKey.AutogradCUDA)
-@map.py_impl(DispatchKey.AutogradCPU)
+@map.py_impl(DispatchKey.Autograd)
 def map_autograd(f, xs, *args):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([f, xs, args])

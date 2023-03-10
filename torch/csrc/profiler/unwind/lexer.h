@@ -17,6 +17,7 @@ struct Lexer {
     return result;
   }
 
+  // SLEB/ULEB code adapted from LLVM equivalents
   int64_t readSLEB128() {
     int64_t Value = 0;
     unsigned Shift = 0;
@@ -46,7 +47,7 @@ struct Lexer {
       p = read<uint8_t>();
       uint64_t Slice = p & 0x7f;
       if ((Shift >= 64 && Slice != 0) || Slice << Shift >> Shift != Slice) {
-        throw std::runtime_error("uleb128 too big for uint64");
+        throw UnwindError("uleb128 too big for uint64");
       }
       Value += Slice << Shift;
       Shift += 7;
@@ -70,7 +71,7 @@ struct Lexer {
         r = base_;
         break;
       default:
-        throw std::runtime_error("unknown encoding");
+        throw UnwindError("unknown encoding");
     }
     return r + readEncodedValue(enc);
   }
@@ -113,7 +114,7 @@ struct Lexer {
       case DW_EH_PE_sleb128:
         return readSLEB128();
       default:
-        throw std::runtime_error("not implemented");
+        throw UnwindError("not implemented");
     }
   }
 
