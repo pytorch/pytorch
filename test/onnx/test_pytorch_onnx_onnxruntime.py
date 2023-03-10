@@ -3705,6 +3705,19 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
+    def test_norm_with_dtype(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                # TODO(bowbao): There is a slight gap in today's test infrastructure
+                # to directly test aten ops. OpInfo `torch.norm`` in `common_methods_invocations.py`
+                # will not decompose to below aten op.
+                return torch.ops.aten.norm(
+                    x, p=2, dim=[1], keepdim=True, dtype=torch.float64
+                )
+
+        x = torch.randn(3, 3)
+        self.run_test(Model(), x)
+
     def test_layer_norm(self):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
@@ -4128,6 +4141,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             (x,),
             input_names=["x"],
             dynamic_axes={"x": [0, 1, 2]},
+            additional_test_inputs=[x2],
+        )
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                aa = torch.tensor([[0], [1], [2]])
+                return aa.expand_as(x)
+
+        x = torch.ones(3, 2)
+        x2 = torch.randn(3, 5)
+        self.run_test(
+            Model(),
+            (x,),
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1]},
             additional_test_inputs=[x2],
         )
 
@@ -7556,6 +7584,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(2, 3, 6)
         self.run_test(PadModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular_dynamic_axes(self):
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (2, 1, 2, 1), mode="circular")
+                return out
+
+        x = torch.randn(4, 3, 5, 6)
+        self.run_test(
+            PadModel(),
+            x,
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
 
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script

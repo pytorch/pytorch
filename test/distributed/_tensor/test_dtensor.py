@@ -409,11 +409,14 @@ class DTensorMeshTest(DTensorTestBase):
             ),
         ]
 
+        from torch.distributed._tensor._utils import compute_local_offset
+
         # loop through all sharding specs and check local shard offsets
         logical_tensor = torch.randn(tensor_shape)
         for shard_spec, expected_shard_offsets in shard_spec_and_offsets:
             dtensor = distribute_tensor(logical_tensor, device_mesh, shard_spec)
-            self.assertEqual(expected_shard_offsets, dtensor._spec.local_offsets)
+            offset = compute_local_offset(dtensor.shape, device_mesh, dtensor.placements)
+            self.assertEqual(expected_shard_offsets, offset)
 
     @with_comms
     def test_from_local_sub_mesh(self):
@@ -457,7 +460,7 @@ class DTensorMeshTest(DTensorTestBase):
         sub_mesh_assert_equal(
             mesh.mesh,
             False,
-            True,
+            True,  # TODO: we might need to communicate the result instead of using the default
             res,
         )
 
@@ -476,7 +479,7 @@ class DTensorMeshTest(DTensorTestBase):
         sub_mesh_assert_equal(
             mesh.mesh,
             [torch.ones(3, 2)] * 2,
-            [torch.tensor([])],
+            [torch.tensor([])] * 2,
             [dt.to_local() for dt in dtensor_list],
         )
 
