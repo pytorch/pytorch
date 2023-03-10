@@ -19,6 +19,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
@@ -217,6 +218,18 @@ is_channels_last_3d
 is_non_overlapping_and_dense
 #endif
 
+/**
+ * This structure is intended to hold additional metadata of the specific device
+ *backend
+ **/
+struct C10_API BackendMeta : intrusive_ptr_target {
+  virtual ~BackendMeta(){};
+  virtual intrusive_ptr<BackendMeta> clone(
+      const intrusive_ptr<BackendMeta>& ptr) const {
+    return ptr;
+  }
+};
+
 struct C10_API ExtraMeta {
   SymDimVector sizes_ = {0};
   SymDimVector strides_ = {1};
@@ -229,6 +242,7 @@ struct C10_API ExtraMeta {
   SymBool is_channels_last_3d_{false};
   SymBool is_non_overlapping_and_dense_{true};
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
+  intrusive_ptr<c10::BackendMeta> backend_meta_;
 
   ExtraMeta() = default;
 
@@ -243,7 +257,8 @@ struct C10_API ExtraMeta {
       SymBool is_channels_last,
       SymBool is_channels_last_3d,
       SymBool is_non_overlapping_and_dense,
-      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta)
+      std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
+      intrusive_ptr<c10::BackendMeta> backend_meta)
       : sizes_(std::move(sizes)),
         strides_(std::move(strides)),
         numel_(std::move(numel)),
@@ -255,7 +270,8 @@ struct C10_API ExtraMeta {
         is_channels_last_(std::move(is_channels_last)),
         is_channels_last_3d_(std::move(is_channels_last_3d)),
         is_non_overlapping_and_dense_(std::move(is_non_overlapping_and_dense)),
-        named_tensor_meta_(std::move(named_tensor_meta)) {}
+        named_tensor_meta_(std::move(named_tensor_meta)),
+        backend_meta_(backend_meta) {}
 
   std::unique_ptr<ExtraMeta> clone() const {
     return std::make_unique<ExtraMeta>(
@@ -269,7 +285,8 @@ struct C10_API ExtraMeta {
         is_channels_last_,
         is_channels_last_3d_,
         is_non_overlapping_and_dense_,
-        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr);
+        named_tensor_meta_ ? named_tensor_meta_->clone() : nullptr,
+        backend_meta_ ? backend_meta_->clone(backend_meta_) : nullptr);
   }
 };
 
@@ -1575,6 +1592,27 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "Cannot report itemsize of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
     return data_type_.itemsize();
+  }
+
+  void set_backend_meta(intrusive_ptr<c10::BackendMeta> backend_meta) {
+    if (!extra_meta_) {
+      extra_meta_ = std::make_unique<ExtraMeta>();
+    }
+    extra_meta_->backend_meta_ = std::move(backend_meta);
+  }
+
+  c10::BackendMeta* get_backend_meta() {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_.get();
+  }
+
+  intrusive_ptr<c10::BackendMeta> get_backend_meta_intrusive_ptr() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->backend_meta_;
   }
 
  protected:
