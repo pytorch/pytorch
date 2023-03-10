@@ -1915,12 +1915,10 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     for idx in range(ndim):
         pad_r = padding[-(2 * idx + 1)]
         pad_l = padding[-(2 * idx + 2)]
-        # get size for targeting the last idx, as Slice don't take start=[-1], end=[-1]
-        size = symbolic_helper._get_tensor_sizes(input)
         tensors = []
         if pad_l > 0:
             left = symbolic_helper._slice_helper(
-                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[size[2 + idx]]
+                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[_constants.INT64_MAX]
             )
             tensors.append(left)
 

@@ -7585,6 +7585,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 6)
         self.run_test(PadModel(), (x))
 
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular_dynamic_axes(self):
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (2, 1, 2, 1), mode="circular")
+                return out
+
+        x = torch.randn(4, 3, 5, 6)
+        self.run_test(
+            PadModel(),
+            x,
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
+
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
     def test_unsupported_pad(self):
