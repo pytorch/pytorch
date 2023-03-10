@@ -1244,11 +1244,7 @@ class WeakTensorRef {
   }
 };
 
-extern "C"
-#ifdef _WIN32
-    __declspec(dllexport)
-#endif
-        TORCH_API PyObject* initModule();
+extern "C" C10_EXPORT PyObject* initModule();
 // separate decl and defn for msvc error C2491
 PyObject* initModule() {
   HANDLE_TH_ERRORS
