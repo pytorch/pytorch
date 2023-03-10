@@ -363,9 +363,10 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
         name = normalize_attr_name(source.name())
         if name in self.names_to_sources:
             curr_source = self.names_to_sources[name]
+            curr_source_name = normalize_attr_name(curr_source.name())
             assert (
-                curr_source.name() == source.name()
-            ), f"Mismatch {curr_source} vs {source}"
+                curr_source_name == name
+            ), f"Mismatch {curr_source_name} vs {name}"
             return
         self.names_to_sources[name] = source
 
