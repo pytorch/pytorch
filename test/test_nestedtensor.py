@@ -101,6 +101,18 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
 
 
+class CrossRefNestedFakeMode(torch._subclasses.CrossRefFakeMode):
+    def __init__(self):
+        super().__init__(
+            self.ignore_op, check_strides=True,
+            check_aliasing=False,
+        )  # TODO: enable alias checking
+
+    @staticmethod
+    def ignore_op(func):
+        return False
+
+
 class TestNestedTensor(TestCase):
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
@@ -495,14 +507,27 @@ class TestNestedTensor(TestCase):
             t.fill_(11.)
             self.assertEqual(nt_ub, t)
 
-    def test_ones_like(self):
+    def test_zero_(self):
         ntensors = 4
         nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        ones_nt = torch.ones_like(nt)
-
-        for nt_ub in ones_nt.unbind():
-            t = torch.ones_like(nt_ub)
+        nt.zero_()
+        for nt_ub in nt.unbind():
+            t = torch.empty_like(nt_ub)
+            t.fill_(0.)
             self.assertEqual(nt_ub, t)
+
+    @parametrize("func", [torch.ones_like, torch.zeros_like, torch.randn_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_functions(self, func):
+        ntensors = 4
+        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
+        torch.manual_seed(1)
+        nt_like = func(nt)
+
+        torch.manual_seed(1)
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
 
 
 class TestNestedTensorDeviceType(TestCase):
@@ -1928,33 +1953,29 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
             nt_empty = torch.empty_like(nt_noncont)
 
-    def _assert_real_fake_equivalent(self, real_nt, fake_nt):
-        # Helper function to verify real and fake are equal minus actual data.
-        self.assertFalse(isinstance(real_nt, FakeTensor))
-        self.assertTrue(isinstance(fake_nt, FakeTensor))
+    def test_fake_nt_creation(self, device):
+        with CrossRefNestedFakeMode():
+            components = [
+                torch.randn(3, 2, device='cpu'),
+                torch.randn(4, 2, device='cpu')
+            ]
+            nt = torch.nested.nested_tensor(components)
 
-        self.assertEqual(real_nt.device, fake_nt.device)
-        for (t1, t2) in zip(real_nt.unbind(), fake_nt.unbind()):
-            self.assertEqual(t1.shape, t2.shape)
+            # ensure passing kwargs works
+            nt2 = torch.nested.nested_tensor(
+                components, device=device, dtype=torch.float64,
+                requires_grad=True, pin_memory=False)
 
-    def test_fake_tensor_mode(self, device):
-        shapes = [(3, 2), (4, 2)]
-        real_components = [torch.randn(*shape) for shape in shapes]
-        real_nt = torch.nested.nested_tensor(real_components, device=device)
+    def test_fake_nt_fallback(self, device):
+        with CrossRefNestedFakeMode():
+            components = [
+                torch.randn(3, 2, device=device),
+                torch.randn(4, 2, device=device)
+            ]
+            nt = torch.nested.nested_tensor(components)
 
-        with FakeTensorMode() as mode:
-            fake_components = [torch.randn(*shape) for shape in shapes]
-            fake_nt = torch.nested.nested_tensor(fake_components, device=device)
-
-        self._assert_real_fake_equivalent(real_nt, fake_nt)
-
-    def test_fake_tensor_converter(self, device):
-        mode = FakeTensorMode()
-        converter = mode.fake_tensor_converter
-        real_nt = torch.nested.nested_tensor([torch.randn(3), torch.randn(4)], device=device)
-        fake_nt = converter(mode, real_nt)
-
-        self._assert_real_fake_equivalent(real_nt, fake_nt)
+            # run op via fallback
+            b = nt + 1
 
 
 class TestNestedTensorAutograd(TestCase):

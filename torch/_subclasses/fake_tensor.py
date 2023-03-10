@@ -522,15 +522,14 @@ def index_put_(fake_mode, func, *args, **kwargs):
 def nested_constructor(fake_mode, func, *args, **kwargs):
     assert func not in _non_kwarg_device_constructors
     new_args, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=False
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     # default device is device of first tensor in tensorlist
     default_device = (
-        torch.device("cpu") if len(args[0]) == 0 else args[0][0].fake_device
+        torch.device("cpu") if len(args[0]) == 0 else args[0][0].device
     )
-    device_arg = new_args[3]
-    out_device = default_device if device_arg is None else device_arg
-    new_args = new_args[:3] + (torch.device("meta"),) + new_args[4:]
+    out_device = new_kwargs.get("device", default_device)
+    new_kwargs["device"] = torch.device("meta")
     with in_kernel_invocation_manager(fake_mode):
         r = func(*new_args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
@@ -948,6 +947,14 @@ class FakeTensor(torch.Tensor):
             else:
                 return args[0].fake_device
 
+        # Need to avoid fake-ifying the NT metadata tensors.
+        if func in [
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
+        ]:
+            with no_dispatch():
+                return func(*args, **kwargs)
+
         # Because fake mode can return NotImplemented (if it sees a subclass
         # it doesn't know how to deal with), this test here is important
         # because the next dispatch after a fake mode will attempt to use
@@ -1106,6 +1113,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch.ops.aten.is_coalesced.default,
             torch.ops.aten.dense_dim.default,
             torch.ops.aten.sparse_dim.default,
+            torch.ops.aten._nested_tensor_size.default,
+            torch.ops.aten._nested_tensor_strides.default,
         }:
             # NB: no_dispatch is ok here too, this func is very simple
             with in_kernel_invocation_manager(self):
@@ -1445,10 +1454,7 @@ def run_fallback_kernel(fake_mode, func, args, kwargs, orig_not_implemented_exce
 
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                if e.is_nested:
-                    out = torch.empty_like(e, device=e.fake_device)
-                else:
-                    out = torch.zeros_like(e, device=e.fake_device)
+                out = torch.zeros_like(e, device=e.fake_device)
                 if e.is_sparse:
                     out._coalesced_(e.is_coalesced())
                 inp_impls[id(out)] = e

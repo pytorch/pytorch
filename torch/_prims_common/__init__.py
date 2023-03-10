@@ -115,8 +115,18 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    if not same_shape(a.shape, b.shape):
-        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+    if a.is_nested != b.is_nested:
+        msg = "One tensor is a NestedTensor and the other is not!"
+        raise AssertionError(msg)
+
+    same_sizes = (
+        torch.equal(a._nested_tensor_size(), b._nested_tensor_size()) if a.is_nested
+        else same_shape(a.shape, b.shape)
+    )
+    if not same_sizes:
+        msg = "Shapes {0} and {1} are not equal!".format(
+            a.shape if not a.is_nested else a._nested_tensor_size(),
+            b.shape if not b.is_nested else b._nested_tensor_size())
         raise AssertionError(msg)
 
     if a.dtype != b.dtype:
@@ -136,13 +146,17 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
 
     # Stride checking is currently disabled, see https://github.com/pytorch/pytorch/issues/78050
     if check_strides:
-        same_strides, idx = check_significant_strides(a, b)
+        if a.is_nested:
+            a_stride, b_stride = a._nested_tensor_strides(), b._nested_tensor_strides()
+            same_strides, idx = torch.equal(a_stride, b_stride), None
+        else:
+            a_stride, b_stride = a.stride(), b.stride()
+            same_strides, idx = check_significant_strides(a, b)
+
         if not same_strides:
-            msg = (
-                "Stride mismatch! Strides are {0} and {1} (mismatched at {2})!".format(
-                    a.stride(), b.stride(), idx
-                )
-            )
+            msg = f"Stride mismatch! Strides are {a_stride} and {b_stride}"
+            if idx is not None:
+                msg += f" (mismatched at {idx})"
             raise RuntimeError(msg)
 
         if a.storage_offset() != b.storage_offset():
