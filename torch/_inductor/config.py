@@ -12,6 +12,12 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# limit lines of inner_fn() when printing IR
+debug_max_lines = int(os.environ.get("TORCHINDUCTOR_DEBUG_MAX_LINES", "10"))
+
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -49,9 +55,7 @@ reordering = False
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
-search_autotune_cache = (
-    os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE", "1") == "1"
-)
+search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -81,6 +85,8 @@ max_fusion_size = 64
 unroll_reductions_threshold = 8
 
 comment_origin = False
+
+benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
 
 def is_fbcode():
@@ -171,9 +177,6 @@ class triton:
     # Synchronize after every kernel launch, to help pinpoint bugs
     debug_sync_kernel = False
 
-    # choose conv backend, "aten" or "triton"
-    convolution = "aten"
-
     # Always load full blocks (rather than broadcasting inside the block)
     dense_indexing = False
 
@@ -189,10 +192,16 @@ class triton:
     tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
-    ordered_kernel_names = False
+    # Note: This is orthogonal to descriptive_names - this is deciding whether
+    # our triton kernel names should all be `triton_` (to maximize caching) or
+    # whether they should be unique.
+    unique_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    # False: No special names (just triton__1, triton__2, etc.)
+    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
+    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    descriptive_names = "aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
