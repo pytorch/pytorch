@@ -132,6 +132,7 @@ _ATENLIB_FUNCTIONS = {
     "aten::sqrt": ops.core.aten_sqrt,
     "aten::sub": ops.core.aten_sub,
     "aten::sum": ops.core.aten_sum_dim_IntList,
+    "aten::sym_size": ops.core.aten_sym_size,
     "aten::t": ops.core.aten_t,
     "aten::tan": ops.core.aten_tan,
     "aten::tanh": ops.core.aten_tanh,
@@ -158,7 +159,6 @@ def _create_op_overload_to_exporter_key_table() -> Dict[
     for op_namespace in (torch.ops.aten, torch.ops.prims):
         for attr_name in dir(op_namespace):
             op_overload_packet = getattr(op_namespace, attr_name)
-
             if not isinstance(op_overload_packet, torch._ops.OpOverloadPacket):
                 continue
 
@@ -180,12 +180,22 @@ def _create_op_overload_to_exporter_key_table() -> Dict[
                 table[op_overload] = op_overload_packet._qualified_op_name
     # TODO(justinchuby): is baddbmm different?
     table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
+    # TODO(titaiwang): aten::sym_size doesn't have overload,
+    # but works fine as overloadpacket
+    table[torch.ops.aten.sym_size] = "aten::sym_size"
     return table
 
 
 # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
 # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
+
+_BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE = {
+    "mul": "aten::mul",
+    "add": "aten::add",
+    "sub": "aten::sub",
+    "truediv": "aten::div",
+}
 
 
 @_beartype.beartype

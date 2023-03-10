@@ -177,7 +177,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -246,7 +245,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
         )
 
-    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -320,7 +318,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -349,7 +346,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(another_x,)],
         )
 
-    @unittest.skip("https://github.com/microsoft/onnx-script/issues/481")
     def test_flatten_dynamic_axes(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):

@@ -5,6 +5,7 @@ import inspect
 import itertools
 import operator
 import re
+import types
 import warnings
 from types import FunctionType
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -88,17 +89,19 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
         #    torch.jit.Value, fx_name_to_onnxscipt_value[fx_node_arg.name],
         #    in TorchScript graph.
         # onnx tensor should be TorchScriptTensor here.
-        onnx_tensor = fx_name_to_onnxscipt_value[onnx_tensor.name]
-    elif isinstance(onnx_tensor, (tuple, list)):
-        # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
-        # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
-        # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
-        # eg: aten_expand size
-        pass
-    elif isinstance(onnx_tensor, torch.dtype):
+        return fx_name_to_onnxscipt_value[onnx_tensor.name]
+    if isinstance(onnx_tensor, (tuple, list)) and all(
+        isinstance(x, torch.fx.Node) for x in onnx_tensor
+    ):
+        # This intends to solve dynamic axes. for example, if the size input of op.Expand
+        # is dynamic, each of dim would be originated from other tensors.
+        new_tensor = []
+        for tensor in onnx_tensor:
+            new_tensor.append(fx_name_to_onnxscipt_value[tensor.name])
+        return new_tensor
+    if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
-
-    return onnx_tensor
+        return onnx_tensor
 
 
 def _filter_incompatible_and_dtype_convert_kwargs(kwargs):
@@ -141,6 +144,13 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_kwargs: Dict[str, Any] = {}
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
+    elif isinstance(node.target, torch._ops.OpOverloadPacket):
+        # aten::sym_size is the only OverloadPacket that we support.
+        # schema: aten::sym_size(Tensor self, int dim) -> Tensor
+        assert str(node.target) == "aten.sym_size"
+        # The first arg is the tensor, the second arg is the dim.
+        complete_args.append(node.args[0])
+        complete_kwargs["dim"] = node.args[1]
     else:
         for i, expected_arg in enumerate(node.target._schema.arguments):  # type: ignore[union-attr]
             if i < len(node.args):
@@ -172,6 +182,12 @@ def _wrap_fx_args_as_onnxscript_args(
                         torch_args.append(
                             torch.randn_like(meta_value, dtype=torch.float)
                         )
+                elif not isinstance(arg.meta["val"], torch.Tensor):
+                    # FIXME(titaiwang): Refactor me with
+                    # https://github.com/microsoft/onnx-script/issues/393
+                    # aten_sym_size output is a int, not a tensor,
+                    # which stands for the size of one dim.
+                    torch_args.append(arg.meta["val"])
                 else:
                     torch_args.append(
                         torch.randn_like(arg.meta["val"], dtype=torch.float)
@@ -189,18 +205,19 @@ def _fill_tensor_meta(
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
+    # aten::sym_size output is a int, not a tensor, which stands
+    # for the size of one dim. We treat it as 1D tensor.
+    if isinstance(expected_values, int):
+        return
+
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
-        # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
         # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
         # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
         # eg: aten_split
-        warnings.warn(
-            f"node: {name} has list of tensors: {expected_values},"
-            f"but onnxscript_value wrapped it as a single tensor: {onnxscript_values}"
-        )
-        return
+        # Pick the first tensor as the representative of the list of tensors.
+        expected_value = expected_values[0]
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
@@ -209,6 +226,7 @@ def _fill_tensor_meta(
     ):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(len(expected_value.size()) * [None])
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
@@ -331,6 +349,21 @@ def _export_fx_node_to_onnxscript(
         ):
             exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
                 node.target
+            ]
+        elif (
+            isinstance(node.target, torch._ops.OpOverloadPacket)
+            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+        ):
+            # aten::sym_size is the only OverloadPacket that we support.
+            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
+                node.target
+            ]
+        elif (
+            isinstance(node.target, types.BuiltinFunctionType)
+            and node.name in function_dispatcher._BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE
+        ):
+            exporter_key = function_dispatcher._BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE[
+                node.name
             ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")
@@ -524,11 +557,11 @@ def _export(
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
-    # import pdb; pdb.set_trace()
+    # symbolic mode generates aten::sym_size to dynamically trace the size of tensors.
     decomposed_module = proxy_tensor.make_fx(
         module,
         decomposition_table=export_options.decomposition_table,
-        tracing_mode="fake",
+        tracing_mode="symbolic",
         _allow_non_fake_inputs=True,
     )(*args)
     # Rename placeholder targets to match the original module's signature since
@@ -625,7 +658,6 @@ def export_after_normalizing_args_and_kwargs(
 
     # We hope the input kwargs will be mapped to bound.args after binding.
     # If not, we will raise an error.
-    # import pdb; pdb.set_trace()
     bound = signature.bind(*args, **kwargs)
     bound.apply_defaults()
     # keyword-only arguments are not handled.
