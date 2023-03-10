@@ -1661,7 +1661,8 @@ class CppVecKernelChecker(CppVecKernel):
                 if dtype == torch.float:
                     # load -> to_dtype
                     is_load_only = all(
-                        usr.target in ["ops", "load"] for usr in _node.all_input_nodes
+                        usr.target in ["ops", "load", "constant"]
+                        for usr in _node.all_input_nodes
                     )
                 elif dtype == torch.bfloat16:
                     # to_dtype -> store
@@ -1881,6 +1882,9 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.is_load_bf16_as_fp32 = True
                         else:
                             self.simd_vec = False
+                    elif dtype == torch.float and input_value.target in ["where"]:
+                        # Support masked_fill_softmax
+                        pass
                     elif dtype == torch.bfloat16:
                         if not all(usr.target == "store" for usr in cur_node.users):
                             self.simd_vec = False
@@ -2019,6 +2023,30 @@ class CppKernelProxy(CppKernel):
                                 "to_dtype", args=(ops, value_var, torch.bfloat16)
                             )
                             _node.replace_input_with(value_var, to_type_node)
+                elif _node.target == "reduction":
+                    (
+                        ops,
+                        name,
+                        dtype,
+                        src_dtype,
+                        reduction_type,
+                        index,
+                        value,
+                    ) = _node.args
+                    if src_dtype == torch.bfloat16:
+                        # Since we always convert the load/store value to float if the tensor is blfoat16.
+                        # Therefore, the reduction should never work with bfloat16 value. Hence, we update
+                        # the bfloat16 reduction by updating the dtype and src_dtype to float.
+                        assert dtype in [torch.float, torch.bfloat16]
+                        _node.args = (
+                            ops,
+                            name,
+                            torch.float,
+                            torch.float,
+                            reduction_type,
+                            index,
+                            value,
+                        )
                 else:
                     pass
 

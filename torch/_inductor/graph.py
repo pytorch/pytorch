@@ -286,9 +286,13 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)
         if isinstance(example, SymTypes):
             expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
+        elif isinstance(example, int):
+            expr = sympy.Integer(example)
             self.graph_inputs[target] = expr
             return expr
         # todo(chilli): We can remove the last check once we turn buffers into
