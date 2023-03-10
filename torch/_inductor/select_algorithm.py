@@ -29,9 +29,6 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
-# cuda runtime does not work with "fork"
-multiprocessing.set_start_method("spawn", force=True)
-
 # correctness checks struggle with fp16/tf32
 VERIFY = False  # dict(atol=1, rtol=0.05)
 PRINT_AUTOTUNE = True
@@ -784,7 +781,9 @@ class AlgorithmSelectorCache(PersistentCache):
             # import cloudpickle only when needed
             from cloudpickle import dumps
 
-            child = multiprocessing.Process(
+            # cuda runtime does not work with "fork", use "spawn" to start processes.
+            ctx = multiprocessing.get_context("spawn")
+            child = ctx.Process(
                 target=benchmark_choice_in_sub_process,
                 args=(
                     dumps(template_kernels),
