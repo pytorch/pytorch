@@ -156,6 +156,20 @@ class TestDoBench(TestCase):
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm)(a, b)
 
+    def test_max_autotune_addmm(self):
+        """
+        Make sure autotuning addmm in sub processes work without crashes.
+        """
+
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).cuda()
+        a = torch.randn(100, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+            torch.compile(addmm)(x, a, b)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:

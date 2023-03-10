@@ -147,12 +147,19 @@ def mm_args(mat1, mat2, *others, layout=None, out_dtype=None):
     return [m, n, k, layout, mat1, mat2, *others]
 
 
-def addmm_epilogue(dtype, alpha, beta):
-    def epilogue(acc, bias):
-        if alpha != 1:
-            acc = V.ops.mul(acc, V.ops.constant(alpha, dtype))
-        if beta != 1:
-            bias = V.ops.mul(bias, V.ops.constant(beta, dtype))
-        return V.ops.add(acc, bias)
+class addmm_epilogue:
+    """
+    Implement as a class so we can pickle it.
+    """
 
-    return epilogue
+    def __init__(self, dtype, alpha, beta):
+        self.dtype = dtype
+        self.alpha = alpha
+        self.beta = beta
+
+    def __call__(self, acc, bias):
+        if self.alpha != 1:
+            acc = V.ops.mul(acc, V.ops.constant(self.alpha, self.dtype))
+        if self.beta != 1:
+            bias = V.ops.mul(bias, V.ops.constant(self.beta, self.dtype))
+        return V.ops.add(acc, bias)
