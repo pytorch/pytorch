@@ -54,3 +54,9 @@
 - aten/src/ATen/quantized/**
 - aten/src/ATen/native/quantized/cpu/**
 - test/quantization/**
+
+"ciflow/binaries_wheel":
+- .ci/docker/ci_commit_pins/triton.txt
+
+"ciflow/binary_conda":
+- .ci/docker/ci_commit_pins/triton.txt
