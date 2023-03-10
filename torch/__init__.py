@@ -432,6 +432,20 @@ def sym_min(a, b):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
 
+def is_concrete_int(a: Union[builtins.int, SymInt]):
+    r""" Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or int): Object to test if int
+    """
+    assert isinstance(a, SymInt) or isinstance(a, builtins.int)
+    if isinstance(a, SymInt):
+        return a.node.is_int()
+
+    return True
+
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
 try:

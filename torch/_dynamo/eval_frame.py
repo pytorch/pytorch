@@ -20,7 +20,6 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from .backends.registry import CompilerFn, lookup_backend
@@ -634,8 +633,8 @@ def export(
 
     graph = None
     out_guards = None
-    out_shape_env = None
     graph_captured_input = None
+    example_fake_inputs = None
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -672,11 +671,6 @@ def export(
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
 
-    def expose_shape_env_fn(shape_env: ShapeEnv):
-        nonlocal out_shape_env
-        assert out_shape_env is None, "whole graph should only have one shape env"
-        out_shape_env = shape_env
-
     def dynamo_normalization_capturing_compiler(
         gm: torch.fx.GraphModule, example_inputs
     ):
@@ -685,6 +679,9 @@ def export(
             graph is None
         ), "Tried to emit a second graph during export. Tracing through 'f' must produce a single graph."
         graph = gm
+
+        nonlocal example_fake_inputs
+        example_fake_inputs = example_inputs
 
         def result_capturing_wrapper(*graph_inputs):
             nonlocal graph_captured_result
@@ -708,7 +705,6 @@ def export(
             hooks=Hooks(
                 guard_export_fn=guard_export_print,
                 guard_fail_fn=None,
-                expose_shape_env_fn=expose_shape_env_fn,
             ),
             export=True,
             dynamic=(tracing_mode == "symbolic"),
@@ -777,7 +773,7 @@ def export(
             decomposition_table=decomposition_table,
             tracing_mode=tracing_mode,
             _allow_non_fake_inputs=True,
-            _shape_env=out_shape_env,
+            _example_inputs=example_fake_inputs,
         )(*graph_captured_input)
 
     new_graph = ChangeInputOutputSignature(

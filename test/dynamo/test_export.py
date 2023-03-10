@@ -2201,6 +2201,14 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             f, torch.ones(6, 4), aten_graph=True, tracing_mode="symbolic"
         )
 
+        for node in gm.graph.nodes:
+            val = node.meta.get("val", None)
+            if val is not None:
+                shapes = val.shape
+                # there should no symbols
+                for shape in shapes:
+                    self.assertTrue(torch.is_concrete_int(shape))
+
         # this should be captured as static, as export won't generate any symbols.
         self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
 

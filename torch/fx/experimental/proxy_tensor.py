@@ -657,34 +657,42 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, _shape_env=None):
+def make_fx(f, decomposition_table=None, tracing_mode="real", *, _allow_non_fake_inputs=False, _example_inputs=None):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
         decomposition_table = {}
+
+    def get_default_fake_tensor_mode(tracing_mode):
+        if tracing_mode == "real":
+            return nullcontext()
+        elif tracing_mode == "fake":
+            return FakeTensorMode(
+                allow_fallback_kernels=True,
+                allow_non_fake_inputs=_allow_non_fake_inputs)
+        elif tracing_mode == "symbolic":
+            shape_env = ShapeEnv()
+            return FakeTensorMode(
+                allow_fallback_kernels=False,
+                allow_non_fake_inputs=_allow_non_fake_inputs,
+                shape_env=shape_env)
+
+        raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
     @functools.wraps(f)
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
-        if tracing_mode == "real":
-            fake_tensor_mode = nullcontext()
-        elif tracing_mode == "fake":
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=True,
-                allow_non_fake_inputs=_allow_non_fake_inputs)
-        elif tracing_mode == "symbolic":
-            # TODO This is bit weird as we are reusing ShapeEnv
-            # from dynamo to propagate certain flags like (assume_static_by_default)
-            # Ideally they should be put in global PT2 config.
-            shape_env = _shape_env if _shape_env else ShapeEnv()
-            fake_tensor_mode = FakeTensorMode(
-                allow_fallback_kernels=False,
-                allow_non_fake_inputs=_allow_non_fake_inputs,
-                shape_env=shape_env)
+        if _example_inputs is None:
+            fake_tensor_mode = get_default_fake_tensor_mode(tracing_mode)
         else:
-            raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
+            for inp in _example_inputs:
+                if isinstance(fake_tensor_mode, nullcontext) and isinstance(inp, FakeTensor):
+                    fake_tensor_mode = inp.fake_mode
+            # if example inputs are not fake tensors, we just use default logic
+            if fake_tensor_mode == nullcontext():
+                fake_tensor_mode = get_default_fake_tensor_mode(tracing_mode)
 
         python_dispatcher_mode: Any = nullcontext()
         if tracing_mode == "symbolic":
@@ -736,7 +744,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":
-            t.shape_env = shape_env  # type: ignore[assignment]
+            t.shape_env = fake_tensor_mode.shape_env  # type: ignore[assignment]
         return t
 
     return wrapped
