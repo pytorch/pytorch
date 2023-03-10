@@ -221,6 +221,15 @@ def parse_args():
         help="commit id for the tested pytorch",
     )
     parser.add_argument(
+        "--runner-url",
+        help="url points to the corresponding nightly CI run",
+    )
+    parser.add_argument(
+        "--github-issue-number",
+        help="github issue number to post the result",
+    )
+
+    parser.add_argument(
         "--total-partitions",
         type=int,
         help="Total number of partitions, to be passed to the actual benchmark script",
@@ -453,36 +462,40 @@ def build_summary(args):
     out_io.write("\n")
 
     out_io.write("\n")
-    out_io.write("### Commit hashes ###\n")
-    print_commit_hash("../pytorch", "pytorch")
-    print_commit_hash("../torchbenchmark", "torchbench")
+    if args.runner_url:
+        out_io.write("### CI nightly runner URL ###\n")
+        out_io.write(args.runner_url)
+    else:
+        out_io.write("### Commit hashes ###\n")
+        print_commit_hash("../pytorch", "pytorch")
+        print_commit_hash("../torchbenchmark", "torchbench")
 
-    out_io.write("\n")
-    out_io.write("### TorchDynamo config flags ###\n")
-    for key in dir(torch._dynamo.config):
-        val = getattr(torch._dynamo.config, key)
-        if not key.startswith("__") and isinstance(val, bool):
-            out_io.write(f"torch._dynamo.config.{key} = {val}\n")
-
-    out_io.write("\n")
-    out_io.write("### Torch version ###\n")
-    out_io.write(f"torch: {torch.__version__}\n")
-
-    out_io.write("\n")
-    out_io.write("### Environment variables ###\n")
-    env_var("TORCH_CUDA_ARCH_LIST")
-    env_var("CUDA_HOME")
-    env_var("USE_LLVM")
-
-    if "cuda" in args.devices:
         out_io.write("\n")
-        out_io.write("### GPU details ###\n")
-        out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
-        out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
-        out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
-        out_io.write(
-            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
-        )
+        out_io.write("### TorchDynamo config flags ###\n")
+        for key in dir(torch._dynamo.config):
+            val = getattr(torch._dynamo.config, key)
+            if not key.startswith("__") and isinstance(val, bool):
+                out_io.write(f"torch._dynamo.config.{key} = {val}\n")
+
+        out_io.write("\n")
+        out_io.write("### Torch version ###\n")
+        out_io.write(f"torch: {torch.__version__}\n")
+
+        out_io.write("\n")
+        out_io.write("### Environment variables ###\n")
+        env_var("TORCH_CUDA_ARCH_LIST")
+        env_var("CUDA_HOME")
+        env_var("USE_LLVM")
+
+        if "cuda" in args.devices:
+            out_io.write("\n")
+            out_io.write("### GPU details ###\n")
+            out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+            out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+            out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+            out_io.write(
+                f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+            )
 
     title = "## Build Summary"
     comment = generate_dropdown_comment(title, out_io.getvalue())
@@ -1327,9 +1340,12 @@ class DashboardUpdater:
             f.write(comment)
             filename = f.name
 
-        issue_number = "93794"
-        if self.args.dtypes[0] == "float32":
-            issue_number = "93518"
+        if self.args.github_issue_number is not None:
+            issue_number = self.args.github_issue_number
+        else:
+            issue_number = "93794"
+            if self.args.dtypes[0] == "float32":
+                issue_number = "93518"
 
         subprocess.check_call(
             [
@@ -1349,6 +1365,11 @@ class DashboardUpdater:
         self.upload_graphs()
         SummaryStatDiffer(self.args).generate_comment()
         RegressionDetector(self.args).generate_comment()
+
+        if not self.args.update_dashboard_test and not self.args.no_update_archive:
+            # archive first so that RegressionTracker can pick up the new result
+            self.archive()
+
         try:
             RegressionTracker(self.args).diff()
         except Exception as e:
@@ -1358,12 +1379,8 @@ class DashboardUpdater:
 
         comment = self.gen_comment()
         print(comment)
-
-        if not self.args.update_dashboard_test:
-            if not self.args.no_gh_comment:
-                self.comment_on_gh(comment)
-            if not self.args.no_update_archive:
-                self.archive()
+        if not self.args.update_dashboard_test and not self.args.no_gh_comment:
+            self.comment_on_gh(comment)
 
 
 if __name__ == "__main__":
