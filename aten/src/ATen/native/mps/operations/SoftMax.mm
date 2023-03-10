@@ -105,7 +105,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "softmax_mps_out:" + mem_format_key + ":" + getMPSTypeString(input.scalar_type()) + ":"
+    string key = "softmax_mps_out:" + mem_format_key + ":" + getMPSTypeString(input) + ":"
                                     + [ns_shape_key UTF8String] + ":" + std::to_string(dim_);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
@@ -117,7 +117,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
 
           // passing selector of softMaxWithTensor on the mpsGraph object
           MPSGraphTensor* outputTensor = [mpsGraph softMaxWithTensor:inputTensor
@@ -217,7 +217,7 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
     MPSShape* grad_shape = mps::getMPSShape(grad);
     NSString* ns_shape_key = [[grad_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    string key = "softmax_backward_mps_out:" + getMPSTypeString(output.scalar_type()) + ":"
+    string key = "softmax_backward_mps_out:" + getMPSTypeString(output) + ":"
                                              + [ns_shape_key UTF8String] + ":" + std::to_string(dim_);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
@@ -229,8 +229,8 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output.scalar_type()), grad_shape);
-          MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad.scalar_type()), grad_shape);
+          MPSGraphTensor* softmaxTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(output), grad_shape);
+          MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad), grad_shape);
 
           MPSGraphTensor* mulTensor = [mpsGraph multiplicationWithPrimaryTensor:softmaxTensor
                                                                 secondaryTensor:gradOutputTensor

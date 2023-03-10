@@ -81,7 +81,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
           newCachedGraph = new CachedGraph(mpsGraph);
           MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
                                                               shape:getMPSShape(result)
-                                                           dataType:getMPSDataType(result.scalar_type())];
+                                                           dataType:getMPSDataType(result)];
 
           // Here we can call the MPSGraph API needed to execute the operation.
           // The API details can be found here: https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
