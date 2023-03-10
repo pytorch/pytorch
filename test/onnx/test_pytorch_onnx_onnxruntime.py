@@ -1,5 +1,12 @@
 # Owner(s): ["module: onnx"]
+"""
+Usage: pytest test/onnx/test_pytorch_onnx_onnxruntime.py
 
+This file contains tests that export models to ONNX and validate model outputs using ONNXRuntime.
+
+
+
+"""
 from __future__ import annotations
 
 import io
@@ -28,6 +35,7 @@ from pytorch_test_common import (
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
     skipDtypeChecking,
+    skipFxTest,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
@@ -123,9 +131,9 @@ def _construct_tensor_for_quantization_test(
 def _parameterized_class_attrs_and_values(
     min_opset_version: int, max_opset_version: int
 ):
-    attrs = ("opset_version", "is_script", "keep_initializers_as_inputs")
-    input_values = []
-    input_values.extend(itertools.product((7, 8), (True, False), (True,)))
+    attrs = ("opset_version", "is_script", "keep_initializers_as_inputs", "is_fx")
+    input_values: List[Tuple[int, bool, bool, bool]] = []
+    input_values.extend(itertools.product((7, 8), (True, False), (True,), (False,)))
     # Valid opset versions are defined in torch/onnx/_constants.py.
     # Versions are intentionally set statically, to not be affected by changes elsewhere.
     if min_opset_version < 9:
@@ -135,8 +143,11 @@ def _parameterized_class_attrs_and_values(
             range(min_opset_version, max_opset_version + 1),
             (True, False),
             (True, False),
+            (False,),
         )
     )
+    # FX exporter. Pin opset version to 17.
+    input_values.append((17, False, False, True))
     return {"attrs": attrs, "input_values": input_values}
 
 
@@ -168,6 +179,7 @@ def _parametrize_rnn_args(arg_name):
 )
 @common_utils.instantiate_parametrized_tests
 class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_fuse_conv_bn1d(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -183,6 +195,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, requires_grad=True)
         self.run_test(model, (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_fuse_conv_bn2d(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -200,6 +213,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 2, 2, requires_grad=True)
         self.run_test(model, (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_fuse_conv_bn3d(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -217,6 +231,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 10, 50, 100, requires_grad=True)
         self.run_test(model, (x,), rtol=1e-3, atol=1e-6)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_fuse_conv_in_block(self):
         class Fuse(torch.nn.Module):
             def __init__(self):
@@ -254,6 +269,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-6,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.conv_tbc.default")  # fmt: skip
     def test_conv_tbc(self):
         from torch.nn.modules.utils import _single
 
@@ -400,16 +416,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         assert torch.all(out2[0].eq(out_trace2[0]))
         assert torch.all(out2[1].eq(out_trace2[1]))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_word_language_model_RNN_TANH(self):
         self.run_word_language_model("RNN_TANH")
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_word_language_model_RNN_RELU(self):
         self.run_word_language_model("RNN_RELU")
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipScriptTest()  # scripting prim::unchecked_cast prim::setattr
     def test_word_language_model_LSTM(self):
         self.run_word_language_model("LSTM")
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_word_language_model_GRU(self):
         self.run_word_language_model("GRU")
 
@@ -445,6 +465,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_mask(self):
         class MyModel(torch.nn.Module):
@@ -461,6 +482,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_data(self):
         class Data(torch.jit.ScriptModule):
@@ -472,6 +494,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Data(), x, input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(Data(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic Tensor.__getitem__(bool[])")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_mask_nd(self):
         class MyModel(torch.nn.Module):
@@ -481,6 +504,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), m1)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable(dict) keys [] {}")  # fmt: skip
     @skipScriptTest()
     def test_dict(self):
         class MyModel(torch.nn.Module):
@@ -494,6 +518,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = {torch.tensor(1.0): torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    @skipFxTest(reason="TypeError: add(): argument 'input' (position 1) must be Tensor, not dict")  # fmt: skip
     @skipScriptTest()
     def test_dict_str(self):
         class MyModel(torch.nn.Module):
@@ -505,6 +530,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = {"test_key_in": torch.randn(1, 2, 3)}
         self.run_test(MyModel(), (x,))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {'tensor_out': TensorVariable(), 'tuple_o...")  # fmt: skip
     @skipScriptTest()  # User-defined class not supported
     def test_dict_output(self):
         class DictModelOutput(OrderedDict):
@@ -526,6 +552,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_tuple_output(self):
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -537,6 +564,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_nested_tuple_output(self):
         class MyModel(torch.nn.Module):
             def forward(self, a, b, c, d):
@@ -548,6 +576,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         d = torch.randn(2, 3)
         self.run_test(MyModel(), (a, b, c, d))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_tuple_input(self):
         class TupleModel(torch.nn.Module):
             def forward(self, a: Tuple[Tensor, Tensor]):
@@ -556,6 +585,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = (torch.randn(3, 4), torch.randn(4, 3))
         self.run_test(TupleModel(), input_args=(x,))
 
+    @skipFxTest(reason="TypeError: can only concatenate tuple (not \"FakeTensor\") to tuple")  # fmt: skip
     def test_tuple_primitive_input(self):
         class TupleModel(torch.nn.Module):
             def forward(self, a: Tuple[int, Tensor], b):
@@ -565,6 +595,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 3)
         self.run_test(TupleModel(), input_args=(x, y))
 
+    @skipFxTest(reason="TypeError: forward() missing 2 required positional arguments: 'b_1_0_' and 'b_1_1_'")  # fmt: skip
     def test_nested_tuple_input(self):
         class NestedTupleModel(torch.nn.Module):
             def forward(self, a, b: Tuple[Tensor, Tuple[Tensor, Tensor]]):
@@ -574,6 +605,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = (torch.randn(4, 5), (torch.randn(1, 5), torch.randn(4, 1)))
         self.run_test(NestedTupleModel(), input_args=(x, y))
 
+    @skipFxTest(reason="AttributeError: 'NoneType' object has no attribute 'cpu'")  # fmt: skip
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional_default_none(self):
@@ -603,6 +635,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x,), {"z": z})
         self.run_test(model, (x,), {"y": y})
 
+    @skipFxTest(reason="AttributeError: 'NoneType' object has no attribute 'cpu'")  # fmt: skip
     @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional_default_tensor(self):
@@ -673,6 +706,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     model, example_inputs, example_kwargs, input_names=("x", "y", "z")
                 )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_all_optional_default_none(self):
@@ -696,6 +730,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=("x",),
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_all_optional_default_tensor(self):
@@ -753,6 +788,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, y))
         self.run_test(model, (), {"x": x, "y": y}, input_names=("x", "y"))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_mixed_optional(self):
@@ -767,6 +803,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, None))
         self.run_test(model, (x, x))
 
+    @skipFxTest(reason="TypeError: unsupported operand type(s) for +: 'FakeTensor' and 'tuple'")  # fmt: skip
     @skipScriptTest()  # Needs https://github.com/pytorch/rfcs/pull/21
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional(self):
@@ -782,6 +819,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y1 = torch.randn(2, 3)
         self.run_test(Model(), (x, (None, y1)))
 
+    @skipFxTest(reason="TypeError: unsupported operand type(s) for +: 'FakeTensor' and 'tuple'")  # fmt: skip
     @skipScriptTest()  # tracing eliminates None inputs so it works differently. See _script version below.
     @skipIfUnsupportedMinOpsetVersion(15)
     def test_tuple_of_optional_default_tensor(self):
@@ -839,6 +877,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model, (x, {"y": (y0, y1)}), io.BytesIO(), opset_version=self.opset_version
         )
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     def test_primitive_input_integer(self):
         class Model(torch.nn.Module):
             def forward(self, x: int, y):
@@ -848,6 +887,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 4))
         self.run_test(Model(), (x, y))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
@@ -858,6 +898,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3, 4)
         self.run_test(Model(), (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_primitive_input_bool(self):
         class Model(torch.nn.Module):
             def forward(self, flag: bool, x, y):
@@ -871,6 +912,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3, 4)
         self.run_test(torch.jit.script(Model()), (flag, x, y))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cste_script(self):
         class MyModel(torch.jit.ScriptModule):
@@ -884,6 +926,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(MyModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(MyModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     def test_scalar_tensor(self):
         class test(torch.nn.Module):
             def forward(self, input):
@@ -902,6 +945,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2]},
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     def test_tensor(self):
         class ScalarInputModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -952,11 +996,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1)
         self.run_test(MixedInputModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_hardtanh(self):
         model = torch.nn.Hardtanh(-1.5, 2.5)
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     def test_hardtanh_script_with_default_values(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -966,6 +1012,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.arange(-5, 5).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_hardswish(self):
         model = torch.nn.Hardswish()
 
@@ -978,6 +1025,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(-3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     def test_hardswish_script(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -987,6 +1035,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(MyModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_hardsigmoid(self):
         model = torch.nn.Hardsigmoid()
 
@@ -999,12 +1048,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(-3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_tanhshrink(self):
         model = torch.nn.Tanhshrink()
 
         x = torch.rand(3, 3).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_hardshrink(self):
         model = torch.nn.Hardshrink()
@@ -1018,11 +1069,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(-0.5).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_hardshrink_dtype(self):
         x = torch.rand(3, 3).to(dtype=torch.float64)
         self.run_test(torch.nn.Hardshrink(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_softshrink(self):
         model = torch.nn.Softshrink()
@@ -1036,6 +1089,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(-0.5).to(dtype=torch.float32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_softshrink_dtype(self):
         x = torch.rand(3, 3).to(dtype=torch.float64)
@@ -1063,6 +1117,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(ClampMaxModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_clamp_dyn(self):
         class ClampMaxModel(torch.jit.ScriptModule):
@@ -1110,6 +1165,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ClampTensorMaxModel(), (x, z))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_trace(self):
         class FullModel(torch.nn.Module):
@@ -1119,6 +1175,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(12)
         self.run_test(FullModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_full_script(self):
         class FullModelScripting(torch.jit.ScriptModule):
@@ -1137,6 +1194,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(3, 3)
         self.run_test(AddmmModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_maxpool(self):
         model = torch.nn.MaxPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
@@ -1163,6 +1221,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_3) Op (ate...")  # fmt: skip
     def test_conv_shape_inference(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1207,6 +1266,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(NumpyTranspose(), torch.randn(4, 7))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
     def test_transpose_infer_shape(self):
@@ -1254,37 +1314,44 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         else:
             self.run_test(Squeeze(d), x1)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     def test_squeeze_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(1, x, None)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_dynamic(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(1, x_squeeze, x_noop)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     def test_squeeze_neg_without_no_op(self):
         x = torch.randn(2, 1, 4)
         self.squeeze_model_tests(-2, x, None)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_neg(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(-2, x_squeeze, x_noop)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.default")  # fmt: skip
     def test_squeeze_all_dims(self):
         x_squeeze = torch.randn(2, 1, 4)
         x_noop = torch.randn(2, 2, 3)
         self.squeeze_model_tests(None, x_squeeze, x_noop)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_no_op(self):
         x_noop = torch.randn(2, 1, 4)
         x_squeeze = torch.randn(2, 2, 1)
         self.squeeze_model_tests(2, x_noop, x_squeeze)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
@@ -1298,6 +1365,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Squeeze(), (d1, d4), additional_test_inputs=[(d3, d4)])
         self.run_test(Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.squeeze.dim")  # fmt: skip
     def test_squeeze(self):
         class Squeeze(torch.nn.Module):
             def forward(self, x):
@@ -1306,6 +1374,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 1, 4)
         self.run_test(Squeeze(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_squeeze_dynamic_dim(self):
         class Squeeze(torch.nn.Module):
@@ -1324,6 +1393,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Unsqueeze(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_unsqueeze_dynamic_dim(self):
         class Unsqueeze(torch.nn.Module):
@@ -1334,6 +1404,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         dim = -1
         self.run_test(Unsqueeze(), (x, dim))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.max_pool2d_with_indices.default")  # fmt: skip
     def test_maxpool_default_stride(self):
         class MaxPoolModel(torch.nn.Module):
             def forward(self, x):
@@ -1343,6 +1414,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_adaptive(self):
         model = torch.nn.AdaptiveMaxPool1d((5), return_indices=False)
@@ -1356,38 +1428,45 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_maxpool_2d(self):
         model = torch.nn.MaxPool2d(5, padding=(1, 2))
         x = torch.randn(1, 20, 16, 50, requires_grad=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_maxpool_1d_ceil(self):
         model = torch.nn.MaxPool1d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_maxpool_2d_ceil(self):
         model = torch.nn.MaxPool2d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_maxpool_3d_ceil(self):
         model = torch.nn.MaxPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_maxpool_with_indices(self):
         model = torch.nn.MaxPool1d(2, stride=1, return_indices=True)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_maxpool_dilation(self):
         model = torch.nn.MaxPool1d(2, stride=1, dilation=2)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.avg_pool2d.default")  # fmt: skip
     def test_avgpool_default_stride(self):
         class AvgPoolModel(torch.nn.Module):
             def forward(self, x):
@@ -1397,11 +1476,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_avgpool(self):
         model = torch.nn.AvgPool1d(2, stride=1)
         x = torch.randn(20, 16, 50)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_avgpool_1d_ceil(self):
         model = torch.nn.AvgPool1d(3, 2, ceil_mode=True)
         x = torch.randn(1, 1, 7)
@@ -1419,6 +1500,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         "count_include_pad",
         (True, False),
     )
+    @skipFxTest(reason="AssertionError")
     def test_avgpool_2d(self, padding, ceil_mode, count_include_pad):
         model = torch.nn.AvgPool2d(
             3,
@@ -1430,6 +1512,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 16, 50, 32)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_avgpool_3d_ceil(self):
         model = torch.nn.AvgPool3d(3, 2, ceil_mode=True)
         x = torch.randn(20, 16, 50, 44, 31)
@@ -1442,6 +1525,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_floating_point(self):
         class FloatingPoint(torch.jit.ScriptModule):
@@ -1470,6 +1554,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(FloatingPoint(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     # Operator rank mismatch between outputs of two branches for opsets below 11.
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_floating_point_infer_dtype(self):
@@ -1502,6 +1587,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4).to(torch.int32)
         self.run_test(FloatingPoint(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_prim_min(self):
         @torch.jit.script
@@ -1530,6 +1616,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.arange(6, dtype=torch.int64)
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_1) Op (aten_add) [Sh...")  # fmt: skip
     def test_arithmetic(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x):
@@ -1542,6 +1629,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     def test_arithmetic_prim_long(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: int):
@@ -1564,6 +1652,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipDtypeChecking
     def test_arithmetic_prim_float(self):
         class ArithmeticModule(torch.nn.Module):
@@ -1587,6 +1676,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 5 were given")  # fmt: skip
     @skipDtypeChecking
     def test_arithmetic_prim_bool(self):
         class ArithmeticModule(torch.nn.Module):
@@ -1612,6 +1702,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = 2
         self.run_test(ArithmeticModule(), (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest(
         15,
         reason="In trace: Outputs that are always None are removed. \
@@ -1626,6 +1717,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(TupleModel(), (x,))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     # In scripting the first transpose node do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     def test_arithmetic_infer_dtype(self):
@@ -1689,6 +1781,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(FloordivModule(), (x,), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="AssertionError: The values for attribute 'dtype' do not match: torch.float32 != torch.int32.")  # fmt: skip
     def test_div(self):
         class DivModule(torch.nn.Module):
             def forward(self, x, y):
@@ -1699,6 +1792,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(DivModule(), (x, y))
         self.run_test(DivModule(), (x.float(), y.float()))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # Note: div cannot (generally) be exported via scripting
     # since its type promotion logic is dependent on knowing the scalar types
     # of the input tensors. That is, the ONNX graph is dependent on the
@@ -1721,6 +1815,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         torch.set_default_dtype(prev_default)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # In scripting x, y do not carry shape and dtype info.
     # The following test only works when onnx shape inference is enabled.
     def test_div_promotion_script(self):
@@ -1756,6 +1851,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.arange(1, 2 * 3 * 4 + 1).reshape(2, 3, 4).to(torch.double)
         self.run_test(torch.jit.script(DivModule()), (x, y))
 
+    @skipFxTest(reason="AssertionError: The values for attribute 'dtype' do not match: torch.float32 != torch.int32.")  # fmt: skip
     @skipDtypeChecking
     def test_div_rounding_mode(self):
         class TrueDivModule(torch.nn.Module):
@@ -1829,6 +1925,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, 6, 7)
         self.run_test(NegSlice(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_slice_with_input_index(self):
         class InputIndexSlice(torch.nn.Module):
@@ -1861,6 +1958,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2], "output_1": [0, 1, 2]},
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_script(self):
         class DynamicSliceModel(torch.jit.ScriptModule):
@@ -1871,6 +1969,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(1, 2)
         self.run_test(DynamicSliceModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_zeros.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_slice_dynamic_shape_script(self):
         class DynamicSliceModel(torch.nn.Module):
@@ -1908,6 +2007,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Square(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_dynamic(self):
         class ArangeModel(torch.nn.Module):
@@ -1937,6 +2037,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0], "output_1": [0]},
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_dynamic_arange_out(self):
         class ArangeOutModel(torch.nn.Module):
@@ -1947,6 +2048,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(8)
         self.run_test(ArangeOutModel(), (x))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_dynamic_arange_start_out(self):
         class ArangeStartOutModel(torch.nn.Module):
@@ -1964,6 +2066,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeStartOutModel(), (x, y), remained_onnx_input_idx=[1])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_linspace(self):
         class LinspaceModel(torch.nn.Module):
@@ -1975,6 +2078,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.tensor(5, dtype=torch.int)
         self.run_test(LinspaceModel(), (x, y, z))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_linspace_negative_start(self):
         class LinspaceModel(torch.nn.Module):
@@ -1986,6 +2090,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.tensor(6, dtype=torch.int)
         self.run_test(LinspaceModel(), (x, y, z))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_out(self):
         class ArangeModelEnd(torch.nn.Module):
@@ -2011,6 +2116,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats(self):
         class ArangeModelEnd(torch.nn.Module):
@@ -2062,6 +2168,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeModelStart(), (x, y), remained_onnx_input_idx=[1])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_with_floats_override(self):
         class ArangeModelEnd(torch.nn.Module):
@@ -2085,6 +2192,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeModelStep(), (x, y), remained_onnx_input_idx=[1])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_out(self):
         class ArangeOutModel(torch.nn.Module):
@@ -2095,6 +2203,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(8.5, dtype=torch.float)
         self.run_test(ArangeOutModel(), (x))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_start_out(self):
         class ArangeStartOutModel(torch.nn.Module):
@@ -2112,6 +2221,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeStartOutModel(), (x, y), remained_onnx_input_idx=[1])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: arange")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_no_type(self):
         class ArangeModel(torch.nn.Module):
@@ -2121,6 +2231,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(6.2, dtype=torch.float)
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_size(self):
         class SizeModel(torch.nn.Module):
@@ -2135,6 +2246,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(SizeModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(SizeModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.as_strided.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipScriptTest()  # x.stride() not scriptable
     def test_as_strided(self):
@@ -2151,6 +2263,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(5, 8, 7)
         self.run_test(Model(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index.Tensor")  # fmt: skip
     @skipScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_tensor_index_advanced_indexing_ellipsis(self):
         class MyModel(torch.nn.Module):
@@ -2160,6 +2273,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), (m1,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index.Tensor")  # fmt: skip
     def test_tensor_index_advanced_indexing(self):
         class MyModel(torch.nn.Module):
             def forward(self, input):
@@ -2194,6 +2308,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyModel(), (m1,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index.Tensor")  # fmt: skip
     def test_tensor_index_advanced_indexing_consecutive(self):
         class MyModel(torch.nn.Module):
             def forward(self, input):
@@ -2204,6 +2319,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         m1 = torch.randn(3, 4, 5, 6, 7)
         self.run_test(MyModel(), (m1,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put(self):
         class IndexPutModel(torch.nn.Module):
@@ -2216,6 +2332,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.ones(4)
         self.run_test(IndexPutModel(), (x, ind, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_singular(self):
         class IndexPutBoolModel(torch.nn.Module):
@@ -2236,6 +2353,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         indices = (torch.rand(50) * mask.shape[0]).to(torch.int64)
         self.run_test(IndexPutFloatModel(), (mask, indices))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_accumulate(self):
         class IndexPutModel(torch.nn.Module):
@@ -2247,6 +2365,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.ones(4)
         self.run_test(IndexPutModel(), (x, ind, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_slice_index(self):
         class IndexPutModel(torch.nn.Module):
@@ -2342,6 +2461,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(5)
         self.run_test(IndexPutModel10(), (x, ind, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Ellipses followed by tensor indexing not scriptable
     def test_index_put_ellipsis(self):
@@ -2363,6 +2483,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(4, 1, 3, 2)
         self.run_test(IndexPutModel2(), (x, update))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_loop(self):
         @torch.jit.script
@@ -2412,6 +2533,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_(self):
         class CopyModel(torch.nn.Module):
@@ -2474,6 +2596,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         mask = torch.randn(3, 1)
         self.run_test(CopyModel5(), (x, mask))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Model not scriptable (output with shape doesn't match the broadcast shape)
     def test_copy_tracing(self):
@@ -2486,6 +2609,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(1, 2)
         self.run_test(CopyModel(), (x, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_ellipsis(self):
         class CopyModel(torch.nn.Module):
@@ -2501,6 +2625,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.ones(1)
         self.run_test(CopyModel(), (x, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_copy_ellipsis_script(self):
         class CopyModel(torch.nn.Module):
@@ -2516,6 +2641,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.ones(1)
         self.run_test(CopyModel(), (x, update))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.flip.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_flip(self):
         class MyModule(torch.nn.Module):
@@ -2525,6 +2651,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(np.arange(6.0).reshape(2, 3))
         self.run_test(MyModule(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.randn.default")  # fmt: skip
     def test_randn(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
@@ -2533,6 +2660,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.rand.default")  # fmt: skip
     def test_rand(self):
         class Rand(torch.nn.Module):
             def forward(self, x):
@@ -2541,6 +2669,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.randn.default")  # fmt: skip
     def test_randn_dtype(self):
         class RandN(torch.nn.Module):
             def forward(self, x):
@@ -2554,6 +2683,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.rand.default")  # fmt: skip
     def test_rand_dtype(self):
         class Rand(torch.nn.Module):
             def forward(self, x):
@@ -2567,6 +2697,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.randn.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_randn_dynamic_size(self):
         class RandN(torch.nn.Module):
@@ -2576,6 +2707,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(RandN(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.rand.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_rand_dynamic_size(self):
         class Rand(torch.nn.Module):
@@ -2585,6 +2717,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(Rand(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.randn_like.default")  # fmt: skip
     def test_randn_like(self):
         class RandNLike(torch.nn.Module):
             def forward(self, x):
@@ -2594,6 +2727,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(RandNLike(), x)
         self.run_test(torch.jit.script(RandNLike()), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.rand_like.default")  # fmt: skip
     def test_rand_like(self):
         class RandLike(torch.nn.Module):
             def forward(self, x):
@@ -2603,6 +2737,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(RandLike(), x)
         self.run_test(torch.jit.script(RandLike()), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.randn_like.default")  # fmt: skip
     def test_randn_like_dtype(self):
         class RandNLike(torch.nn.Module):
             def forward(self, x):
@@ -2616,6 +2751,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(RandNLike(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.rand_like.default")  # fmt: skip
     def test_rand_like_dtype(self):
         class RandLike(torch.nn.Module):
             def forward(self, x):
@@ -2629,6 +2765,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(RandLike(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bernoulli.default")  # fmt: skip
     def test_bernoulli(self):
         class Bernoulli(torch.nn.Module):
             def forward(self, x):
@@ -2640,6 +2777,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.empty(2, 3, 3, dtype=torch.double).uniform_(0, 1)
         self.run_test(Bernoulli(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bernoulli.p")  # fmt: skip
     def test_bernoulli_p(self):
         class Bernoulli_float(torch.nn.Module):
             def forward(self, x):
@@ -2789,6 +2927,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                         self._interpolate(xi, mode_i, False, is_upsample, True)
                     self._interpolate(xi, mode_i, False, is_upsample)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'end'")  # fmt: skip
     # ONNX export failed on interpolate scripting because dynamic size not supported for opsets below 9.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_upsample(self):
@@ -2799,6 +2938,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_interpolate_upsample_trace(self):
         self._interpolate_tests(True)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_interpolate_function_substitution(self):
         class ScriptModel(torch.jit.ScriptModule):
@@ -2830,10 +2970,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(TracingModule(), (x,))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'end'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.upsample_linear1d.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_interpolate_half_pixel(self):
         # testing whether it uses "half_pixel" or "pytorch_half_pixel"
@@ -2871,6 +3013,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                     size[i] = 1
                     self.run_test(MyModel(mode_i, size), xi)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'y'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_interpolate_no_shape(self):
         class MyModel(torch.jit.ScriptModule):
@@ -2895,6 +3038,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(MyModel(), (x, y), remained_onnx_input_idx=[0])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'end'")  # fmt: skip
     @skipScriptTest()  # scripting raises OnnxRuntimeError
     def test_interpolate_adaptive_pooling_error(self):
         x = torch.randn(1, 2, 6, requires_grad=True)
@@ -2904,6 +3048,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         with self.assertRaises(RuntimeError) as cm:
             self._interpolate(x, "area", False, True)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
         x = torch.randn(4, 6, 36, 36, 18)
@@ -2917,6 +3062,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_groupnorm_noaffine(self):
         model = torch.nn.GroupNorm(4, 8, 0.002, affine=False)
         x = torch.randn(3, 8, 224, 224)
@@ -2930,6 +3076,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 6, 180, 180)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_unpack_scripted(self):
         class ListUnpack(torch.nn.Module):
@@ -2946,6 +3093,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(torch.jit.script(ListUnpack()), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_unpack_scripted_runs_without_error_with_constructed_list_as_input(
         self,
@@ -2976,6 +3124,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             remained_onnx_input_idx=[0],
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_unpack_slice_scripted(self):
         class ListUnpackSlice(torch.nn.Module):
@@ -2994,6 +3143,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
         )
 
+    @skipFxTest(reason="AssertionError: Tensor-likes are not close!")  # fmt: skip
     @skipDtypeChecking
     def test_pow(self):
         class PowModule(torch.nn.Module):
@@ -3108,6 +3258,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(DivModule(), (x, y))
         self.run_test(PowModule(), (x, z))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid ...")  # fmt: skip
     def test_mul_bool(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, y):
@@ -3148,6 +3299,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor([2, 3, 5], dtype=torch.float64)
         self.run_test(ModModule(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_empty_constant_shape(self):
         class Zeros(torch.nn.Module):
@@ -3186,6 +3338,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(42.0)
         self.run_test(Empty(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std.correction")  # fmt: skip
     def test_std(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3202,6 +3355,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std.correction")  # fmt: skip
     def test_std_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3219,6 +3373,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std.correction")  # fmt: skip
     def test_std_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3236,6 +3391,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std.correction")  # fmt: skip
     def test_std_correction(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3245,6 +3401,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviation()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var.correction")  # fmt: skip
     def test_var(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3270,6 +3427,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceSqrt()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var.correction")  # fmt: skip
     def test_var_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3287,6 +3445,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var.correction")  # fmt: skip
     def test_var_keepdim(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3304,6 +3463,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var.correction")  # fmt: skip
     def test_var_correction(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3313,6 +3473,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = Variance()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_var_mean(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3329,6 +3490,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_var_mean_along_dims(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3346,6 +3508,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_var_mean_mixed_dims(self):
         class ReverseDims(torch.nn.Module):
             def forward(self, input):
@@ -3371,6 +3534,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = NonZeroDims()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_var_mean_keepdim(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3388,6 +3552,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_var_mean_correction(self):
         class Variance(torch.nn.Module):
             def forward(self, input):
@@ -3397,6 +3562,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = Variance()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std_mean.correction")  # fmt: skip
     def test_std_mean(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3413,6 +3579,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std_mean.correction")  # fmt: skip
     def test_std_mean_along_dims(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3430,6 +3597,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = VarianceUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.std_mean.correction")  # fmt: skip
     def test_std_mean_keepdim(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3447,6 +3615,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviationUnbiased()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.var_mean.correction")  # fmt: skip
     def test_std_mean_correction(self):
         class StandardDeviation(torch.nn.Module):
             def forward(self, input):
@@ -3456,6 +3625,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = StandardDeviation()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.__rshift__.Scalar")  # fmt: skip
     def test_bitshift(self):
         class BitshiftModel(torch.nn.Module):
             def forward(self, input):
@@ -3469,6 +3639,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.__rshift__.Scalar")  # fmt: skip
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10
     @skipIfUnsupportedMinOpsetVersion(11)
@@ -3486,6 +3657,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input2 = torch.arange(24, dtype=torch.uint8).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), (input, input2))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_narrow(self):
         class NarrowModel(torch.nn.Module):
             def forward(self, input):
@@ -3494,6 +3666,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_test(NarrowModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_narrow_dynamic(self):
         class NarrowModel(torch.nn.Module):
@@ -3503,6 +3676,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3, requires_grad=True)
         self.run_test(NarrowModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_fill.int_Scalar")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_fill(self):
         class IndexFillModel(torch.nn.Module):
@@ -3513,6 +3687,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(IndexFillModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_copy(self):
         class IndexCopyModel(torch.nn.Module):
@@ -3540,6 +3715,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(Select(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_select.default")  # fmt: skip
     def test_index_select_constant_scaler_index(self):
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def forward(self, x):
@@ -3549,6 +3725,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(IndexSelectScalerIndexModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_select.default")  # fmt: skip
     def test_index_select_scaler_index(self):
         class IndexSelectScalerIndexModel(torch.nn.Module):
             def __init__(self, index_base):
@@ -3565,6 +3742,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         base = 1
         self.run_test(IndexSelectScalerIndexModel(base), (x, index_offset))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.take.default")  # fmt: skip
     def test_take(self):
         class TakeModel(torch.nn.Module):
             def forward(self, x, y):
@@ -3574,6 +3752,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor([4, 1, 7, 15, 63])
         self.run_test(TakeModel(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_topk(self):
         class MyModule(torch.nn.Module):
             def forward(self, x):
@@ -3582,6 +3761,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.arange(1.0, 6.0, requires_grad=True)
         self.run_test(MyModule(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_topk_int32_k(self):
         class Model(torch.nn.Module):
@@ -3592,6 +3772,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         k = torch.tensor(3, dtype=torch.int32)
         self.run_test(Model(), (x, k))
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_topk_smallest_unsorted(self):
         class MyModule(torch.nn.Module):
@@ -3606,6 +3787,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         k = torch.tensor(3)
         self.run_test(MyModule(), (x, k))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'k'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_topk_script(self):
         class MyModuleDynamic(torch.jit.ScriptModule):
@@ -3672,9 +3854,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyClipInt(), torch.randn(3, 3).to(torch.int64))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_relu_int(self):
         self.run_test(torch.nn.ReLU(), torch.randn(3, 3).to(torch.int32))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.constant_pad_nd.default")  # fmt: skip
     def test_pad_int(self):
         class MyPadInt(torch.nn.Module):
             def forward(self, x):
@@ -3682,6 +3866,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyPadInt(), torch.randn(3, 3).to(torch.int32))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_1) Op (aten_add) [Shape...")  # fmt: skip
     def test_min_int(self):
         class MyMinInt(torch.nn.Module):
             def forward(self, x):
@@ -3689,6 +3874,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyMinInt(), torch.randn(3, 3).to(torch.int32))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_1) Op (aten_add) [Shape...")  # fmt: skip
     def test_max_int(self):
         class MyMaxnInt(torch.nn.Module):
             def forward(self, x):
@@ -3696,6 +3882,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyMaxnInt(), torch.randn(3, 3).to(torch.int32))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     @skipIfUnsupportedOpsetVersion([7])
     def test_normalize(self):
         class Model(torch.nn.Module):
@@ -3705,6 +3892,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.norm.ScalarOpt_dim_dtype")  # fmt: skip
     def test_norm_with_dtype(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -3718,6 +3906,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3)
         self.run_test(Model(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_layer_norm(self):
         # As layer_norm works on the last D dimension, please keep
         # this test case at least three dimension to prevent the
@@ -3726,6 +3915,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(20, 5, 10, 10, 10)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm1d(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=True)
@@ -3734,6 +3924,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm1d_noaffine(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, affine=False)
@@ -3742,6 +3933,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm1d_norunningstats(self):
         x = torch.randn(10, 10)
         model = torch.nn.BatchNorm1d(10, track_running_stats=False)
@@ -3750,31 +3942,37 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 10, 128)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm2d(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm2d_noaffine(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, affine=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm2d_norunningstats(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.BatchNorm2d(3, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm3d(self):
         x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.BatchNorm3d(3, affine=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_batchnorm3d_noaffine(self):
         x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because ConstantOfShape op is not supported for opset < 9
@@ -3786,6 +3984,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm1d(5, affine=False, track_running_stats=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_instancenorm1d_norunningstats(self):
         x = torch.randn(10, 5, 128)
         model = torch.nn.InstanceNorm1d(5, affine=True, track_running_stats=False)
@@ -3794,6 +3993,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm1d(5, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because ConstantOfShape op is not supported for opset < 9
@@ -3805,6 +4005,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm2d(3, affine=False, track_running_stats=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_instancenorm2d_norunningstats(self):
         x = torch.randn(10, 3, 128, 128)
         model = torch.nn.InstanceNorm2d(3, affine=True, track_running_stats=False)
@@ -3813,6 +4014,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm2d(3, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because ConstantOfShape op is not supported for opset < 9
@@ -3824,6 +4026,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm3d(3, affine=False, track_running_stats=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_instancenorm3d_norunningstats(self):
         x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=False)
@@ -3832,6 +4035,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torch.nn.InstanceNorm3d(3, affine=False, track_running_stats=False)
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter.value")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter_with_scalar(self):
         class ScatterModel(torch.nn.Module):
@@ -3845,6 +4049,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), input_args=(input, indices))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter.value")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter_with_scalar_different_types(self):
         # Tests the case when scalar src (updates values) type is different
@@ -3861,6 +4066,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), input_args=(input, indices))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter.src")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter(self):
         class ScatterModel(torch.nn.Module):
@@ -3888,6 +4094,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         values = torch.arange(3 * 2 * 2, dtype=torch.float32).view(3, 2, 2)
         self.run_test(ScatterModel(), (input, indices, values))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter_add.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scatter_add(self):
         class ScatterModel(torch.nn.Module):
@@ -3913,6 +4120,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         index = torch.tensor([[0, 1], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), (src, index))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter_add.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_scatter_add_index_not_unique(self):
         class ScatterModel(torch.nn.Module):
@@ -3938,6 +4146,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         index = torch.tensor([[0, 0], [1, 1], [0, 1]], dtype=torch.int64)
         self.run_test(ScatterModel(), (src, index))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter_add.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_scatter_add_different_size_index_src(self):
         class ScatterModel(torch.nn.Module):
@@ -3970,6 +4179,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ),
         ],
     )
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scatter_add.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(16)
     def test_scatter_add_dynamic_index(self, src, indices):
         class ScatterModel(torch.nn.Module):
@@ -3984,6 +4194,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"indices": {0: "a", 1: "b"}, "src": {0: "c", 1: "d"}},
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bucketize.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_bucketize(self):
         class BucketModel(torch.nn.Module):
@@ -3996,6 +4207,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         boundaries = torch.tensor([1, 5, 7, 8, 10])
         self.run_test(BucketModel(), (input, boundaries))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_one_hot(self):
         class OneHot(torch.nn.Module):
@@ -4018,6 +4230,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         num_classes = 15 * torch.ones(1)
         self.run_test(OneHot(), (x, num_classes))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.gather.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gather(self):
         class GatherModel(torch.nn.Module):
@@ -4028,6 +4241,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         indices = torch.tensor([[1, 0], [0, 1], [0, 1]], dtype=torch.int64)
         self.run_test(GatherModel(), input_args=(input, indices))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: construct nn.Module: ZeroPad2d")  # fmt: skip
     @skipScriptTest()  # Scripting error: Cannot instantiate nn module
     def test_gather_constant_fold(self):
         class GatherModule(torch.nn.Module):
@@ -4085,6 +4299,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             output_names=["output"],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_expand(self):
@@ -4112,6 +4327,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         size = torch.tensor(-1)
         self.run_test(ExpandTensorSizeModel(), input_args=(input, size))
 
+    @skipFxTest(reason="torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)  # index_put is supported in opsets >= 11
     def test_dynamic_expand_as(self):
         class Model(torch.nn.Module):
@@ -4159,6 +4375,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[x2],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
@@ -4206,12 +4423,15 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedOpModule(), x)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (_aten_sum_dim_onnx_1) Op (_a...")  # fmt: skip
     def test_reduced_sum(self):
         return self._test_reduced_ops(op=torch.sum)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.mean.dim")  # fmt: skip
     def test_reduced_mean(self):
         return self._test_reduced_ops(op=torch.mean)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.prod.dim_int")  # fmt: skip
     def test_reduced_prod(self):
         return self._test_reduced_ops(op=torch.prod)
 
@@ -4228,6 +4448,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(NoDimModel(), input)
         self.run_test(DimModel(), input)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.min.dim")  # fmt: skip
     def test_reduced_min_max(self):
         class ReducedMinMaxModule(torch.nn.Module):
             def forward(self, input):
@@ -4242,6 +4463,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, dtype=torch.float)
         self.run_test(ReducedMinMaxModule(), x)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is a...")  # fmt: skip
     def test_reduce_log_sum_exp(self):
         class ReduceLogSumExpModel(torch.nn.Module):
             def forward(self, input):
@@ -4252,6 +4474,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 4, requires_grad=True)
         self.run_test(ReduceLogSumExpModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_softmax(self):
         for i in range(-4, 3):
             model = torch.nn.Softmax(dim=i)
@@ -4269,6 +4492,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model = torch.jit.script(SoftmaxUnknownRank(i))
             self.run_test(model, input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_softmax_large_values(self):
         input = torch.tensor(
             [[-1e12, -1e12, -1e12], [1e12, 0.0, -5.0], [3.0, 4.0, 5.0]]
@@ -4288,6 +4512,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             model = torch.jit.script(SoftmaxUnknownRank(i))
             self.run_test(model, input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_logsoftmax(self):
         for i in range(7)[2:]:
             model = torch.nn.LogSoftmax(dim=i - 1)
@@ -4295,12 +4520,14 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input = torch.ones(*dims, requires_grad=True)
             self.run_test(model, input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_logsoftmax_dim(self):
         for i in range(-4, 3):
             model = torch.nn.LogSoftmax(dim=i)
             input = torch.randn(3, 4, 5, 6)
             self.run_test(model, input)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_logsoftmax_dtype(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -4309,6 +4536,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(Model(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.softplus.default")  # fmt: skip
     def test_softplus(self):
         class BetaOneModel(torch.nn.Module):
             def forward(self, x):
@@ -4331,6 +4559,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(BetaFloatModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_no_hidden(self):
         class LSTMModel(torch.nn.Module):
@@ -4358,6 +4587,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         with self.assertRaises(RuntimeError):
             self.run_test(LSTMModel(), (input,))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm(self):
         class LSTMModel(torch.nn.Module):
@@ -4375,6 +4605,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         c0 = torch.randn(1, BATCH_SIZE, RNN_HIDDEN_SIZE)
         self.run_test(LSTMModel(), (input, h0, c0))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_cell(self):
         class LSTMCellModel(torch.nn.Module):
@@ -4393,6 +4624,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         for bias in [True, False]:
             self.run_test(LSTMCellModel(bias), (input, h0, c0))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_default_init_state(self):
         class LSTMModel(torch.nn.Module):
@@ -4408,6 +4640,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(RNN_SEQUENCE_LENGTH, BATCH_SIZE, RNN_INPUT_SIZE)
         self.run_test(LSTMModel(), input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_fixed_batch_size(self):
         class LSTMModel(torch.nn.Module):
@@ -4431,6 +4664,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             LSTMModel(), input, fixed_batch_size=True, additional_test_inputs=[input2]
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_post_fix_init_state(self):
         class LSTMModel(torch.nn.Module):
@@ -4459,6 +4693,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[input2],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_lstm_constant_folding(self):
         class LstmNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -4488,6 +4723,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model2, input2 = get_LstmNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_no_bias(self):
         class LstmNet(torch.nn.Module):
@@ -4521,6 +4757,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         for model, input in models_and_inputs:
             self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lstm_sequence(self):
         class LstmNet(torch.nn.Module):
@@ -4550,6 +4787,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             },
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()
     def test_rnn_no_bias(self):
         def make_model(layers, packed_sequence):
@@ -4601,6 +4839,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         for model, input in zip(models, inputs):
             self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_gru_no_bias(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -4641,6 +4880,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         for model, input in models_and_inputs:
             self.run_test(model, input, do_constant_folding=True)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")  # fmt: skip
     def test_gru_constant_folding(self):
         class GruNet(torch.nn.Module):
             def __init__(self, input_size, hidden_size, num_layers, bidirectional):
@@ -4670,6 +4910,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model2, input2 = get_GruNet_model_and_inputs(5, 4, 3, batch_size2, 7, False)
         self.run_test(model2, input2, do_constant_folding=True)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_max_tensors(self):
         class MaxModel(torch.nn.Module):
@@ -4692,6 +4933,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 4)
         self.run_test(model, x)
 
+    @skipFxTest(reason="IndexError: list index out of range")  # fmt: skip
     def test_aminmax(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -4703,6 +4945,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_end(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4720,6 +4963,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_end_notype(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4739,6 +4983,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(ArangeModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(ArangeModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_start_end(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4755,6 +5000,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_start_end_notype(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4771,6 +5017,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_arange_start_end_step(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4797,6 +5044,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'a'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_arange_start_end_step_notype(self):
         class ArangeScript(torch.jit.ScriptModule):
@@ -4819,6 +5067,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArangeModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'end'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test__dim_arange(self):
         class DimArange(torch.nn.Module):
@@ -4844,6 +5093,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             self.run_test(model, x_float)
             self.run_test(model, x_int)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bitwise_xor.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_and_or_xor(self):
         class MyModel(torch.nn.Module):
@@ -4854,6 +5104,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(0, 2, (5, 5), dtype=torch.bool)
         self.run_test(MyModel(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.logical_and.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_logical_and(self):
         class AndModel(torch.nn.Module):
@@ -4876,6 +5127,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(AndModel(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.logical_or.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_logical_or(self):
         class OrModel(torch.nn.Module):
@@ -4898,6 +5150,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(OrModel(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.logical_xor.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_logical_xor(self):
         class XorModel(torch.nn.Module):
@@ -4920,6 +5173,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(XorModel(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
     def test_eq(self):
         class EqualModel(torch.nn.Module):
@@ -4928,6 +5182,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(EqualModel(), 2)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_gt(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input, other):
@@ -4935,6 +5190,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(GreaterModel(), 2)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ge(self):
         class GreaterOrEqualModel(torch.nn.Module):
@@ -4943,6 +5199,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(GreaterOrEqualModel(), 2)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_1) Op (aten_gt) [Shape...")  # fmt: skip
     def test_gt_scalar(self):
         class GreaterModel(torch.nn.Module):
             def forward(self, input):
@@ -4950,6 +5207,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(GreaterModel(), 1)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_gt_primitive(self):
         class GreaterModel(torch.nn.Module):
             def __init__(self):
@@ -4962,6 +5220,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = 3
         self.run_test(GreaterModel(), (x,))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error: Type parameter (T) of Op...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ge_scalar(self):
         class GreaterOrEqualModel(torch.nn.Module):
@@ -4970,6 +5229,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(GreaterOrEqualModel(), 1)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_lt(self):
         class LessModel(torch.nn.Module):
             def forward(self, input, other):
@@ -4977,6 +5237,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(LessModel(), 2)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_le(self):
         class LessOrEqualModel(torch.nn.Module):
@@ -4985,6 +5246,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(LessOrEqualModel(), 2)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_lt_1) Op (aten_lt) [Shape...")  # fmt: skip
     def test_lt_scalar(self):
         class LessModel(torch.nn.Module):
             def forward(self, input):
@@ -4992,6 +5254,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(LessModel(), 1)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Type Error: Type parameter (T) of Op...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_le_scalar(self):
         class LessOrEqualModel(torch.nn.Module):
@@ -5000,6 +5263,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self._test_compare_ops(LessOrEqualModel(), 1)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_matmul(self):
         class MatmulModel(torch.nn.Module):
             def forward(self, input, other):
@@ -5013,6 +5277,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (4, 5))
         self.run_test(MatmulModel(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_matmul_batch(self):
         class MatmulModel(torch.nn.Module):
             def forward(self, input, other):
@@ -5040,11 +5305,13 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArgminArgmaxModel(), input)
 
+    @skipFxTest(reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1, 1, 1]) != torch.Size([1]).")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_argmin_argmax(self):
         input = torch.randn(7, 3, 5)
         self._argmin_argmax_model(input)
 
+    @skipFxTest(reason="AssertionError: The values for attribute 'shape' do not match: torch.Size([1, 1]) != torch.Size(...")  # fmt: skip
     # Argmin and Argmax with "select_last_index" is not supprted before opset 12
     # "select_last_index" was added in opset 12 to deal with corner case where the
     # same value appears multiple times in the tensor
@@ -5067,6 +5334,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor([4, 5, 8, 9])
         self.run_test(RepeatModel(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shape operator: aten.repeat_interleave.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_repeat_interleave(self):
         class FlattenModel(torch.nn.Module):
@@ -5107,6 +5375,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[1, 2], [3, 4]])
         self.run_test(RepeatsDimsModel2(), (x,))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shape operator: aten.repeat_interleave.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_repeat_interleave_noop(self):
         class Model(torch.nn.Module):
@@ -5116,6 +5385,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 1, 8)
         self.run_test(Model(), (x,))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: repeat_interleave")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_dynamic_repeat_interleave(self):
         class SingleDynamicModel(torch.nn.Module):
@@ -5194,6 +5464,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"repeats_1": {0: "r"}},
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: repeat_interleave")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_multiple_dynamic_repeat_interleave(self):
         class DynamicRepeatsModel(torch.nn.Module):
@@ -5234,6 +5505,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randint(10, (4, 2, 3, 4), dtype=torch.int32)
         self.run_test(ViewModel(), x)
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     def test_view_dynamic(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input, other):
@@ -5308,6 +5580,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(1)
         self.run_test(LinearModel(), (x, y, z))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()
     def test_weight_norm(self):
         # addmm for 3-d inputs converts to onnx::MatMul
@@ -5332,6 +5605,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 3, 5, requires_grad=True)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()
     def test_weight_norm_nodim(self):
         # addmm for 3-d inputs converts to onnx::MatMul
@@ -5394,6 +5668,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input": {0: "batch_size"}, "output": {0: "batch_size"}},
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'ind'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_getitem(self):
         class GetItemModel(torch.jit.ScriptModule):
@@ -5412,6 +5687,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipDtypeChecking
     def test_item(self):
         class M(torch.nn.Module):
@@ -5423,6 +5699,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         i = 3
         self.run_test(torch.jit.script(M()), (x, y, i))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Tensor.nonzero")  # fmt: skip
     @skipScriptTest()  # torch.nonzero(x, as_tuple=True) is not scriptable.
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_nonzero(self):
@@ -5433,6 +5710,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(60).index_fill_(0, torch.randint(0, 60, (20,)), 0).view(3, 4, 5)
         self.run_test(NonzeroModel(), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.unbind.int")  # fmt: skip
     def test_unbind(self):
         class UnbindModel(torch.nn.Module):
             def forward(self, input):
@@ -5458,6 +5736,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5)
         self.run_test(UnbindModel3(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_len(self):
         class LenModel(torch.jit.ScriptModule):
@@ -5474,6 +5753,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=(torch.randn(5, 5),),
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_len_list(self):
         class LenListModel(torch.jit.ScriptModule):
@@ -5484,6 +5764,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5)
         self.run_test(LenListModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unbind_dynamic(self):
         class UnbindModel(torch.jit.ScriptModule):
@@ -5548,6 +5829,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(5, 4, 3)
         self.run_test(SplitModel3(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_split_size_as_list(self):
@@ -5564,6 +5846,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         split_sizes = [torch.tensor(2), torch.tensor(4)]
         self.run_test(SplitModel(), (x, split_sizes))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 4 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_size_with_slice(self):
         class SplitModule(torch.nn.Module):
@@ -5583,6 +5866,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(SplitModule(), (x, y, t), remained_onnx_input_idx=[2])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_split_dynamic(self):
         class SplitModel(torch.jit.ScriptModule):
@@ -5684,6 +5968,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 dynamic_axes={"x": {0: "batch_size", 1: "dims"}},
             )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.cat.default")  # fmt: skip
     def test_concat(self):
         class ConcatModel(torch.nn.Module):
             def forward(self, x, y, z):
@@ -5694,6 +5979,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(2, 4, 5)
         self.run_test(ConcatModel(), (x, y, z))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_concat_dynamic(self):
         class ConcatDynamicModel(torch.jit.ScriptModule):
@@ -5704,6 +5990,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, 6)
         self.run_test(ConcatDynamicModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.stack.default")  # fmt: skip
     def test_stack(self):
         class StackModel(torch.nn.Module):
             def forward(self, x, y, z):
@@ -5714,6 +6001,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(3, 4, 5)
         self.run_test(StackModel(), (x, y, z))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_stack_dynamic(self):
         class StackDynamicModel(torch.jit.ScriptModule):
@@ -5724,6 +6012,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 5, 6)
         self.run_test(StackDynamicModel(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     def test_loop_dynamic(self):
         class LoopModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -5736,6 +6025,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         self.run_test(model, inputs)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_loop_nested(self):
         class NestedLoopsModel(torch.jit.ScriptModule):
@@ -5752,6 +6042,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         inputs = torch.zeros(1, 2, 3, dtype=torch.long)
         self.run_test(model, inputs)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_with_list(self):
         class ListLoopModel(torch.jit.ScriptModule):
@@ -5775,6 +6066,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         inputs = torch.randn(16)
         self.run_test(model, inputs)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_transpose(self):
         class LoopModel(torch.nn.Module):
@@ -5788,6 +6080,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(5, 3, 3)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'y'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_loop_multi_dim(self):
         class LoopMultiDimModel(torch.jit.ScriptModule):
@@ -5802,6 +6095,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.ones(1, dtype=torch.long)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list(self):
         class ListModel(torch.jit.ScriptModule):
@@ -5823,6 +6117,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         inputs = torch.randn(16, 1)
         self.run_test(model, inputs)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_append(self):
         class ListModel(torch.nn.Module):
@@ -5837,6 +6132,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_append_nested(self):
         class ListModel(torch.nn.Module):
@@ -5852,6 +6148,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::Identity of sequence in opset 14
     def test_list_append_nested_2(self):
         class ListModel(torch.nn.Module):
@@ -5870,6 +6167,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 4, 3, 4)
         self.run_test(model, (x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_append_nested_mixed_dtype(self):
         class ListModel(torch.nn.Module):
@@ -5888,6 +6186,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(3, 4)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_pop(self):
         class ListModel(torch.nn.Module):
@@ -5903,6 +6202,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_pop_nested(self):
         class ListModel(torch.nn.Module):
@@ -5920,6 +6220,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_del(self):
         class ListModel(torch.nn.Module):
@@ -5935,6 +6236,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_del_nested(self):
         class ListModel(torch.nn.Module):
@@ -5952,6 +6254,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_set(self):
         class ListModel(torch.nn.Module):
@@ -5967,6 +6270,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2, dtype=torch.long)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_idx_sum(self):
         class ListModel(torch.nn.Module):
@@ -5982,6 +6286,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2, dtype=torch.long)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories(self):
         class TensorFactory(torch.nn.Module):
@@ -5994,6 +6299,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(TensorFactory(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -6009,6 +6315,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(TensorFactory(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tensor_like_factories_script(self):
         class TensorFactory(torch.jit.ScriptModule):
@@ -6075,6 +6382,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={input_names[0]: {0: "batch"}},
         )
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_eye(self):
         class TensorFactory(torch.nn.Module):
@@ -6097,6 +6405,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2]},
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.diagonal.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_diagonal(self):
         class DiagonalModel(torch.nn.Module):
@@ -6174,6 +6483,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1, 2, 3]},
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.zero_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_zero(self):
         class Zero_(torch.nn.Module):
@@ -6184,6 +6494,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.zero_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_inplace_zero_qkv(self):
         class Zero_(torch.nn.Module):
@@ -6193,6 +6504,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(24, 3, 4)
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_zeros.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_zeros(self):
         class Zero_(torch.nn.Module):
@@ -6205,6 +6517,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Zero_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Zero_(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_ones.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_ones(self):
         class OnesModel(torch.nn.Module):
@@ -6217,6 +6530,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(OnesModel(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(OnesModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipScriptTest()  # torch.zeros/torch.ones with size tensor of dim != 0 not scriptable.
     def test_zeros_ones_with_tensor_input(self):
@@ -6227,6 +6541,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([2])
         self.run_test(ZeroAndOnes(), (x,))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipShapeChecking
     def test_tolist(self):
@@ -6238,6 +6553,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(List(), (torch.randint(100, (1,)),))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_list_pass(self):
         class Slice(torch.nn.Module):
@@ -6300,6 +6616,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(List(), (x, y), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_empty.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):
         class Emtpy(torch.nn.Module):
@@ -6313,6 +6630,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Emtpy(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Emtpy(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidArgument: [ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Failed to load...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_full(self):
         class Full(torch.nn.Module):
@@ -6325,6 +6643,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Full(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Full(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'y'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_list(self):
         class Arithmetic(torch.jit.ScriptModule):
@@ -6342,6 +6661,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(Arithmetic(), (x, y), remained_onnx_input_idx=[0])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.copy_.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_fill(self):
         class Fill_(torch.nn.Module):
@@ -6352,6 +6672,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Fill_(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
         self.run_test(Fill_(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'y'")  # fmt: skip
     def test_inplace_arithmetic(self):
         class Arithmetic(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -6364,6 +6685,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3, 4)
         self.run_test(Arithmetic(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_inplace_arithmetic_half(self):
         class InplaceAddModel(torch.nn.Module):
             def forward(self, x, y):
@@ -6378,6 +6700,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(InplaceAddModel(), (x, y), rtol=1e-2, atol=1e-2)
         self.run_test(InplaceMulModel(), (x, y), rtol=1e-2, atol=1e-2)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_with_loop(self):
         class M(torch.nn.Module):
@@ -6399,6 +6722,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(torch.jit.script(M()), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_inplace_with_loop_2(self):
         class M(torch.nn.Module):
@@ -6444,6 +6768,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(torch.jit.script(M()), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_inplace_attr_with_loop(self):
         class M(torch.nn.Module):
@@ -6471,6 +6796,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(torch.jit.script(M()), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_inplace_attr_copy_with_loop(self):
         class M(torch.nn.Module):
@@ -6513,6 +6839,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(torch.jit.script(M()), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(14)  # Need onnx::Identity of sequence in opset 14
     def test_inplace_sequence_with_loop(self):
         class M(torch.nn.Module):
@@ -6550,6 +6877,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(8, 4, 3)
         self.run_test(torch.jit.script(M()), (x))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.sort.default")  # fmt: skip
     @skipScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort(self):
         class SortModel(torch.nn.Module):
@@ -6562,6 +6890,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.sort.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Sort with dynamic dim not supported in ONNX
     def test_sort_ascending(self):
@@ -6575,6 +6904,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(SortModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.sort.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_argsort(self):
         class ArgSortModel(torch.nn.Module):
@@ -6584,6 +6914,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4)
         self.run_test(ArgSortModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
@@ -6601,6 +6932,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_masked_fill_inplace(self):
         class MaskedFillModel(torch.jit.ScriptModule):
@@ -6622,6 +6954,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.arange(16).view(2, 2, 4).to(torch.float32)
         self.run_test(MaskedFillModel2(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.masked_scatter.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
@@ -6631,6 +6964,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedScatterModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shape operator: aten.masked_select.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_masked_select(self):
         class MaskedSelectModel(torch.nn.Module):
@@ -6640,6 +6974,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(3, 4, 5, requires_grad=True)
         self.run_test(MaskedSelectModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_to_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
@@ -6653,6 +6988,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         constant = torch.tensor(5, dtype=torch.float)
         self.run_test(MaskedFillModel(), (mask, constant))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
@@ -6665,6 +7001,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         constant = torch.tensor(5, dtype=torch.float)
         self.run_test(MaskedScatterModel(), (mask, constant))
 
+    @skipFxTest(reason="RuntimeError: a leaf Variable that requires grad is being used in an in-place operation.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_with_1d_mask_to_masked_scatter(self):
         class MaskedScatterModel(torch.nn.Module):
@@ -6677,6 +7014,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         some_const = torch.randn(4, 4, 5, dtype=torch.float)
         self.run_test(MaskedScatterModel(), (tensor, mask, some_const))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.pixel_shuffle.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_shuffle(self):
         class PixelShuffle(torch.nn.Module):
@@ -6694,6 +7032,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.pixel_unshuffle.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pixel_unshuffle(self):
         class PixelUnshuffle(torch.nn.Module):
@@ -6711,6 +7050,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invali...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_reciprocal(self):
         class ReciprocalModel(torch.nn.Module):
@@ -6723,6 +7063,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, x.to(torch.float))
         self.run_test(model, x.to(torch.double))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_mul_1) Op (aten_mul) [S...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_scalar_type(self):
         class ArithmeticModel(torch.nn.Module):
@@ -6781,6 +7122,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor(12)
         self.run_test(FullLikeModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipDtypeChecking
     def test_full_like_value(self):
@@ -6793,6 +7135,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.tensor(2)
         self.run_test(FullLikeModel(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_l1_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6801,6 +7144,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_l2_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6809,6 +7153,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_frobenius_norm(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6817,6 +7162,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_frobenius_norm_keepdim(self):
         class NormModel(torch.nn.Module):
             def forward(self, x):
@@ -6825,6 +7171,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(NormModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.unfold.default")  # fmt: skip
     def test_unfold(self):
         class UnfoldModel(torch.nn.Module):
             def forward(self, x):
@@ -6840,6 +7187,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'x'")  # fmt: skip
     def test_unfold_infer_shape(self):
         class UnfoldModule(torch.jit.ScriptModule):
             def __init__(self):
@@ -6854,6 +7202,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(32, 3, 64)
         self.run_test(UnfoldModule(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.unfold.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_unfold_dynamic_inputs(self):
         class UnfoldModel(torch.nn.Module):
@@ -6870,6 +7219,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 4, requires_grad=True)
         self.run_test(UnfoldModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
     def test_mv(self):
         class MatmulModel(torch.nn.Module):
@@ -6884,6 +7234,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (5,))
         self.run_test(MatmulModel(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)  # MatMul long inputs is added in ONNX opset 9.
     def test_dot(self):
         class MatmulModel(torch.nn.Module):
@@ -6898,6 +7249,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(10, (5,))
         self.run_test(MatmulModel(), (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()  # SpectralNorm not TorchScript compatible.
     def test_spectral_norm(self):
         m = torch.nn.utils.spectral_norm(torch.nn.Linear(2, 4))
@@ -6905,6 +7257,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(6, 2)
         self.run_test(m, (x,))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_3) Op (aten_gt) [ShapeInfe...")  # fmt: skip
     def test_prelu(self):
         class PReluModel(torch.nn.Module):
             def __init__(self):
@@ -6924,10 +7277,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[y],
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_prelu_scalar(self):
         x = torch.scalar_tensor(1.0)
         self.run_test(torch.nn.PReLU(), x, input_names=["x"])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.hardtanh.default")  # fmt: skip
     def test_relu6(self):
         class Relu6Model(torch.nn.Module):
             def __init__(self):
@@ -6959,6 +7314,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(SiLUModel(), (x))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.tril.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_tril(self):
         class trilModel(torch.nn.Module):
@@ -6989,6 +7345,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(trilModelWithDiagonalInput(), (x, 5))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.triu.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_triu(self):
         class triuModel(torch.nn.Module):
@@ -7019,6 +7376,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(triuModelWithDiagonalInput(), (x, 5))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.mish.default")  # fmt: skip
     def test_mish(self):
         class MishModel(torch.nn.Module):
             def __init__(self):
@@ -7031,6 +7389,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 4)
         self.run_test(MishModel(), (x))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_remainder_0) Op (aten_rem...")  # fmt: skip
     def test_remainder(self):
         class RemainderModel(torch.nn.Module):
             def forward(self, input, other):
@@ -7053,6 +7412,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = x.to(torch.int32)
         self.run_test(RemainderModel(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_remainder_1) Op (a...")  # fmt: skip
     def test_remainder_scalar(self):
         class RemainderModel(torch.nn.Module):
             def __init__(self, scalar=2.55):
@@ -7078,6 +7438,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(1, 2, 1)
         self.run_test(FModModel(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_fmod_1) Op (aten_fmod) ...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fmod_scalar(self):
         class FModModel(torch.nn.Module):
@@ -7087,6 +7448,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randint(10, (2, 3))
         self.run_test(FModModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.glu.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_glu(self):
         class GluModel(torch.nn.Module):
@@ -7096,6 +7458,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GluModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_gelu(self):
         class GeluModel(torch.nn.Module):
@@ -7105,6 +7468,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_tanh_gelu(self):
         class GeluModel(torch.nn.Module):
@@ -7114,6 +7478,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 4, 5, 6, requires_grad=True)
         self.run_test(GeluModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     def test_add_inplace(self):
         class InplaceAddModel(torch.nn.Module):
             def forward(self, x):
@@ -7123,6 +7488,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True)
         self.run_test(InplaceAddModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.addcmul.default")  # fmt: skip
     def test_addcmul(self):
         class AddcmulModel(torch.nn.Module):
             def forward(self, x, t1, t2):
@@ -7133,6 +7499,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         t2 = torch.randn(1, 3)
         self.run_test(AddcmulModel(), (x, t1, t2))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_rsqrt(self):
         class RsqrtModel(torch.nn.Module):
             def forward(self, x):
@@ -7141,6 +7508,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 2, 3, requires_grad=True, dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     def test_rsqrt_zeros(self):
         class RsqrtModel(torch.nn.Module):
             def forward(self, x):
@@ -7149,6 +7517,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.zeros(4, 2, 3, requires_grad=True, dtype=torch.float64)
         self.run_test(RsqrtModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: unique")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique(self):
         class UniqueModel(torch.nn.Module):
@@ -7160,6 +7529,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([1, 3, 2, 3], dtype=torch.long)
         self.run_test(UniqueModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: unique")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_unique_along_dim(self):
         class UniqueModel(torch.nn.Module):
@@ -7193,6 +7563,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([False, True, True])
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipScriptTest()  # error in propagate as assign input shape
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_embedding_bag(self):
@@ -7210,6 +7581,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randint(10, (7, 5))
         self.run_test(model, (input))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._embedding_bag_forward_only.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_embedding_bag_1d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
@@ -7231,6 +7603,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         embedding_matrix = torch.rand(10, 15)
         self.run_test(model, (embedding_matrix, x, offset, w))
 
+    @skipFxTest(reason="TypeError: multiple values for argument 'dtype'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_embedding_bag_2d_per_sample_weights(self):
         class EmbeddingModel(torch.nn.Module):
@@ -7323,6 +7696,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"embedding_matrix": [0, 1], "x": [0, 1], "w": [0, 1]},
         )
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid(self):
         class Meshgrid(torch.nn.Module):
@@ -7335,6 +7709,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.randn(5, requires_grad=True)
         self.run_test(Meshgrid(), (x, y, z))
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(8)
     def test_meshgrid_scalar(self):
         class Meshgrid(torch.nn.Module):
@@ -7347,6 +7722,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.tensor(2.0)
         self.run_test(Meshgrid(), (x, y, z))
 
+    @skipFxTest(reason="torch._subclasses.fake_tensor.DataDependentOutputException: aten._local_scalar_dense.default")  # fmt: skip
     def test_baddbmm(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2):
@@ -7360,6 +7736,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     def test_baddbmm_dynamic(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, batch1, batch2, alpha, beta):
@@ -7373,6 +7750,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = MyModule()
         self.run_test(model, (x, batch1, batch2, alpha, beta))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_mul_1) Op (aten_mul) [ShapeIn...")  # fmt: skip
     def test_numel(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
@@ -7389,6 +7767,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_mul_1) Op (aten_mul) [S...")  # fmt: skip
     def test_numel_empty(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
@@ -7405,6 +7784,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'other'")  # fmt: skip
     def test_dtype(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -7415,6 +7795,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3)
         self.run_test(MyModel(), (x, y))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'other'")  # fmt: skip
     def test_dtype_eq(self):
         class MyModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -7427,6 +7808,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3)
         self.run_test(MyModel(), (x, y))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'other'")  # fmt: skip
     def test_cast_to(self):
         class MyModule(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -7438,6 +7820,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = MyModule()
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.cat.default")  # fmt: skip
     def test_cast_to_bool(self):
         class MyModule(torch.nn.Module):
             def forward(self, input, other):
@@ -7476,6 +7859,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, b)
         self.run_test(model, c)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bitwise_and.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_ones_bool(self):
         class MyModule(torch.nn.Module):
@@ -7523,6 +7907,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = Log2()
         self.run_test(model, x)
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_round(self):
         class Round(torch.nn.Module):
@@ -7532,6 +7917,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_constant_pad(self):
         model = torch.nn.ConstantPad1d(2, 3.5)
         x = torch.randn(2, 4, 4)
@@ -7544,13 +7930,23 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(
         "pad",
         [
-            common_utils.subtest([2, 4], name="scalar_list"),
+            common_utils.subtest(
+                [2, 4],
+                name="scalar_list",
+                decorators=[
+                    skipFxTest(
+                        reason="TypeError: forward() takes 2 positional "
+                        "arguments but 3 were given"
+                    )
+                ],
+            ),
             common_utils.subtest(
                 [
                     torch.tensor(2, dtype=torch.int64),
                     torch.tensor(4, dtype=torch.int64),
                 ],
                 name="scalar_tensor_list",
+                decorators=[skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")],
             ),
         ],
     )
@@ -7564,6 +7960,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(Pad(), (x, pad))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_empty.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_pad_circular(self):
         class PadModel(torch.nn.Module):
@@ -7574,6 +7971,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 3, 4)
         self.run_test(PadModel(), (x))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.new_empty.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_pad_circular_negative(self):
         # Test for different pad integer types
@@ -7604,6 +8002,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         ):
             self.run_test(Pad(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_1) Op (aten_add) [Shape...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_if_fold(self):
         class IfFoldModel(torch.nn.Module):
@@ -7723,6 +8122,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.ones((3, 4), dtype=torch.int)
         self.run_test(IfFoldModel(), (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_uninitialized(self):
         class UninitializedModel(torch.nn.Module):
@@ -7737,6 +8137,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(UninitializedModel(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_uninitialized_dynamic(self):
         class UninitializedModel(torch.nn.Module):
@@ -7758,6 +8159,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1]},
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_uninitialized_tensorList(self):
@@ -7773,6 +8175,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(torch.jit.script(UninitializedTensorListModel()), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_uninitialized_tensorList_dynamic(self):
@@ -7793,6 +8196,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1]},
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_uninitialized_intList(self):
@@ -7815,6 +8219,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1]},
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # onnx::Identity of sequence supported for ONNX opset >= 14
     @skipIfUnsupportedMinOpsetVersion(14)
     def test_uninitialized_tensorList_shape(self):
@@ -7839,6 +8244,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1]},
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # Sequence type as loop-carried dependencies only supported for ONNX opset >= 13
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequance_loopcarried(self):
@@ -7852,6 +8258,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones((3, 4), dtype=torch.int)
         self.run_test(torch.jit.script(SequanceLoopModel()), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_reflection_pad(self):
         model = torch.nn.ReflectionPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -7861,6 +8268,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_replication_pad(self):
         model = torch.nn.ReplicationPad1d(2)
         x = torch.randn(2, 4, 4)
@@ -7870,6 +8278,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 2, 4, 4)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: multiple values for argument 'dtype'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_im2col(self):
         class Unfold(torch.nn.Module):
@@ -7899,6 +8308,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(Det(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_linalg_norm(self):
         class LinalgSingleDimModel(torch.nn.Module):
             def __init__(self, ord_val):
@@ -7973,6 +8383,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(LinalgNoDim2DModel(1), x)
         self.run_test(LinalgNoDim2DModel(-1), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_linalg_vector_norm_zero(self):
         class LinalgVectorNormModel(torch.nn.Module):
@@ -7986,6 +8397,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LinalgVectorNormModel(0), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_linalg_vector_norm(self):
         class LinalgVectorNormModel(torch.nn.Module):
             def __init__(self, ord_val, dim_info):
@@ -8005,6 +8417,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             for dim_info in dim_options:
                 self.run_test(LinalgVectorNormModel(ord_val, dim_info), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_vector_norm.default")  # fmt: skip
     def test_linalg_matrix_norm(self):
         class LinalgMatrixNormModel(torch.nn.Module):
             def __init__(self, ord_val, dim_val=(-2, -1), keepdim_val=False):
@@ -8025,6 +8438,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             self.run_test(LinalgMatrixNormModel(ord_val, (0, 2)), x)
             self.run_test(LinalgMatrixNormModel(ord_val, (0, 2), True), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_cross.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_linalg_cross(self):
         class Cross(torch.nn.Module):
@@ -8035,6 +8449,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(1, 3, 1, 3)
         self.run_test(Cross(), input_args=(x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Dynamic slicing on data-dependent value is not supported")  # fmt: skip
     # This test checks output scalar type in the ONNX graph should not be null
     # https://github.com/pytorch/pytorch/issues/28607
     @skipIfUnsupportedMinOpsetVersion(10)
@@ -8060,6 +8475,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 3, 5, 5)
         self.run_test(LogDet(), x)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     def test_dim(self):
         class DimModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -8073,6 +8489,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(DimModel(), empty_input)
         self.run_test(DimModel(), multi_dim_input)
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'poses'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dim_1(self):
         class M(torch.jit.ScriptModule):
@@ -8088,6 +8505,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         dummy_inputs = torch.rand(2, 2, 3)
         self.run_test(M(), (dummy_inputs,), input_names=["x"], dynamic_axes={"x": [0]})
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_mul_2) Op (aten_mul) [ShapeIn...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     @skipDtypeChecking
     def test_outer(self):
@@ -8146,6 +8564,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MoveaxisModel(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.diagonal.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_einsum(self):
         class EinsumModelBatchDiagonal(torch.nn.Module):
@@ -8182,18 +8601,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         for x in [torch.randn(3, 4), torch.randn(3, 4).to(dtype=torch.bool)]:
             self.run_test(EinsumModelTranspose(), input_args=(x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cosine_similarity(self):
         x = torch.randn(5, 3, 2)
         y = torch.randn(5, 3, 2)
         self.run_test(torch.nn.CosineSimilarity(dim=2), input_args=(x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_pairwise_distance(self):
         x = torch.randn(5, 3, 2)
         y = torch.randn(5, 3, 2)
         self.run_test(torch.nn.PairwiseDistance(p=2.0), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.linalg_cross.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cross(self):
         class Cross(torch.nn.Module):
@@ -8204,6 +8626,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(5, 3, 2, 3)
         self.run_test(Cross(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._cdist_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_cdist(self):
         class Cdist(torch.nn.Module):
@@ -8214,6 +8637,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(5, 2, 3)
         self.run_test(Cdist(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scalar_tensor.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
@@ -8330,6 +8754,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(CrossEntropyLossMeanWeight(ignore_index), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.mean.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_MSELoss(self):
         class MSELoss(torch.nn.Module):
@@ -8350,6 +8775,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(2, 3, 5)
         self.run_test(MSELoss(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.mean.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
 
@@ -8418,6 +8844,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(KLDivLossMiniBatchMean(), input_args=(x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scalar_tensor.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss(self):
         class NLLModel(torch.nn.Module):
@@ -8438,6 +8865,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_none(self):
         class NLLModel(torch.nn.Module):
@@ -8459,6 +8887,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean(self):
         class NLLModel(torch.nn.Module):
@@ -8480,6 +8909,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_sum(self):
         class NLLModel(torch.nn.Module):
@@ -8501,6 +8931,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_weights(self):
         class NLLModel(torch.nn.Module):
@@ -8522,6 +8953,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target[target == 1] = -100
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index(self):
         class NLLModel(torch.nn.Module):
@@ -8540,6 +8972,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.scalar_tensor.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_dynamic_ignore_index(self):
         import torch.nn.functional as F
@@ -8580,6 +9013,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         start_position = torch.randint(10, (N, N))
         self.run_test(LabelSmoothingCrossEntropy(), (preds, target, start_position))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nll_loss2d_forward.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_nllloss_2d_mean_ignore_index_weights(self):
         class NLLModel(torch.nn.Module):
@@ -8600,6 +9034,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         self.run_test(NLLModel(), (input, target))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_rs...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_binary_cross_entropy_with_logits(self):
         x = torch.randn(5)
@@ -8748,6 +9183,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         mat2 = torch.randn(3, 3)
         self.run_test(M(), input_args=(mat1, mat2))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_1) Op (at...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because where op is not supported for opset < 9.
@@ -8761,6 +9197,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         mat2 = torch.ones(2, 3)
         self.run_test(M(), input_args=(mat1, mat2))
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         9
     )  # Because where op is not supported for opset < 9.
@@ -8785,6 +9222,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), float("inf")]])
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid ...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_isfinite(self):
         class M(torch.nn.Module):
@@ -8794,6 +9232,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.isnan.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)  # ONNX IsNaN op is added in opset 9.
     def test_isnan(self):
         class M(torch.nn.Module):
@@ -8803,6 +9242,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), float("inf")]])
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.nan_to_num.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(
         10
     )  # ONNX IsNaN, IsInf op is added in opset 9, 10 respectively.
@@ -8825,6 +9265,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[1, 2, float("inf")], [2, float("nan"), -float("inf")]])
         self.run_test(WithParams(), (x,))
 
+    @skipFxTest(reason="AssertionError: Tensor-likes are not close!")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_maximum_minimum(self):
         class ModelWithNan(torch.nn.Module):
@@ -8835,6 +9276,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.rand(1, 3)
         self.run_test(ModelWithNan(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_minimum_0) Op (aten_...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_minimum_dtypes(self):
         class MinimumModel(torch.nn.Module):
@@ -8857,6 +9299,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.full_like(x, True)
         self.run_test(MinimumModel(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_maximum_0) Op (aten_...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_maximum_dtypes(self):
         class MaximumModel(torch.nn.Module):
@@ -8879,6 +9322,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.full_like(x, True)
         self.run_test(MaximumModel(), (x, y))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.any.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_any(self):
         class M(torch.nn.Module):
@@ -8902,6 +9346,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(3, 4).bool()
         self.run_test(MKeepdim(), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.all.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_all(self):
         class M(torch.nn.Module):
@@ -8925,6 +9370,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.rand(3, 4).bool()
         self.run_test(MKeepdim(), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bernoulli_.float")  # fmt: skip
     def test_dropout(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -8938,10 +9384,12 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 3, 53)
         self.run_test(M(), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_rrelu_eval(self):
         x = torch.tensor([0.5, -0.5])
         self.run_test(torch.nn.RReLU(0.1, 0.3).eval(), x)
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_add_1) Op (aten...")  # fmt: skip
     def test_shape_constant_fold(self):
         class ShapeModule(torch.nn.Module):
             def __init__(self):
@@ -8994,6 +9442,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(2)
         self.run_test(Celu(), (input,))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.InvalidGraph: [ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_celu_cast(self):
         class Celu(torch.nn.Module):
@@ -9035,6 +9484,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input3 = torch.randn(2)
         self.run_test(TupleModule(), (input1, input2, input3))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_lower_tuple_2(self):
         class TupleModule(torch.nn.Module):
             def forward(self, input1: Tensor, input2: Tensor) -> Tuple[Tensor, Tensor]:
@@ -9048,6 +9498,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input2 = torch.randn(2)
         self.run_test(TupleModule(), (input1, input2))
 
+    @skipFxTest(reason="AttributeError: 'tuple' object has no attribute 'cpu'")  # fmt: skip
     def test_lower_tuple_3(self):
         class TupleModule(torch.nn.Module):
             def forward(
@@ -9083,6 +9534,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         z = torch.ones(2, 3, 1)
         self.run_test(Model(), (x, y, z))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: where")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipScriptTest()  # scripting tests run for opsets > 11. See: test_where_condition_script
     def test_where_condition(self):
@@ -9101,6 +9553,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
         self.run_test(Model2(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: where")  # fmt: skip
     @skipIfUnsupportedOpsetVersion([13])
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_where_condition_script(self):
@@ -9119,6 +9572,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randint(1, 2, (2, 3, 4), dtype=bool)
         self.run_test(Model2(), (x, y))
 
+    @skipFxTest(reason="TypeError: missing a required argument: 'input'")  # fmt: skip
     def test_empty_branch(self):
         class EmptyBranchModel(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -9224,6 +9678,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyModule(), x)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_if_transpose(self):
         class IfModel(torch.nn.Module):
@@ -9242,6 +9697,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"output_1": [0, 1]},
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_if_list(self):
         class IfModel(torch.nn.Module):
@@ -9258,6 +9714,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         cond = torch.tensor(1, dtype=torch.bool)
         self.run_test(torch.jit.script(IfModel()), (x, y, cond))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_if_view(self):
         class IfModel(torch.nn.Module):
@@ -9279,6 +9736,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipScriptTest(
         skip_before_opset_version=11, reason="dynamic split support added in 11"
     )
@@ -9365,6 +9823,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randint(4, (4, 3, 2))
         self.run_test(model, (x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_embedding_renorm(self):
         n, d = 7, 5
@@ -9695,6 +10154,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.fake_quantize_per_tensor_affine_cachemask.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quantize_per_tensor(self):
         class FakeQuantizePerTensorModel(torch.nn.Module):
@@ -9710,6 +10170,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerTensorModel(), (x))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._fake_quantize_per_tensor_affi...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_fake_quantize_per_tensor_dynamic_scale_zeropoint(self):
         class FakeQuantizePerTensorModel(torch.nn.Module):
@@ -9725,6 +10186,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         zero_point = torch.tensor(0)
         self.run_test(FakeQuantizePerTensorModel(), (x, scale, zero_point))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.fake_quantize_per_channel_affine_cachemask.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_fake_quantize_per_channel(self):
         class FakeQuantizePerChannelModel(torch.nn.Module):
@@ -9743,6 +10205,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(6, 4, 3, 3)
         self.run_test(FakeQuantizePerChannelModel(), (x))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     # RuntimeError: Can't redefine method:
     # forward on class: __torch__.torch.nn.modules.linear.Linear
@@ -9773,6 +10236,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([[150.0], [127.0], [-5.0]])
         self.run_test(m, x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_batchnorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9809,6 +10273,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_batchnorm_training_mode_fix_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9846,6 +10311,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_batchnorm_eval_mode_train_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9883,6 +10349,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.empty.memory_format")  # fmt: skip
     def test_instancenorm_training(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9919,6 +10386,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.empty.memory_format")  # fmt: skip
     def test_instancenorm_training_mode_fix_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -9956,6 +10424,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.empty.memory_format")  # fmt: skip
     def test_instancenorm_eval_mode_train_layer(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -10100,6 +10569,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         np.testing.assert_allclose(ratio_pytorch, ratio_ort, rtol=0.01, atol=0.01)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -10125,6 +10595,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             atol=1e-5,
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")  # fmt: skip
     def test_multiple_conv_bn(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -10167,6 +10638,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(RuntimeError) [ConstantVariable(str)] {}")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
         num_boxes = 100
@@ -10180,6 +10652,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(Module(), (boxes, scores))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(RuntimeError) [ConstantVariable(str)] {}")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_batched_nms(self):
         num_boxes = 100
@@ -10194,6 +10667,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(Module(), (boxes, scores, idxs))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_clip_boxes_to_image(self):
@@ -10216,6 +10690,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(boxes, size), (boxes, size_2)],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(RuntimeError) [ConstantVariable(str)] {}")  # fmt: skip
     @skipScriptTest(
         reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
@@ -10226,6 +10701,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torchvision.ops.RoIAlign((5, 5), 1.0, 2)
         self.run_test(model, (x, single_roi))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(RuntimeError) [ConstantVariable(str)] {}")  # fmt: skip
     @skipScriptTest(
         reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
@@ -10251,6 +10727,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model4 = torchvision.ops.RoIAlign((2, 2), 2.5, 0, aligned=True)
         self.run_test(model4, (x, single_roi))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(RuntimeError) [ConstantVariable(str)] {}")  # fmt: skip
     @skipScriptTest(
         reason="Conditioning on input type via prim::isinstance unsupported in ONNX"
     )
@@ -10263,6 +10740,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         model = torchvision.ops.RoIPool((pool_h, pool_w), 2.0)
         self.run_test(model, (x, rois))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Tensor.item")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_resize_images(self):
         class TransformModule(torch.nn.Module):
@@ -10283,6 +10761,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(input,), (input_test,)],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Tensor.item")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_transform_images(self):
@@ -10314,6 +10793,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         features = OrderedDict(features)
         return features
 
+    @skipFxTest(reason="RuntimeError: Couldn't load custom C++ ops. This can happen if your PyTorch and torchvision versions are incompatible, or if...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
     def test_rpn(self):
@@ -10397,6 +10877,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             ],
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.set_.source_Tensor")  # fmt: skip
     def test_set_(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -10417,6 +10898,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y, y2)],
         )
 
+    @skipFxTest(reason="TypeError: forward() missing 1 required positional argument: 'self_module_module_float_tensor'")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules(self):
         class InnerModule2(torch.nn.Module):
@@ -10477,6 +10959,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(Module(), (x,), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_set_attr_modules_2(self):
         class InnerModule(torch.nn.Module):
@@ -10517,6 +11000,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(Module(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(Module(), (x,), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_set_attr(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -10539,6 +11023,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         box_regression = torch.randn(3, 2)
         self.run_test(model, (box_regression, weight))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_2(self):
         class MyModule(torch.nn.Module):
@@ -10564,6 +11049,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (anchors))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_3(self):
         class MyModule(torch.nn.Module):
@@ -10591,6 +11077,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.rand(3, 10)
         self.run_test(model, (anchors))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_4(self):
         class MyModule(torch.nn.Module):
@@ -10623,6 +11110,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (x, anchors))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_5(self):
         class MyModule(torch.nn.Module):
@@ -10654,6 +11142,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.ones(3, 10, 3)
         self.run_test(model, (anchors))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_set_attr_in_loop(self):
         class MyModule(torch.nn.Module):
@@ -10682,6 +11171,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.rand(10)
         self.run_test(model, anchors)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_set_attr_in_loop_with_list(self):
         class MyModule(torch.nn.Module):
@@ -10713,6 +11203,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         anchors = torch.rand(10)
         self.run_test(model, anchors)
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if(self):
         @torch.jit.script
@@ -10766,6 +11257,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_2(self):
         @torch.jit.script
@@ -10833,6 +11325,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_3(self):
         @torch.jit.script
@@ -10879,6 +11372,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_4(self):
         @torch.jit.script
@@ -10926,6 +11420,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_if_5(self):
         @torch.jit.script
@@ -10975,6 +11470,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data, empty_tensor), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_append_in_block(self):
         class ListModel(torch.nn.Module):
@@ -10989,6 +11485,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_append_in_nested_block(self):
         class ListModel(torch.nn.Module):
@@ -11004,6 +11501,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_pop_in_block(self):
         class ListModel(torch.nn.Module):
@@ -11024,6 +11522,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_list_del_in_block(self):
         class ListModel(torch.nn.Module):
@@ -11044,6 +11543,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_list_unpack(self):
         class ListModel(torch.nn.Module):
@@ -11060,6 +11560,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(4, 5)
         self.run_test(model, (x, y))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_inplace_ops(self):
         @torch.jit.script
@@ -11108,6 +11609,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, (random_data), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.bitwise_or.Tensor")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_input_mask_model(self):
         class InputMaskModel(torch.nn.Module):
@@ -11175,6 +11677,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(1, 18)
         self.run_test(model, x, input_names=["x"])
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     def test_symbolic_shape_inference(self):
         # ConstantOfShape is tested in test_embedding_bag
         # Tile is tested in test_repeat
@@ -11219,6 +11722,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(2, 3, 4, 5, 6)
         self.run_test(model, x)
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_symbolic_shape_inference_arange(self):
         # test Range
@@ -11252,6 +11756,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x,), (y,)],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: where")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_symbolic_shape_inference_box(self):
         # test NonZero
@@ -11276,6 +11781,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x,), (y,)],
         )
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: where")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_symbolic_shape_inference_box_if(self):
         # test If
@@ -11295,6 +11801,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         scores = torch.ones(1, 4)
         self.run_test(model, (boxes, scores))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipDtypeChecking
     def test_symbolic_shape_inference_arange_2(self):
@@ -11319,6 +11826,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ArangeModel2(), (x,), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: nonzero")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_symbolic_shape_inference_nonzero(self):
         class OneLikeModel(torch.nn.Module):
@@ -11359,6 +11867,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(ZeroLikeModel(), x, remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() ins...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_symbolic_shape_inference_expand_1(self):
         class ExpandModel(torch.nn.Module):
@@ -11368,6 +11877,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(6, 1, requires_grad=True)
         self.run_test(ExpandModel(), (x,))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_symbolic_shape_inference_expand_2(self):
         class M(torch.nn.Module):
@@ -11385,6 +11895,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0, 1]})
         self.run_test(M(), (x,), remained_onnx_input_idx=[])
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_symbolic_shape_inference_slice(self):
         class M(torch.nn.Module):
@@ -11413,6 +11924,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         position_bias = torch.randn(1, 3, 20, 8)
         self.run_test(M(), (position_bias,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipScriptTest()
     def test_symbolic_shape_inference_time(self):
@@ -11456,6 +11968,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_ids": {0: "batch", 1: "sequence"}},
         )
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_hann_window_periodic(self):
         class HannWindowModule_Periodic(torch.nn.Module):
@@ -11478,6 +11991,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         module = HannWindowModule_Periodic()
         self.run_test(module, (x, win_length))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_hann_window_not_periodic(self):
         class HannWindowModule_NotPeriodic(torch.nn.Module):
@@ -11500,6 +12014,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         module = HannWindowModule_NotPeriodic()
         self.run_test(module, (x, win_length))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     @skipScriptTest()
     def test_hann_window_default_values(self):
@@ -11521,6 +12036,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         output = module(x, win_length)
         self.run_test(module, (x, win_length))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_permute_0) outp...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_tensordot_dim_count(self):
         class M(torch.nn.Module):
@@ -11533,6 +12049,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(M(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_permute_0) outpu...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_tensordot_dim_list(self):
         class M(torch.nn.Module):
@@ -11545,6 +12062,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(M(), (x, y))
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_permute_0) ou...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_tensordot_dynamic_dim(self):
         class M(torch.nn.Module):
@@ -11566,6 +12084,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_x": [0, 1, 2, 3], "input_y": [0, 1, 2, 3]},
         )
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_to_device(self):
         class M_ToDevice(torch.nn.Module):
@@ -11582,6 +12101,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(M_ToDevice(), (x, y))
         self.run_test(M_ToDeviceDtype(), (x, y))
 
+    @skipFxTest(reason="TypeError: forward() takes 2 positional arguments but 3 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_fill(self):
         class FillModule(torch.nn.Module):
@@ -11609,6 +12129,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(2, 3, 4, dtype=torch.long)
         self.run_test(FillScalarModule(), x)
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_normal(self):
         class M(torch.nn.Module):
@@ -11639,6 +12160,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         index = torch.tensor([0, 2, 1])
         self.run_test(M(2, index, updates), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_dim_size_differ(self):
         class M(torch.nn.Module):
@@ -11657,6 +12179,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         index = torch.tensor([0, 2, 1])
         self.run_test(M(1, index, updates), (x,))
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_in_loop(self):
         class M(torch.nn.Module):
@@ -11680,6 +12203,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         loop_count = torch.randint(20, (1,))[0].item()
         self.run_test(M(1, index, updates, loop_count), (x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_if(self):
         class M(torch.nn.Module):
@@ -11708,6 +12232,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             torch.jit.script(M(1, updates, index_true, index_false)), (x, cond)
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.index_put.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_index_add_dynamic_axes(self):
         class M(torch.nn.Module):
@@ -11736,6 +12261,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"input_1": [0, 1]},
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.roll.default")  # fmt: skip
     def test_roll(self):
         class M(torch.nn.Module):
             def __init__(self, shifts, dims):
@@ -11760,6 +12286,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.ones(12, 3)
         self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0]})
 
+    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.RuntimeException: [ONNXRuntimeError] : 6 : RUNTIME_EXCEPTION : Non-...")  # fmt: skip
     @skipShapeChecking
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
@@ -11797,6 +12324,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(M(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: missing: POP_FINALLY")  # fmt: skip
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_normal(self):
@@ -11875,6 +12403,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             abs(abs(actual_std) - expected_std) <= expected_std * 0.1
         ), "the gap of variance between ort outputs and expected one is unacceptable."
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: missing: POP_FINALLY")  # fmt: skip
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_dist_uniform(self):
@@ -11922,6 +12451,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             abs(actual_mean - expected_mean) <= expected_mean * 0.05
         ), "the mean value of ort outputs is out of scope."
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_int(self):
         class M(torch.nn.Module):
@@ -11932,6 +12462,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_float(self):
         class M(torch.nn.Module):
@@ -11944,6 +12475,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="TypeError: forward() takes 1 positional argument but 2 were given")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_sequence_to_bool(self):
         class M(torch.nn.Module):
@@ -11956,6 +12488,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     def test_tuple_output_from_if_with_raised_exception(self):
         class M(torch.nn.Module):
             def forward(self, t: Tensor) -> Tuple[Tensor, Tensor]:
@@ -11967,6 +12500,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.zeros(1)
         self.run_test(torch.jit.script(M()), (x,))
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     # NOTE: For quantization tests, choose scale and zero point carefully
     #       such that inputs and outputs do not always overflow/underflow.
     #       Otherwise test results could be inaccurate.
@@ -11986,6 +12520,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input_tensor = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, input_tensor)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d(self):
         model = torch.ao.nn.quantized.Conv2d(16, 33, 3, stride=2)
@@ -12000,6 +12535,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_adaptive_avg_pool2d(self):
         model = torch.nn.AdaptiveAvgPool2d((5, 7))
@@ -12007,6 +12543,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.2, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv2d_relu(self):
         model = torch.ao.nn.intrinsic.quantized.ConvReLU2d(16, 33, 3, stride=2)
@@ -12021,6 +12558,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         q_input = torch.quantize_per_tensor(input, 0.5, 128, torch.quint8)
         self.run_test(model, q_input)
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_conv1d_relu(self):
         model = torch.ao.nn.intrinsic.quantized.ConvReLU1d(16, 33, 3, stride=2)
@@ -12129,6 +12667,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skipScriptTest()
     @skipIfUnsupportedMinOpsetVersion(10)
+    @skipFxTest(
+        reason="torch._dynamo.exc.Unsupported: Unsupported:"
+        "quantized nyi in meta tensors with fake tensor propag..."
+    )
     def test_quantized_unary_ops(self, function_or_module):
         input = torch.randn(1, 4, 2, 3)
         q_input = torch.quantize_per_tensor(input, 0.26, 128, torch.quint8)
@@ -12143,6 +12685,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(Model(function_or_module), q_input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Unsupported: quantized nyi in meta tensors with fake tensor propagation.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_flatten(self):
         class FlattenModel(torch.nn.Module):
@@ -12152,6 +12695,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(1, 2, 3, 4), 1, 0, torch.quint8)
         self.run_test(FlattenModel(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Unsupported: quantized nyi in meta tensors with ...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
     def test_quantized_cat_when_concatinating_the_same_tensor(self):
@@ -12207,6 +12751,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     )
     @skipIfUnsupportedMinOpsetVersion(10)
     @skipScriptTest()  # torch.jit.frontend.FrontendError: Cannot instantiate class 'QFunctional' in a script function:
+    @skipFxTest(
+        reason="torch._dynamo.exc.Unsupported: Unsupported: "
+        "quantized nyi in meta tensors with fake tensor propa... "
+    )
     def test_quantized_cat(self, x: torch.Tensor, y: torch.Tensor):
         class QuantizedConcatenationModel(torch.nn.Module):
             def forward(self, x, y):
@@ -12214,6 +12762,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(QuantizedConcatenationModel(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Unsupported: quantized nyi in meta tensors with fake tensor prop...")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     # torch.jit.frontend.FrontendError:
     # Cannot instantiate class 'QFunctional' in a script function
@@ -12230,6 +12779,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArithmeticModel(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Unsupported: quantized nyi in meta tensors with fake tensor propagation.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantized_arithmetic(self):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 128, torch.quint8)
@@ -12243,6 +12793,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(ArithmeticModel2(), (x, y))
 
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError: ")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_quantize_per_tensor(self):
         class Module(torch.nn.Module):
@@ -12255,6 +12806,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(4, 6)
         self.run_test(Module(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Unsupported: quantized nyi in meta tensors with fake tensor propagation.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_dequantize(self):
         class Module(torch.nn.Module):
@@ -12264,6 +12816,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.quantize_per_tensor(torch.randn(3, 4), 0.2, 0, torch.qint8)
         self.run_test(Module(), x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_linear_per_channel(self):
         class M(torch.nn.Module):
@@ -12317,6 +12870,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randn(2, 4, 6)
         self.run_test(model, x)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_relu(self):
         class M(torch.nn.Module):
@@ -12339,6 +12893,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = torch.randn(8, 4)
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d(self):
         class M(torch.nn.Module):
@@ -12370,6 +12925,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d_relu(self):
         class M(torch.nn.Module):
@@ -12403,6 +12959,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_conv2d_relu_fused(self):
         class M(torch.nn.Module):
@@ -12437,6 +12994,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         )
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_maxpool2d(self):
         class M(torch.nn.Module):
@@ -12461,6 +13019,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_avg_pool2d(self):
         model = torch.nn.Sequential(
@@ -12474,6 +13033,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         input = _construct_tensor_for_quantization_test((4, 4, 3, 2))
         self.run_test(model, input)
 
+    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_qat_upsample_nearest2d(self):
         model = torch.nn.Sequential(
@@ -12498,6 +13058,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.ones(1)
         self.run_test(fn(), (x, y), input_names=["x", "y"], output_names=["output"])
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._convolution.default")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_convolution_allow_tf32(self):
         class Module(torch.nn.Module):
@@ -12559,6 +13120,10 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         (True, False),
         name_fn=lambda align_corners: str(align_corners),
     )
+    # Skipped all test cases for FX.
+    # Unsure how to write driver tool to automatically tag the correct parameterized
+    # test case to 'xfail'.
+    @skipFxTest(reason="TypeError: missing a required argument: 'end'")
     def test_grid_sample(self, mode, padding_mode, align_corners):
 
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
@@ -12712,6 +13277,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             input_names=["y"],
         )
 
+    @skipFxTest(reason="AssertionError")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_device_eq(self):
         class M(torch.nn.Module):
@@ -12738,6 +13304,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             dynamic_axes={"a": {0: "a0"}},
         )
 
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.lerp.Scalar")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_lerp(self):
         class LerpModel(torch.nn.Module):
@@ -12756,6 +13323,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @common_utils.parametrize("input_dtype", [torch.cfloat, torch.float])
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipFxTest(
+        reason="torch._dynamo.exc.Unsupported: call_function BuiltinVariable(format)"
+    )
     def test_print_tensor_within_torch_nn_module(self, input_dtype: torch.dtype):
         class PrintTensorOnMyModel(torch.nn.Module):
             def forward(self, x):
@@ -12867,6 +13437,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     @common_utils.parametrize(**_parametrize_rnn_args("initial_state"))
     @common_utils.parametrize(**_parametrize_rnn_args("packed_sequence"))
     @common_utils.parametrize(**_parametrize_rnn_args("dropout"))
+    @skipFxTest(reason="torch._dynamo.exc.TorchRuntimeError:")
     def test_rnn(self, *args, **kwargs):
         self._dispatch_rnn_test(*args, **kwargs)
 

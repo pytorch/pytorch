@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import dataclasses
-import os
-from typing import Any, Mapping, Type
 
+import inspect
+import io
+import os
+from typing import Any, Callable, Mapping, Sequence, Tuple, Type, Union
+
+import onnx.reference
 import onnxruntime
 import pytorch_test_common
 
 import torch
 from torch.onnx import _constants, verification
+from torch.onnx._internal import fx as fx_onnx
+from torch.utils import _pytree as pytree
 
 onnx_model_dir = os.path.join(
     os.path.dirname(os.path.realpath(__file__)),
@@ -52,6 +58,71 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
+def _run_onnx_reference_runtime(
+    onnx_model: Union[str, io.BytesIO],
+    pytorch_inputs: Tuple[Any, ...],
+    verbose: int = 10,
+) -> Sequence[Any]:
+    session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
+    )
+
+
+def _run_ort(
+    onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
+) -> Sequence[Any]:
+    session = onnxruntime.InferenceSession(
+        onnx_model, providers=["CPUExecutionProvider"]
+    )
+    input_names = [ort_input.name for ort_input in session.get_inputs()]
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    )
+
+
+def run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+    model: Union[torch.nn.Module, Callable],
+    input_args,
+    rtol: float = 1e-3,
+    atol: float = 1e-7,
+    opset_version: int = 17,
+    **input_kwargs,
+):
+    # Feed args and kwargs into exporter.
+    # Note that exporter should flatten kwargs into positional args the exported model;
+    # since ONNX doesn't represent kwargs.
+    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+        model,
+        *input_args,
+        opset_version=opset_version,
+        use_binary_format=True,
+        **input_kwargs,
+    )
+
+    # Inspect the model's signature. It will be used
+    # to flatten kwargs.
+    if isinstance(model, torch.nn.Module):
+        signature = inspect.signature(model.forward)
+    else:
+        signature = inspect.signature(model)
+
+    # Bind args and kwargs to the model's signature to
+    # flatten kwargs into positional args since ONNX
+    # model cannot be called with kwargs.
+    bound = signature.bind(*input_args, **input_kwargs)
+    # Fill optional inputs.
+    bound.apply_defaults()
+    assert not bound.kwargs
+
+    ref_outputs, _ = pytree.tree_flatten(model(*input_args, **input_kwargs))
+    ort_outputs = _run_ort(onnx_model, bound.args)
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        torch.testing.assert_close(
+            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
+        )
+
+
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
     """Combine class name with the parameterized arguments.
 
@@ -66,6 +137,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
     opset_version = _constants.ONNX_DEFAULT_OPSET
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
+    is_fx = False
     check_shape = True
     check_dtype = True
 
@@ -75,7 +147,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
-        self.is_script_test_enabled = True
 
     # The exported ONNX model may have less inputs than the pytorch model because of const folding.
     # This mostly happens in unit test, where we widely use torch.size or torch.shape.
@@ -130,7 +201,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)
         )
 
-        if self.is_script_test_enabled and self.is_script:
+        if self.is_script:
+            # Run test for export route of `torch.nn.Module` -> `torch.jit.ScriptModule` -> ONNX.
             script_model = model if is_model_script else torch.jit.script(model)
             _run_test(
                 script_model,
@@ -138,5 +210,20 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 flatten=False,
                 ignore_none=False,
             )
-        if not is_model_script and not self.is_script:
+        elif not is_model_script and not self.is_script and not self.is_fx:
+            # Run test on export route of `torch.nn.Module` -> `ONNX`.
             _run_test(model, tracing_remained_onnx_input_idx)
+
+        elif self.is_fx:
+            # Run test with FX ONNX Exporter
+            input_kwargs = input_kwargs or {}
+            if isinstance(input_args, torch.Tensor):
+                input_args = (input_args,)
+            run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+                model,
+                input_args,
+                rtol,
+                atol,
+                opset_version=self.opset_version,
+                **input_kwargs,
+            )

@@ -1,4 +1,5 @@
 # Owner(s): ["module: onnx"]
+from __future__ import annotations
 
 import os
 import unittest
@@ -51,7 +52,7 @@ def exportTest(
             acceptable_error_percentage=acceptable_error_percentage,
         )
 
-        if self.is_script_test_enabled and opset_version > 11:
+        if self.is_script and opset_version > 11:
             script_model = torch.jit.script(model)
             onnx_test_common.run_model_test(
                 self,
@@ -68,7 +69,6 @@ TestModels = type(
     (pytorch_test_common.ExportTestCase,),
     dict(
         test_models.TestModels.__dict__,
-        is_script_test_enabled=False,
         is_script=False,
         exportTest=exportTest,
     ),
@@ -82,7 +82,6 @@ TestModels_new_jit_API = type(
     dict(
         TestModels.__dict__,
         exportTest=exportTest,
-        is_script_test_enabled=True,
         is_script=True,
         onnx_shape_inference=True,
     ),
