@@ -56,7 +56,7 @@ void cat_serial_kernel_impl(const Tensor& result, const MaterializedITensorListR
 }
 
 void cat_serial_kernel(const Tensor& result, const MaterializedITensorListRef& tensors, int64_t dim) {
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, result.scalar_type(), "cat_serial_kernel", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(ScalarType::BFloat16, ScalarType::Half, result.scalar_type(), "cat_serial_kernel", [&]() {
     cat_serial_kernel_impl<scalar_t>(result, tensors, dim);
   });
 }
