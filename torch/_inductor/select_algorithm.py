@@ -7,7 +7,6 @@ import sys
 import textwrap
 import warnings
 from io import StringIO
-from pickle import dumps, loads
 
 from typing import Any, List
 from unittest.mock import patch
@@ -48,8 +47,7 @@ def benchmark_choice_in_sub_process(
     all_template_kernels, choice, args, out, expected_out, timings
 ):
     global template_kernels
-    template_kernels = loads(all_template_kernels)
-    choice = loads(choice)
+    template_kernels = all_template_kernels
     result = choice.benchmark(*args, out=out)
     if expected_out is not None:
         torch.testing.assert_close(out, expected_out)
@@ -824,8 +822,8 @@ class AlgorithmSelectorCache(PersistentCache):
             child = ctx.Process(
                 target=benchmark_choice_in_sub_process,
                 args=(
-                    dumps(template_kernels),
-                    dumps(choice),
+                    template_kernels,
+                    choice,
                     inputs,
                     output,
                     expected_output,
