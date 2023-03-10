@@ -7,6 +7,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/util/MathConstants.h>
+#include <ATen/native/cuda/JitLoops.cuh>
 
 // NOTE: CUDA on Windows requires that the enclosing function
 // of a __device__ lambda not have internal linkage.
