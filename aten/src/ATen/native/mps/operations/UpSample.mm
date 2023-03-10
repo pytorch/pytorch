@@ -103,7 +103,7 @@ void upsample_out_template(const Tensor& input,
             inputSizeVec[3] = @(input_dim.size() > 3 ? input_size[3] : 1);
             inputSizeTensor = [mpsGraph constantWithScalar: 0
                                                      shape: [NSArray arrayWithObjects:inputSizeVec.data() count:input_dim.size()]
-                                                  dataType: getMPSDataType(input.scalar_type())];
+                                                  dataType: getMPSDataType(input)];
           }
           if (is_macOS_13_0_or_newer) {
             if (!is_backward_pass) {
