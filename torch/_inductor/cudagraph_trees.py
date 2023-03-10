@@ -331,7 +331,14 @@ class CUDAWarmupNode:
 
         assert len(new_inputs) == 0
 
-        self.outputs_weakrefs.extend([map_to_ref(o) for o in out])
+        self.outputs_weakrefs.extend(
+            [
+                map_to_ref(o)
+                for o in out
+                if o is not None
+                and o.untyped_storage().data_ptr() not in non_cudagraph_inps
+            ]
+        )
 
         if config.triton.debug_cudagraph_trees:
             out_refs = self.path_live_weakrefs()
@@ -422,6 +429,15 @@ class CUDAGraphNode:
             (inputs[i].data_ptr() if i in self.static_input_idxs else None)
             for i in range(len(inputs))
         ]
+        self.static_input_storage_ptrs: List[int] = [
+            (
+                inputs[i].untyped_storage().data_ptr()
+                if i in self.static_input_idxs
+                else None
+            )
+            for i in range(len(inputs))
+        ]
+
         self.expanded_dims: List[List[int]] = [
             get_expanded_dims(x) if idx not in self.static_input_idxs else []
             for idx, x in enumerate(inputs)
@@ -524,8 +540,8 @@ class CUDAGraphNode:
             return outputs
 
         outputs = [
-            self._reconstruct_from_tensor_metadata(metadata, storage_cache)
-            for metadata in self.outputs_metadata
+            (self._reconstruct_from_tensor_metadata(m, storage_cache) if m else None)
+            for m in self.outputs_metadata
         ]
 
         self._add_replayed_outputs(outputs)
@@ -578,6 +594,14 @@ class CUDAGraphNode:
 
         assert len(self.outputs_weakrefs) == 0
         weak_refs = [map_to_ref(o) for o in outputs]
+
+        for i, o in enumerate(outputs):
+            if (
+                o is not None
+                and o.untyped_storage().data_ptr() in self.static_input_storage_ptrs
+            ):
+                weak_refs[i] = None
+
         self.outputs_weakrefs.extend(weak_refs)
 
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
@@ -820,7 +844,7 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
 
     check(
         len(unique_storages) == 0,
-        lambda: f"These storage data ptrs are not allocated but should be {unique_storages}",
+        lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
     )
 
 
