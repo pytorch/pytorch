@@ -155,7 +155,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
+        ort_outputs = onnx_test_common.run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
@@ -250,7 +250,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
-            ort_outputs = _run_ort(
+            ort_outputs = onnx_test_common.run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 (arg for arg in args if arg is not None),
             )

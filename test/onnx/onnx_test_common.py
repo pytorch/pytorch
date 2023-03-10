@@ -58,7 +58,7 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     return verification.verify(*args, options=options, **kwargs)
 
 
-def _run_onnx_reference_runtime(
+def run_onnx_reference_runtime(
     onnx_model: Union[str, io.BytesIO],
     pytorch_inputs: Tuple[Any, ...],
     verbose: int = 10,
@@ -69,7 +69,7 @@ def _run_onnx_reference_runtime(
     )
 
 
-def _run_ort(
+def run_ort(
     onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
 ) -> Sequence[Any]:
     session = onnxruntime.InferenceSession(
@@ -116,7 +116,7 @@ def run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     assert not bound.kwargs
 
     ref_outputs, _ = pytree.tree_flatten(model(*input_args, **input_kwargs))
-    ort_outputs = _run_ort(onnx_model, bound.args)
+    ort_outputs = run_ort(onnx_model, bound.args)
     for ref_output, ort_output in zip(ref_outputs, ort_outputs):
         torch.testing.assert_close(
             ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
