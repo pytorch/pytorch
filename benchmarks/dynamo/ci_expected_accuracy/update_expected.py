@@ -1,3 +1,22 @@
+"""
+Update commited CSV files used as reference points by dynamo/inductor CI.
+
+Currently only cares about graph breaks, so only saves those columns.
+
+Hardcodes a list of job names and artifacts per job, but builds the lookup
+by querying github sha and finding associated github actions workflow ID and CI jobs,
+downloading artifact zips, extracting CSVs and filtering them.
+
+Usage:
+
+1) get a rocksdp API key and save it in ~/rocks_api_key
+2) python benchmarks/dynamo/ci_expected_accuracy.py <sha of pytorch commit that has completed inductor benchmark jobs>
+
+Known limitations:
+- doesn't handle 'retry' jobs in CI, if the same hash has more than one set of artifacts, gets the first one
+- needs rocks API key (plan to use a public endpoint and remove this limitation)
+"""
+
 import argparse
 import os
 import urllib
@@ -89,26 +108,33 @@ def write_filtered_csvs(root_path, dataframes):
         df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("sha")
-args = parser.parse_args()
+if __name__ == "__main__":
 
-repo = "pytorch/pytorch"
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
 
-root_path = "benchmarks/dynamo/ci_expected_accuracy/"
-# TODO open public rocksdb endpoint, no apikey
-with open(os.path.join(os.path.expanduser("~"), "rocks_api_key"), "r") as f:
-    api_key = f.read()
+    parser.add_argument("sha")
+    args = parser.parse_args()
 
-results = query_job_sha(repo, args.sha, api_key)
-suites = {
-    "inductor_huggingface",
-    # "inductor_huggingface_dynamic",
-    "inductor_timm",
-    # "inductor_timm_dynamic",
-    "inductor_torchbench",
-    # "inductor_torchbench_dynamic",
-}
-urls = get_artifacts_urls(results, suites)
-dataframes = download_artifacts_and_extract_csvs(urls)
-write_filtered_csvs(root_path, dataframes)
+    repo = "pytorch/pytorch"
+    suites = {
+        "inductor_huggingface",
+        "inductor_timm",
+        "inductor_torchbench",
+        # "inductor_huggingface_dynamic",
+        # "inductor_timm_dynamic",
+        # "inductor_torchbench_dynamic",
+    }
+
+    # TODO check path and warn to run from pytorch root
+    root_path = "benchmarks/dynamo/ci_expected_accuracy/"
+
+    # TODO open public rocksdb endpoint, no apikey
+    with open(os.path.join(os.path.expanduser("~"), "rocks_api_key"), "r") as f:
+        api_key = f.read()
+
+    results = query_job_sha(repo, args.sha, api_key)
+    urls = get_artifacts_urls(results, suites)
+    dataframes = download_artifacts_and_extract_csvs(urls)
+    write_filtered_csvs(root_path, dataframes)
