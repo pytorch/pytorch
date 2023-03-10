@@ -8,11 +8,11 @@
 PyTorch documentation
 ===================================
 
-PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
+PyTorch is an optimized tensor library for deep learning using computer GPUs and CPUs.
 
-Features described in this documentation are classified by release status:
+The features described in this documentation are classified by these release statuses:
 
-  *Stable:*  These features will be maintained long-term and there should generally
+  *Stable:*  These features will be maintained in the long-term and there should generally
   be no major performance limitations or gaps in documentation.
   We also expect to maintain backwards compatibility (although
   breaking changes can happen and notice will be given one release ahead
