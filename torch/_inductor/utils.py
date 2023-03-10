@@ -324,6 +324,10 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
 
 
+def free_symbol_has(index: sympy.Expr, pattern: str):
+    return any(pattern in v.name for v in index.free_symbols)
+
+
 def has_incompatible_cudagraph_ops(gm):
     forbidden_list = {
         "aten._fused_moving_avg_obs_fq_helper.default",
