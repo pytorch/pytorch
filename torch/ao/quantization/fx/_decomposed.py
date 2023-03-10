@@ -427,8 +427,8 @@ quantized_decomposed_lib.define(
 
 @impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "MkldnnCPU")
 def conv_unary_inductor(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis,
-                         bias, stride, padding, dilation, groups, output_scale,
-                         output_zero_point, unary_post_op):
+                        bias, stride, padding, dilation, groups, output_scale,
+                        output_zero_point, unary_post_op):
     quantized = torch.ops.quantized
 
     if unary_post_op in ['relu', 'relu_']:
@@ -443,9 +443,9 @@ def conv_unary_inductor(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis,
     )
 
 @impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "Meta")
-def conv_unary_inductor(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis, bias,
-                        stride, padding, dilation, groups, output_scale,
-                        output_zero_point, unary_post_op):
+def conv_unary_inductor_meta(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis, bias,
+                             stride, padding, dilation, groups, output_scale,
+                             output_zero_point, unary_post_op):
     if len(qx.shape) == 3 and len(qw.shape) == 4:
         # For conv1d, x and w should both have rank 3
         # But if weight is prepacked, it's rank is 4 by unsqueeze(2)

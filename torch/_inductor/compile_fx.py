@@ -433,11 +433,9 @@ def compile_fx(
             )
 
         with overrides.patch_functions():
-            print("hit compile_fx fusion pass", flush=True)
             model_ = overrides.replace_fx(model_)
             model_ = overrides.fuse_fx(model_, example_inputs_)
             model_ = overrides.fuse_quantization(model_, example_inputs_)
-
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(

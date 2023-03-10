@@ -244,8 +244,7 @@ class TestQuantizePT2E(QuantizationTestCase):
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                             ns.call_function(torch.ops.aten.convolution.default),
-                            ns.call_function(torch.ops.aten.relu_.default) if inplace_relu else \
-                                ns.call_function(torch.ops.aten.relu.default),
+                            ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                         ]
@@ -257,7 +256,9 @@ class TestQuantizePT2E(QuantizationTestCase):
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                         ]
-                    self.checkGraphModuleNodes(convert_module, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
+                    self.checkGraphModuleNodes(convert_module,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
 
                     # Step1: Ref result in 1.X fx path
                     backend_config_1_x = get_x86_backend_config()

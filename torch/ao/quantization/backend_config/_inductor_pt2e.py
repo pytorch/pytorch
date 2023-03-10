@@ -1,4 +1,3 @@
-import operator
 import torch
 from torch.ao.quantization.backend_config import (
     BackendConfig,
@@ -13,9 +12,6 @@ weighted_op_quint8_dtype_config = DTypeConfig(
     weight_dtype=torch.qint8,
     bias_dtype=torch.float,
 )
-from typing import List
-from torch.ao.quantization.utils import MatchAllNode
-import itertools
 
 def get_conv_configs():
     conv_configs = []

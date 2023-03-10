@@ -97,6 +97,7 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
 
+
 def is_quantized_graph_module(gm: torch.fx.GraphModule):
     found_quantize = False
     quantize_ops = (
@@ -109,33 +110,35 @@ def is_quantized_graph_module(gm: torch.fx.GraphModule):
             break
     return found_quantize
 
+
 def _quantize_and_replace_weight(
-        gm: torch.fx.GraphModule,
-        dq_per_channel_node: torch.fx.Node):
+    gm: torch.fx.GraphModule, dq_per_channel_node: torch.fx.Node
+):
     # pattern: w - q - dq - weighted op
     q_per_channel_node = dq_per_channel_node.args[0]
     weight_node = q_per_channel_node.args[0]
     w_attr_name = weight_node.target
     weight = getattr(gm, w_attr_name)
 
-    assert isinstance(weight, torch.Tensor), 'Cannot find weight for quantization'
+    assert isinstance(weight, torch.Tensor), "Cannot find weight for quantization"
     if weight.is_quantized:
-        print('Weight is already quantized. Skip.')
         return
-    quantize_args = \
-        (getattr(gm, n.target) if isinstance(n, torch.fx.Node) else n for n in q_per_channel_node.args)
+    quantize_args = (
+        getattr(gm, n.target) if isinstance(n, torch.fx.Node) else n
+        for n in q_per_channel_node.args
+    )
     q_arg_list = list(quantize_args)
     q_arg_tuple = tuple(q_arg_list)
-    weight_int8 = \
-        torch.ops.quantized_decomposed.quantize_per_channel(*q_arg_tuple)
+    weight_int8 = torch.ops.quantized_decomposed.quantize_per_channel(*q_arg_tuple)
 
-    qw_attr_name = w_attr_name + '_quant'
+    qw_attr_name = w_attr_name + "_quant"
     setattr(gm, qw_attr_name, weight_int8)
     weight_node.target = qw_attr_name
     gm.graph.owning_module._buffers[qw_attr_name] = weight_int8
     delattr(gm, w_attr_name)
     q_per_channel_node.replace_all_uses_with(weight_node)
     gm.graph.erase_node(q_per_channel_node)
+
 
 def pre_quantize_weights(gm: torch.fx.GraphModule):
     # pattern: w - q - dq - weighted op
@@ -147,11 +150,13 @@ def pre_quantize_weights(gm: torch.fx.GraphModule):
             # conv args = (x, w, ...)
             dq_per_channel_node = node.args[1]
         if dq_per_channel_node is not None:
-            assert dq_per_channel_node.target == decomposed.dequantize_per_channel,\
-                    'Cannot find the dequantize op for weight'
+            assert (
+                dq_per_channel_node.target == decomposed.dequantize_per_channel
+            ), "Cannot find the dequantize op for weight"
             _quantize_and_replace_weight(gm, dq_per_channel_node)
     gm.graph.lint()
     gm.recompile()
+
 
 def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
     """
@@ -171,15 +176,29 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
     dequantize_per_channel = quantized_decomposed.dequantize_per_channel
 
     unary_post_ops = {
-        'relu' : relu,
-        'relu_' : relu_,
+        "relu": relu,
+        "relu_": relu_,
     }
     for name, unary_post_op in unary_post_ops.items():
         for node in gm.graph.nodes:
             if node.target is convolution:
-                (x, w, bias, stride, padding, dilation, is_transposed, out_padding, groups) = node.args
-                assert x.target == dequantize_per_tensor, "input's node should be dequantize_per_tensor"
-                assert w.target == dequantize_per_channel, "weight's node should be dequantize_per_channel"
+                (
+                    x,
+                    w,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    is_transposed,
+                    out_padding,
+                    groups,
+                ) = node.args
+                assert (
+                    x.target == dequantize_per_tensor
+                ), "input's node should be dequantize_per_tensor"
+                assert (
+                    w.target == dequantize_per_channel
+                ), "weight's node should be dequantize_per_channel"
                 (qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype) = x.args
                 (qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype) = w.args
                 if len(list(node.users)) != 1:
@@ -189,7 +208,10 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
                 if list(node.users)[0].target is unary_post_op:
                     # conv relu fusion
                     unary_op_to_be_fused = list(node.users)[0]
-                    if list(unary_op_to_be_fused.users)[0].target != quantize_per_tensor:
+                    if (
+                        list(unary_op_to_be_fused.users)[0].target
+                        != quantize_per_tensor
+                    ):
                         # Not meet fusion pattern: the op after unary_op is not quantize_per_tensor
                         continue
                     quant_per_tensor_node = list(unary_op_to_be_fused.users)[0]
@@ -197,26 +219,50 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
                     # Not meet fusion pattern: the op after conv is not unary_op to be fused or quantize_per_tensor
                     continue
 
-                (y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype) = quant_per_tensor_node.args
+                (
+                    y,
+                    y_scale,
+                    y_zp,
+                    y_quant_min,
+                    y_quant_max,
+                    y_dtype,
+                ) = quant_per_tensor_node.args
                 with gm.graph.inserting_after(quant_per_tensor_node):
-                    args = (qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                            bias, stride, padding, dilation, groups, y_scale,
-                            y_zp, name)
-                    new_conv_node = gm.graph.call_function(quantized_decomposed.conv_unary_inductor, args=args)
+                    args = (
+                        qx,
+                        x_scale,
+                        x_zp,
+                        qw,
+                        w_scale,
+                        w_zp,
+                        w_axis,
+                        bias,
+                        stride,
+                        padding,
+                        dilation,
+                        groups,
+                        y_scale,
+                        y_zp,
+                        name,
+                    )
+                    new_conv_node = gm.graph.call_function(
+                        quantized_decomposed.conv_unary_inductor, args=args
+                    )
                 # Copy node meta
                 new_conv_node.meta = copy.copy(quant_per_tensor_node.meta)
                 quant_per_tensor_node.replace_all_uses_with(new_conv_node)
 
-                gm.graph.erase_node(quant_per_tensor_node) # erase quantize_per_tensor
-                gm.graph.erase_node(unary_op_to_be_fused) # erase unary_op
-                gm.graph.erase_node(node) # erase conv
-                gm.graph.erase_node(w) # erase dequantize_per_channel
-                gm.graph.erase_node(x) # erase dequantize_per_tensor
+                gm.graph.erase_node(quant_per_tensor_node)  # erase quantize_per_tensor
+                gm.graph.erase_node(unary_op_to_be_fused)  # erase unary_op
+                gm.graph.erase_node(node)  # erase conv
+                gm.graph.erase_node(w)  # erase dequantize_per_channel
+                gm.graph.erase_node(x)  # erase dequantize_per_tensor
 
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
     return gm
+
 
 def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
     """
@@ -236,9 +282,23 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
 
     for node in gm.graph.nodes:
         if node.target is convolution:
-            (x, w, bias, stride, padding, dilation, is_transposed, out_padding, groups) = node.args
-            assert x.target == dequantize_per_tensor, "input's node should be dequantize_per_tensor"
-            assert w.target == dequantize_per_channel, "weight's node should be dequantize_per_channel"
+            (
+                x,
+                w,
+                bias,
+                stride,
+                padding,
+                dilation,
+                is_transposed,
+                out_padding,
+                groups,
+            ) = node.args
+            assert (
+                x.target == dequantize_per_tensor
+            ), "input's node should be dequantize_per_tensor"
+            assert (
+                w.target == dequantize_per_channel
+            ), "weight's node should be dequantize_per_channel"
             (qx, x_scale, x_zp, x_quant_min, x_quant_max, x_dtype) = x.args
             (qw, w_scale, w_zp, w_axis, w_quant_min, w_quant_max, w_dtype) = w.args
             if len(list(node.users)) != 1:
@@ -252,39 +312,65 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
                 # Not meet fusion pattern: the op after conv is not unary_op to be fused or quantize_per_tensor
                 continue
 
-            (y, y_scale, y_zp, y_quant_min, y_quant_max, y_dtype) = quant_per_tensor_node.args
+            (
+                y,
+                y_scale,
+                y_zp,
+                y_quant_min,
+                y_quant_max,
+                y_dtype,
+            ) = quant_per_tensor_node.args
             with gm.graph.inserting_after(quant_per_tensor_node):
-                args = (qx, x_scale, x_zp, qw, w_scale, w_zp, w_axis, 
-                        bias, stride, padding, dilation, groups, y_scale,
-                        y_zp, "none")
-                new_conv_node = gm.graph.call_function(quantized_decomposed.conv_unary_inductor, args=args)
+                args = (
+                    qx,
+                    x_scale,
+                    x_zp,
+                    qw,
+                    w_scale,
+                    w_zp,
+                    w_axis,
+                    bias,
+                    stride,
+                    padding,
+                    dilation,
+                    groups,
+                    y_scale,
+                    y_zp,
+                    "none",
+                )
+                new_conv_node = gm.graph.call_function(
+                    quantized_decomposed.conv_unary_inductor, args=args
+                )
             # Copy node meta
             new_conv_node.meta = copy.copy(quant_per_tensor_node.meta)
             quant_per_tensor_node.replace_all_uses_with(new_conv_node)
 
-            gm.graph.erase_node(quant_per_tensor_node) # erase quantize_per_tensor
-            gm.graph.erase_node(node) # erase conv
-            gm.graph.erase_node(w) # erase dequantize_per_channel
-            gm.graph.erase_node(x) # erase dequantize_per_tensor
+            gm.graph.erase_node(quant_per_tensor_node)  # erase quantize_per_tensor
+            gm.graph.erase_node(node)  # erase conv
+            gm.graph.erase_node(w)  # erase dequantize_per_channel
+            gm.graph.erase_node(x)  # erase dequantize_per_tensor
 
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
     return gm
 
+
 def fuse_reference_quantized_conv(gm: torch.fx.GraphModule):
     gm = fuse_reference_quantized_conv_unary(gm)
     gm = packed_reference_quantized_conv(gm)
     return gm
 
+
 def _insert_packed_weight_bias(
-        gm: torch.fx.GraphModule,
-        weight_node: torch.fx.Node,
-        bias_node: torch.fx.Node,
-        packed_weight: torch.Tensor,
-        packed_bias: torch.Tensor):
+    gm: torch.fx.GraphModule,
+    weight_node: torch.fx.Node,
+    bias_node: torch.fx.Node,
+    packed_weight: torch.Tensor,
+    packed_bias: torch.Tensor,
+):
     w_attr_name = weight_node.target
-    w_packed_attr_name = w_attr_name + '_packed'
+    w_packed_attr_name = w_attr_name + "_packed"
     gm.graph.owning_module._buffers[w_packed_attr_name] = packed_weight
     setattr(gm, w_packed_attr_name, gm.graph.owning_module._buffers[w_packed_attr_name])
     weight_node.target = w_packed_attr_name
@@ -294,11 +380,12 @@ def _insert_packed_weight_bias(
     # Replace the original bias with packed bias
     if bias_node is not None:
         b_attr_name = bias_node.target
-        b_pack_attr_name = b_attr_name + '_packed'
+        b_pack_attr_name = b_attr_name + "_packed"
         gm.graph.owning_module._buffers[b_pack_attr_name] = packed_bias
         setattr(gm, b_pack_attr_name, gm.graph.owning_module._buffers[b_pack_attr_name])
         bias_node.target = b_pack_attr_name
         delattr(gm, b_attr_name)
+
 
 def _prepack_conv_weight(gm: torch.fx.GraphModule):
     # Assume dq - conv (- relu) - q is already fused and `w - q` is replaced by qw
@@ -310,8 +397,9 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
             #              bias, stride, padding, dilation, groups,
             #              y_scale, y_zp, unary_post_op_name)
             weight_node = node.args[3]
-            assert hasattr(gm, weight_node.target) and isinstance(getattr(gm, weight_node.target), torch.Tensor),\
-                    "Cannot find quantized weight of convolution" 
+            assert hasattr(gm, weight_node.target) and isinstance(
+                getattr(gm, weight_node.target), torch.Tensor
+            ), "Cannot find quantized weight of convolution"
             weight_int8 = getattr(gm, weight_node.target)
             bias_node = node.args[7]
             # Prepack weight into an MKLDNN tensor of dtype int8
@@ -324,11 +412,18 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
             padding = node.args[9]
             dilation = node.args[10]
             groups = node.args[11]
-            packed_weight, packed_bias = \
-                torch.ops.quantized.conv_prepack_cpu_tensor(
-                    weight_int8, w_scales, x_shape, x_scale, x_zp,
-                    bias, stride, padding, dilation, groups
-                )
+            packed_weight, packed_bias = torch.ops.quantized.conv_prepack_cpu_tensor(
+                weight_int8,
+                w_scales,
+                x_shape,
+                x_scale,
+                x_zp,
+                bias,
+                stride,
+                padding,
+                dilation,
+                groups,
+            )
             # Replace the original weight with packed weight
             _insert_packed_weight_bias(
                 gm, weight_node, bias_node, packed_weight, packed_bias
@@ -336,12 +431,13 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
     gm.graph.eliminate_dead_code()
     gm.graph.lint()
     gm.recompile()
-
     return gm
+
 
 def prepack_weight_in_graph(gm: torch.fx.GraphModule):
     gm = _prepack_conv_weight(gm)
     return gm
+
 
 def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     # skip if gm is not a quantized graph module
@@ -354,7 +450,6 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
 
     # To store input shapes on the graph
     # Get shape by node.meta.get("tensor_meta").shape
-    from torch.fx.passes.shape_prop import ShapeProp
     fake_mode = fake_mode_from_tensors(example_inputs)
     ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
 
@@ -366,6 +461,7 @@ def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     gm = prepack_weight_in_graph(gm)
 
     return gm
+
 
 def fetch_attr(target: str, mod):
     target_atoms = target.split(".")
