@@ -358,10 +358,11 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
 
         :return: None.
         """
-        from torch._dynamo.utils import normalize_attr_name
+        from torch._dynamo.utils import unique_normalized_attr_name
 
-        name = normalize_attr_name(source.name())
+        name = unique_normalized_attr_name(source.name())
         if name in self.names_to_sources:
+            breakpoint()
             raise AssertionError("Illegal, unreachable state. ")
         self.names_to_sources[name] = source
 

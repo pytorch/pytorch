@@ -51,8 +51,8 @@ from .utils import (
     counters,
     dynamo_timed,
     format_graph_tabular,
+    get_or_make_known_name,
     is_lazy_module,
-    normalize_attr_name,
     same,
 )
 from .variables.base import VariableTracker
@@ -497,35 +497,36 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # The reason we need this uniform is that we need all the names to be the same, so that
         # all the sources can be the same, because when we eventually call .register into the
         # context_module, we need to make sure elements match.
-        name = normalize_attr_name(name)
+        name = get_or_make_known_name(name, source)
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
-        if name not in self.nn_modules:
-            self.nn_modules[name] = target
-            assert self.names_to_sources is not None
-            self.tracing_context.module_context.register(source)
-            if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
-                # annoying, but there are cases when we do not have parameters
-                # see test_nn_moduledict_contains
-                if hasattr(target, "_parameters"):
-                    for n, p in target.named_parameters(
-                        recurse=False, remove_duplicate=False
-                    ):
-                        new_source = ParamBufferSource(source, n)
-                        new_name = new_source.name()
-                        self.register_attr_or_module(p, new_name, source=new_source)
-                # annoying, but there are cases when we do not have buffers
-                # see test_nn_moduledict_contains
-                if hasattr(target, "_buffers"):
-                    for n, p in target.named_buffers(
-                        recurse=False, remove_duplicate=False
-                    ):
-                        new_source = ParamBufferSource(source, n)
-                        new_name = new_source.name()
-                        self.register_attr_or_module(p, new_name, source=new_source)
-            return wrap_name(name)
-
+        for i in itertools.count():
+            if name not in self.nn_modules:
+                self.nn_modules[name] = target
+                assert self.names_to_sources is not None
+                self.tracing_context.module_context.register(source)
+                if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
+                    # annoying, but there are cases when we do not have parameters
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_parameters"):
+                        for n, p in target.named_parameters(
+                            recurse=False, remove_duplicate=False
+                        ):
+                            new_source = ParamBufferSource(source, n)
+                            new_name = new_source.name()
+                            self.register_attr_or_module(p, new_name, source=new_source)
+                    # annoying, but there are cases when we do not have buffers
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_buffers"):
+                        for n, p in target.named_buffers(
+                            recurse=False, remove_duplicate=False
+                        ):
+                            new_source = ParamBufferSource(source, n)
+                            new_name = new_source.name()
+                            self.register_attr_or_module(p, new_name, source=new_source)
+                return wrap_name(name)
+            name = f"{base}_{i}"
         raise AssertionError("unreachable")
 
     def compile_subgraph(

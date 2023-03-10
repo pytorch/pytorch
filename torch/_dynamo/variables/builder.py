@@ -36,6 +36,7 @@ from ..source import (
 from ..utils import (
     clone_input,
     get_fake_value,
+    get_or_make_known_name,
     getfile,
     global_key_name,
     HAS_NUMPY,
@@ -43,7 +44,6 @@ from ..utils import (
     is_numpy_int_type,
     is_typing,
     istype,
-    normalize_attr_name,
     np,
     odict_values,
     preserve_rng_state,
@@ -572,7 +572,7 @@ class VariableBuilder:
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
-                normalize_attr_name(self.name),
+                get_or_make_known_name(self.name, self.get_source()),
                 source=None,
                 sym_num=value
                 # shape Guards live their own rich life via shape_env
@@ -580,7 +580,7 @@ class VariableBuilder:
         return SymNodeVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
-                normalize_attr_name(self.name), type(value)
+                get_or_make_known_name(self.name, self.get_source()), type(value)
             ),
             sym_num=value
             # shape Guards live their own rich life via shape_env
@@ -714,7 +714,7 @@ class VariableBuilder:
         if is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
-                normalize_attr_name(self.name),
+                get_or_make_known_name(self.name, self.get_source()),
                 source=self.get_source(),
                 # Guards are added inside register_attr_or_module
             )
@@ -743,7 +743,7 @@ class VariableBuilder:
             ignore_subclass = False
 
         tensor_proxy = self.tx.output.create_graph_input(
-            normalize_attr_name(self.name), type(value)
+            get_or_make_known_name(self.name, self.get_source()), type(value)
         )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -815,7 +815,8 @@ class VariableBuilder:
                 options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
-                normalize_attr_name(self.name), type(wrapped_value)
+                get_or_make_known_name(self.name, self.get_source()),
+                type(wrapped_value),
             )
 
             unspec_var = wrap_fx_proxy_cls(
