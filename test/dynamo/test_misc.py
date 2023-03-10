@@ -3039,6 +3039,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         pred = torch.tensor(False)
         self.assertTrue(same(module(pred, x), opt_m(pred, x)))
 
+    def test_map_with_quantization(self):
+        from functorch.experimental.control_flow import map
+        from torch.ao.quantization.experimental.qconfig import uniform_qconfig_8bit
+        from torch.ao.quantization.quantize_fx import prepare_qat_fx
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                qconfig_dict = {
+                    "object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]
+                }
+                example_inputs = (torch.randn(5, 5),)
+                self.model = torch.nn.Linear(5, 5)
+                self.quantized_model = prepare_qat_fx(
+                    self.model, qconfig_dict, example_inputs=example_inputs
+                )
+
+            def forward(self, x):
+                def body(x):
+                    return x.sin() + self.quantized_model(x)
+
+                return map(body, x)
+
+        module = MyModule()
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(module)
+        x = torch.rand((5, 5))
+        self.assertTrue(same(module(x), opt_m(x)))
+
     def test_cond_side_effects(self):
         from functorch.experimental.control_flow import cond
 
