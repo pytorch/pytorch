@@ -4461,6 +4461,14 @@ class CommonTemplate:
             ),
         )
 
+    def test_index_put_index(self):
+        def fn(ind, x, src):
+            y = torch.ops.aten.index_put.default(x, [ind], src)
+            return torch.ops.aten.index.Tensor(y, [ind])
+
+        args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
+        self.common(fn, args)
+
     @config.patch(fallback_random=True)
     def test_bernoulli1(self):
         def fn(a):
