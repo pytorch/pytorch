@@ -4,6 +4,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 #include <ATen/CPUFunctions.h>
+#include <ATen/EmptyTensor.h>
 #include <iostream>
 
 namespace at {
@@ -674,7 +675,7 @@ Tensor _pin_memory_mps(const Tensor& self, c10::optional<Device> device)
   auto* shared_allocator = at::mps::getIMPSAllocator(true);
   TORCH_CHECK(shared_allocator, "unable to pin memory on a non-unified memory device");
 
-  const size_t storage_size = detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());
+  const size_t storage_size = at::detail::computeStorageNbytes(self.sizes(), self.strides(), self.dtype().itemsize());
   std::cout << "Pinning memory of size " << storage_size / 1024UL << " KB\n";
   auto storage = Storage(Storage::use_byte_size_t(), storage_size, shared_allocator, false);
   auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
