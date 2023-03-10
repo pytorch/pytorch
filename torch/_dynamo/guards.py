@@ -516,9 +516,10 @@ class GuardBuilder(GuardBuilderBase):
             )
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
-                    code.append(
-                        f"___dynamic_dims_check({tensor_name}, {dict(value._dynamo_dynamic_indices)})"
-                    )
+                    dims_check = str(dict(value._dynamo_dynamic_indices))
+                    dims_check = dims_check.replace("-oo", "None")
+                    dims_check = dims_check.replace("oo", "None")
+                    code.append(f"___dynamic_dims_check({tensor_name}, {dims_check})")
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
@@ -732,7 +733,6 @@ class CheckFunctionManager:
                 ("___check_tensors", check_tensors_fn),
                 ("___check_tensors_verbose", check_tensors_verbose_fn),
                 ("tensor_check_names", tensor_check_names),
-                ("oo", float("inf")),
             ]
             + list(SYMPY_INTERP.items())
         )

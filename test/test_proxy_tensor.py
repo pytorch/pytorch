@@ -970,6 +970,16 @@ def forward(self, crop_camera_1, mask_1):
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_2);  crop_camera_1 = mask_1 = view_2 = None
     return None""")
 
+    def test_unbacked_slice(self):
+        def f(x, m):
+            x = x[m]
+            return x[slice(None, None, None), slice(None, None, None), slice(None, 2, None)]
+
+        make_fx(f, tracing_mode="symbolic")(
+            torch.randn((12, 3, 3)),
+            torch.randint(0, 2, (12,), dtype=torch.bool)
+        )
+
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     def test_unbacked_batch_resnet(self):
         mod = torchvision.models.resnet18()
@@ -1323,7 +1333,6 @@ symbolic_tensor_failures = {
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('aminmax', ''),  # aten.aminmax.default - couldn't find symbolic meta function/decomposition
     xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
@@ -1357,7 +1366,6 @@ symbolic_tensor_failures = {
     xfail('fft.rfft2', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfft', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('fft.rfftn', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
-    xfail('unflatten', ''),  # RuntimeError: Trying to call aten.size on a tensor with symbolic shapes...
     xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('gradient', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
@@ -1471,7 +1479,6 @@ symbolic_tensor_failures = {
     xfail('special.scaled_modified_bessel_k0', ''),  # aten.special_scaled_modified_bessel_k0.default - couldn't find symbo...
     xfail('special.scaled_modified_bessel_k1', ''),  # aten.special_scaled_modified_bessel_k1.default - couldn't find symbo...
     xfail('stft', ''),  # argument 'size' must be tuple of ints, but found element of type torch._C.SymIntNode at...
-    xfail('sum_to_size', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('svd_lowrank', ''),  # aten.mm.default - couldn't find symbolic meta function/decomposition
     xfail('take_along_dim', ''),  # dtype of indices should be Long but got Float
     xfail('take', ''),  # aten.take.default - couldn't find symbolic meta function/decomposition

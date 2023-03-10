@@ -751,6 +751,13 @@ def dynamic_dims_check(tensor, prior_dynamo_dynamic_indices):
         return False
     for key, vr in tensor._dynamo_dynamic_indices.items():
         prior_vr = prior_dynamo_dynamic_indices[key]
+        # Below, None means not set, aka (pos/neg) infinity
+        # If a prior value is None, and a new value is not, we reject
+        if prior_vr[1] is None and vr.max is not None:
+            return False
+        if prior_vr[0] is None and vr.min is not None:
+            return False
+
         # If the new range min is lower, we must reject
         if vr.min < prior_vr[0]:
             return False
@@ -976,7 +983,10 @@ def same(
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
         if relax_numpy_equality:
-            ref = ref.item()
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
             log.error(f"Accuracy failed (numpy): {ref} != {res}")
@@ -1027,7 +1037,6 @@ def disable_cache_limit():
     try:
         yield
     finally:
-        pass
         config.cache_size_limit = prior
 
 
@@ -1308,6 +1317,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2

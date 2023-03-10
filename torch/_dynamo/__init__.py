@@ -171,57 +171,65 @@ def mark_dynamic_constrain(
     t, index, *, min: Optional[int] = None, max: Optional[int] = None
 ):
     """
-    To fully understand this API, please read [Note - on the state of mark_dynamic] first,
+    To fully understand this API, please read the documentation for mark_dynamic first,
     as this API is an enrichment over that API.
 
-    In its current state, mark_dynamic_constrain fully subsumes mark_dynamic.
+    In its current state, ``mark_dynamic_constrain`` fully subsumes ``mark_dynamic``.
 
-    mark_dynamic_constrain allows users to provide a directive that the dimension will fall
-    within a given range. A range can be unbounded on either min, or max. Multiple calls to this API for
-    the same dimension will take the most conservative intersection of all ranges. At guard accumulation
-    time, we verify that the dimension fell within the specified range, and raise if it does not.
+    ``mark_dynamic_constrain`` allows users to provide a directive that the dimension will fall
+    within a given range. A range can be unbounded on either ``min``, or ``max``. Multiple calls to this API for
+    the same dimension will fail. At guard accumulation time, we verify that the dimension fell within the
+    specified range, and raise if it does not.
 
     Example usage is as follow:
 
-    x = torch.randn([7, 7, 7])
+    ::
 
-    def my_dyn_fn(a):
-        if a.shape[0] > 5:
-            return a.cos()
-        return a.sin()
+        x = torch.randn([7, 7, 7])
 
-    torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
-    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+        def my_dyn_fn(a):
+            if a.shape[0] > 5:
+                return a.cos()
+            return a.sin()
 
-    We will get a new guard, '4 <= a.size()[0] <= 10'
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    We will get a new guard, ``4 <= a.size()[0] <= 10``.
 
     If we run it again, with a wider constraint, by adding these 2 lines:
 
-    torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
-    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    ::
 
-    Nothing happens - mark_dynamic_constrain is sticky unless reset, so the range is still
-    at the narrowst intersection (4, 10)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    Nothing happens - ``mark_dynamic_constrain`` is sticky unless reset, so the range is still
+    at the narrowest intersection (4, 10).
 
     If we delete the field first:
 
-    torch._dynamo.clear_dynamic(x, 0)
-    torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=12)
-    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+    ::
 
-    We will recompile, and get a new guard, `3 <= a.size()[0] <= 12`
+        torch._dynamo.clear_dynamic(x, 0)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=12)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    We will recompile, and get a new guard, ``3 <= a.size()[0] <= 12``.
 
     Alternatively, if our directive had been counter to the guards:
 
-    x = torch.randn([7, 7, 7])
+    ::
 
-    def my_dyn_fn(a):
-        if a.shape[0] > 5:
-            return a.cos()
-        return a.sin()
+        x = torch.randn([7, 7, 7])
 
-    torch._dynamo.optimize("eager")(my_dyn_fn)(x)
-    torch._dynamo.mark_dynamic_constrain(x, 0, min=2, max=4)
+        def my_dyn_fn(a):
+            if a.shape[0] > 5:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=2, max=4)
 
     We would raise.
 
@@ -232,10 +240,11 @@ def mark_dynamic_constrain(
             t._dynamo_dynamic_indices = defaultdict(MinMaxConstraint.NONE)
         # TODO(voz): Should we bounds check?
         new_range = MinMaxConstraint(min=min, max=max)
-        curr_range = t._dynamo_dynamic_indices[index]
-        t._dynamo_dynamic_indices[index] = MinMaxConstraint.INTERSECT(
-            curr_range, new_range
-        )
+        if index in t._dynamo_dynamic_indices:
+            raise RuntimeError(
+                f"Attempt to constrain already constrained index {index}"
+            )
+        t._dynamo_dynamic_indices[index] = new_range
         return
 
     assert isinstance(index, (list, tuple))
