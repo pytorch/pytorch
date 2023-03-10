@@ -20,6 +20,18 @@ struct TableState {
   }
 };
 
+
+// FDE - Frame Description Entry (Concept in ELF spec)
+// This format is explained well by
+// https://www.airs.com/blog/archives/460
+// Details of different dwarf actions are explained
+// in the spec document:
+// https://web.archive.org/web/20221129184704/https://dwarfstd.org/doc/DWARF4.doc
+// An overview of how DWARF unwinding works is given in
+// https://dl.acm.org/doi/pdf/10.1145/3360572
+// A similar implementation written in rust is:
+// https://github.com/mstange/framehop/
+
 template <bool LOG = false>
 struct FDE {
   FDE(void* data, const char* library_name, uint64_t load_bias)
@@ -38,7 +50,7 @@ struct FDE {
         version == 1 || version == 3, "non-1 version for CIE");
     augmentation_string_ = LC.readCString();
     if (hasAugmentation("eh")) {
-      eh_data_ = LC.read<int64_t>();
+      throw UnwindError("unsupported 'eh' augmentation string");
     }
     code_alignment_factor_ = LC.readULEB128();
     data_alignment_factor_ = LC.readSLEB128();
@@ -358,7 +370,6 @@ struct FDE {
   int64_t data_alignment_factor_;
   void* cie_data_;
 
-  int64_t eh_data_ = 0;
   int64_t ra_register_;
   uint8_t lsda_enc = DW_EH_PE_omit;
   uint8_t fde_enc = DW_EH_PE_absptr;

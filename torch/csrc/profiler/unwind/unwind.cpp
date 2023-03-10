@@ -10,7 +10,6 @@ std::vector<void*> unwind() {
       "record_context_cpp is not support on non-linux non-x86_64 platforms");
 }
 
-// similar libraries: addr2line, llvm-symbolizer, gimli
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   TORCH_CHECK(
       false,
@@ -190,7 +189,9 @@ struct UnwindCache {
     try {
       unwinder = libraryFor(addr).unwinderFor(addr);
     } catch (UnwindError& err) {
-      std::cout << "UNSUPPORTED!?: " << err.what() << "\n";
+      // because unwinders are cached this will only print
+      // once per frame that cannot be unwound.
+      TORCH_WARN("Unsupported unwinding pattern: ", err.what());
     }
     auto r = ip_cache_.insert_or_assign(addr, std::move(unwinder));
     return r.first->second;
@@ -210,7 +211,7 @@ struct UnwindCache {
       }
       auto& r = searchFor(addr);
       if (addr >= r.last_addr()) {
-        throw std::runtime_error("addr not in range of known libraries");
+        throw UnwindError("addr not in range of known libraries");
       }
       return r;
     }
@@ -252,6 +253,8 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
   std::shared_lock lock(cache_mutex_);
   UnwindState state;
   state.rip = *(int64_t*)(rsp);
+  // +8 because we saved rsp after the return address was already pushed
+  // to the stack
   state.rsp = rsp + 8;
   state.rbp = rbp;
   unwind_cache.checkRefresh(lock);
@@ -270,6 +273,11 @@ extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
 
 extern "C" void unwind_entry(std::vector<void*>* result);
 
+// calling convention puts the first three pointer/int64_t arguments in
+// rdi rsi rdx (all caller-saved)
+// rdi already holds the pointer to the result vector
+// we add arguments for current rsp and rbp and then tail call
+// into unwind_c
 __asm__(
     ".global unwind_entry\n"
     "unwind_entry:\n"
@@ -285,7 +293,6 @@ std::vector<void*> unwind() {
   return frames;
 }
 
-// similar libraries: addr2line, llvm-symbolizer, gimli
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   // we need to make sure we don't write more than 64k bytes to
   // a pipe before reading the results. Otherwise the buffer may

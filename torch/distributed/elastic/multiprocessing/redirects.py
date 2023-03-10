@@ -93,8 +93,10 @@ def redirect(std: str, to_file: str):
 
     with os.fdopen(os.dup(std_fd)) as orig_std, open(to_file, mode="w+b") as dst:
         _redirect(dst)
-        yield
-        _redirect(orig_std)
+        try:
+            yield
+        finally:
+            _redirect(orig_std)
 
 
 redirect_stdout = partial(redirect, "stdout")
