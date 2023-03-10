@@ -1,16 +1,26 @@
 import torch
+from . import config
+
+AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
 
-def collect_mul_ops(node, target_name="aten::mul.Tensor"):
+def collect_mul_ops(node, target_name="aten::mul.Tensor", seen=None):
     """
     Collect operations that match 'target_name',
 
     :yields: lists of nodes sorted topologically
     """
+    if seen is None:
+        seen = set()
+
+    if node in seen:
+        return
+
+    seen.add(node)
 
     def is_same_target(node):
         if isinstance(node.target, torch._ops.PyOperatorABC):
@@ -27,6 +37,7 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor"):
             if is_same_target(input_node) and len(input_node.users) == 1:
                 input_nodes.extend(input_node.users)
                 group.append(input_node)
+                seen.add(input_node)
             else:
                 new_input_nodes.append(input_node)
 
@@ -35,7 +46,7 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor"):
             yield group
 
     for input_node in input_nodes:
-        yield from collect_mul_ops(input_node)
+        yield from collect_mul_ops(input_node, seen=seen)
 
 
 def reorder_tangents(graph):
@@ -54,8 +65,14 @@ def reorder_tangents(graph):
 
     groups = []
     for tangent in tangents:
-        groups.extend(collect_mul_ops(tangent))
+        groups.extend(collect_mul_ops(tangent, seen=set()))
+
+    if AOT_PARTITIONER_DEBUG:
+        print(f"Found {len(groups)} groups of pointwise multiplications to reorder")
+    # print(f"Found {[len(group) for group in groups]} groups")
     for group in groups:
+        if AOT_PARTITIONER_DEBUG:
+            print(' + GROUP: ', group)
         inputs = [group[0]._args[0]] + [node._args[1] for node in group]
         end = group[-1]
         while inputs:
@@ -75,4 +92,3 @@ def reorder_tangents(graph):
                 if len(inputs):
                     inputs.append(node)
         end.replace_all_uses_with(node)
-        return
