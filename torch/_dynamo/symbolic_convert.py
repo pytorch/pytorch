@@ -230,6 +230,18 @@ def _detect_and_normalize_assert_statement(
     return True
 
 
+def jump_check_none(check_is_none: bool):
+    def inner(self: "InstructionTranslatorBase", inst: Instruction):
+        value: VariableTracker = self.pop()
+        is_none = False
+        if value.is_python_constant():
+            is_none = value.as_python_constant() is None
+        if is_none ^ (not check_is_none):
+            self.jump(inst)
+
+    return inner
+
+
 def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
@@ -1567,10 +1579,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     POP_JUMP_FORWARD_IF_FALSE = generic_jump(operator.not_, False)
     POP_JUMP_BACKWARD_IF_FALSE = generic_jump(operator.not_, False)
 
-    POP_JUMP_FORWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_BACKWARD_IF_NOT_NONE = generic_jump(is_not_none, False)
-    POP_JUMP_FORWARD_IF_NONE = generic_jump(is_none, False)
-    POP_JUMP_BACKWARD_IF_NONE = generic_jump(is_none, False)
+    POP_JUMP_FORWARD_IF_NOT_NONE = jump_check_none(False)
+    POP_JUMP_BACKWARD_IF_NOT_NONE = jump_check_none(False)
+    POP_JUMP_FORWARD_IF_NONE = jump_check_none(True)
+    POP_JUMP_BACKWARD_IF_NONE = jump_check_none(True)
 
     def CACHE(self, inst):
         pass
