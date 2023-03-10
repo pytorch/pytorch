@@ -4539,6 +4539,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(sys.version_info < (3, 11), "requires Python 3.11+")
     def test_py311_jump_offset(self):
         new_inst = bytecode_transformation.create_instruction
+        load_global = bytecode_transformation.create_load_global
         consts = (None, 1, 2, 3, 4)
 
         def create_test_code(jump_opname, target_idx):
@@ -4565,12 +4566,12 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 new_inst("RESUME", 0),
                 new_inst("JUMP_FORWARD", target=jump_to_target_inst),
                 targets[0],
-                new_inst("LOAD_GLOBAL", argval="print"),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
                 new_inst("LOAD_CONST", 2),
-                new_inst("LOAD_GLOBAL", argval="print"),
+                load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],

@@ -334,19 +334,17 @@ class SideEffects:
                 cg.tx.output.update_co_names("update")
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "update")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", "clear")])
+                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
 
                 suffixes.append(
-                    create_call_method(0)  # clear
-                    + [
+                    [
+                        *create_call_method(0),  # clear
                         create_instruction("POP_TOP"),
-                    ]
-                    + create_call_method(1)  # update
-                    + [
+                        *create_call_method(1),  # update
                         create_instruction("POP_TOP"),
                     ]
                 )
@@ -357,12 +355,14 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
-                        suffixes.append([create_instruction("STORE_GLOBAL", name)])
+                        suffixes.append(
+                            [create_instruction("STORE_GLOBAL", argval=name)]
+                        )
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         cg(var.mutable_local.source)
-                        suffixes.append([create_instruction("STORE_ATTR", name)])
+                        suffixes.append([create_instruction("STORE_ATTR", argval=name)])
             else:
                 raise AssertionError(type(var))
 
