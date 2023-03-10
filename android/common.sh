@@ -10,6 +10,10 @@ if [ -z "$PYTORCH_DIR" ]; then
   exit 1
 fi
 
+retry () {
+    "$@" || (sleep 10 && "$@") || (sleep 20 && "$@") || (sleep 40 && "$@")
+}
+
 check_android_sdk() {
   if [ -z "$ANDROID_HOME" ]; then
     echo "ANDROID_HOME not set; please set it to Android sdk directory"
