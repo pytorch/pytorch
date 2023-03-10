@@ -81,7 +81,7 @@ void flag_to_float(T src, float* dst, int64_t n) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
@@ -98,11 +98,16 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
 }
 
 template <>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int>& src) {
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int> src) {
 #if defined(CPU_CAPABILITY_AVX2)
-  return at::vec::Vectorized<float>(_mm256_cvtepi32_ps(src));
+  return at::vec::Vectorized<float>(_mm256_castsi256_ps(src));
 #else
-  return at::vec::Vectorized<float>(_mm512_cvtepi32_ps(src));
+  return at::vec::Vectorized<float>(_mm512_castsi512_ps(src));
 #endif
+}
+
+template <>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {
+  return src;
 }
 #endif

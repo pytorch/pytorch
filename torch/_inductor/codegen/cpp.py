@@ -308,27 +308,27 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def eq(x, y):
-        return f"{x} == {y}"
+        return f"to_float_mask({x} == {y})"
 
     @staticmethod
     def ne(x, y):
-        return f"{x} != {y}"
+        return f"to_float_mask({x} != {y})"
 
     @staticmethod
     def lt(x, y):
-        return f"{x} < {y}"
+        return f"to_float_mask({x} < {y})"
 
     @staticmethod
     def gt(x, y):
-        return f"{x} > {y}"
+        return f"to_float_mask({x} > {y})"
 
     @staticmethod
     def le(x, y):
-        return f"{x} <= {y}"
+        return f"to_float_mask({x} <= {y})"
 
     @staticmethod
     def ge(x, y):
-        return f"{x} >= {y}"
+        return f"to_float_mask({x} >= {y})"
 
     @staticmethod
     def and_(x, y):
@@ -568,9 +568,8 @@ class CppVecOverrides(OpOverrides):
 
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            zero_val = "at::vec::Vectorized<float>(0)"
             float_mask = f"to_float_mask({mask})"
-            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
+            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask})"
             code.writeline(f"{var} = {blendv};")
         V.kernel.compute.splice(code)
         return var
