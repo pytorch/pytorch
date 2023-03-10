@@ -5143,12 +5143,13 @@ class TestQuantizedConv(TestCase):
             ["lscpu"],
             stderr=subprocess.STDOUT,
         ).decode("utf-8")
+        print("out is: {}".format(out), flush=True)
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(), Y_q_inductor.cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q},
-            Y_q: {Y_q}, Y_q_int_repr: {Y_q.int_repr().cpu().numpy()}, out: {out}''')
+            Y_q: {Y_q}, Y_q_int_repr: {Y_q.int_repr().cpu().numpy()}''')
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
@@ -5333,9 +5334,9 @@ class TestQuantizedConv(TestCase):
         Y_scale = 4.2
         Y_zero_point = 0
         use_bias_list = [False]
-        use_channelwise_list = [True]
+        use_channelwise_list = [False]
         X2_scale = 1.2
-        X2_zero_point_list = [0]
+        X2_zero_point_list = [0, 4]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
         for groups, use_bias, use_channelwise, X2_zero_point in options:
             with override_quantized_engine('onednn'):
