@@ -646,6 +646,17 @@ static PyObject* _custom_eval_frame(
       frame->f_lasti,
       frame->f_iblock,
       frame->f_executing);
+
+  // In obscure situations, we can enter the eval frame with an exception
+  // already set (the most common situation this when we hit a generator
+  // expression which is exiting with GeneratorExit).  In this case, there
+  // isn't really any chance that Dynamo will be able to successfully handle
+  // it.  Immediately propagate it out.
+  if (PyErr_Occurred() != NULL) {
+    DEBUG_TRACE("propagate error %s", name(frame));
+    return NULL;
+  }
+
   CacheEntry* extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
@@ -715,6 +726,10 @@ static PyObject* _custom_eval_frame(
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
     // testing
+    // NB: we intentionally DO NOT re-enable custom behavior to prevent
+    // cascading failure from internal exceptions.  The upshot is if
+    // Dynamo barfs, that's it for Dynamo, even if you catch the exception
+    // inside the torch.compile block we won't try to Dynamo anything else.
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", name(frame));
