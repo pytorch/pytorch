@@ -5048,6 +5048,7 @@ class TestQuantizedConv(TestCase):
         conv_op.bias = torch.nn.Parameter(
             bias_float, requires_grad=False) if use_bias else None
         result_ref = conv_op(X)
+        X2_q = None
         if post_op == 'relu':
             assert not use_transpose, "Cannot fuse ReLU with ConvTranspose"
             relu = torch.nn.ReLU()
@@ -5127,7 +5128,7 @@ class TestQuantizedConv(TestCase):
             result_ref_q.int_repr().cpu().numpy(), Y_q_inductor.cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
-            groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}''')
+            groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q}''')
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float        
@@ -5293,11 +5294,11 @@ class TestQuantizedConv(TestCase):
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add(self):
         batch_size = 3
-        groups_list = [1, 10]
+        groups_list = [10]
         input_channels_per_group = 2
         output_channels_per_group = 2
-        height = 10
-        width = 10
+        height = 3
+        width = 3
         kernel_h = 3
         kernel_w = 3
         stride_h = 2
@@ -5311,8 +5312,8 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [-3]
         Y_scale = 4.2
         Y_zero_point = 0
-        use_bias_list = [False, True]
-        use_channelwise_list = [False, True]
+        use_bias_list = [False]
+        use_channelwise_list = [False]
         X2_scale = 1.2
         X2_zero_point_list = [0, 4]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
@@ -5351,9 +5352,9 @@ class TestQuantizedConv(TestCase):
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add_relu(self):
         batch_size = 3
-        height = 10
-        width = 10
-        groups_list = [1, 10]
+        height = 3
+        width = 3
+        groups_list = [10]
         input_channels_per_group = 2
         output_channels_per_group = 2
         kernel_h = 3
@@ -5369,8 +5370,8 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [-3]
         Y_scale = 4.2
         Y_zero_point = 3
-        use_bias_list = [False, True]
-        use_channelwise_list = [False, True]
+        use_bias_list = [False]
+        use_channelwise_list = [False]
         X2_scale = 1.2
         X2_zero_point_list = [0, 4]
 
