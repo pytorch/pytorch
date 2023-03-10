@@ -100,5 +100,20 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         # None of our CPU operations should call the custom add function.
         self.assertFalse(module.custom_add_called())
 
+        # check generator registered befor use
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Please register a generator to the PrivateUse1 dispatch key"):
+            gen_ = torch.Generator(device=device)
+
+        module.register_genertor()
+
+        gen = torch.Generator(device=device)
+        self.assertTrue(gen.device == device)
+
+        # generator can be registered only once
+        with self.assertRaisesRegex(RuntimeError,
+                                    "Only can register a generator to the PrivateUse1 dispatch key once"):
+            module.register_genertor()
+
 if __name__ == "__main__":
     common.run_tests()
