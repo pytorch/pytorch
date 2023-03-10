@@ -8,17 +8,15 @@
 
 namespace qnnpack {
 // For runtime quantization unpacking.
-uint8_t* PackBMatrix::unpackWeights(
+void PackBMatrix::unpackWeights(
   const uint8_t* kernel_zero_points,
-  int n_elements
+  int8_t* kernel
 ) const {
   union {
     void* const as_void_ptr;
     uint8_t* as_uint8_ptr;
     int32_t* as_int32_ptr;
   } packed = {packed_weights_};
-
-  uint8_t* kernel = (uint8_t*)malloc(n_elements * sizeof(uint8_t));;
 
   // C = A * B
   // A = M*K
@@ -67,7 +65,6 @@ uint8_t* PackBMatrix::unpackWeights(
     }
   }
 
-  return kernel;
 }
 
 } // namespace qnnpack

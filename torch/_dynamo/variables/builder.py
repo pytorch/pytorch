@@ -47,6 +47,8 @@ from ..utils import (
     np,
     odict_values,
     preserve_rng_state,
+    tensor_always_has_static_shape,
+    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -174,32 +176,16 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return set(range(17)).union(
-            {
-                20,
-                30,
-                40,
-                32,
-                64,
-                96,
-                128,
-                144,
-                240,
-                256,
-                672,
-                1024,
-                2048,
-                4096,
-                0.1,
-                0.01,
-                0.001,
-                0.5,
-                0.05,
-                800,
-                1.873536229133606,
-                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
-            }
-        )
+        return {
+            # We zero-one specialize shapes, so specialize these constants
+            # too
+            0,
+            1,
+            # NB: There used to be more constants here, but honestly it was
+            # pretty confusing.  Note we specialize floats by default, and
+            # DON'T specialize ints by default.  This all only matters with
+            # dynamic_shapes
+        }
 
     @staticmethod
     def list_type(value):
@@ -317,6 +303,10 @@ class VariableBuilder:
         id_dispatch = self._id_dispatch().get(id(value))
         if id_dispatch is not None:
             return id_dispatch(self, value)
+
+        # Note - There are some nested values where types mismatch!
+        # We want to get those out and wrap those.
+        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
         if istype(value, config.traceable_tensor_subclasses):
@@ -683,8 +673,8 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) in (int, float) and not config.specialize_int_float:
-            # unspecializing int/float by default, but still
+        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
+            # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
@@ -694,6 +684,10 @@ class VariableBuilder:
                     isinstance(self.source, AttrSource)
                     and isinstance(self.source.base, GlobalSource)
                 )
+                # Assume that integers that came from NN modules want to be
+                # specialized (as we don't expect users to be changing the
+                # NN modules on the fly)
+                or self.source.guard_source().is_nn_module()
             ):
                 return ConstantVariable(
                     value=value,
@@ -793,6 +787,10 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            # NB: We do not do float.  For motivation, see
+            # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
+            # but the general idea is that we generate kernels that can
+            # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
                 and isinstance(value, int)
@@ -805,9 +803,7 @@ class VariableBuilder:
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float
             else:
-                # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
@@ -839,7 +835,7 @@ class VariableBuilder:
                     GraphArg(
                         self.get_source(),
                         wrapped_value,
-                        True,
+                        isinstance(wrapped_value, torch.Tensor),
                         fake_tensor_value,
                         is_tensor=False,
                     )
@@ -1061,12 +1057,8 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes = (
-            source is None
-            or type(e) is torch.nn.Parameter
-            or config.dynamic_shapes is False
-            or not is_tensor
-        )
+        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
@@ -1077,9 +1069,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if hasattr(e, "_dynamo_dynamic_indices"):
             fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert (
-                config.dynamic_shapes
-            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+            assert not static_shapes, tensor_static_reason_to_message(reason)
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

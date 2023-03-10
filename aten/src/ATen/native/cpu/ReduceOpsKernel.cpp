@@ -12,6 +12,7 @@
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/cpu/Reduce.h>
+#include <ATen/native/cpu/LogAddExp.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -112,57 +113,6 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
       }, /*init_val=*/ 1
     );
   });
-}
-// custom min and max to be used in logcumsumexp for complex arguments
-template <typename scalar_t, bool min>
-c10::complex<scalar_t> _logcumsumexp_minmax(c10::complex<scalar_t> x, c10::complex<scalar_t> y) {
-  if (at::_isnan(y)) {  // either real is nan or imag is nan
-    return y;
-  } else if (at::_isnan(x)) {  // either real is nan or imag is nan
-    return x;
-  } else {
-    return ((x.real() < y.real()) == min) ? x : y;  // logical xnor
-  }
-}
-
-template <typename scalar_t>
-scalar_t _log_add_exp_helper(scalar_t x, scalar_t y) {
-  // Reference : https://www.tensorflow.org/api_docs/python/tf/math/cumulative_logsumexp
-  scalar_t min = at::_isnan(y) ? y : std::min(x, y); // std::min returns first arg if one of the args is nan
-  scalar_t max = at::_isnan(y) ? y : std::max(x, y); // std::max returns first arg if one of the args is nan
-  if (min != max || std::isfinite(min)) {
-    // nan will be propagated here
-    return std::log1p(std::exp(min - max)) + max;
-  } else {
-    // special case to correctly handle infinite cases
-    return x;
-  }
-}
-
-template <typename scalar_t>
-c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-  auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
-  auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
-  auto min_real = std::real(min);
-  auto max_real = std::real(max);
-
-  if (at::_isnan(min)) {  // either real is nan or imag is nan
-    // handling the "infectious" NaNs
-    return {std::numeric_limits<scalar_t>::quiet_NaN(), std::numeric_limits<scalar_t>::quiet_NaN()};
-  } else if ((!std::isfinite(min_real)) && (min_real == max_real)) {
-    if (min_real < 0) {
-      // handle the -inf case, the imaginary part here does not really matter as the exp(value)
-      // will be around 0.0 and the angle (i.e. the imaginary part) cannot be determined.
-      // It does not matter if we're taking the exp of this value
-      return min;
-    } else {
-      // handle the +inf case, we don't need the special precision for log1p for small values
-      // and to avoid producing nan in case of real(max) == real(min) == +inf
-      return std::log(std::exp(min) + std::exp(max));
-    }
-  } else {
-    return std::log1p(std::exp(min - max)) + max;
-  }
 }
 
 static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t dim) {
