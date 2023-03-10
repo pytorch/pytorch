@@ -203,7 +203,7 @@ class CallFunction(PatternExpr):
         node_items, node_spec = self.flatten(node.args, node.kwargs)
         self_items, self_spec = self.flat_args_kwargs
         if node_spec != self_spec:
-            return FailedMatch(f"args_stucture {node_spec} {self_spec}")
+            return FailedMatch(f"args_structure {node_spec} {self_spec}")
         assert len(node_items) == len(self_items)
 
         m = Match(self)

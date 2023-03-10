@@ -148,7 +148,7 @@ void InputBuffer::add(
   //  (4) var is a CUDA variable and it shares a device with the producer but
   //  not the consumer:
   //       (4a) Uses the producer device's default stream as the accumulation
-  //       stream (4b) Syncs the accumulation stream with the the producer's
+  //       stream (4b) Syncs the accumulation stream with the producer's
   //       stream (4c) Accumulates.
   //  (5) var is a CUDA variable and it does not share a device with the
   //  consumer or producer.
