@@ -50,7 +50,6 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         w_scales(std::move(w_scales)),
         w_zero_points(std::move(w_zps)) {
           weight_sizes = this->orig_weight.sizes().vec();
-          n_elements = std::accumulate(std::begin(weight_sizes), std::end(weight_sizes), 1, std::multiplies<double>());
         }
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
@@ -62,7 +61,6 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   std::vector<uint8_t> w_zero_points;
   std::vector<float> requantization_scales;
   std::vector<int64_t> weight_sizes;
-  int n_elements;
 
   at::Tensor apply(
       at::Tensor input,
