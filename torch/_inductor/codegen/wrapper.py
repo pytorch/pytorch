@@ -614,13 +614,16 @@ class WrapperCodeGen(CodeGen):
                     "",
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
+                    'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
                 ]
             )
             with output.indent():
-                output.writeline(f"benchmark_all_kernels('{get_benchmark_name()}')")
+                output.writeline(
+                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs)"
+                )
             output.writeline("else:")
             with output.indent():
                 output.writeline("benchmark_compiled_module()")
