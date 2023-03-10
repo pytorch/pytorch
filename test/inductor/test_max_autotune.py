@@ -34,14 +34,12 @@ class TestDoBench(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
-    @unittest.skip(
-        "Pickle StorageBox fail with https://gist.github.com/171e5ab404b7855dee2dfa1d9f093442"
-    )
     def test_pickle_storage_box(self):
         from pickle import dumps, loads
 
         buf = TensorBox.create(self._create_buffer("buf0", (2, 3))).data
-        loads(dumps(buf))
+        expected_str = str(buf)
+        self.assertEqual(str(loads(dumps(buf))), expected_str)
 
     @unittest.skip(
         "Pickle fx.Node fail with https://gist.github.com/9c289e895d7091d7ec787c67bc3c0d70"
@@ -142,6 +140,19 @@ class TestDoBench(TestCase):
 
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm_plus_mm)(a, b, c, d)
+
+    def test_max_autotune_regular_mm(self):
+        """
+        Make sure autotuning mm in sub processes work without crashes.
+        """
+
+        def mm(a, b):
+            return a @ b
+
+        a = torch.randn(100, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+            torch.compile(mm)(a, b)
 
 
 if __name__ == "__main__":

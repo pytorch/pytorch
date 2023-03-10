@@ -1,7 +1,6 @@
 import functools
 
 import torch
-from ..ir import StorageBox
 from ..lowering import lowerings
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -159,17 +158,6 @@ def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
 
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
     m, n, k, layout, mat3, mat4 = mm_args(mat3, mat4, layout=layout)
-
-    # can not pickle ir.StorageBox for tuning in subprocess. Use its inner
-    # buffer instead.
-    if isinstance(mat1, StorageBox):
-        mat1 = mat1.data
-    if isinstance(mat2, StorageBox):
-        mat2 = mat2.data
-    if isinstance(mat3, StorageBox):
-        mat3 = mat3.data
-    if isinstance(mat4, StorageBox):
-        mat4 = mat4.data
 
     # options to tune from
     choices = [aten_mm_plus_mm.bind((mat1, mat2, mat3, mat4), layout)]
