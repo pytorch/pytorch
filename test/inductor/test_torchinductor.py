@@ -3646,13 +3646,36 @@ class CommonTemplate:
             )
 
         for ind_dtype in (torch.int32, torch.int64):
-            self.common(
-                fn,
-                (
-                    torch.randn(8, 8, 8),
-                    torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
-                ),
+            for inp_dtype in (torch.float32, torch.half, torch.bfloat16):
+                self.common(
+                    fn,
+                    (
+                        torch.randn(8, 8, 8, dtype=inp_dtype),
+                        torch.tensor([0, 0, 2, 1], dtype=ind_dtype),
+                    ),
+                )
+
+    def test_index_add(self):
+        def fn(a, b, c):
+            return (
+                torch.index_add(a, 0, b, c, alpha=1),
+                torch.index_add(a, 1, b, c, alpha=-1),
             )
+
+        for ind_dtype in (torch.int64, torch.int64):
+            for inp_dtype in (torch.float32,):
+                # torch.bfloat16, torch.half
+                # disable low precision since non-deterministic parallel reduction have larger impact
+                # and also suffered from not using accumulate data type
+                # https://github.com/pytorch/pytorch/issues/93582
+                self.common(
+                    fn,
+                    (
+                        torch.randn(4, 4, 32, dtype=inp_dtype),
+                        torch.tensor([0, 3, 2, 3], dtype=ind_dtype),
+                        torch.randn(4, 4, 32, dtype=inp_dtype),
+                    ),
+                )
 
     def test_cudnn_rnn(self):
         if self.device == "cpu":
@@ -4339,32 +4362,38 @@ class CommonTemplate:
                 torch.index_put_(a + 1, [b + 1], c + 1) + 1,
             )
 
-        self.common(
-            fn,
-            [
-                torch.randn([800, 256, 7, 7]),
-                torch.randperm(601),
-                torch.randn([601, 256, 7, 7]),
-            ],
-        )
-        self.common(
-            fn, [torch.randn(1024, 4, 2), torch.arange(4), torch.randn(4, 1, 1)]
-        )
+        for dtype in (torch.float32, torch.half, torch.bfloat16):
+            self.common(
+                fn,
+                [
+                    torch.randn([800, 256, 7, 7], dtype=dtype),
+                    torch.randperm(601),
+                    torch.randn([601, 256, 7, 7], dtype=dtype),
+                ],
+            )
+            self.common(
+                fn, [torch.randn(1024, 4, 2, dtype=dtype), torch.arange(4), torch.randn(4, 1, 1, dtype=dtype)]
+            )
 
     def test_index_put2(self):
         def fn(a, b, c):
             return torch.index_put(a, [b], c, True)
 
-        self.common(
-            fn,
-            [
-                torch.randn([100, 256, 7, 7]),
-                torch.randint(0, 100, size=[600], dtype=torch.int64),
-                torch.randn([600, 256, 7, 7]),
-            ],
-            # workaround for https://github.com/openai/triton/issues/558
-            check_lowp=False,
-        )
+        for dtype in (torch.float32, ):
+            # torch.bfloat16, torch.half
+            # disable low precision since non-deterministic parallel reduction have larger impact
+            # and also suffered from not using accumulate data type
+            # https://github.com/pytorch/pytorch/issues/93582
+            self.common(
+                fn,
+                [
+                    torch.randn([100, 256, 7, 7], dtype=dtype),
+                    torch.randint(0, 100, size=[600], dtype=torch.int64),
+                    torch.randn([600, 256, 7, 7], dtype=dtype),
+                ],
+                # workaround for https://github.com/openai/triton/issues/558
+                check_lowp=False,
+            )
 
     def test_index_put3(self):
         def fn(a, b, c):
@@ -4373,14 +4402,15 @@ class CommonTemplate:
             torch.ops.aten.index_put_(a1, (None, b + 1, None), c + 1)
             return (a, a1)
 
-        self.common(
-            fn,
-            [
-                torch.randn([1024, 4, 2]),
-                torch.arange(3),
-                torch.randn([1024, 1, 2]),
-            ],
-        )
+        for dtype in (torch.float32, torch.half, torch.bfloat16):
+            self.common(
+                fn,
+                [
+                    torch.randn([1024, 4, 2], dtype=dtype),
+                    torch.arange(3),
+                    torch.randn([1024, 1, 2], dtype=dtype),
+                ],
+            )
 
     def test_index_put_as_masked_fill(self):
         def fn(a, b, c, d):
@@ -4650,29 +4680,31 @@ class CommonTemplate:
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
 
-        self.common(
-            fn,
-            [
-                torch.randn(2, 3),
-                0,
-                torch.tensor([[0, 0, 0], [1, 1, 1]]),
-                torch.randn(2, 3),
-            ],
-        )
+        for dtype in (torch.float32, torch.half, torch.bfloat16):
+            self.common(
+                fn,
+                [
+                    torch.randn(2, 3, dtype=dtype),
+                    0,
+                    torch.tensor([[0, 0, 0], [1, 1, 1]]),
+                    torch.randn(2, 3, dtype=dtype),
+                ],
+            )
 
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
 
-        self.common(
-            fn,
-            [
-                torch.randn(5, 29, 13),
-                2,
-                torch.tensor([[[3, 5, 7, 9]]]),
-                torch.randn(1, 1, 10),
-            ],
-        )
+        for dtype in (torch.float32, torch.half, torch.bfloat16):
+            self.common(
+                fn,
+                [
+                    torch.randn(5, 29, 13, dtype=dtype),
+                    2,
+                    torch.tensor([[[3, 5, 7, 9]]]),
+                    torch.randn(1, 1, 10, dtype=dtype),
+                ],
+            )
 
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):

@@ -906,7 +906,11 @@ class CppKernel(Kernel):
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
             else:
-                line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
+                 dtype = V.graph.get_dtype(name)
+                 if dtype in (torch.float16, torch.bfloat16):
+                     line = f"atomic_add(&{var}[{cexpr(index)}], static_cast<{DTYPE_TO_CPP[dtype]}>({value}));"
+                 else:
+                    line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)

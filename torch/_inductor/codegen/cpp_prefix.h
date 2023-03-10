@@ -38,24 +38,44 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
 template <typename T> struct AsIntegerType { typedef T type; };
 template <> struct AsIntegerType<float> { typedef uint32_t type; };
 template <> struct AsIntegerType<double> { typedef uint64_t type; };
+template <>
+struct AsIntegerType<bfloat16> {
+  typedef uint16_t type;
+};
+template <>
+struct AsIntegerType<half> {
+  typedef uint16_t type;
+};
 
-template <typename T> void atomic_add(volatile T *addr, T offset) {
+template <typename T>
+void atomic_add(T* addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
 
   static_assert(sizeof(std::atomic<alt_type>) == sizeof(T),
                 "std::atomic issue");
 
-  alt_type expected;
+  typedef union {
+    alt_type intV;
+    T fV;
+  } uf_int;
 
-  alt_type desired;
+  uf_int expected, desired;
+  std::atomic<alt_type>* atomic_addr = (std::atomic<alt_type>*)addr;
 
-  std::atomic<alt_type> *atomic_addr = (std::atomic<alt_type> *)addr;
-  do {
-    T val = *addr;
-    reinterpret_cast<T *>(&expected)[0] = val;
-    reinterpret_cast<T *>(&desired)[0] = val + offset;
-  } while (!atomic_addr->compare_exchange_weak(expected, desired,
-                                               std::memory_order_relaxed));
+  expected.fV = *addr;
+  desired.fV = expected.fV + offset;
+
+  alt_type* expected_intV = (alt_type*)(&expected.intV);
+  while (!std::atomic_compare_exchange_strong(
+      atomic_addr, expected_intV, desired.intV)) {
+#ifdef __aarch64__
+    __asm__ __volatile__("yield;" : : : "memory");
+#else
+    _mm_pause();
+#endif
+    expected.fV = *addr;
+    desired.fV = expected.fV + offset;
+  }
 }
 
 // This function is used to convert bool or uint8 to float mask for
@@ -85,16 +105,11 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
   assert(
       at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
   at::vec::Vectorized<float> res_vec(0);
-  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
-  __at_align__ SRC src_tmp[at::vec::Vectorized<SRC>::size()];
-  src.store(src_tmp);
-
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+    res_vec[i] = src[i] ? 0xFFFFFFFF : 0;
   }
-
-  return res_vec.loadu(dst_tmp);
+  return res_vec;
 }
 
 template <>
