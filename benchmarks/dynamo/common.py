@@ -196,7 +196,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "MT5ForConditionalGeneration",  # fails accuracy
     # TIMM
     "convit_base",  # fp64_OOM
-    "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
