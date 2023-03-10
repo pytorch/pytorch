@@ -26,7 +26,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
-from torch._ops import has_key, DispatchKey
+from torch._ops import DispatchKey
 
 import itertools
 import functools
@@ -715,7 +715,7 @@ class HasDecompTest(TestCase):
 
             try:
                 # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
-                return not has_key(op, DispatchKey.CompositeImplicitAutograd)
+                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
             except RuntimeError as e:
                 # has_key fails for some jit-registered ops, which shouldn't be
                 # relevant here anyway
