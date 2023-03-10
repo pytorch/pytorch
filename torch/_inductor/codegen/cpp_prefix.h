@@ -107,7 +107,7 @@ inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
   at::vec::Vectorized<float> res_vec(0);
   __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
   __at_align__ SRC src_tmp[at::vec::Vectorized<SRC>::size()];
-  src.store(src_tmp);  
+  src.store(src_tmp);
 
 #pragma unroll
   for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
