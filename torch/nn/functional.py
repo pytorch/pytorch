@@ -2901,10 +2901,9 @@ def kl_div(
         :attr:`size_average` and :attr:`reduce` are in the process of being deprecated,
         and in the meantime, specifying either of those two args will override :attr:`reduction`.
 
-    .. note::
+    .. warning::
         :attr:`reduction` = ``'mean'`` doesn't return the true kl divergence value, please use
         :attr:`reduction` = ``'batchmean'`` which aligns with KL math definition.
-        In the next major release, ``'mean'`` will be changed to be the same as 'batchmean'.
     """
     if has_torch_function_variadic(input, target):
         return handle_torch_function(

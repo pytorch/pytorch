@@ -426,7 +426,6 @@ class KLDivLoss(_Loss):
     .. warning::
         :attr:`reduction`\ `= "mean"` doesn't return the true KL divergence value, please use
         :attr:`reduction`\ `= "batchmean"` which aligns with the mathematical definition.
-        In a future release, `"mean"` will be changed to be the same as `"batchmean"`.
 
     Args:
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
