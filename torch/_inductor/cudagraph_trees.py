@@ -380,7 +380,8 @@ class CUDAGraphNode:
 
     WrappedFunction should have already been warmed up prior to invocation.
 
-    See [setCheckpointPoolState] for further explanation.
+    See [setCheckpointPoolState] for further explanation, as well as
+    https://user-images.githubusercontent.com/13564/222815509-374f3400-f83d-4f7d-8fa6-4a092b3250bb.png
     """
 
     def __init__(
@@ -409,6 +410,7 @@ class CUDAGraphNode:
         # we preserve a single reference to executed outputs that is then referenced
         # in children to avoid children having to chase parent pointers in the hot path
         # DO NOT reassign output_weakrefs, only call `clear()`
+        # Path is a series of nodes from root to the current node
         self.outputs_weakrefs: List[Optional[StorageWeakRefWrapper]] = []
         self.path_weakrefs: List[List[Optional[StorageWeakRefWrapper]]] = [
             node.outputs_weakrefs for node in self._path_from_root
@@ -924,8 +926,8 @@ class CUDAGraphTreeManager:
 
         # the most recently invoked cudagraph wrapping of a function. Will be None
         # when there is no output from a previous recording or execution whose memory
-        # we need to respect in the cuda caching allocator, which includes if that
-        # memory is from a separate generation.
+        # we need to respect in the cuda caching allocaton. If you incremented generation,
+        # this will also be none, as ignore those allocations.
         self.current_node: Optional[CUDAGraphNode] = None
 
         # current generation of cudagraph invocations. when torch.compile is run
@@ -998,7 +1000,7 @@ class CUDAGraphTreeManager:
 
             self.try_end_curr_execution()
             if self.current_node is not None:
-                self.checkpoint_execution_state_in_allocator()
+                self.apply_checkpoint_execution_state_in_allocator()
 
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
@@ -1149,7 +1151,7 @@ class CUDAGraphTreeManager:
         self.current_node.clear_path_outputs()
         self.current_node = None
 
-    def checkpoint_execution_state_in_allocator(self):
+    def apply_checkpoint_execution_state_in_allocator(self):
         """
         Checkpoint the current execution state in the caching allocator so that
         additional cudagraph recordings can be made respecting existent live storages.
