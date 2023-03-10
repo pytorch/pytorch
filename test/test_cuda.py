@@ -5036,6 +5036,32 @@ class TestCudaComm(TestCase):
             finally:
                 torch.cuda.memory._record_memory_history(False)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_snapshot_script(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device='cuda')
+
+            x = foo()
+
+            ss = torch.cuda.memory._snapshot()['segments']
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue(h['frames'][0]['name'] == 'foo')
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
+
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
             pow2 = 1
