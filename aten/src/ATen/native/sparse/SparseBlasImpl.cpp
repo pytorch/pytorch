@@ -5,7 +5,6 @@
 #include <ATen/SparseCsrTensorUtils.h>
 
 // Required for checking whether Triton kernels are available
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -91,10 +90,9 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
    // so the result is tiled to (b0, b0) and we need to make
    // sure that dense.size(-1) is divisible by b0.
    && n % blocksize[0] == 0) {
-    const auto triton_kernel = c10::Dispatcher::singleton()
-      .findOp(torch::jit::parseName("aten::_triton_bsr_dense_mm"));
+    const auto triton_kernel = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_triton_bsr_dense_mm", "");
     // Call Triton only if dispatch key was overwritten.
-    if (triton_kernel->hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+    if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
       return at::_triton_bsr_dense_mm_out(result, compressed, strided);
     }
   }
