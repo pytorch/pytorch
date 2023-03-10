@@ -5,6 +5,7 @@
 #include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/native/StridedRandomAccessor.h>
@@ -219,20 +220,20 @@ warpMergeSortKVInPlace(
 
   const auto invalid_value = V{};
   LoadKeys(warp_storage.load_keys).Load(keys_iter, local_keys, keySliceSize, invalid_key);
-  __syncwarp();
+  WARP_SYNC();
   LoadValues(warp_storage.load_values).Load(values_iter, local_values, keySliceSize, invalid_value);
-  __syncwarp();
+  WARP_SYNC();
 
   // Sort! We use stable sort to ensure that invalid values are never
   // sorted before valid values. In testing it performed the same as
   // .Sort, so there is no down-side.
   Sort(warp_storage.sort).StableSort(
       local_keys, local_values, comp, keySliceSize, invalid_key);
-  __syncwarp();
+  WARP_SYNC();
 
   // Store outputs
   StoreKeys(warp_storage.store_keys).Store(keys_iter, local_keys, keySliceSize);
-  __syncwarp();
+  WARP_SYNC();
   StoreValues(warp_storage.store_values).Store(values_iter, local_values, keySliceSize);
 }
 

@@ -14,6 +14,10 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
+__device__ __forceinline__ void WARP_SYNC(unsigned mask = 0xffffffff) {
+  return __syncwarp(mask);
+}
+
 #if defined(USE_ROCM)
 __device__ __forceinline__ unsigned long long int WARP_BALLOT(int predicate)
 {

@@ -29,9 +29,21 @@ static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
   return minGridSize;
 }
 
-// For very small unstable sorts (n <= 64), use bitonicSortKVInPlace
-// which performs better because it can sort multiple arrays within
-// the same block of threads, improving occupancy.
+template <typename T>
+constexpr bool has_nan() {
+  if constexpr (std::numeric_limits<T>::is_specialized) {
+    return std::numeric_limits<T>::has_quiet_NaN;
+  } else if constexpr (
+      c10::is_complex<T>::value ||
+      std::is_same_v<T, c10::BFloat16> ||
+      std::is_same_v<T, c10::Half>) {
+    return true;
+  }
+}
+
+// For very small unstable sorts (n <= 32), use bitonicSortKVInPlace
+// which can sort multiple arrays within the same block of threads,
+// improving occupancy.
 struct SmallBitonicSort {
   template <int A, typename K, typename V, typename IndexType>
   void sort(
@@ -92,9 +104,9 @@ struct SmallBitonicSort {
   }
 };
 
-// For small stable sorts (n <= 64) we use warpMergeSortKVInPlace
-// which sorts one slice per warp and potentially multiple slices in
-// the same block for improved occupancy with large batch sizes.
+// For small sorts (n <= 128) we use warpMergeSortKVInPlace which
+// sorts one slice per warp and potentially multiple slices in the
+// same block for improved occupancy with large batch sizes.
 template <int sort_size>
 struct WarpMergeSort {
 
@@ -107,7 +119,6 @@ struct WarpMergeSort {
       at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
       IndexType valueSliceStride,
       bool descending) {
-    // constexpr int sort_size = 64;
     constexpr int max_block_y = 16;
     const int block_x = at::cuda::warp_size();
 
@@ -143,7 +154,13 @@ struct WarpMergeSort {
           invalid_key);
       C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else {
-      const K invalid_key = at::numeric_limits<K>::upper_bound();
+      const K invalid_key = []{
+        // NAN is sorted after inf
+        if constexpr(has_nan<K>()) {
+          return K(NAN);
+        }
+        return at::numeric_limits<K>::upper_bound();
+      }();
       warpMergeSortKVInPlace<A, -1, sort_size, max_block_y>
         <<<grid, block, 0, stream>>>(
           keyInfo,
@@ -159,8 +176,7 @@ struct WarpMergeSort {
   }
 };
 
-// For medium sizes (32 < n <= 4096) use radixSortKVInplace for better
-// performance.
+// For medium sizes (128 < n <= 4096) use radixSortKVInplace.
 struct MediumRadixSort {
 
   template <int A, typename K, typename V, typename IndexType>
@@ -198,8 +214,6 @@ struct MediumRadixSort {
         HANDLE_CASE(1024, 32);
         break;
       case 128:
-        HANDLE_CASE(128, 4);
-        break;
       case 64:
       case 32:
       case 16:
@@ -341,9 +355,8 @@ void sortKeyValueInplace(
   const auto sort_size = key.size(dim);
   if (sort_size <= 1) {
     return; // Already sorted
-  } else if (sort_size <= 32) {
-    sortCommon(WarpMergeSort<32>{}, key, value, dim, descending);
-    // sortCommon(SmallBitonicSort{}, key, value, dim, descending);
+  } else if (!stable && sort_size <= 32) {
+    sortCommon(SmallBitonicSort{}, key, value, dim, descending);
   } else if (sort_size <= 128) {
     sortCommon(WarpMergeSort<128>{}, key, value, dim, descending);
   } else {
