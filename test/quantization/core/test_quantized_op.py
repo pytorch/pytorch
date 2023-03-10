@@ -5138,13 +5138,17 @@ class TestQuantizedConv(TestCase):
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
         import subprocess
-        cpu_info = subprocess.run(['lscpu'], stdout=subprocess.PIPE)
+        # cpu_info = subprocess.run(['lscpu'], stdout=subprocess.PIPE)
+        out = subprocess.check_output(
+            ["lscpu"],
+            stderr=subprocess.STDOUT,
+        ).decode("utf-8")
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(), Y_q_inductor.cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q},
-            Y_q: {Y_q}, Y_q_int_repr: {Y_q.int_repr().cpu().numpy()}, cpu_info:{cpu_info.stdout}''')
+            Y_q: {Y_q}, Y_q_int_repr: {Y_q.int_repr().cpu().numpy()}, out: {out}''')
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
