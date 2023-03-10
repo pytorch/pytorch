@@ -19,13 +19,13 @@ def check_and_replace(inp: str, src: str, dst: str) -> str:
     return inp.replace(src, dst)
 
 
-def patch_setup_py(path: Path, *, version: str = "2.1.0", name: str = "triton") -> None:
+def patch_setup_py(path: Path, *, version: str = "2.0.0", name: str = "triton") -> None:
     with open(path) as f:
         orig = f.read()
     # Replace name
     orig = check_and_replace(orig, "name=\"triton\",", f"name=\"{name}\",")
     # Replace version
-    orig = check_and_replace(orig, "version=\"2.1.0\",", f"version=\"{version}\",")
+    orig = check_and_replace(orig, "version=\"2.0.0\",", f"version=\"{version}\",")
     with open(path, "w") as f:
         f.write(orig)
 
@@ -55,7 +55,7 @@ def build_triton(commit_hash: str, build_conda: bool = False, py_version : Optio
             shutil.copy(conda_path, Path.cwd())
             return Path.cwd() / conda_path.name
 
-        patch_setup_py(triton_pythondir / "setup.py", name="pytorch-triton", version=f"2.1.0+{commit_hash[:10]}")
+        patch_setup_py(triton_pythondir / "setup.py", name="pytorch-triton", version=f"2.0.0+{commit_hash[:10]}")
         check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
