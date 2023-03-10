@@ -937,6 +937,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
                 self.assertTrue(node.meta["source_fn"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
+                self.assertTrue(node.meta["original_aten"] is not None)
 
     def test_export_preserves_nn_module_stack_for_get_attr(self):
         inp = torch.randn(4, 4)
