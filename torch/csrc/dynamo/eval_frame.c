@@ -651,9 +651,10 @@ static PyObject* _custom_eval_frame(
     // When unwinding generators, eval frame is called with throw_flag ==
     // true.  Frame evaluation is supposed to continue unwinding by propagating
     // the exception.  Dynamo doesn't really know how to do this, nor does it
-    // really want to do this, because there's literally no code to
-    // capture (you're going to immediately quit out of the frame).  So we
-    // just run the default handler in this case.
+    // really want to do this, because there's unlikely any code to capture
+    // (you're going to immediately quit out of the frame, perhaps running
+    // some unwinding logic along the way).  So we just run the default
+    // handler in this case.
     //
     // NB: A previous version of this patch returned NULL.  This is wrong,
     // because returning NULL is *different* from unwinding an exception.

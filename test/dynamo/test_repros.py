@@ -2298,7 +2298,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             generator_box.clear()
             return g(x)
 
-        self.assertNoUnraisable(lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3)))
+        self.assertNoUnraisable(
+            lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
+        )
 
         # Make sure the x + 2 is captured (a previous incorrect implementation
         # of this fix would have disabled the eval frame callback, which means
