@@ -659,6 +659,14 @@ static PyObject* _custom_eval_frame(
     // because returning NULL is *different* from unwinding an exception.
     // In particular, you will not execute things like context manager
     // __exit__ if you just return NULL.
+    //
+    // NB: It's /conceivable/ that you might want to actually still call the
+    // Dynamo callback when throw_flag == TRUE, to give Dynamo a chance to
+    // do any stack unwinding code.  But this is not really useful because
+    // (1) Dynamo doesn't actually know how to do stack unwinding, so it would
+    // immediately skip the frame, and (2) even if it did, this would only
+    // be profitable if there was tensor code in the unwinding code.  Seems
+    // unlikely.
     DEBUG_TRACE("throw %s", name(frame));
     return eval_frame_default(tstate, frame, throw_flag);
   }
