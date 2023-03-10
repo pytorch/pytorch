@@ -13,6 +13,12 @@
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
+#if (defined(__x86_64__) || defined(__i386__) || defined(__aarch64__))
+#include <ATen/native/cpu/Intrinsics.h>
+#else
+#define _mm_pause()
+#endif
+
 typedef at::Half half;
 typedef at::BFloat16 bfloat16;
 
