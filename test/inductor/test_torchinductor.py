@@ -6658,6 +6658,7 @@ if HAS_CPU:
                 )
                 return clone_3
 
+            metrics.reset()
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
