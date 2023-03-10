@@ -649,22 +649,19 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
+            return UnspecializedNNModuleVariable(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        else:
             if getattr(value, "_is_fsdp_managed_module", False):
                 # Note: we can't do this assert inside FSDP constructor,
                 # since we don't know yet whether dynamo will be used
                 assert getattr(
                     value, "_fsdp_use_orig_params", False
                 ), "Dynamo only supports FSDP with use_orig_params=True"
-
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
-            return UnspecializedNNModuleVariable(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
-            )
-        else:
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,

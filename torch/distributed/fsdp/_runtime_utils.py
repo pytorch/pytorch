@@ -412,7 +412,15 @@ def _pre_forward(
     # Register post-backward hooks to reshard the parameters and reduce-scatter
     # their gradients. They must be re-registered every forward pass in case
     # the `grad_fn` is mutated.
-    _register_post_backward_hooks(state, handles)
+    if not state._use_orig_params:
+        _register_post_backward_hooks(state, handles)
+    else:
+        # Register the hooks *after* unsharding or else the hooks do not fire
+        # when CPU offloading is enabled
+        # TODO: For CPU offloading with activation checkpointing, the hook
+        # does not fire.
+        _register_grad_alloc_hooks(state, handles)
+        _register_multi_post_grad_hook(state, handles)
 
     # Recursively convert args and kwargs to specified precision.
     input_dtype: Optional[torch.dtype] = state.mixed_precision.param_dtype
@@ -661,6 +669,8 @@ def _post_backward_hook(
     - Otherwise, the ``_saved_grad_shard`` attribute is the reduced sharded
     gradient (accumulating with any existing gradient).
     """
+    # if state.rank == 0:
+    #     print(f"[Rank {state.rank}] Post-backward hook! {handle}")
     flat_param = handle.flat_param
     flat_param._post_backward_called = True
     with torch.autograd.profiler.record_function(
@@ -908,7 +918,7 @@ def _post_backward_final_callback(
 
     for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
-        _finalize_params(fsdp_state)
+        _finalize_param_handles(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
         fsdp_state.training_state = TrainingState.IDLE
         for handle in fsdp_state._handles:
@@ -957,11 +967,28 @@ def _catch_all_reshard(
 
 
 @no_type_check
-def _finalize_params(
+def _finalize_param_handles(
     state: _FSDPState,
 ) -> None:
-    """Finalizes the parameters before the next iteration."""
+    """
+    Finalizes the flat parameter handles and their flat parameters before the
+    next iteration.
+    """
     for handle in state._handles:
+        # Reset once per backward since we expect each gradient to only be
+        # accumulated once
+        # TODO: For reentrant checkpointing, can the gradient be accumulated
+        # more than once per backward (due to nested graph tasks)?
+        if handle._use_orig_params:
+            for i, grad_alloc_hook_handle in enumerate(handle._grad_alloc_hook_handles):
+                if grad_alloc_hook_handle is not None:
+                    grad_alloc_hook_handle.remove()
+                handle._grad_alloc_hook_handles[i] = None
+            handle._ran_grad_alloc_hook = False
+            if handle._multi_post_grad_hook is not None:
+                handle._multi_post_grad_hook.remove()
+                handle._multi_post_grad_hook = None
+
         flat_param = handle.flat_param
         if flat_param.requires_grad:
             if hasattr(flat_param, "_post_backward_hook_state"):
@@ -973,7 +1000,7 @@ def _finalize_params(
                 delattr(flat_param, "_post_backward_hook_state")
             if not state._sync_gradients:
                 # Preserve the gradient accumulation state if not synchronizing
-                # gradients: `.grad` remains the unsharded gradient  from prior
+                # gradients: `.grad` remains the unsharded gradient from prior
                 # `no_sync()` iterations, and `_saved_grad_shard` remains the
                 # sharded gradient from the last synchronized iteration
                 continue
@@ -983,6 +1010,41 @@ def _finalize_params(
                 "Expects `_post_backward_called` to be set on the `FlatParameter`",
             )
             flat_param._post_backward_called = False
+
+
+def _grad_alloc_hook(
+    state: _FSDPState,
+    param: nn.Parameter,
+    handle: FlatParamHandle,
+    *unused: Any,
+):
+    """
+    ``param`` should be one of ``handle`` 's original parameters.
+
+    NOTE: The goal of this hook is to emulate the autograd engine's existing
+    behavior for flat gradient allocation and write.
+    """
+    if handle._ran_grad_alloc_hook:
+        return
+    # This is the first invocation of the hook among the handle's parameters
+    # in this backward pass
+    handle._ran_grad_alloc_hook = True
+    # Remove hooks to avoid additional overhead of running them on the other
+    # parameters since they are no longer needed for this backward pass
+    for i, hook_handle in enumerate(handle._grad_alloc_hook_handles):
+        if hook_handle is not None:
+            hook_handle.remove()
+        handle._grad_alloc_hook_handles[i] = None
+    # TODO: We want to allocate this gradient with the padding directly. For
+    # simplicity now, we just pad in post-backward if needed.
+    # TODO: We require an extra zero fill kernel since the original parameters'
+    # gradients are accumulated into the flat gradient.
+    _p_assert(
+        handle.flat_param.shape == handle.flat_param._unpadded_unsharded_size,
+        f"Expected {handle.flat_param._unpadded_unsharded_size} but got {handle.flat_param.shape}",
+    )
+    handle.flat_param.grad = torch.zeros_like(handle.flat_param)
+    handle._use_unsharded_grad_views()
 
 
 @no_type_check
@@ -1268,6 +1330,39 @@ def _register_post_backward_final_callback(
     Variable._execution_engine.queue_callback(
         functools.partial(_post_backward_final_callback, state, module)
     )
+
+
+@no_type_check
+def _register_grad_alloc_hooks(
+    state: _FSDPState,
+    handles: List[FlatParamHandle],
+):
+    assert state._use_orig_params
+    for handle in handles:
+        for i, param in enumerate(handle.flat_param._params):
+            if param.requires_grad and handle._grad_alloc_hook_handles[i] is None:
+                # TODO: Simplify signature later if needed.
+                hook = functools.partial(_grad_alloc_hook, state, param, handle)
+                handle._grad_alloc_hook_handles[i] = param.register_hook(hook)
+
+
+@no_type_check
+def _register_multi_post_grad_hook(
+    state: _FSDPState,
+    handles: List[FlatParamHandle],
+):
+    if not torch.is_grad_enabled():
+        return
+    for handle in handles:
+        already_registered = handle._multi_post_grad_hook is not None
+        if already_registered:
+            continue
+        hook = functools.partial(_post_backward_hook, state, handle)
+        handle._multi_post_grad_hook = (
+            torch.autograd.graph._register_multi_post_grad_hook(
+                handle.flat_param._params, hook
+            )
+        )
 
 
 def _wait_for_computation_stream(
