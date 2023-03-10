@@ -380,6 +380,20 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_complex_linear(self):
+        # https://github.com/pytorch/pytorch/issues/93424
+        inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10, dtype=torch.complex64)
+
+            def forward(self, x):
+                return self.linear(x).sum().abs()
+
+        self.verify_aot_autograd(F(), inp)
+
     def test_embedding_bag_view(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
@@ -484,6 +498,44 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, create_inp(True), test_mutation=True)
         self.verify_aot_autograd(f, create_inp(False), test_mutation=True)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_detach(self):
+        # Here, "a" requires grad, and gets mutated, so we append a copy_() to the end of the graph.
+        # Its mutation doesn't take part in autograd though, because we mutated a detach'd view.
+        # Need to make sure that this copy_() doesn't error, and doesn't participate in autograd either.
+        def f(a):
+            a.detach().mul_(2)
+            return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        self.verify_aot_autograd(f, inp, test_mutation=False)
+        inp = [torch.ones(4, requires_grad=True)]
+        # test_mutation=True will first do some compute on inp, so it is no longer an autograd leaf
+        # by the time it becomes a graph input. Good to test both cases.
+        self.verify_aot_autograd(f, inp, test_mutation=True)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_no_grad(self):
+        def f(a):
+            with torch.no_grad():
+                a.mul_(2)
+            return a + 3
+        inp = [torch.ones(4, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=False)
+
+    @patch("functorch.compile.config.use_fake_tensor", True)
+    def test_input_mutation_requires_grad_no_grad_detach_mixed(self):
+        # Perform a mix of mutations on a:
+        # 1 normal, 1 in no_grad, 1 on a detach'd tensor.
+        # Only the first should participate in gradient computation.
+        def f(a):
+            a.detach().mul_(2)
+            a.mul_(3)
+            with torch.no_grad():
+                a.mul_(4)
+            return a + 5
+        inp = [torch.ones(4, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_metadata2(self):
