@@ -29,7 +29,7 @@ inline scalar_t vec_reduce_all(
 
 template <typename scalar_t, typename Op>
 struct VecReduceAllSIMD {
-  static inline scalar_t apply(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+  static inline scalar_t apply(const Op& vec_fun, const Vectorized<scalar_t>& acc_vec) {
     return vec_reduce_all(vec_fun, acc_vec, Vectorized<scalar_t>::size());
   }
 };
@@ -38,7 +38,7 @@ struct VecReduceAllSIMD {
 #if defined(CPU_CAPABILITY_AVX2)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
+  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
     // 128-bit shuffle
@@ -57,7 +57,7 @@ struct VecReduceAllSIMD<float, Op> {
 #if defined(CPU_CAPABILITY_AVX512)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
-  static inline float apply(const Op& vec_fun, Vectorized<float> acc_vec) {
+  static inline float apply(const Op& vec_fun, const Vectorized<float>& acc_vec) {
     using Vec = Vectorized<float>;
     Vec v = acc_vec;
     // 256-bit shuffle
@@ -79,7 +79,7 @@ struct VecReduceAllSIMD<float, Op> {
 #endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
 
 template <typename scalar_t, typename Op>
-inline scalar_t vec_reduce_all(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+inline scalar_t vec_reduce_all(const Op& vec_fun, const Vectorized<scalar_t>& acc_vec) {
   return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
 }
 

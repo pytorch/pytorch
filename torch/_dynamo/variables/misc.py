@@ -1,4 +1,5 @@
 import collections
+import functools
 import inspect
 import types
 from typing import Dict, List
@@ -11,8 +12,8 @@ from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-from ..utils import identity, proxy_args_kwargs
-from .base import VariableTracker
+from ..utils import check_constant_args, identity, proxy_args_kwargs
+from .base import MutableLocal, VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -685,10 +686,19 @@ class SkipFilesVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def fold_through_function_to_wrapper():
+        return {
+            collections.namedtuple: variables.UserDefinedClassVariable,
+        }
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from .builtin import BuiltinVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
 
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
             unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
@@ -699,7 +709,23 @@ class SkipFilesVariable(VariableTracker):
             and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
         ):
             return BuiltinVariable.call_dict_helper(
-                tx, collections.OrderedDict, None if len(args) == 0 else args[0]
+                tx,
+                collections.OrderedDict,
+                None if len(args) == 0 else args[0],
+                **options,
+            )
+        # Fold through the functions(e.g, collections.namedtuple)
+        # that inputs & outputs are all python constants
+        elif (
+            self.value in self.fold_through_function_to_wrapper().keys()
+            and check_constant_args(args, kwargs)
+        ):
+            value = self.value(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            return self.fold_through_function_to_wrapper().get(self.value)(
+                value, mutable_local=MutableLocal(), **options
             )
         else:
             try:
