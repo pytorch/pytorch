@@ -5565,6 +5565,21 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             self.assertTrue((out == 10000.).all())
         torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig
 
+    @dtypes(torch.float)
+    def test_baddbmm_nan_input_with_zero_beta(self, device, dtype):
+        for shape in [[3, 2, 2], [2, 20, 20]]:
+            mat1, mat2 = [torch.randn(shape, dtype=dtype, device=device) for _ in range(2)]
+            inputs = [torch.randn(shape, dtype=dtype, device=device),
+                      torch.randn(shape, dtype=dtype, device=device).fill_(torch.nan)]
+            outs = [None, torch.randn(shape, dtype=dtype, device=device),
+                    torch.randn(shape, dtype=dtype, device=device).fill_(torch.nan)]
+            options = itertools.product(inputs, outs)
+            for input, out in options:
+                y_ref = torch.bmm(mat1, mat2)
+                y = torch.baddbmm(input, mat1, mat2, beta=0.0, out=out)
+                self.assertEqual(y_ref, y)
+
+
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @onlyCUDA
     def test_matmul_45724(self, device):
