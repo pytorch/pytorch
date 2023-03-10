@@ -336,7 +336,7 @@ class KernelArgs:
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.input_buffers.items():
@@ -344,7 +344,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
@@ -352,7 +352,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
