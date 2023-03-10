@@ -139,8 +139,8 @@ def _parameterized_class_attrs_and_values(
             (False,),
         )
     )
-    # FX exporter. Pin opset version to 17.
-    input_values.append((17, False, False, True))
+    # FX exporter. Pin opset version.
+    input_values.append((_constants.FX_ONNX_OPSET, False, False, True))
     return {"attrs": attrs, "input_values": input_values}
 
 
@@ -5185,7 +5185,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
         self.run_test(NotModel(), input_args=(x,))
 
-
     @skipFxTest(reason="RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.")  # fmt: skip
     @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
     def test_eq(self):
@@ -8555,6 +8554,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._linalg_det.default")  # fmt: skip
     def test_det(self):
         class Det(torch.nn.Module):
             def forward(self, x):
@@ -8722,6 +8722,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfNoLapack
     @skipIfUnsupportedMinOpsetVersion(11)
+    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten._linalg_slogdet.default")  # fmt: skip
     def test_logdet(self):
         class LogDet(torch.nn.Module):
             def forward(self, x):

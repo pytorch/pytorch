@@ -5,6 +5,7 @@ import pytorch_test_common
 import torch
 from torch import nn
 from torch.nn import functional as F
+from torch.onnx import _constants as onnx_constants
 from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
 
@@ -12,7 +13,7 @@ from torch.testing._internal import common_utils
 class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def setUp(self):
         super().setUp()
-        self.opset_version = torch.onnx._constants.ONNX_DEFAULT_OPSET
+        self.opset_version = onnx_constants.FX_ONNX_OPSET
 
     def test_simple_function(self):
         def func(x):
