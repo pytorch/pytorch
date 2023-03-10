@@ -1,4 +1,5 @@
 import os
+import urllib
 from io import BytesIO
 from urllib.request import urlopen
 from zipfile import ZipFile
@@ -60,23 +61,26 @@ def normalize_suite_filename(suite_name):
 
 def download_artifacts_and_extract_csvs(urls):
   dataframes = {}
-  for (suite, shard), url in urls.items():
-      resp = urlopen(url)
-      subsuite = normalize_suite_filename(suite)
-      artifact = ZipFile(BytesIO(resp.read()))
-      for phase in ("training", "inference"):
-        name = f"test/test-reports/{phase}_{subsuite}.csv"
-        df = pd.read_csv(artifact.open(name))
-        dataframes[(suite, phase, shard)] = df
-
+  try:
+    for (suite, shard), url in urls.items():
+        resp = urlopen(url)
+        subsuite = normalize_suite_filename(suite)
+        artifact = ZipFile(BytesIO(resp.read()))
+        for phase in ("training", "inference"):
+          name = f"test/test-reports/{phase}_{subsuite}.csv"
+          df = pd.read_csv(artifact.open(name))
+          dataframes[(suite, phase, shard)] = df
+  except urllib.error.HTTPError:
+    print(f"Unable to download {url}, perhaps the CI job isn't finished?")
   return dataframes
 
 def write_filtered_csvs(root_path, dataframes):
   for (suite, phase, shard), df in dataframes.items():
+    suite_fn = normalize_suite_filename(suite)
     if "timm" in suite:
-      out_fn = os.path.join(root_path, f"{phase}_{suite}{shard - 1}.csv")
+      out_fn = os.path.join(root_path, f"{phase}_{suite_fn}{shard - 1}.csv")
     else:
-      out_fn = os.path.join(root_path, f"{phase}_{suite}.csv")
+      out_fn = os.path.join(root_path, f"{phase}_{suite_fn}.csv")
     df.to_csv(out_fn, index=False, columns=["name", "graph_breaks"])
 
 
