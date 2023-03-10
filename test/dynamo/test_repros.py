@@ -1298,6 +1298,32 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_with_on_graph_break_nested(self):
+        def reversible(x):
+            torch._dynamo.graph_break()  # Cause graph break so inline fails
+            return torch.sin(torch.cos(x))
+
+        def fn(x):
+            # nested context manager failed previously
+            with torch.no_grad():
+                with torch.enable_grad():
+                    a = torch.sin(x)
+                    b = reversible(a)
+                    c = torch.sigmoid(b)
+                    c.sum().backward()
+                    return x.grad
+
+        x = torch.randn(3, requires_grad=True)
+        x.grad = None
+        with torch.no_grad():
+            ref = fn(x)
+
+        x.grad = None
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        with torch.no_grad():
+            res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
     # https://github.com/pytorch/torchdynamo/issues/1446
     def test_grad_mode_carrying_correct_state_after_graph_break(self):
         def fn(x):
@@ -1958,6 +1984,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize(cnt, nopython=True)(mod)
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_tensor_data_kwarg(self):
+        # https://github.com/pytorch/pytorch/issues/96278
+        def f():
+            return torch.tensor(data=[[1.0, -1.0]])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(), opt_fn()))
         self.assertEqual(cnt.frame_count, 1)
 
     @requires_cuda()
