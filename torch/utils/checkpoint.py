@@ -522,7 +522,7 @@ class _NoopSaveInputs(torch.autograd.Function):
 
         def get_args(saved_tensors):
             ret = [saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o for i, o in enumerate(args)]
-            return ret
+            return ret[1:]
 
         ctx.get_args = get_args
         ctx.save_for_backward(*tensors)
@@ -701,7 +701,9 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
 
 def _checkpoint_impl(fn, recompute_fn, *args):
     new_frame = _CheckpointFrame(recompute_fn)
-    new_frame.input_saver = _NoopSaveInputs.apply(*args)
+
+    dummy = torch.empty((0,), requires_grad=True)
+    new_frame.input_saver = _NoopSaveInputs.apply(dummy, *args)
 
     if new_frame.input_saver.grad_fn is None:
         return fn(*args)
