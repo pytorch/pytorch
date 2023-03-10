@@ -1513,7 +1513,7 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
     // Weight is quant per tensor, then weight_scales will be a scalar Tensor
     weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
   } else {
-    // Weight is quant per channel 
+    // Weight is quant per channel
     for (int i = 0; i < weight_scales.numel(); ++i) {
       weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
     }

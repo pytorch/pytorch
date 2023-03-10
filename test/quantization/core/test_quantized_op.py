@@ -5088,8 +5088,10 @@ class TestQuantizedConv(TestCase):
         X_q_inductor = X_q.int_repr()
         W_q_inductor = W_q.int_repr()
 
-        weight_scale = W_q.q_per_channel_scales() if use_channelwise else torch.tensor(W_q.q_scale(), dtype=torch.float, device=device)
-        weight_zero_point = W_q.q_per_channel_zero_points() if use_channelwise else torch.tensor(W_q.q_zero_point(), dtype=torch.int64, device=device)
+        weight_scale = W_q.q_per_channel_scales() if use_channelwise \
+            else torch.tensor(W_q.q_scale(), dtype=torch.float, device=device)
+        weight_zero_point = W_q.q_per_channel_zero_points() if use_channelwise \
+            else torch.tensor(W_q.q_zero_point(), dtype=torch.int64, device=device)
 
         packed_weight, packed_bias = qconv_prepack_inductor(
             W_q_inductor, weight_scale,
@@ -5103,7 +5105,7 @@ class TestQuantizedConv(TestCase):
                 packed_weight, weight_scale, weight_zero_point,
                 packed_bias, strides, pads, dilations, groups,
                 Y_scale, Y_zero_point
-            )        
+            )
         else:
             Y_q_inductor = qconv_inductor(
                 X_q_inductor, X_scale, X_zero_point,
@@ -5131,7 +5133,7 @@ class TestQuantizedConv(TestCase):
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q}''')
 
         # Return the quantized data for later reuse
-        return X_q, W_q, bias_float        
+        return X_q, W_q, bias_float
 
     @skipIfNoONEDNN
     def test_inductor_qconv1d(self):
@@ -5294,7 +5296,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add(self):
         batch_size = 3
-        groups_list = [10]
+        groups_list = [2]
         input_channels_per_group = 2
         output_channels_per_group = 2
         height = 3
@@ -5354,7 +5356,7 @@ class TestQuantizedConv(TestCase):
         batch_size = 3
         height = 3
         width = 3
-        groups_list = [10]
+        groups_list = [2]
         input_channels_per_group = 2
         output_channels_per_group = 2
         kernel_h = 3

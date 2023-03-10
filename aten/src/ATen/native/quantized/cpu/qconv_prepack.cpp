@@ -537,10 +537,10 @@ std::tuple<at::Tensor, at::Tensor> prepack_qconv_weight_bias_onednn(
     // Weight is quant per tensor, then weight_scales will be a scalar Tensor
     TORCH_CHECK(
         weight_scales.numel() == 1,
-        "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements."); 
+        "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements.");
     weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
   } else {
-    // Weight is quant per channel 
+    // Weight is quant per channel
     for (int i = 0; i < weight_scales.numel(); ++i) {
       weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
     }
