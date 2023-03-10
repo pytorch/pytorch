@@ -75,6 +75,10 @@ SKIP = {
     "levit_128",
 }
 
+SKIP_TRAIN = {
+    # segfault: Internal Triton PTX codegen error
+    "eca_halonext26ts",
+}
 
 MAX_BATCH_SIZE_FOR_ACCURACY_CHECK = {
     "cait_m36_384": 4,
