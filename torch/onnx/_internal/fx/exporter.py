@@ -198,6 +198,7 @@ def _fill_tensor_meta(
     ):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(expected_value.size())
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
