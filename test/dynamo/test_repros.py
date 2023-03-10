@@ -1986,6 +1986,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_tensor_data_kwarg(self):
+        # https://github.com/pytorch/pytorch/issues/96278
+        def f():
+            return torch.tensor(data=[[1.0, -1.0]])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(), opt_fn()))
+        self.assertEqual(cnt.frame_count, 1)
+
     @requires_cuda()
     def test_norm_dtype(self):
         def foo(_stack0):
