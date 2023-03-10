@@ -604,7 +604,7 @@ struct Frame {
 static std::mutex to_free_frames_mutex;
 static std::vector<Frame> to_free_frames;
 
-struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
+struct StackContext : public c10::GatheredContext {
   // Locking:
   // We need to free PyCodeObjects when ~StackContext runs, but
   // CUDACachingAllocator may hold its device lock when ~StackContext runs.
@@ -657,11 +657,10 @@ struct StackContext : public c10::cuda::CUDACachingAllocator::Context {
     }
     return r;
   }
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context> gather() {
+  static std::shared_ptr<c10::GatheredContext> gather() {
     return _gather(true, true, false);
   }
-  static std::shared_ptr<c10::cuda::CUDACachingAllocator::Context>
-  gather_with_cpp() {
+  static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
     return _gather(true, true, true);
   }
 };
