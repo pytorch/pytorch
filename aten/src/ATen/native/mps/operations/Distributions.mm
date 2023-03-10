@@ -87,7 +87,7 @@ Tensor& random_mps_impl(Tensor& self, scalar_t val1, scalar_t val2,
                                                                                name: nil];
           newCachedGraph->resultTensor = randomBlock ? randomBlock(newCachedGraph, resultTensors[0]) : resultTensors[0];
           // results will be cast if self's scalar type isn't directly supported by MPS backend.
-          if (getMPSDataType(self.scalar_type()) != outputDataType)
+          if (getMPSDataType(self) != outputDataType)
             newCachedGraph->resultTensor = castMPSTensor(mpsGraph, newCachedGraph->resultTensor, self.scalar_type());
         }
         return newCachedGraph;
@@ -371,7 +371,7 @@ Tensor& randperm_out_mps(int64_t n, c10::optional<Generator> generator, Tensor& 
                                                            name:nil];
     if (result.scalar_type() != kInt) {
       argsortTensor = [mpsGraph castTensor:argsortTensor
-                                    toType:mps::getMPSDataType(result.scalar_type())
+                                    toType:mps::getMPSDataType(result)
                                       name:@"castOutput"];
     }
     return argsortTensor;
@@ -416,10 +416,10 @@ Tensor& multinomial_with_replacement_mps_kernel(
           newCachedGraph = new RandomCachedGraph(mpsGraph);
           newCachedGraph->stateTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[@7]);
 
-          auto prob_dtype = getMPSDataType(self_v.scalar_type());
+          auto prob_dtype = getMPSDataType(self_v);
 
           // This is probability weights
-          newCachedGraph->probTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self_v.scalar_type()), prob_shape);
+          newCachedGraph->probTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self_v), prob_shape);
 
           MPSGraphTensor *sumProbs = [mpsGraph reductionSumWithTensor:newCachedGraph->probTensor
                                                                  axis:-1
@@ -502,7 +502,7 @@ Tensor& multinomial_with_replacement_mps_kernel(
                                                        withShape:@[ns_numDist ,ns_n_sample]
                                                             name:nil];
           newCachedGraph->resultTensor = [mpsGraph castTensor:reshapeTensor
-                                                       toType:getMPSDataType(result.scalar_type())
+                                                       toType:getMPSDataType(result)
                                                          name:@"resultTensor"];
         }
         return newCachedGraph;

@@ -97,7 +97,7 @@ Tensor& arange_mps_out(const Scalar& start, const Scalar& end, const Scalar& ste
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
     auto stream = getCurrentMPSStream();
-    auto mpsDataType = getMPSDataType(result.scalar_type());
+    auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
       auto cachedGraph = static_cast<RangeCachedGraph *>(cache_->LookUp(key));
@@ -168,7 +168,7 @@ Tensor& range_mps_out(const Scalar& start, const Scalar& end, const Scalar& step
     using namespace mps;
     auto cache_ = MPSGraphCache::getInstance();
     auto stream = getCurrentMPSStream();
-    auto mpsDataType = getMPSDataType(result.scalar_type());
+    auto mpsDataType = getMPSDataType(result);
     @autoreleasepool {
       string key = "arange_mps_out" + getTensorsStringKey({result}) + ":" + to_string(size);
       auto cachedGraph = static_cast<RangeCachedGraph *>(cache_->LookUp(key));
@@ -234,8 +234,8 @@ Tensor& linspace_out_mps(const Scalar& start, const Scalar& end, int64_t steps, 
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new RangeCachedGraph(mpsGraph, MPSDataTypeFloat32, steps, true, start_less_end);
 
-            if(getMPSDataType(result.scalar_type()) != MPSDataTypeFloat32) {
-              newCachedGraph->outputTensor = [mpsGraph castTensor:newCachedGraph->outputTensor toType:getMPSDataType(result.scalar_type()) name:@"output"];
+            if(getMPSDataType(result) != MPSDataTypeFloat32) {
+              newCachedGraph->outputTensor = [mpsGraph castTensor:newCachedGraph->outputTensor toType:getMPSDataType(result) name:@"output"];
             }
           }
           return newCachedGraph;

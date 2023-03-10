@@ -50,7 +50,7 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
     // Input as placeholders
     MPSShape* input_shape = getMPSShape(self);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    string key = string("sort:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self.scalar_type()) +
+    string key = string("sort:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) +
                            ":dim" + to_string(dim) + ":descending" + to_string(descending);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
@@ -59,21 +59,21 @@ TORCH_IMPL_FUNC(sort_stable_out_mps)
         @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
-            newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
+            newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
             MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, newCachedGraph->selfTensor, self, /*includesInt64=*/macOS13_3_plus);
             MPSGraphTensor * sortedTensor = [mpsGraph sortWithTensor:castInputTensor
                                                                 axis:(NSInteger)dim
                                                                 descending:(BOOL)descending
                                                                 name:@"sort_out"];
-            if ([sortedTensor dataType] != getMPSDataType(values.scalar_type())) {
+            if ([sortedTensor dataType] != getMPSDataType(values)) {
               sortedTensor = castMPSTensor(mpsGraph, sortedTensor, values.scalar_type());
             }
             MPSGraphTensor* argSortedTensor = [mpsGraph argSortWithTensor:castInputTensor
                                                                      axis:(NSInteger)dim
                                                                      descending:(BOOL)descending
                                                                      name:@"argsort_out"];
-            if ([argSortedTensor dataType] != getMPSDataType(indices.scalar_type())) {
+            if ([argSortedTensor dataType] != getMPSDataType(indices)) {
               argSortedTensor = castMPSTensor(mpsGraph, argSortedTensor, indices.scalar_type());
             }
             newCachedGraph->valuesTensor = sortedTensor;
