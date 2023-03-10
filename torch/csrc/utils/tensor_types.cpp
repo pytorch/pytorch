@@ -41,6 +41,8 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.hpu";
     case at::Backend::MPS:
       return "torch.mps";
+    case at::Backend::MTIA:
+      return "torch.mtia";
     case at::Backend::PrivateUse1:
       return "torch.privateuseone";
     case at::Backend::Lazy:
