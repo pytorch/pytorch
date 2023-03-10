@@ -946,6 +946,7 @@ aten_cpu_non_globed_sources = [
     "aten/src/ATen/detail/HIPHooksInterface.cpp",
     "aten/src/ATen/detail/MPSHooksInterface.cpp",
     "aten/src/ATen/detail/ORTHooksInterface.cpp",
+    "aten/src/ATen/detail/XPUHooksInterface.cpp",
     "aten/src/ATen/record_function.cpp",
     "aten/src/ATen/Dispatch.cpp",
     "aten/src/ATen/SequenceNumber.cpp",
@@ -958,6 +959,7 @@ aten_cpu_non_globed_headers = [
     "aten/src/ATen/detail/MPSHooksInterface.h",
     "aten/src/ATen/detail/HIPHooksInterface.h",
     "aten/src/ATen/detail/ORTHooksInterface.h",
+    "aten/src/ATen/detail/XPUHooksInterface.h",
 ]
 
 aten_cpu_source_non_codegen_list = [
@@ -1363,6 +1365,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/sparse/SparseFactories.cpp",
     "aten/src/ATen/native/sparse/ValidateCompressedIndicesKernel.cpp",
     "aten/src/ATen/native/sparse/SparseBinaryOpIntersectionKernel.cpp",
+    "aten/src/ATen/native/sparse/FlattenIndicesKernel.cpp",
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
     "aten/src/ATen/native/xnnpack/Activation.cpp",

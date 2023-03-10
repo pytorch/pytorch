@@ -80,7 +80,7 @@ Tensor dot_mps(
           if(self.scalar_type() == ScalarType::Short || self.scalar_type() == ScalarType::Byte
                                                      || self.scalar_type() == ScalarType::Char)
             dotProductTensor = [mpsGraph castTensor:dotProductTensor
-                                             toType:getMPSDataType(self.scalar_type())
+                                             toType:getMPSDataType(self)
                                                name:@"castDotProductTensor"];
 
           newCachedGraph->selfTensor_ = selfTensor;
