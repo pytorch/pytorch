@@ -5,11 +5,10 @@ from typing import cast, List
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import ReduceOp
-from torch.distributed._shard.replicated_tensor import ReplicatedTensor
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
-from torch.distributed.nn.functional import all_gather, all_reduce, reduce_scatter
+from torch.distributed.nn.functional import all_gather, reduce_scatter
 
 from ._common import (
     _all_gather_base_input,
@@ -353,28 +352,25 @@ def _handle_row_wise_sharding(
     Returns:
         gathered_output: final result of lookup and aggregation.
     """
-    if not isinstance(input, ReplicatedTensor):
-        if input.dim() > 1 and per_sample_weights is None:
-            # allgather the inputs first for non Replicated Tensor.
-            gather_inp = _all_gather_base_input(input, pg)
-        else:
-            (
-                gathered_inputs,
-                gathered_per_sample_weights,
-                gathered_offsets,
-            ) = _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg)
-            cat_dim = 0 if input.dim() != 1 else -1
-            gather_inp = torch.cat(gathered_inputs, dim=cat_dim)
-            if per_sample_weights is not None:
-                per_sample_weights = torch.cat(gathered_per_sample_weights, dim=cat_dim)
-            offset_add = 0 if input.dim() > 1 else input.size(0)
-            if offsets is not None:
-                offsets_list = torch.cat(
-                    [gathered_offsets[i] + (offset_add * i) for i in range(pg.size())],
-                    dim=cat_dim,
-                )
+    if input.dim() > 1 and per_sample_weights is None:
+        # allgather the inputs first for non Replicated Tensor.
+        gather_inp = _all_gather_base_input(input, pg)
     else:
-        gather_inp = input
+        (
+            gathered_inputs,
+            gathered_per_sample_weights,
+            gathered_offsets,
+        ) = _all_gather_embedding_bag_input(input, per_sample_weights, offsets, pg)
+        cat_dim = 0 if input.dim() != 1 else -1
+        gather_inp = torch.cat(gathered_inputs, dim=cat_dim)
+        if per_sample_weights is not None:
+            per_sample_weights = torch.cat(gathered_per_sample_weights, dim=cat_dim)
+        offset_add = 0 if input.dim() > 1 else input.size(0)
+        if offsets is not None:
+            offsets_list = torch.cat(
+                [gathered_offsets[i] + (offset_add * i) for i in range(pg.size())],
+                dim=cat_dim,
+            )
 
     # Mask the input according to sharding spec.
     lookup_input, padding_local, padding_row = _handle_row_wise_mask(
@@ -410,16 +406,13 @@ def _handle_row_wise_sharding(
 
     op = ReduceOp.SUM if mode != "max" else ReduceOp.MAX
     # TODO: Make the result a PartialTensor and move the the logic below there.
-    if isinstance(input, ReplicatedTensor):
-        result = all_reduce(result, op=op, group=pg)
-    else:
-        local_shards = result.chunk(pg.size())
-        result = reduce_scatter(
-            torch.empty_like(local_shards[0]),
-            list(local_shards),
-            op=op,
-            group=pg,
-        )
+    local_shards = result.chunk(pg.size())
+    result = reduce_scatter(
+        torch.empty_like(local_shards[0]),
+        list(local_shards),
+        op=op,
+        group=pg,
+    )
 
     # For Mean, we cannot do the division until very end because the sum of means
     # not equal to the mean of sum. (Divisor is different)

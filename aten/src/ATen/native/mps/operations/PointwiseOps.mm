@@ -6,21 +6,21 @@ namespace at::native {
 // scope the MPS's internal methods to not expose them to at::native
 namespace mps {
 
-Tensor& addc_mul_div_out_mps(const Tensor& self,
+void addc_mul_div_out_mps(const Tensor& self,
                              const Tensor& tensor1,
                              const Tensor& tensor2,
                              const Scalar& value_opt, // default value = 1.0
-                             Tensor& output,
+                             const Tensor& output,
                              const bool is_div,
                              const string op_name)
 {
   if (value_opt.toDouble() == 0.0) {
     output.copy_(self);
-    return output;
+    return;
   }
 
   if(output.numel() == 0) {
-    return output;
+    return;
   }
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -38,10 +38,11 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
 
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
-    if(!cachedGraph) {
+    if (!cachedGraph) {
         cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
 
           CachedGraph* newCachedGraph = nil;
+          ScalarType common_dtype = c10::promoteTypes(self.scalar_type(), c10::promoteTypes(tensor1.scalar_type(), tensor2.scalar_type()));
           @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
@@ -53,22 +54,25 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
 
             // the tensor to be optionally multiplied by value_scalar
             MPSGraphTensor *multiplicandTensor = nil;
+            auto firstTensor = castMPSTensor(mpsGraph, newCachedGraph->firstTensor, common_dtype);
+            auto secondTensor = castMPSTensor(mpsGraph, newCachedGraph->secondTensor, common_dtype);
             if (is_div) {
-              multiplicandTensor = [mpsGraph divisionWithPrimaryTensor:newCachedGraph->firstTensor
-                                                       secondaryTensor:newCachedGraph->secondTensor
+              multiplicandTensor = [mpsGraph divisionWithPrimaryTensor:firstTensor
+                                                       secondaryTensor:secondTensor
                                                                   name:nil];
             } else {
-              multiplicandTensor = [mpsGraph multiplicationWithPrimaryTensor:newCachedGraph->firstTensor
-                                                             secondaryTensor:newCachedGraph->secondTensor
+              multiplicandTensor = [mpsGraph multiplicationWithPrimaryTensor:firstTensor
+                                                             secondaryTensor:secondTensor
                                                                         name:nil];
             }
             // the tensor to be added to input_tensor
             MPSGraphTensor *addendTensor = [mpsGraph multiplicationWithPrimaryTensor:multiplicandTensor
-                                                      secondaryTensor:newCachedGraph->valueTensor
+                                                      secondaryTensor:castMPSTensor(mpsGraph, newCachedGraph->valueTensor, common_dtype)
                                                                 name:nil];
-            newCachedGraph->outputTensor = [mpsGraph additionWithPrimaryTensor:newCachedGraph->inputTensor
-                                                               secondaryTensor:addendTensor
-                                                                          name:nil];
+            auto outputTensor = [mpsGraph additionWithPrimaryTensor:castMPSTensor(mpsGraph, newCachedGraph->inputTensor, common_dtype)
+                                                    secondaryTensor:addendTensor
+                                                               name:nil];
+            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, outputTensor, output.scalar_type());
           }
           return newCachedGraph;
       });
@@ -95,8 +99,6 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
 
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
   }
-
-  return output;
 }
 
 } // namespace mps
@@ -105,13 +107,13 @@ Tensor& addc_mul_div_out_mps(const Tensor& self,
 TORCH_IMPL_FUNC(addcmul_out_mps)
 (const Tensor& self, const Tensor& tensor1, const Tensor& tensor2, const Scalar& value, const Tensor& output)
 {
-  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), false, "addcmul_out_mps");
+  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, false, "addcmul_out_mps");
 }
 
 TORCH_IMPL_FUNC(addcdiv_out_mps)
 (const Tensor& self, const Tensor& tensor1, const Tensor& tensor2, const Scalar& value, const Tensor& output)
 {
-  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, const_cast<Tensor&>(output), true, "addcdiv_out_mps");
+  mps::addc_mul_div_out_mps(self, tensor1, tensor2, value, output, true, "addcdiv_out_mps");
 }
 
 } // namespace at::native

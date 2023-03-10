@@ -29,7 +29,7 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
 }
 
 // This function has two main goals:
-//  1) Use the user-provided jvp function to populate the the outputs' forward
+//  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
 //  properly handled
 //

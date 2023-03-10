@@ -8119,6 +8119,23 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
+    @parametrize_test("no_batch_dim", [True, False])
+    @parametrize_test("affine", [True, False])
+    def test_instancenorm_raises_error_if_input_channels_is_not_num_features(self, device, instance_norm_cls, no_batch_dim, affine):
+        inst_norm = instance_norm_cls(4, affine=affine)
+        size = [2] * inst_norm._get_no_batch_dim()
+        if not no_batch_dim:
+            size = [3] + size
+        t = torch.randn(size)
+        if affine:
+            with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
+                inst_norm(t)
+        else:
+            with warnings.catch_warnings(record=True) as w:
+                inst_norm(t)
+            self.assertIn("which is not used because affine=False", str(w[0].message))
+
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
