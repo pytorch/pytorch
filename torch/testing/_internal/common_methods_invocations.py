@@ -4497,7 +4497,14 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
     else:
         alphas = (None,)
 
-    for shape, alpha in product(shapes, alphas):
+    if fill:
+        # A weird number to catch errors.
+        # The former one tests `index_fill.int_Scalar`, and the latter one tests `index_fill.int_Tensor`.
+        values = (make_arg((1,)).item(), make_arg(()))
+    else:
+        values = (None,)
+
+    for shape, alpha, value in product(shapes, alphas, values):
         t = make_arg(shape)
         args = []
 
@@ -4512,8 +4519,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
         if copy or add:
             args.append(make_arg(shape))
         elif fill:
-            # A weird number to catch errors
-            args.append(make_arg((1,)).item())
+            args.append(value)
 
         args = tuple(args)
         kwargs = {} if alpha is None else {"alpha": alpha}
@@ -15004,6 +15010,12 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
+           skips=(
+               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_no_amp'),
+               # RuntimeError: Mismatch on aten._unique.default: Shapes torch.Size([2]) and torch.Size([1]) are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensor', 'test_fake_crossref_backward_amp'),
+           ),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True)),
     OpInfo('index_copy',
@@ -20081,7 +20093,8 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_add",
@@ -20090,7 +20103,8 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # no _refs support for Tensor.__setitem__
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),)
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        ),
     ),
     PythonRefInfo(
         "_refs.index_fill",
