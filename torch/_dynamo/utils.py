@@ -1390,15 +1390,54 @@ def tensor_always_has_static_shape(
 # copy pasted. This util is meant to replace that regex. Because we were inconsistent across all locations,
 # we are implementing the widest useful intersection of the various regexs here.
 def normalize_attr_name(name):
-    from torch._guards import TracingContext
-
     # e.g. replace abc[0].xyz with abc_0.xyz
     name = re.sub(r"\[(\d+)\]", r"_\g<1>", name)
     # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
     name = re.sub(r"[^a-zA-Z0-9]", "_", name)
+    return name
+
+
+def unique_normalized_attr_name(name):
+    from torch._guards import TracingContext
+
+    # Normalize the attr name
+    name = normalize_attr_name(name)
     base = name
+    # Iterate until we have a new, unique name.
     for i in itertools.count():
         if name not in TracingContext.get().module_context.names_to_sources:
             return name
         name = f"{base}_{i}"
-    return name
+
+
+def get_or_make_known_name(name, source):
+    # Try to get the known name
+    known = known_name(name, source)
+    if known:
+        return known
+    # We didn't find it, let's make and register a new one
+    return unique_normalized_attr_name(name)
+
+
+def known_name(name, source):
+    from torch._guards import TracingContext
+
+    # Normalize the attr name
+    name = normalize_attr_name(name)
+    names_to_sources = TracingContext.get().module_context.names_to_sources
+    # If the name isn't known, return.
+    # This is safe because names are always monotonically increasing, so if
+    # we do not know about bar, or bar_1, we won't have bar_{k}
+    if name not in names_to_sources:
+        return None
+    base = name
+    # We know about the name, let's find the source where we match by name
+    for i in itertools.count():
+        if name not in names_to_sources:
+            breakpoint()
+        candidate_source_name = normalize_attr_name(source.name())
+        if name == candidate_source_name:
+            # Name matches!
+            return name
+        # Name mismatch, iterate.
+        name = f"{base}_{i}"
