@@ -32,6 +32,10 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import ifunspec
+from torch.ao.quantization import MinMaxObserver
+from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.quantize_fx import prepare_qat_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -54,6 +58,20 @@ class MyPickledModule(torch.nn.Module):
 
     def forward(self, x, y):
         return x * x * x + y + self.z
+
+
+# These are used for test_{cond/map}_with_quantization
+default_symmetric_fake_quant = FakeQuantize.with_args(
+    observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=torch.quint8
+)
+default_weight_symmetric_fake_quant = FakeQuantize.with_args(
+    observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+)
+uniform_qconfig_8bit = QConfig(
+    activation=default_symmetric_fake_quant,
+    weight=default_weight_symmetric_fake_quant.with_args,
+)
+qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
@@ -3007,15 +3025,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_cond_with_quantization(self):
         from functorch.experimental.control_flow import cond
-        from torch.ao.quantization.experimental.qconfig import uniform_qconfig_8bit
-        from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                qconfig_dict = {
-                    "object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]
-                }
                 example_inputs = (torch.randn(5, 5),)
                 self.model = torch.nn.Linear(5, 5)
                 self.quantized_model = prepare_qat_fx(
@@ -3041,15 +3054,10 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
     def test_map_with_quantization(self):
         from functorch.experimental.control_flow import map
-        from torch.ao.quantization.experimental.qconfig import uniform_qconfig_8bit
-        from torch.ao.quantization.quantize_fx import prepare_qat_fx
 
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                qconfig_dict = {
-                    "object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]
-                }
                 example_inputs = (torch.randn(5, 5),)
                 self.model = torch.nn.Linear(5, 5)
                 self.quantized_model = prepare_qat_fx(
