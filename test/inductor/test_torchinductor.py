@@ -5861,9 +5861,9 @@ if HAS_CPU:
         def test_reduce_with_masked(self):
             # https://github.com/pytorch/pytorch/issues/96484
             def fn(a, b):
-               a = torch.nn.functional.pad(a, (0, -1))
-               c = a + b
-               return c.min(0).values
+                a = torch.nn.functional.pad(a, (0, -1))
+                c = a + b
+                return c.min(0).values
 
             a = torch.randn([2])
             b = torch.randn([2])
