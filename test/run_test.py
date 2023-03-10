@@ -911,7 +911,7 @@ PYTEST_BLOCKLIST = [
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
     "dynamo/test_unspec",  # imports repros
-] + list(CUSTOM_HANDLERS.keys())
+]
 
 
 def parse_test_module(test):
