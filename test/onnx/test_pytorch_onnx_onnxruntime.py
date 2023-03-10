@@ -13,7 +13,6 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
-
 import torch
 import torchvision
 from model_defs import (
@@ -35,9 +34,10 @@ from pytorch_test_common import (
     skipShapeChecking,
     skipTraceTest,
 )
+
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, verification
+from torch.onnx import _constants, errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -7531,6 +7531,221 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_default(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=False)
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_hop_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                hop_length = 4
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    hop_length=hop_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_non_divisible_hop_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                hop_length = 5
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    hop_length=hop_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_int_same_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_length = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    win_length=win_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_int_different_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_length = 9
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    win_length=win_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_custom(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(16)
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    window=window,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_custom_window_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(10)
+                return torch.stft(
+                    x, n_fft=n_fft, window=window, center=False, return_complex=False
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises((AssertionError, RuntimeError)):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_window_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_len = 17
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    win_length=win_len,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_size_with_win_len(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(10)
+                win_len = 10
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    window=window,
+                    win_length=win_len,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_one_dimension(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_input_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=False)
+
+        x = torch.randn((1, 1, 32), requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_return_complex(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=True)
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises(errors.SymbolicValueError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_normalize(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    normalized=True,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_not_onesided(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    onesided=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
 
     def test_constant_pad(self):
         model = torch.nn.ConstantPad1d(2, 3.5)
