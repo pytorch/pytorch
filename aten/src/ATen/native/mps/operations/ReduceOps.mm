@@ -271,7 +271,7 @@ void reduction_out_mps(
           }
 
           MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [castOutputTensor dataType]) {
+          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
             outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
           }
 
@@ -885,7 +885,7 @@ Tensor std_var_common_impl_mps(
 
           if (use_correction && correction_value) {
               MPSGraphTensor *besselTensor= [mpsGraph constantWithScalar:bessel_correction
-                                                                dataType:getMPSDataType(input_t.scalar_type())];
+                                                                dataType:getMPSDataType(input_t)];
               MPSGraphTensor *correctedTensor = [mpsGraph multiplicationWithPrimaryTensor:outputVarTensor
                                                                           secondaryTensor:besselTensor
                                                                                      name:nil];
@@ -969,7 +969,7 @@ TORCH_IMPL_FUNC(any_out_mps)
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("any_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" + getMPSTypeString(input_t.scalar_type());
+    string key = string("any_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" + getMPSTypeString(input_t);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if (!cachedGraph) {
@@ -979,7 +979,7 @@ TORCH_IMPL_FUNC(any_out_mps)
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSDataType input_type = getMPSDataType(input_t.scalar_type());
+          MPSDataType input_type = getMPSDataType(input_t);
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
 
           MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
@@ -1033,7 +1033,7 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("any_all_out_mps:") + getMPSShapeString(input_t_shape) +":" + getMPSTypeString(input_t.scalar_type());
+    string key = string("any_all_out_mps:") + getMPSShapeString(input_t_shape) +":" + getMPSTypeString(input_t);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if (!cachedGraph) {
@@ -1045,7 +1045,7 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSDataType input_type = getMPSDataType(input_t.scalar_type());
+          MPSDataType input_type = getMPSDataType(input_t);
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
           MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
           MPSGraphTensor* castOutputTensor = [mpsGraph reductionOrWithTensor:castInputTensor
@@ -1053,7 +1053,7 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
                                                                             name:nil];
 
           MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [castOutputTensor dataType]) {
+          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
             outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
           }
           newCachedGraph->inputTensor_ = inputTensor;
@@ -1111,7 +1111,7 @@ TORCH_IMPL_FUNC(all_out_mps)
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" + getMPSTypeString(input_t.scalar_type());
+    string key = string("all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" + getMPSTypeString(input_t);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if (!cachedGraph) {
@@ -1121,7 +1121,7 @@ TORCH_IMPL_FUNC(all_out_mps)
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSDataType input_type = getMPSDataType(input_t.scalar_type());
+          MPSDataType input_type = getMPSDataType(input_t);
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
           MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
           MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor
@@ -1167,7 +1167,7 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("all_all_out_mps:") + getMPSShapeString(input_t_shape) +":" + getMPSTypeString(input_t.scalar_type());
+    string key = string("all_all_out_mps:") + getMPSShapeString(input_t_shape) +":" + getMPSTypeString(input_t);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
 
     if (!cachedGraph) {
@@ -1177,7 +1177,7 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSDataType input_type = getMPSDataType(input_t.scalar_type());
+          MPSDataType input_type = getMPSDataType(input_t);
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_type, input_t_shape);
           MPSGraphTensor* castInputTensor = castToIHFTypes(mpsGraph, inputTensor, input_t, /*includesInt64=*/macOS13_3_plus);
           MPSGraphTensor* castOutputTensor = [mpsGraph reductionAndWithTensor:castInputTensor
@@ -1260,7 +1260,7 @@ Tensor min_max_mps
           }
 
           MPSGraphTensor* outputTensor = castOutputTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [castOutputTensor dataType]) {
+          if (getMPSDataType(output_t) != [castOutputTensor dataType]) {
             outputTensor = castMPSTensor(mpsGraph, castOutputTensor, output_t.scalar_type());
           }
 
@@ -1388,7 +1388,7 @@ void min_max_out_mps
                                             name:@"cast_out"];
           }
 
-          if ([outputTensor dataType] != getMPSDataType(output_t.scalar_type())) {
+          if ([outputTensor dataType] != getMPSDataType(output_t)) {
             outputTensor = castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type());
           }
           newCachedGraph->inputTensor_ = inputTensor;
@@ -1535,7 +1535,7 @@ void argmax_argmin_out_mps
           }
 
           MPSGraphTensor* outputTensor = argreduceOutTensor;
-          if (getMPSDataType(output_t.scalar_type()) != [argreduceOutTensor dataType]) {
+          if (getMPSDataType(output_t) != [argreduceOutTensor dataType]) {
             outputTensor = castMPSTensor(mpsGraph, argreduceOutTensor, output_t.scalar_type());
           }
 
@@ -1703,7 +1703,7 @@ Tensor median_mps(const Tensor& input_t) {
   }
 
   @autoreleasepool {
-    string key = "median_mps:"+ mps::getMPSTypeString(input_t.scalar_type())  + mps::getTensorsStringKey(input_t);
+    string key = "median_mps:"+ mps::getMPSTypeString(input_t)  + mps::getTensorsStringKey(input_t);
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     // Initialize once if configuration not found in cache
     if (!cachedGraph) {
