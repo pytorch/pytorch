@@ -448,7 +448,7 @@ TORCH_IMPL_FUNC(cumsum_out_mps)
        auto rc = [mpsGraph cumulativeSumWithTensor: inputTensor
                                               axis: dim
                                               name: nil];
-       if ((mps::getMPSDataType(result.scalar_type()) != [rc dataType]) || castInputData) {
+       if ((mps::getMPSDataType(result) != [rc dataType]) || castInputData) {
          return mps::castMPSTensor(mpsGraph, rc, result.scalar_type());
        }
        return rc;
