@@ -305,7 +305,7 @@ class _DeviceGuard:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
@@ -325,7 +325,7 @@ class device:
         self.prev_idx = torch.cuda._exchange_device(self.idx)
 
     def __exit__(self, type: Any, value: Any, traceback: Any):
-        torch.cuda._exchange_device(self.prev_idx)
+        self.idx = torch.cuda._exchange_device(self.prev_idx)
         return False
 
 
