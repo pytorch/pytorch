@@ -242,7 +242,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -266,7 +265,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
