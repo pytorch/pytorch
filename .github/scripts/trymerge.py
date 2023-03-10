@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
 
+# NB: the following functions are used in Meta-internal workflows
+# (github_first_try_merge/my_handler.py) and thus have functionality limitations
+# (no `git` command access, no network access besides the strict allow list):
+#
+# find_matching_merge_rule
+# read_merge_rules
+#
+# Also any signature changes of these functions, as well as changes to the `GitHubPR`
+# class, will likely require corresponding changes for the internal workflows.
+
 import base64
 import json
 import os
@@ -18,11 +28,8 @@ from typing import (
     Optional,
     Pattern,
     Tuple,
-    Union,
     cast,
 )
-from urllib.error import HTTPError
-from urllib.request import Request, urlopen
 from warnings import warn
 from pathlib import Path
 
@@ -32,6 +39,18 @@ from gitutils import (
     get_git_remote_name,
     get_git_repo_dir,
     patterns_to_regex,
+)
+from github_utils import (
+    GitHubComment,
+    gh_fetch_json_list,
+    gh_fetch_url,
+    gh_post_commit_comment,
+    gh_post_pr_comment,
+)
+from label_utils import (
+    LABEL_ERR_MSG,
+    gh_add_labels,
+    has_required_labels,
 )
 from trymerge_explainer import (
     TryMergeExplainer,
@@ -426,6 +445,22 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 
+GH_GET_REPO_SUBMODULES = """
+query ($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    submodules(first: 100) {
+      nodes {
+        path
+      }
+      pageInfo {
+        endCursor
+        hasNextPage
+      }
+    }
+  }
+}
+"""
+
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
 RE_GHSTACK_DESC = re.compile(r'Stack.*:\r?\n(\* [^\r\n]+\r?\n)+', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
@@ -440,71 +475,8 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 
 
-def _fetch_url(url: str, *,
-               headers: Optional[Dict[str, str]] = None,
-               data: Optional[Dict[str, Any]] = None,
-               method: Optional[str] = None,
-               reader: Callable[[Any], Any] = lambda x: x.read()) -> Any:
-    if headers is None:
-        headers = {}
-    token = os.environ.get("GITHUB_TOKEN")
-    if token is not None and url.startswith('https://api.github.com/'):
-        headers['Authorization'] = f'token {token}'
-    data_ = json.dumps(data).encode() if data is not None else None
-    try:
-        with urlopen(Request(url, headers=headers, data=data_, method=method)) as conn:
-            return reader(conn)
-    except HTTPError as err:
-        if err.code == 403 and all(key in err.headers for key in ['X-RateLimit-Limit', 'X-RateLimit-Used']):
-            print(f"""Rate limit exceeded:
-                Used: {err.headers['X-RateLimit-Used']}
-                Limit: {err.headers['X-RateLimit-Limit']}
-                Remaining: {err.headers['X-RateLimit-Remaining']}
-                Resets at: {err.headers['x-RateLimit-Reset']}""")
-        raise
-
-def _fetch_json_any(
-    url: str,
-    params: Optional[Dict[str, Any]] = None,
-    data: Optional[Dict[str, Any]] = None
-) -> Any:
-    headers = {'Accept': 'application/vnd.github.v3+json'}
-    if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
-    return _fetch_url(url, headers=headers, data=data, reader=json.load)
-
-def fetch_json_list(url: str,
-                    params: Optional[Dict[str, Any]] = None,
-                    data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    return cast(List[Dict[str, Any]], _fetch_json_any(url, params, data))
-
-def fetch_json_dict(url: str,
-                    params: Optional[Dict[str, Any]] = None,
-                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
-    return cast(Dict[str, Any], _fetch_json_any(url, params, data))
-
-def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    if dry_run:
-        print(comment)
-        return []
-    return fetch_json_list(url, data={"body": comment})
-
-
-def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments', comment, dry_run)
-
-
-def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
-    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/commits/{sha}/comments', comment, dry_run)
-
-
-def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
-    fetch_json_list(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/labels',
-                    data={"labels": labels})
-
-
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
-    rc = _fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
+    rc = gh_fetch_url("https://api.github.com/graphql", data={"query": query, "variables": kwargs}, reader=json.load)
     if "errors" in rc:
         raise RuntimeError(f"GraphQL query {query}, args {kwargs} failed: {rc['errors']}")
     return cast(Dict[str, Any], rc)
@@ -683,15 +655,6 @@ def get_ghstack_prs(repo: GitRepo, pr: "GitHubPR") -> List[Tuple["GitHubPR", str
             )
     return entire_stack
 
-@dataclass
-class GitHubComment:
-    body_text: str
-    created_at: str
-    author_login: str
-    author_association: str
-    editor_login: Optional[str]
-    database_id: int
-
 
 class GitHubPR:
     def __init__(self, org: str, project: str, pr_num: int) -> None:
@@ -707,6 +670,7 @@ class GitHubPR:
         self._authors: Optional[List[Tuple[str, str]]] = None
         self._reviews: Optional[List[Tuple[str, str]]] = None
         self.merge_base: Optional[str] = None
+        self.submodules: Optional[List[str]] = None
 
     def is_closed(self) -> bool:
         return bool(self.info["closed"])
@@ -764,10 +728,10 @@ class GitHubPR:
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
             info = self.info
-            self.changed_files = []
+            unique_changed_files = set()
             # Do not try to fetch more than 10K files
             for _ in range(100):
-                self.changed_files += [x["path"] for x in info["files"]["nodes"]]
+                unique_changed_files.update([x["path"] for x in info["files"]["nodes"]])
                 if not info["files"]["pageInfo"]["hasNextPage"]:
                     break
                 rc = gh_graphql(GH_GET_PR_NEXT_FILES_QUERY,
@@ -776,10 +740,34 @@ class GitHubPR:
                                 number=self.pr_num,
                                 cursor=info["files"]["pageInfo"]["endCursor"])
                 info = rc["data"]["repository"]["pullRequest"]
+            self.changed_files = list(unique_changed_files)
 
         if len(self.changed_files) != self.get_changed_files_count():
             raise RuntimeError("Changed file count mismatch")
         return self.changed_files
+
+    def get_submodules(self) -> List[str]:
+        if self.submodules is None:
+            rc = gh_graphql(GH_GET_REPO_SUBMODULES,
+                            name=self.project,
+                            owner=self.org)
+            info = rc["data"]["repository"]["submodules"]
+            self.submodules = [s["path"] for s in info["nodes"]]
+        return self.submodules
+
+    def get_changed_submodules(self) -> List[str]:
+        submodules = self.get_submodules()
+        return [f for f in self.get_changed_files() if f in submodules]
+
+    def has_invalid_submodule_updates(self) -> bool:
+        """ Submodule updates in PR are invalid if submodule keyword
+        is not mentioned in neither the title nor body/description
+        nor in any of the labels.
+        """
+        return (len(self.get_changed_submodules()) > 0 and
+                "submodule" not in self.get_title().lower() and
+                "submodule" not in self.get_body().lower() and
+                all("submodule" not in label for label in self.get_labels()))
 
     def _get_reviews(self) -> List[Tuple[str, str]]:
         if self._reviews is None:
@@ -1146,9 +1134,14 @@ def gen_new_issue_link(
 
 
 def read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
+    """Returns the list of all merge rules for the repo or project.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     repo_relative_rules_path = MERGE_RULE_PATH
     if repo is None:
-        json_data = _fetch_url(
+        json_data = gh_fetch_url(
             f"https://api.github.com/repos/{org}/{project}/contents/{repo_relative_rules_path}",
             headers={'Accept': 'application/vnd.github.v3+json'},
             reader=json.load,
@@ -1178,7 +1171,11 @@ def find_matching_merge_rule(
     skip_internal_checks: bool = False,
     land_check_commit: Optional[str] = None,
 ) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception"""
+    """Returns merge rule matching to this pr or raises an exception.
+
+    NB: this function is used in Meta-internal workflows, see the comment
+    at the top of this file for details.
+    """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
 
@@ -1343,7 +1340,7 @@ def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[
 
 def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
     try:
-        return [FlakyRule(**rule) for rule in fetch_json_list(url)]
+        return [FlakyRule(**rule) for rule in gh_fetch_json_list(url)]
     except Exception as e:
         print(f"Could not download {url} because: {e}.")
         if num_retries > 0:
@@ -1528,7 +1525,7 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
         return
     response = cast(
         Dict[str, Any],
-        fetch_json_list(
+        gh_fetch_json_list(
             "https://api.github.com/search/issues",
             params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
         ),
@@ -1634,6 +1631,9 @@ def merge(pr_num: int, repo: GitRepo,
     # jobs. If there's missing approval, a RuntimeError will be raised
     # here to stop the merge process right away
     find_matching_merge_rule(pr, repo, skip_mandatory_checks=True)
+
+    if not has_required_labels(pr):
+        raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
 
     if land_checks and not dry_run:
         land_check_commit = pr.create_land_time_check_branch(
@@ -1779,6 +1779,12 @@ def main() -> None:
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
         gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        return
+
+    if not args.force and pr.has_invalid_submodule_updates():
+        message = f"This PR updates submodules {', '.join(pr.get_changed_submodules())}\n"
+        message += "\nIf those updates are intentional, please add \"submodule\" keyword to PR title/description."
+        gh_post_pr_comment(org, project, args.pr_num, message, dry_run=args.dry_run)
         return
 
     try:
