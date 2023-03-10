@@ -4,6 +4,7 @@
 #include <ATen/Utils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/sparse/Macros.h>
+#include <ATen/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -190,7 +191,8 @@ template <
     class kernel_t,
     template <typename func_t, typename vec_func_t>
     class vec_kernel_t = EmptyVecKernel,
-    template <typename scalar_t> class Vec = DummyVec>
+    template <typename scalar_t> class Vec = DummyVec,
+    size_t static_shape_max_len = 0>
 void _validate_compressed_sparse_indices_kernel(
     const Tensor& cidx,
     const Tensor& idx,
@@ -269,14 +271,10 @@ void _validate_compressed_sparse_indices_kernel(
         at::arange(batch_count, cidx.options()).view(batch_dims).unsqueeze_(-1);
 
     const auto idx_ndims = idx.dim();
-    const auto cpu_options = idx.options().dtype(kLong).device(kCPU);
-    Tensor idx_sizes_and_strides_cpu = at::empty({2, idx_ndims}, cpu_options);
-    idx_sizes_and_strides_cpu.select(0, 0).copy_(
-        at::tensor(idx.sizes(), cpu_options));
-    idx_sizes_and_strides_cpu.select(0, 1).copy_(
-        at::tensor(idx.strides(), cpu_options));
-    const Tensor idx_sizes_and_strides =
-        idx_sizes_and_strides_cpu.to(idx.device());
+
+    const auto idx_geometry_holder = at::sparse::TensorGeometryHolder<static_shape_max_len>(idx);
+    const auto idx_sizes = std::get<0>(*idx_geometry_holder);
+    const auto idx_strides = std::get<1>(*idx_geometry_holder);
 
     auto iter = TensorIteratorConfig()
                     .set_check_mem_overlap(false)
@@ -291,11 +289,8 @@ void _validate_compressed_sparse_indices_kernel(
     AT_DISPATCH_INDEX_TYPES(
         idx.scalar_type(),
         NAME,
-        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes_and_strides]() {
+        [&iter, &idx, dim, nnz, idx_ndims, &idx_sizes, &idx_strides]() {
           const auto* RESTRICT ptr_idx = idx.data_ptr<index_t>();
-          const int64_t* RESTRICT idx_sizes =
-              idx_sizes_and_strides.data_ptr<int64_t>();
-          const int64_t* RESTRICT idx_strides = idx_sizes + idx_ndims;
           const auto zero = index_t{0};
           KernelLauncher::launch(
               iter,
@@ -348,18 +343,41 @@ void validate_compressed_sparse_indices_kernel(
     const int64_t cdim,
     const int64_t dim,
     const int64_t nnz) {
+  constexpr size_t idx_max_ndims = 8; // up to 7-dim batch.
+  const size_t idx_ndims = static_cast<size_t>(idx.dim());
+
   if (is_crow) {
-    _validate_compressed_sparse_indices_kernel<
-        CDimName::CRow,
-        kernel_t,
-        vec_kernel_t,
-        Vec>(cidx, idx, cdim, dim, nnz);
+    if (idx_ndims <= idx_max_ndims) {
+      _validate_compressed_sparse_indices_kernel<
+          CDimName::CRow,
+          kernel_t,
+          vec_kernel_t,
+          Vec,
+          idx_max_ndims>(cidx, idx, cdim, dim, nnz);
+    }
+    else {
+      _validate_compressed_sparse_indices_kernel<
+          CDimName::CRow,
+          kernel_t,
+          vec_kernel_t,
+          Vec>(cidx, idx, cdim, dim, nnz);
+    }
   } else {
-    _validate_compressed_sparse_indices_kernel<
-        CDimName::CCol,
-        kernel_t,
-        vec_kernel_t,
-        Vec>(cidx, idx, cdim, dim, nnz);
+    if (idx_ndims <= idx_max_ndims) {
+      _validate_compressed_sparse_indices_kernel<
+          CDimName::CCol,
+          kernel_t,
+          vec_kernel_t,
+          Vec,
+          idx_max_ndims>(cidx, idx, cdim, dim, nnz);
+    }
+    else {
+      _validate_compressed_sparse_indices_kernel<
+          CDimName::CCol,
+          kernel_t,
+          vec_kernel_t,
+          Vec>(cidx, idx, cdim, dim, nnz);
+    }
   }
 }
 

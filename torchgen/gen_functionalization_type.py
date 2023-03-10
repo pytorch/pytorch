@@ -499,6 +499,7 @@ def wrap_propagate_mutations_and_return(
     ):
         updates.append(
             f"""\
+  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
   at::functionalization::impl::sync({outer_arg});"""
@@ -541,6 +542,11 @@ def emit_inplace_functionalization_body(
         for a in f.func.arguments.flat_all
         if a.type.is_tensor_like() and a.annotation is None
     ]
+    non_mutated_tensor_names = [
+        a.name
+        for a in f.func.arguments.flat_all
+        if a.type == BaseType(BaseTy.Tensor) and a.annotation is None
+    ]
     # all mutable inputs must be functional tensors in order to participate in functionalization
     check_all_mutated_args_are_functional = " && ".join(
         ["true"]
@@ -554,6 +560,14 @@ def emit_inplace_functionalization_body(
         + [
             f"at::functionalization::impl::isFunctionalTensor({a})"
             for a in non_mutated_names
+        ]
+    )
+
+    check_any_non_mutated_tensors_are_xla = " || ".join(
+        ["false"]
+        + [
+            f"{a}.device().type() == c10::DeviceType::XLA"
+            for a in non_mutated_tensor_names
         ]
     )
     # These are used in the cases where we don't functionalize and redispatch to the inplace op
@@ -619,7 +633,9 @@ def emit_inplace_functionalization_body(
       }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
-        if (({check_any_non_mutated_args_are_functional})) {{
+        // We want to disable this check if there are any XLA tensors.
+        // cpu_tensor.copy_(xla_tensor) is valid code.
+        if (!({check_any_non_mutated_tensors_are_xla}) && ({check_any_non_mutated_args_are_functional})) {{
          // case 1: trying to mutate a non functional tensor with a functional tensor is an error
          TORCH_INTERNAL_ASSERT(false,
            "mutating a non-functional tensor with a functional tensor is not allowed.",
