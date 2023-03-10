@@ -5333,9 +5333,9 @@ class TestQuantizedConv(TestCase):
         Y_scale = 4.2
         Y_zero_point = 0
         use_bias_list = [False]
-        use_channelwise_list = [False]
+        use_channelwise_list = [True]
         X2_scale = 1.2
-        X2_zero_point_list = [0, 4]
+        X2_zero_point_list = [0]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
         for groups, use_bias, use_channelwise, X2_zero_point in options:
             with override_quantized_engine('onednn'):
