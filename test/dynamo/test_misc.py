@@ -565,7 +565,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(v, v.size())[0, 0], -10)
         self.assertEqual(opt_fn(v, (10, 20))[0, 0], -10)
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
-        self.assertEqual(cnts.op_count, 2)
+        # One recompile per differing input type
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_cell_output1(self):
         out = None
@@ -3340,6 +3341,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def forward(self, query, key, value):
                 out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
                 out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
                     query=query,
                     key=key,
                     value=value,
@@ -3358,6 +3362,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 out = F.scaled_dot_product_attention(
                     query, key, value, None, dropout_p=0, is_causal=True
                 )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
                 return out
 
         device = "cuda"
