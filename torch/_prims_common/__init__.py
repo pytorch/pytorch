@@ -150,7 +150,7 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType, check_strides=Fals
             a_stride, b_stride = a._nested_tensor_strides(), b._nested_tensor_strides()
             same_strides, idx = torch.equal(a_stride, b_stride), None
         else:
-            a_stride, b_stride = a.stride(), b.stride()
+            a_stride, b_stride = a.stride(), b.stride()  # type: ignore[assignment]
             same_strides, idx = check_significant_strides(a, b)
 
         if not same_strides:

@@ -26,11 +26,6 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-from torch._subclasses.fake_tensor import (
-    FakeTensor,
-    FakeTensorMode,
-)
-
 # Tests are ported from pytorch/nestedtensor.
 # This makes porting as_nested_tensor easier in the future.
 

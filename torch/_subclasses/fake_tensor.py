@@ -525,9 +525,7 @@ def nested_constructor(fake_mode, func, *args, **kwargs):
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
     # default device is device of first tensor in tensorlist
-    default_device = (
-        torch.device("cpu") if len(args[0]) == 0 else args[0][0].device
-    )
+    default_device = torch.device("cpu") if len(args[0]) == 0 else args[0][0].device
     out_device = new_kwargs.get("device", default_device)
     new_kwargs["device"] = torch.device("meta")
     with in_kernel_invocation_manager(fake_mode):

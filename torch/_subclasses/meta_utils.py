@@ -248,7 +248,11 @@ class MetaConverter:
                             r = r.clone()
                             r._coalesced_(t.is_coalesced())
                 elif t.is_nested:
+                    assert shape_env is None, "symbolic on nested NYI"
                     is_leaf = safe_is_leaf(t)
+                    # TODO: This will have to change to handle the symbolic case.
+                    # In particular, we'll need to use a NT constructor that allows
+                    # us to pass the correct symbolic metadata.
                     r = callback(lambda: torch.empty_like(t, device="meta"))
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
