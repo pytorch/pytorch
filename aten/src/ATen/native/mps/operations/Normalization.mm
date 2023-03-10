@@ -254,7 +254,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
             // Update saved mean and inverse std tensor
             MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(double)epsilon
                                                                    shape:@[@1]
-                                                                dataType:MPSDataTypeFloat32];
+                                                                dataType:input_mps_dtype];
 
             MPSGraphTensor *varianceEps = [mpsGraph additionWithPrimaryTensor:batchVarianceTensor
                                                               secondaryTensor:epsilonTensor
@@ -262,12 +262,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
 
             MPSGraphTensor *sqrtVariance = [mpsGraph squareRootWithTensor:varianceEps
                                                                      name:@"sqrtVariance"];
-            float primary = 1.0f;
-            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:primary dataType:MPSDataTypeFloat32];
-
-            scaledInverseSqrtVariance = [mpsGraph divisionWithPrimaryTensor:primaryTensor
-                                                            secondaryTensor:sqrtVariance
-                                                                       name:nil];
+            scaledInverseSqrtVariance = [mpsGraph reciprocalWithTensor:sqrtVariance
+                                                                  name:nil];
             // Update saved mean and inverse std tensor
             saveMeanTensor = batchMeanTensor;
             saveVarTensor = scaledInverseSqrtVariance;
@@ -678,13 +674,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
 
           if(train) {
             // Use save_mean and save_var
-            float primary = 1.0f;
-            MPSGraphTensor *primaryTensor = [mpsGraph constantWithScalar:primary dataType:MPSDataTypeFloat32];
-            MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(float)epsilon dataType:MPSDataTypeFloat32];
+            MPSGraphTensor *epsilonTensor = [mpsGraph constantWithScalar:(float)epsilon dataType:input_mps_dtype];
             MPSGraphTensor *revertSaveVarTensor = saveVarTensor;
-            revertSaveVarTensor = [mpsGraph divisionWithPrimaryTensor: primaryTensor
-                                                      secondaryTensor: revertSaveVarTensor
-                                                                 name: nil];
+            revertSaveVarTensor = [mpsGraph reciprocalWithTensor: revertSaveVarTensor
+                                                            name: nil];
             revertSaveVarTensor = [mpsGraph multiplicationWithPrimaryTensor: revertSaveVarTensor
                                                             secondaryTensor: revertSaveVarTensor
                                                                        name: nil];
