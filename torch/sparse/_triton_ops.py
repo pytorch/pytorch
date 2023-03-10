@@ -322,7 +322,7 @@ if _has_triton():
                     c_output,
                     *c_output.stride(),
                     GROUP_SIZE_ROW=4,
-                    num_stages=1,
+                    num_stages=4,
                     num_warps=4,
                 )
 
@@ -373,7 +373,7 @@ if _has_triton():
                         brc_o,
                         *brc_o.stride(),
                         GROUP_SIZE_ROW=4,
-                        num_stages=1,
+                        num_stages=4,
                         num_warps=4,
                     )
 
