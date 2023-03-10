@@ -43,7 +43,7 @@ class SGD(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
             group.setdefault('differentiable', False)
-            group.setdefault('fused', False)
+            group.setdefault('fused', None)
 
     def _init_group(self, group, params_with_grad, d_p_list, momentum_buffer_list):
         has_sparse_grad = False
@@ -225,29 +225,25 @@ def sgd(params: List[Tensor],
     See :class:`~torch.optim.SGD` for details.
     """
 
-    if fused is None and foreach is None:
-        # why must we be explicit about an if statement for torch.jit.is_scripting here?
-        # because JIT can't handle Optionals nor fancy conditionals when scripting
-        if not torch.jit.is_scripting():
-            fused, foreach = _default_to_fused_or_foreach(
-                [params, d_p_list, momentum_buffer_list], differentiable=False, has_fused=True)
-        else:
-            foreach = False
-            fused = False
     if fused is None:
         fused = False
     if foreach is None:
-        foreach = False
+        # why must we be explicit about an if statement for torch.jit.is_scripting here?
+        # because JIT can't handle Optionals nor fancy conditionals when scripting
+        if not torch.jit.is_scripting():
+            _, foreach = _default_to_fused_or_foreach(params, differentiable=False, use_fused=False)
+        else:
+            foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')
     if fused and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with fused optimizers')
 
-    if fused and not torch.jit.is_scripting():
-        func = _fused_sgd
-    elif foreach and not torch.jit.is_scripting():
+    if foreach and not torch.jit.is_scripting():
         func = _multi_tensor_sgd
+    elif fused and not torch.jit.is_scripting():
+        func = _fused_sgd
     else:
         func = _single_tensor_sgd
 
