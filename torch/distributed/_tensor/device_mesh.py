@@ -22,8 +22,8 @@ from torch.distributed.distributed_c10d import (
     scatter,
     Work,
 )
-import torch.distributed.distributed_c10d as c10d
 
+import torch.distributed.distributed_c10d as c10d
 import torch.distributed._functional_collectives as funcol
 
 _global_device_mesh: Optional["DeviceMesh"] = None
@@ -293,12 +293,12 @@ class DeviceMesh:
     def get_rank(self) -> int:
         return get_rank()
 
-    def get_coordinate_on_dim(self, dim: int) -> Optional[int]:
+    def get_coordinate(self) -> Optional[List[int]]:
         """
-        Return the relative index of this rank relative to a given
-        dimension of the mesh. If this rank is not part of the mesh, return None.
+        Return the relative indices of this rank relative to all
+        dimensions of the mesh. If this rank is not part of the mesh, return None.
         """
-        return self._coordinate_on_dim[dim] if self._coordinate_on_dim else None
+        return self._coordinate_on_dim if self._coordinate_on_dim else None
 
     def scatter(
         self,
@@ -420,6 +420,7 @@ class DeviceMesh:
         tensor: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,  # type: ignore[assignment]
         mesh_dim: int = 0,
+        async_op: bool = False,
     ) -> torch.Tensor:
         """
         all_reduce the tensor on each rank on a device mesh dimension, and
@@ -435,6 +436,7 @@ class DeviceMesh:
         Returns:
             A :class:`torch.Tensor` object
         """
+        dim_group = self._dim_groups[mesh_dim]
         op_name: str = op.name  # type: ignore[attr-defined]
         return funcol.all_reduce(tensor, reduceOp=op_name, group=(self, mesh_dim,))
 
@@ -474,7 +476,7 @@ class DeviceMesh:
             warnings.warn(
                 "ProcessGroupGloo does not support reduce_scatter, falling back with all reduce!"
             )
-            my_coordinate = self.get_coordinate_on_dim(mesh_dim)
+            my_coordinate = self.get_coordinate()
             # TODO: what should happen if rank is not in the mesh?
             # see issue https://github.com/pytorch/tau/pull/492
             assert (
@@ -498,7 +500,7 @@ class DeviceMesh:
             fut = c10d.all_reduce(flat_tensor, op=op, group=dim_group, async_op=async_op)
 
             # scatter the tensor
-            output_offset = offset_list[my_coordinate]
+            output_offset = offset_list[my_coordinate[mesh_dim]]
             output.copy_(
                 flat_tensor[output_offset : output_offset + output.numel()].view(
                     output.shape

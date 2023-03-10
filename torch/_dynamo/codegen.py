@@ -369,9 +369,6 @@ class PyCodegen:
             )
         )
 
-    def create_begin_finally(self):
-        return create_instruction("BEGIN_FINALLY")
-
     def create_call_function_kw(self, nargs, kw_names, push_null):
         if sys.version_info >= (3, 11):
             output = create_call_function(nargs, push_null)
