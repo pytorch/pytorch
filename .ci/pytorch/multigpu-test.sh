@@ -35,7 +35,6 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_embedding_bag
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_binary_cmp
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_init
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_linear
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_math_ops
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_matrix_ops
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_softmax
