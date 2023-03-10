@@ -824,8 +824,8 @@ struct TORCH_API TensorType : public SharedType {
   TensorType(
       c10::optional<at::ScalarType> scalar_type,
       c10::optional<Device> device,
-      const SymbolicShape& sizes,
-      const VaryingShape<Stride>& strides,
+      SymbolicShape sizes,
+      VaryingShape<Stride> strides,
       c10::optional<bool> requires_grad,
       c10::optional<bool> undefined = false);
 
