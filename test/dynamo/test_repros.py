@@ -2298,13 +2298,20 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             generator_box.clear()
             return g(x)
 
-        # Should not error
-        torch._dynamo.optimize(counter)(f)(torch.randn(3))
+        self.assertNoUnraisable(lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3)))
 
         # Make sure the x + 2 is captured (a previous incorrect implementation
         # of this fix would have disabled the eval frame callback, which means
         # g wouldn't get traced
         self.assertEqual(counter.op_count, 1)
+
+    def test_error_return_without_exception_set(self):
+        # https://github.com/pytorch/pytorch/issues/93781
+        @torch.compile
+        def f():
+            _generator_type = type((_ for _ in ()))
+
+        self.assertNoUnraisable(f)
 
     @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
