@@ -1,0 +1,98 @@
+Fail to get yarn configuration. node:events:306
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: EBADF: bad file descriptor, read
+Emitted 'error' event on ReadStream instance at:
+    at emitErrorNT (node:internal/streams/destroy:188:8)
+    at errorOrDestroy (node:internal/streams/destroy:251:7)
+    at node:internal/fs/streams:193:9
+    at FSReqCallback.wrapper [as oncomplete] (node:fs:550:5) {
+  errno: -9,
+  code: 'EBADF',
+  syscall: 'read'
+}
+
+[I 2023-03-07 16:56:57.665 ServerApp] jupyterlab | extension was successfully linked.
+[I 2023-03-07 16:56:57.665 ServerApp] jupytext | extension was successfully linked.
+[I 2023-03-07 16:56:57.669 ServerApp] nbclassic | extension was successfully linked.
+[I 2023-03-07 16:56:58.081 ServerApp] jupyter_nbextensions_configurator | extension was found and enabled by notebook_shim. Consider moving the extension to Jupyter Server's extension paths.
+[I 2023-03-07 16:56:58.081 ServerApp] jupyter_nbextensions_configurator | extension was successfully linked.
+[I 2023-03-07 16:56:58.081 ServerApp] notebook_shim | extension was successfully linked.
+[I 2023-03-07 16:56:58.147 ServerApp] notebook_shim | extension was successfully loaded.
+[I 2023-03-07 16:56:58.147 ServerApp] [jupyter_nbextensions_configurator] enabled 0.6.1
+[I 2023-03-07 16:56:58.147 ServerApp] jupyter_nbextensions_configurator | extension was successfully loaded.
+[I 2023-03-07 16:56:58.148 LabApp] JupyterLab extension loaded from /home/pdamania/.conda/envs/myclone_ai-0810/lib/python3.8/site-packages/jupyterlab
+[I 2023-03-07 16:56:58.148 LabApp] JupyterLab application directory is /home/pdamania/.conda/envs/myclone_ai-0810/share/jupyter/lab
+[I 2023-03-07 16:56:58.151 ServerApp] jupyterlab | extension was successfully loaded.
+[I 2023-03-07 16:56:58.151 ServerApp] [Jupytext Server Extension] Deriving a JupytextContentsManager from LargeFileManager
+[I 2023-03-07 16:56:58.152 ServerApp] jupytext | extension was successfully loaded.
+[I 2023-03-07 16:56:58.161 ServerApp] nbclassic | extension was successfully loaded.
+[I 2023-03-07 16:56:58.161 ServerApp] The port 8888 is already in use, trying another port.
+[I 2023-03-07 16:56:58.162 ServerApp] Serving notebooks from local directory: /home/pdamania/notebooks
+[I 2023-03-07 16:56:58.162 ServerApp] Jupyter Server 1.23.6 is running at:
+[I 2023-03-07 16:56:58.162 ServerApp] http://localhost:8889/lab?token=c40c4329e03341f08e476ea6ef958c4d21af2dee83ef847e
+[I 2023-03-07 16:56:58.162 ServerApp]  or http://127.0.0.1:8889/lab?token=c40c4329e03341f08e476ea6ef958c4d21af2dee83ef847e
+[I 2023-03-07 16:56:58.162 ServerApp] Use Control-C to stop this server and shut down all kernels (twice to skip confirmation).
+[C 2023-03-07 16:56:58.174 ServerApp] 
+    
+    To access the server, open this file in a browser:
+        file:///home/pdamania/.local/share/jupyter/runtime/jpserver-639795-open.html
+    Or copy and paste one of these URLs:
+        http://localhost:8889/lab?token=c40c4329e03341f08e476ea6ef958c4d21af2dee83ef847e
+     or http://127.0.0.1:8889/lab?token=c40c4329e03341f08e476ea6ef958c4d21af2dee83ef847e
+[E 2023-03-07 16:57:07.113 LabApp] Fail to get yarn configuration. node:events:306
+          throw er; // Unhandled 'error' event
+          ^
+    
+    Error: EBADF: bad file descriptor, read
+    Emitted 'error' event on ReadStream instance at:
+        at emitErrorNT (node:internal/streams/destroy:188:8)
+        at errorOrDestroy (node:internal/streams/destroy:251:7)
+        at node:internal/fs/streams:193:9
+        at FSReqCallback.wrapper [as oncomplete] (node:fs:550:5) {
+      errno: -9,
+      code: 'EBADF',
+      syscall: 'read'
+    }
+    
+[I 2023-03-07 16:57:07.147 LabApp] Build is up to date
+[W 2023-03-07 16:57:08.208 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.209 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.218 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.223 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.284 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.288 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.296 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.304 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.494 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.498 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.503 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:08.507 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.121 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.124 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.129 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.131 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.320 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.339 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.375 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.563 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.756 ServerApp] Config option `template_path` not recognized by `LenvsHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.777 ServerApp] Config option `template_path` not recognized by `LenvsTocHTMLExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:09.813 ServerApp] Config option `template_path` not recognized by `LenvsLatexExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[W 2023-03-07 16:57:10.002 ServerApp] Config option `template_path` not recognized by `LenvsSlidesExporter`.  Did you mean one of: `extra_template_paths, template_name, template_paths`?
+[I 2023-03-07 16:57:16.655 ServerApp] Creating new notebook in 
+[I 2023-03-07 16:57:16.696 ServerApp] Saving Untitled.ipynb
+[I 2023-03-07 16:57:18.290 ServerApp] Kernel started: ec48da9f-b82a-4ee9-bdca-3f3a531cc090
+[I 2023-03-07 16:57:19.619 ServerApp] Starting buffering for ec48da9f-b82a-4ee9-bdca-3f3a531cc090:76516499-478c-4aba-add5-41e698a871e0
+[IPKernelApp] ERROR | No such comm target registered: jupyter.widget.control
+[IPKernelApp] WARNING | No such comm: 93034be5-a4eb-49f5-8e2a-c6cf675943bb
+[I 2023-03-07 16:59:17.865 ServerApp] Saving file at /Untitled.ipynb
+[I 2023-03-07 16:59:17.867 ServerApp] Saving Untitled.ipynb
+[I 2023-03-07 17:03:19.923 ServerApp] Saving file at /Untitled.ipynb
+[I 2023-03-07 17:03:19.924 ServerApp] Saving Untitled.ipynb
+[I 2023-03-07 17:05:20.202 ServerApp] Saving file at /Untitled.ipynb
+[I 2023-03-07 17:05:20.203 ServerApp] Saving Untitled.ipynb
+[I 2023-03-07 17:13:23.711 ServerApp] Saving file at /Untitled.ipynb
+[I 2023-03-07 17:13:23.714 ServerApp] Saving Untitled.ipynb
+[I 2023-03-07 18:51:00.304 ServerApp] Starting buffering for ec48da9f-b82a-4ee9-bdca-3f3a531cc090:ffed311c-dde5-4972-a7a9-050411645757
