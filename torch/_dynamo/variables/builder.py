@@ -1050,6 +1050,9 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
 
+    def __hash__(self) -> int:
+        return hash(id(self))
+
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool

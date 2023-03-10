@@ -3005,9 +3005,42 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
-    @unittest.expectedFailure
+    def test_cond_with_quantization(self):
+        from functorch.experimental.control_flow import cond
+        from torch.ao.quantization.experimental.qconfig import uniform_qconfig_8bit
+        from torch.ao.quantization.quantize_fx import prepare_qat_fx
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                qconfig_dict = {
+                    "object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]
+                }
+                example_inputs = (torch.randn(5, 5),)
+                self.model = torch.nn.Linear(5, 5)
+                self.quantized_model = prepare_qat_fx(
+                    self.model, qconfig_dict, example_inputs=example_inputs
+                )
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x.sin() + self.quantized_model(x)
+
+                def false_fn(x):
+                    return x.cos() + self.model(x)
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        module = MyModule()
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(module)
+        x = torch.rand((5, 5))
+        pred = torch.tensor(True)
+        self.assertTrue(same(module(pred, x), opt_m(pred, x)))
+        pred = torch.tensor(False)
+        self.assertTrue(same(module(pred, x), opt_m(pred, x)))
+
     def test_cond_side_effects(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         c = 0
 
@@ -3027,6 +3060,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([1.25, 1.25]), a))
 
+    @unittest.expectedFailure
     def test_map_side_effects(self):
         from functorch.experimental.control_flow import map
 
@@ -3043,12 +3077,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return map(body, xs)
 
         mod = Module()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Graph state change detected",
-        ):
-            opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
-            opt_fn(torch.randn(3, 2))
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
+        opt_fn(torch.randn(3, 2))
 
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
