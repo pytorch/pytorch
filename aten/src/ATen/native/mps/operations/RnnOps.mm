@@ -111,8 +111,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
         AT_ERROR("LSTM with projections is not currently supported with MPS.");
     }
 
-    TORCH_CHECK(!(!is_macos_13_or_newer() && num_layers > 1), "Multi-layer LSTM support in MPS available only on MacOS 13 onwards");
-
     std::vector<Tensor> kernel_weights;
     std::vector<Tensor> recurrent_kernel_weights;
     std::vector<Tensor> biases;
