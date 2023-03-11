@@ -2527,8 +2527,8 @@ class NativeCachingAllocator : public CUDAAllocator {
    * @param stale_live_storages - storages of tensors which are currently
    * allocated but which will be not be allocated after the checkpoint is set.
    * For these storages we will remove their deleter function.
-   * @return CheckpointDelta - Freed Pointers and DataPtrs that contain deleter functions
-   * for all allocated blocks in the new checkpoinnt state.
+   * @return CheckpointDelta - Freed Pointers and DataPtrs that contain deleter
+   * functions for all allocated blocks in the new checkpoint state.
    */
   CheckpointDelta setCheckpointPoolState(
       int device,
