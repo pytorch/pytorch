@@ -371,7 +371,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_out,
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_opt,
                                                                                const c10::optional<Tensor>& grad_hy_opt,
                                                                                const c10::optional<Tensor>& grad_cy_opt,
                                                                                const Tensor& z_state,
@@ -387,7 +387,7 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
-  const Tensor& grad_y_r = c10::value_or_else(grad_y_out, [] { return Tensor(); });
+  const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
   const auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx[0], input.options());
