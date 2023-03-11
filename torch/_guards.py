@@ -351,11 +351,11 @@ class TracingContext:
         assert (
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
-        assert (
-            len(tc.frame_summary_stack) > 0
-        ), "Loc context manager must be called within tracing of a current frame."
-        current_frame = tc.frame_summary_stack[-1]
-        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, current_frame.name)
+        if len(tc.frame_summary_stack) > 0:
+            current_frame_name = tc.frame_summary_stack[-1].name
+        else:
+            current_frame_name = "<unknown>"
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, current_frame_name)
         try:
             yield
         finally:

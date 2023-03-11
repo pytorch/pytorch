@@ -1555,7 +1555,7 @@ class ShapeEnv:
                     # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                     # constrained to an integer.
                     if _is_int(ss):
-                        raise RuntimeError(f"Attempting to constrain {source.name()}.size()[{i}] to {ss}, which violates user's mark_dynamic")
+                        raise RuntimeError(f"Attempting to constrain dim {i} for {source}, which violates user's mark_dynamic")
                     dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
