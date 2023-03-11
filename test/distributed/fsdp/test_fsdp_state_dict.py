@@ -501,11 +501,13 @@ class TestFSDPStateDict(FSDPTest):
             use_orig_params and state_dict_type not in _UNFLATTENED_STATE_DICT_IMPLS
         ):
             return  # not supported
+        device = torch.device(self.rank)
         for model_call in [
             partial(
                 self._get_non_fsdp_root_module,
                 cpu_offload=cpu_offload,
                 use_orig_params=use_orig_params,
+                # sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             ),
             partial(
                 self._get_simple_nested_model,
@@ -519,6 +521,14 @@ class TestFSDPStateDict(FSDPTest):
             ),
         ]:
             model = model_call()
+            if fp16:
+                model.half()
+            # Run a forward/backward to compute gradients to test the case
+            # where there are gradients populated
+            inp = torch.randn((3, 10), device=device)
+            if fp16:
+                inp = inp.half()
+            model(inp).sum().backward()
 
             ctx = self._get_state_dict_mgr(
                 model, state_dict_type, state_dict_rank0_and_offload
@@ -548,6 +558,12 @@ class TestFSDPStateDict(FSDPTest):
                 model_new = model_new.cuda()
             if fp16:
                 model_new.half()
+            # Run a forward/backward to compute gradients to test the case
+            # where there are gradients populated
+            inp = torch.randn((3, 10), device=device)
+            if fp16:
+                inp = inp.half()
+            model_new(inp).sum().backward()
 
             # zero the model to ensure parameters are different.
             _zero_model(model_new, zero_buffers=True)
@@ -871,7 +887,6 @@ class TestFSDPStateDict(FSDPTest):
         if state_dict_rank0_and_offload:
             fsdp_state_dict = self._broadcast_state_dict(model, fsdp_state_dict)
 
-        # if self.rank == 0:
         blank_local_model.load_state_dict(fsdp_state_dict, strict=True)
         local_params = list(blank_local_model.parameters())
         for fsdp_param, local_param in zip(fsdp_params, local_params):
