@@ -1940,7 +1940,7 @@ class FlatParamHandle:
                 or self._training_state
                 in (HandleTrainingState.FORWARD, HandleTrainingState.IDLE),
                 "Sharded strategies should use `_cpu_grad` or `_saved_grad_shard` "
-                "unless in IDLE or FORWARD"
+                "unless in IDLE or FORWARD",
             )
             grad = flat_param.grad
         return grad
