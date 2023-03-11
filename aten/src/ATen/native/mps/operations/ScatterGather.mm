@@ -51,8 +51,8 @@ TORCH_IMPL_FUNC(gather_out_mps)
       if(i != dim && [index_shape[i] intValue] < [input_shape[i] intValue])
         needSlice = true;
     }
-    auto input_type = getMPSDataType(self.scalar_type());
-    auto output_type = getMPSDataType(output.scalar_type());
+    auto input_type = getMPSDataType(self);
+    auto output_type = getMPSDataType(output);
     if (input_type == MPSDataTypeUInt8 || ((input_type ==  MPSDataTypeBool && !is_macos_13_or_newer()))) {
       input_type = MPSDataTypeInt8;
     }
@@ -191,7 +191,7 @@ void scatter_mps_general
     }
     TORCH_CHECK(reduce != "mean", "Scatter reduce mean mode not yet supported in MPS")
 
-    MPSDataType src_type = getMPSDataType(src.scalar_type());
+    MPSDataType src_type = getMPSDataType(src);
     if (reduce != "set" || src_type == MPSDataTypeUInt8 || src_type == MPSDataTypeBool) {
       src_type = isFloatingType(src.scalar_type()) ? MPSDataTypeFloat32 : MPSDataTypeInt32;
       needsCast = true;
