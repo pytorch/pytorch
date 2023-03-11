@@ -717,9 +717,8 @@ def export(
                         "predefined dynamic state, and having export leave it intact."
                     )
                 tensor_id_to_indices[id(tensor)] = set()
-            assert (
-                index not in tensor_id_to_indices[id(tensor)]
-            ), f"Duplicate index {index}"
+            if index in tensor_id_to_indices[id(tensor)]:
+                raise RuntimeError(f"Duplicate index {index}")
             tensor_id_to_indices[id(tensor)].add(index)
             torch._dynamo.mark_dynamic(tensor, index)
 
