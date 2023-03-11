@@ -24,10 +24,6 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
-
 # allows coverage to run w/o failing due to a missing plug-in
 pip install -e tools/coverage_plugins_package
 
