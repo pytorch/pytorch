@@ -56,16 +56,10 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # TODO: Stop using `-c malfet`
     conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS} -c malfet
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    # and libpython-static for torch deploy
     conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    # and libpython-static for torch deploy
     conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS}
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
-    # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    # and libpython-static for torch deploy
     conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS}
   else
     # Install `typing-extensions` for 3.7
