@@ -20,7 +20,6 @@ struct TableState {
   }
 };
 
-
 // FDE - Frame Description Entry (Concept in ELF spec)
 // This format is explained well by
 // https://www.airs.com/blog/archives/460
