@@ -103,6 +103,7 @@ def is_quantized_graph_module(gm: torch.fx.GraphModule):
     quantize_ops = (
         torch.ops.quantized_decomposed.quantize_per_tensor,
         torch.ops.quantized_decomposed.quantize_per_channel,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
     )
     for node in gm.graph.nodes:
         if node.target in quantize_ops:
