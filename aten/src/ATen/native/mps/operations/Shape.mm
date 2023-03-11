@@ -86,7 +86,7 @@ TORCH_IMPL_FUNC(topk_out_mps)
     MPSShape* input_shape = getMPSShape(self);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
     string key = string("topk:") + [ns_shape_key UTF8String] + ":" +
-                           getMPSTypeString(self.scalar_type()) +
+                           getMPSTypeString(self) +
                            ":k" + to_string(k) + ":dim" + to_string(dim_) +
                            ":largest" + to_string(largest);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
@@ -96,11 +96,11 @@ TORCH_IMPL_FUNC(topk_out_mps)
         @autoreleasepool {
             MPSGraph* mpsGraph = make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
-            newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), input_shape);
+            newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
             if (is_macos_13_or_newer()) {
               MPSGraphTensor* castInputTensor = newCachedGraph->selfTensor;
-              MPSDataType dataType = getMPSDataType(self.scalar_type());
+              MPSDataType dataType = getMPSDataType(self);
               // #issue 104398441 sortWithTensor and argsortWithTensor
               if (dataType != MPSDataTypeInt32 &&
                   dataType != MPSDataTypeFloat32 &&

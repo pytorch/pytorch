@@ -57,8 +57,8 @@ void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
   MPSStream* stream = getCurrentMPSStream();
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
-  MPSDataType dstDType = getMPSDataType(dst.scalar_type());
-  MPSDataType srcDType = getMPSDataType(src.scalar_type());
+  MPSDataType dstDType = getMPSDataType(dst);
+  MPSDataType srcDType = getMPSDataType(src);
   MPSShape* dstShape = getMPSShape(dst);
   MPSShape* srcShape = getMPSShape(src);
 
