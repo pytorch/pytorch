@@ -160,9 +160,8 @@ class TORCH_API DistEngine {
 // Guard to clean up resources once the backward pass is done.
 class BackwardPassCleanupGuard {
  public:
-  // NOLINTNEXTLINE(modernize-pass-by-value)
-  explicit BackwardPassCleanupGuard(const ContextPtr& autogradContext)
-      : autogradContext_(autogradContext) {}
+  explicit BackwardPassCleanupGuard(ContextPtr autogradContext)
+      : autogradContext_(std::move(autogradContext)) {}
 
   ~BackwardPassCleanupGuard() {
     DistEngine::getInstance().cleanupBackwardPass(autogradContext_);

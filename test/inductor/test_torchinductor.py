@@ -20,6 +20,7 @@ import sympy
 import torch
 
 import torch._dynamo
+import torch.nn as nn
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
@@ -2481,13 +2482,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device="cpu:0")
-        y0 = torch.randn(1024, 1024, device="cpu:0")
+        x0 = torch.randn(1024, 1024, device="cuda:0")
+        y0 = torch.randn(1024, 1024, device="cuda:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device="cpu:1")
-        y1 = torch.randn(1024, 1024, device="cpu:1")
+        x1 = torch.randn(1024, 1024, device="cuda:1")
+        y1 = torch.randn(1024, 1024, device="cuda:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -4047,7 +4048,7 @@ class CommonTemplate:
         self.assertTrue(same(out, out_eager))
 
     @config.patch(
-        {"triton.ordered_kernel_names": True, "triton.descriptive_kernel_names": False}
+        {"triton.unique_kernel_names": True, "triton.descriptive_names": False}
     )
     def test_kernel_names(self):
         @torch._dynamo.optimize("inductor")
@@ -4459,6 +4460,14 @@ class CommonTemplate:
                 True,
             ),
         )
+
+    def test_index_put_index(self):
+        def fn(ind, x, src):
+            y = torch.ops.aten.index_put.default(x, [ind], src)
+            return torch.ops.aten.index.Tensor(y, [ind])
+
+        args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
+        self.common(fn, args)
 
     @config.patch(fallback_random=True)
     def test_bernoulli1(self):
@@ -6647,6 +6656,7 @@ if HAS_CPU:
                 )
                 return clone_3
 
+            metrics.reset()
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
@@ -7411,6 +7421,59 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int32)" in code)
 
                 self.assertEqual(fn_opt(), fn())
+
+        def test_kernel_names_descriptive(self):
+            @torch._dynamo.optimize("inductor")
+            def fn1(x):
+                return x.cos().sin()
+
+            @torch._dynamo.optimize("inductor")
+            def fn2(x):
+                x = torch.mm(x, x)
+                x = torch.softmax(x, dim=1)
+                return x
+
+            mod = nn.Sequential(
+                nn.Linear(4, 4),
+                nn.LayerNorm(4),
+                nn.ReLU(),
+            ).cuda()
+
+            @torch._dynamo.optimize("inductor")
+            def fn3(x):
+                return mod(x)
+
+            func_and_kernel_aten = [
+                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_fused__softmax", (torch.randn(4, 4, device="cuda"),)),
+                (
+                    fn3,
+                    "triton_fused_native_layer_norm_relu",
+                    (torch.randn(4, 4, device="cuda"),),
+                ),
+            ]
+            func_and_kernel_torch = [
+                (fn1, "triton_fused_cos_sin", (torch.randn(8, device="cuda"),)),
+                (fn2, "triton_fused_softmax", (torch.randn(4, 4, device="cuda"),)),
+                (
+                    fn3,
+                    "triton_fused_LayerNorm_ReLU",
+                    (torch.randn(4, 4, device="cuda"),),
+                ),
+            ]
+
+            def test_funcs(func_and_kernel):
+                with torch.no_grad():
+                    for fn, kernel_name, inps in func_and_kernel:
+                        code = run_and_get_triton_code(fn, *inps)
+                        if kernel_name not in code:
+                            print(code)
+                        self.assertTrue(kernel_name in code)
+
+            test_funcs(func_and_kernel_aten)
+            patch.object(config.triton, "descriptive_names", "torch")(test_funcs)(
+                func_and_kernel_torch
+            )
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
