@@ -172,11 +172,11 @@ class TORCH_API Node {
 
  protected:
   // Adds node's index output number as operand.
-  void AddOperand(NodePtr node, size_t index = 0);
+  void AddOperand(torch::lazy::Value operand, size_t index = 0);
 
   std::vector<Shape> shapes_;
   // A node holds a real reference to its operands.
-  std::vector<NodePtr> operands_;
+  std::vector<torch::lazy::Value> operands_;
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;

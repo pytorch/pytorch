@@ -85,7 +85,7 @@ Node::Node(
       continue;
     }
 
-    AddOperand(operand.node, operand.index);
+    AddOperand(operand, operand.index);
   }
 }
 
@@ -164,10 +164,10 @@ std::string Node::ToString() const {
   return ss.str();
 }
 
-void Node::AddOperand(NodePtr node, size_t index) {
-  TORCH_CHECK_LT(index, node->num_outputs());
-  operands_.push_back(node);
-  operands_as_outputs_.emplace_back(operands_.back().get(), index);
+void Node::AddOperand(torch::lazy::Value operand, size_t index) {
+  TORCH_CHECK_LT(index, operand.node->num_outputs());
+  operands_.push_back(operand);
+  operands_as_outputs_.emplace_back(operands_.back().node.get(), index);
 }
 
 } // namespace lazy
