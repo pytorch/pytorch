@@ -44,7 +44,7 @@ Tensor& bincount_mps_impl(const Tensor& self,
           else {
             updatesTensor = [mpsGraph constantWithScalar:1.0f
                                                    shape:getMPSShape(self)
-                                                dataType:getMPSDataType(output.scalar_type())];
+                                                dataType:getMPSDataType(output)];
           }
 
           MPSGraphTensor *castedInputTensor = inputTensor;
