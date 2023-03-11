@@ -4085,14 +4085,8 @@ class TestSWAUtils(TestCase):
     def test_averaged_model_default_avg_fn_picklable(self):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
-            torch.nn.ReLU(),
-            torch.nn.MaxPool2d(kernel_size=2),
-            torch.nn.BatchNorm2d(5, momentum=0.3),
-            torch.nn.Conv2d(5, 2, kernel_size=3),
-            torch.nn.ReLU(),
+            torch.nn.BatchNorm2d(5),
             torch.nn.Linear(5, 5),
-            torch.nn.ReLU(),
-            torch.nn.Linear(5, 10),
         )
         averaged_dnn = AveragedModel(dnn)
         pickle.dumps(averaged_dnn)
