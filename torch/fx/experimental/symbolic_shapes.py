@@ -1170,7 +1170,7 @@ class ShapeGuardPrinter(StrPrinter):
         def repr_symbol_to_source():
             return repr({
                 symbol: [s.name() for s in sources]
-                for symbol, sources in self.symbol_to_source
+                for symbol, sources in self.symbol_to_source.items()
             })
 
         assert expr in self.symbol_to_source, (

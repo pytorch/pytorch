@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import functools
 import inspect
 import logging
@@ -701,26 +702,31 @@ def export(
     if not constraints:
         constraints = list()
 
-    tensor_to_indices: Dict[torch.Tensor, Set[int]] = dict()
+    # id : set[dim]
+    tensor_id_to_indices: Dict[int, Set[int]] = dict()
     try:
         for constraint in constraints:
             tensor = constraint[0]
             index = constraint[1]
             # TODO(voz): Is tensor defaultdict friendly?
-            if tensor not in tensor_to_indices:
-                assert not torch._dynamo.has_dynamic_dims(
-                    tensor
-                ), "Illegal to export tensor already marked dynamic"
-                tensor_to_indices[tensor] = set()
-            assert index not in tensor_to_indices[tensor], f"Duplicate index {index}"
-            tensor_to_indices[tensor].add(index)
+            if id(tensor) not in tensor_id_to_indices:
+                if torch._dynamo.has_dynamic_dims(tensor):
+                    raise RuntimeError(
+                        "Illegal to export tensor already marked dynamic."
+                        "This is a temporary state, we will add support for exporting from any"
+                        "predefined dynamic state, and having export leave it intact."
+                    )
+                tensor_id_to_indices[id(tensor)] = set()
+            assert (
+                index not in tensor_id_to_indices[id(tensor)]
+            ), f"Duplicate index {index}"
+            tensor_id_to_indices[id(tensor)].add(index)
             torch._dynamo.mark_dynamic(tensor, index)
 
-        seen_tensors = set(tensor_to_indices.keys())
-        for arg in flat_args:
-            if isinstance(arg, torch.Tensor) and arg in seen_tensors:
-                seen_tensors.remove(arg)
-        assert len(seen_tensors) == 0, "User specified dynamic dim for unknown tensors"
+        seen_tensors = set(tensor_id_to_indices.keys())
+        arg_ids = {id(arg) for arg in flat_args if isinstance(arg, torch.Tensor)}
+        if len(seen_tensors - arg_ids) != 0:
+            raise RuntimeError("User specified dynamic dim for unknown tensors")
 
         remove_from_cache(f)
         with patch(f"{__name__}.most_recent_backend", None), config.patch(
@@ -862,8 +868,10 @@ def export(
 
         new_graph.recompile()
     finally:
-        for tensor in tensor_to_indices.keys():
-            torch._dynamo.clear_dynamic_dims(tensor)
+        for tensor_id in tensor_id_to_indices.keys():
+            torch._dynamo.clear_dynamic_dims(
+                ctypes.cast(tensor_id, ctypes.py_object).value
+            )
 
     return (new_graph, out_guards)
 

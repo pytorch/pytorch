@@ -69,7 +69,7 @@ def _aot_capture(mod, flat_args):
     out_spec = None
 
     with enable_python_dispatcher():
-        fw_metadata, _ = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
         )(*copy.deepcopy(full_args))  # type: ignore[operator]
@@ -213,7 +213,7 @@ Constraint = Tuple[torch.Tensor, int]
 # After a lot of discussion, we have settled on a dynamic marking API
 # for export that meets the following constraints:
 # 1) Stateless
-# 2) Safe for numerous .export calls
+# 2) Safe for numerous .export calls within a single process
 # 3) Simple to use
 # 4) Can be extended to constraints easily
 #

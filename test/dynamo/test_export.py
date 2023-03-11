@@ -2193,7 +2193,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaisesRegex(
-            AssertionError, "Illegal to export tensor already marked dynamic"
+            RuntimeError, "Illegal to export tensor already marked dynamic"
         ):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
@@ -2220,7 +2220,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return x.cos()
 
         with self.assertRaisesRegex(
-            AssertionError, "User specified dynamic dim for unknown tensors"
+            RuntimeError, "User specified dynamic dim for unknown tensors"
         ):
             torch._dynamo.export(
                 my_dyn_fn, y, constraints=[dynamic_dim(z, 0), dynamic_dim(y, 0)]
