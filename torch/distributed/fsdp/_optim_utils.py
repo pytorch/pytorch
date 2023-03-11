@@ -219,7 +219,7 @@ def _communicate_optim_state(
         # value directly
         else:
             if _is_zero_dim_tensor(value):
-                zero_dim_tensor_state[state_name] = value
+                zero_dim_tensor_state[state_name] = value.detach().clone()
             else:
                 non_tensor_state[state_name] = value
     return state
