@@ -12,6 +12,7 @@ conda_reinstall() {
   as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
 }
 
+echo "DEBUG"
 # The logic here is copied from .ci/pytorch/common_utils.sh
 TRITON_PINNED_COMMIT=$(get_pinned_commit triton)
 

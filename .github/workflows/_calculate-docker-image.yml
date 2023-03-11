@@ -21,11 +21,13 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
     steps:
+      # Use a higher fetch depth to increase the likelihood of having the merge
+      # base
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
-          fetch-depth: 1
+          fetch-depth: 100
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
