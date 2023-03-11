@@ -13,6 +13,8 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
+HAS_CUDA = torch.cuda.is_available()
+
 def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
 
@@ -155,6 +157,7 @@ class TestFlopCounter(TestCase):
         with mode:
             T(4, 5).cos()
 
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
     def test_sdpa(self):
         batch_size = 4
         n_heads = 8
@@ -180,24 +183,51 @@ class TestFlopCounter(TestCase):
         qkv = torch.randn(batch_size, n_heads, seq_len_q, 3 * head_dim, device='cuda', dtype=dtype, requires_grad=True)
         query, key, value = qkv.split(head_dim, dim=-1)
 
-        def f(query, key, value):
+        def f_forward(query, key, value):
+            return F.scaled_dot_product_attention(query, key, value, dropout_p=0, is_causal=True)
+
+        def f_forward_backward(query, key, value):
             return F.scaled_dot_product_attention(query, key, value, dropout_p=0, is_causal=True).sum().backward()
 
-        enable_backend(torch.backends.cuda.enable_math_sdp)
-        mode = FlopCounterMode()
-        with mode:
-            f(query, key, value)
-        self.assertExpectedInline(get_total_flops(mode), """134217728""")
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
 
-        enable_backend(torch.backends.cuda.enable_mem_efficient_sdp)
-        with mode:
-            f(query, key, value)
-        self.assertExpectedInline(get_total_flops(mode), """134217728""")
+            # Note: The "math" backend does *not* do recomputation, which is why this value is lower
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 3)
+            self.assertExpectedInline(flops_bw, """402653184""")
 
-        enable_backend(torch.backends.cuda.enable_flash_sdp)
-        with mode:
-            f(query, key, value)
-        self.assertExpectedInline(get_total_flops(mode), """134217728""")
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
+
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 7 // 2)
+            self.assertExpectedInline(flops_bw, """469762048""")
+
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
+
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 7 // 2)
+            self.assertExpectedInline(flops_bw, """469762048""")
 
 
 
