@@ -1166,9 +1166,17 @@ class ShapeGuardPrinter(StrPrinter):
 
     def _print_Symbol(self, expr) -> str:
         assert isinstance(expr, sympy.Symbol), str(type(expr))
+
+        def repr_symbol_to_source():
+            return repr({
+                symbol: [s.name() for s in sources]
+                for symbol, sources in self.symbol_to_source.items()
+            })
+
         assert expr in self.symbol_to_source, (
             f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
-            f"not in {self.symbol_to_source}"
+            f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
+            "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
         )
         return self.source_ref(self.symbol_to_source[expr][0])
 
@@ -1326,7 +1334,7 @@ class ShapeEnv:
     def create_unbacked_symint(self):
         symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
         self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
-        self.var_to_range[symbol] = ValueRanges.unknown()
+        self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
@@ -1353,7 +1361,10 @@ class ShapeEnv:
 
             # We also infer that it must be not 0/1
             lower = 2 if self.specialize_zero_one else 0
-            self.var_to_range[sympy_expr] = ValueRanges(lower, sympy.oo)
+            # NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
+            # as a sentinel sometimes.  Your sizevar isn't going to be
+            # anywhere near the max 64-bit integer anyway.
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sys.maxsize - 1)
 
         if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
@@ -1569,12 +1580,20 @@ class ShapeEnv:
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
                 assert sources
+                assert symbol.is_integer
                 r = self.var_to_range[symbol]
                 bounds = []
                 if r.lower != -sympy.oo:
                     bounds.append(str(r.lower))
                 bounds.append(source_ref(sources[0]))
-                if r.upper != sympy.oo:
+                # NB: This looks like an off-by-one error but it's not: the
+                # upper bound may be sys.maxsize - 1 because we intentionally
+                # exclude sys.maxsize from our bounds to deal with direct
+                # == INT_MAX guards, but it's still dumb to actually test it.
+                # Note that you can be off by a pretty large constant and it
+                # won't matter because sizes in practice will be no where near
+                # the 64-bit limit.
+                if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
                     bounds.append(str(r.upper))
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
@@ -1773,14 +1792,10 @@ class ShapeEnv:
     def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
-        accesses = '\n\n'.join(
-            f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}"
-            for s in expr.free_symbols
-        )
+        for s in expr.free_symbols:
+            log.debug(f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}")
         return GuardOnDataDependentSymNode(
-            f"\n\n{accesses}\n"
-            "GuardOnDataDependentSymNode: It appears that you're trying to get "
-            "a value out of symbolic int/float "
+            "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
             f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."
@@ -1823,7 +1838,7 @@ class ShapeEnv:
                 return
         free = list(expr.free_symbols)
 
-        assert len(free) > 0, "The expression should not be static by this point"
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
@@ -1902,6 +1917,15 @@ class ShapeEnv:
             # is not actually necessary to save a guard for the equality,
             # as we will implicitly generate a guard when we match that
             # input against the symbol
+        elif isinstance(concrete_val, sympy.Integer):
+            # WARNING: we cannot actually do simplifications on guards
+            # on floating point values, because Sympy generally does not
+            # think expressions on integers can ever be equal to floating
+            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+            # very clear algebraic laws that hold for floating point, such
+            # simplifications are error prone anyway, so be sure not to
+            # maybe_guard_eq in those cases.
+            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
         # TODO: optimize this; avoid formatting traces until we need them
         # NB: drop two frames; evaluate_expr and the Sym* function that
