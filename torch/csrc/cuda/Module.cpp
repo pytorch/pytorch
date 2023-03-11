@@ -747,7 +747,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   result["device_traces"] = traces;
 
   py::str frames_s = "frames";
-  auto frames = symbolize(to_gather_frames);
+  auto frames = py_symbolize(to_gather_frames);
   for (auto i : c10::irange(frames.size())) {
     to_gather_dest.at(i)[frames_s] = frames.at(i);
   }

@@ -296,7 +296,7 @@ void initPythonBindings(PyObject* module) {
   py::class_<CapturedTraceback, std::shared_ptr<CapturedTraceback>>(
       m, "CapturedTraceback");
   m.def("gather_traceback", CapturedTraceback::gather);
-  m.def("symbolize_tracebacks", symbolize);
+  m.def("symbolize_tracebacks", py_symbolize);
 }
 
 } // namespace profiler
