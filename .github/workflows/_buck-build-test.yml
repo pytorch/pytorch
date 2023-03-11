@@ -2,14 +2,45 @@ name: buck
 
 on:
   workflow_call:
+    inputs:
+      test-matrix:
+        required: true
+        type: string
+        description: |
+          A JSON description of what configs to run later on.
 
 defaults:
   run:
     shell: bash -e -l {0}
 
 jobs:
+  filter:
+    runs-on: [self-hosted, linux.large]
+    outputs:
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}
+      keep-going: ${{ steps.filter.outputs.keep-going }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Select all requested test configurations
+        id: filter
+        uses: ./.github/actions/filter-test-configs
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          test-matrix: ${{ inputs.test-matrix }}
+
   buck-build-test:
-    runs-on: ubuntu-latest
+    needs: filter
+    if: github.repository_owner == 'pytorch' && needs.filter.outputs.is-test-matrix-empty == 'False'
+    strategy:
+      matrix: ${{ fromJSON(needs.filter.outputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
