@@ -3755,42 +3755,37 @@ else:
     def test_masked_fill(self, device, dtypes):
         dtype = dtypes[0]
         mask_dtype = dtypes[1]
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
 
-            num_dest = 10
-            dst = torch.zeros(num_dest, dtype=dtype)
-            mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
-            val = random.random()
-            dst2 = dst.clone()
+        num_dest = 10
+        dst = torch.zeros(num_dest, dtype=dtype)
+        mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
+        val = random.random()
+        dst2 = dst.clone()
 
-            dst.masked_fill_(mask, val)
-            for i in range(num_dest):
-                if mask[i]:
-                    dst2[i] = val
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
+        if mask_dtype is not torch.bool:
+            with self.assertRaisesRegex(RuntimeError, 'only supports boolean masks'):
+                dst.masked_fill_(mask, val)
+            return
 
-            # test non-contiguous case
-            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
-            dst2 = dst.contiguous()
-            if dtype.is_complex:
-                mask = dst.abs() > 0
-            else:
-                mask = dst > 0
-            self.assertTrue(not dst.is_contiguous())
-            self.assertTrue(dst2.is_contiguous())
-            dst.masked_fill_(mask.to(mask_dtype), val)
-            dst2.masked_fill_(mask.to(mask_dtype), val)
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
+        dst.masked_fill_(mask, val)
+        for i in range(num_dest):
+            if mask[i]:
+                dst2[i] = val
+        self.assertEqual(dst, dst2, atol=0, rtol=0)
 
-            if mask_dtype == torch.uint8:
-                self.assertEqual(len(w), 3)
+        # test non-contiguous case
+        dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+        dst2 = dst.contiguous()
+        if dtype.is_complex:
+            mask = dst.abs() > 0
+        else:
+            mask = dst > 0
+        self.assertTrue(not dst.is_contiguous())
+        self.assertTrue(dst2.is_contiguous())
+        dst.masked_fill_(mask.to(mask_dtype), val)
+        dst2.masked_fill_(mask.to(mask_dtype), val)
+        self.assertEqual(dst, dst2, atol=0, rtol=0)
 
-                warn = 'masked_fill received a non-boolean mask, which is no'
-                for wi in w:
-                    self.assertEqual(str(wi.message)[0:52], str(warn))
-            else:
-                self.assertEqual(len(w), 0)
 
     # FIXME: find a test suite for the masked fill operator
     def test_masked_fill_bool_tensor(self, device):
