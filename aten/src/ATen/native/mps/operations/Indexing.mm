@@ -166,7 +166,7 @@ static void validateInputData(const TensorIteratorBase& iter, IntArrayRef index_
     TORCH_CHECK(c10::isIntegralType(inputTensor.scalar_type(), /*includesBool=*/true) ||
                 inputTensor.scalar_type() == ScalarType::Float ||
                 inputTensor.scalar_type() == ScalarType::Half,
-                getMPSTypeString(inputTensor.scalar_type()) + std::string(" not supported for index.Tensor_out"));
+                getMPSTypeString(inputTensor) + std::string(" not supported for index.Tensor_out"));
   }
 }
 
@@ -290,7 +290,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_){
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
         CachedGraph *newCachedGraph = nil;
         @autoreleasepool {
-          MPSDataType inputDataType = getMPSDataType(self.scalar_type());
+          MPSDataType inputDataType = getMPSDataType(self);
           MPSShape* inputShape = getMPSShape(self);
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
@@ -665,8 +665,8 @@ Tensor& index_select_out_mps(const Tensor & self,
   };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-  auto inputType = getMPSDataType(self.scalar_type());
-  auto outputType = getMPSDataType(output.scalar_type());
+  auto inputType = getMPSDataType(self);
+  auto outputType = getMPSDataType(output);
   if (inputType == MPSDataTypeUInt8 ||
      (!is_macos_13_or_newer() && inputType == MPSDataTypeBool)) {
     inputType = MPSDataTypeInt8;
@@ -868,7 +868,7 @@ Tensor embedding_dense_backward_mps(
     auto stream = at::mps::getCurrentMPSStream();
 
     @autoreleasepool {
-        string key = "edb_mps:" + native_mps::getMPSTypeString(grad_.scalar_type()) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" + std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
+        string key = "edb_mps:" + native_mps::getMPSTypeString(grad_) + ":indices" + std::to_string(num_indices_dims) + ":num_weights" + std::to_string(num_weights) + ":padding_idx" + std::to_string(padding_idx) + ":scaled" + std::to_string(scale_grad_by_freq);
       CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
       // Initialize once if configuration not found in cache
       if(!cachedGraph) {
@@ -880,14 +880,14 @@ Tensor embedding_dense_backward_mps(
             MPSGraph* mpsGraph = native_mps::make_mps_graph();
             newCachedGraph = new CachedGraph(mpsGraph);
 
-            MPSGraphTensor* incomingGradTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(grad_.scalar_type()));
+            MPSGraphTensor* incomingGradTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(grad_));
 
-            MPSGraphTensor* indicesTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(indices.scalar_type()));
+            MPSGraphTensor* indicesTensor = native_mps::mpsGraphUnrankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(indices));
 
             MPSGraphTensor* reshapedIndicesTensor = indicesTensor;
 
             MPSGraphTensor* castGradTensor = incomingGradTensor;
-            MPSDataType dataType = mps::getMPSDataType(grad_.scalar_type());
+            MPSDataType dataType = mps::getMPSDataType(grad_);
             // issue 105486100, scatterNDWithUpdatesTensor produces wrong result for float16
             if (dataType == MPSDataTypeFloat16) {
               castGradTensor = [mpsGraph castTensor: incomingGradTensor

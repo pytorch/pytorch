@@ -139,7 +139,7 @@ Tensor& mm_out_mps_impl(
 
             outputTensor = [mpsGraph constantWithScalar:0.
                                                   shape:getMPSShape(output_sizes)
-                                                   dataType:getMPSDataType(output.scalar_type())];
+                                                   dataType:getMPSDataType(output)];
 
           }
           else {
@@ -267,8 +267,8 @@ Tensor& addr_out_mps(const Tensor& self,
           MPSGraph *mpsGraph = mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor *t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1.scalar_type()), inputShape);
-          MPSGraphTensor *t2 =  mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2.scalar_type()), otherShape);
+          MPSGraphTensor *t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
+          MPSGraphTensor *t2 =  mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
           MPSGraphTensor *selfTensor =  mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
 
           // Intermediate as placeholder
@@ -793,13 +793,13 @@ Tensor& linalg_solve_triangular_mps_impl( const Tensor& A, const Tensor& B, bool
                                                                                    matrices:batchSize
                                                                                    rowBytes:aCols * aElemSize
                                                                                 matrixBytes:aRows * aCols * aElemSize
-                                                                                   dataType:getMPSDataType(A_.scalar_type())];
+                                                                                   dataType:getMPSDataType(A_)];
       MPSMatrixDescriptor* rightHandSideMatrixDesc = [MPSMatrixDescriptor matrixDescriptorWithRows:bRows
                                                                                            columns:bCols
                                                                                           matrices:batchSize
                                                                                           rowBytes:bCols * bElemSize
                                                                                        matrixBytes:bRows * bCols * bElemSize
-                                                                                          dataType:getMPSDataType(B_.scalar_type())];
+                                                                                          dataType:getMPSDataType(B_)];
       for (const auto i: c10::irange(batchSize)) {
         const uint64_t aBatchOffset = i * aRows * aCols;
         const uint64_t bBatchOffset = i * bRows * bCols;
