@@ -705,6 +705,7 @@ Symbolic Numbers
     sym_max
     sym_min
     sym_not
+    is_concrete_int
 
 Optimizations
 -------------
