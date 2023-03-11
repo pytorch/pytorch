@@ -95,6 +95,10 @@ def mps_ops_grad_modifier(ops):
         'floor_divide': [torch.float16, torch.float32],
         # derivative for aten::narrow_copy is not implemented on CPU
         'narrow_copy': [torch.float16, torch.float32],
+        # derivative for aten::_histogramdd_from_bin_cts is not implemented on CPU
+        'histogramdd': [torch.float16, torch.float32],
+        # derivative for aten::histogram is not implemented
+        'histogram': [torch.float16, torch.float32],
         # RuntimeError: "log_vml_cpu" not implemented for 'Half'
         '__rpow__': [torch.float16],
         'pow': [torch.float16],
@@ -418,9 +422,9 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        'histc': None,
-        'histogram': None,
-        'histogramdd': None,
+        #'histc': None,
+        #'histogram': None,
+        #'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -10220,7 +10224,10 @@ class TestConsistency(TestCaseMPS):
             else:
                 atol = None
                 rtol = None
-
+            print("input", cpu_args, mps_args, mps_kwargs)
+            if mps_kwargs["weight"] is not None:
+                print(mps_kwargs["weight"].is_contiguous())
+            print(cpu_out, mps_out)
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 

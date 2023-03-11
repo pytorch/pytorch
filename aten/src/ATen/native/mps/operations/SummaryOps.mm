@@ -36,11 +36,11 @@ int64_t upper_bound(constant T * arr, int64_t first, int64_t len, T val) {
     if (val < arr[middle]) {
       len = half_;
     } else {
-      first = ++middle;
-      len = len - half_ - 1;
+      first = ++middle; // 2
+      len = len - half_ - 1; // 3-1-1 = 1
     }
   }
-  return first;
+  return first; // 2
 }
 
 template<typename T>
@@ -64,7 +64,7 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
   int64_t bin_seq_offset = 0;
 
   for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = *(constant T*)((constant uint8_t*)input_ + tid * num_dims + dim); //+ offsets[tid * num_dims + dim]);
+    T element = ((constant T*)input_)[tid * num_dims + dim];
 
     // Skips elements which fall outside the specified bins and NaN elements
     if (!(element >= leftmost_edge[dim] && element <= rightmost_edge[dim])) {
@@ -75,10 +75,10 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
     
     if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
       pos = upper_bound(
-        bin_seq,
-        bin_seq_offset,
-        num_bin_edges[dim],
-        element
+        bin_seq, // 0 1 2 3
+        bin_seq_offset, // 0
+        num_bin_edges[dim], // 4
+        element  // 1 
       ) - bin_seq_offset - 1;
     } else if (
       algorithm == BIN_SELECTION_ALGORITHM::LINEAR_INTERPOLATION ||
@@ -89,26 +89,25 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
       if (algorithm == LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH) {
           int64_t pos_min = max(static_cast<int64_t>(0), pos - 1);
           int64_t pos_max = min(pos + 2, num_bin_edges[dim]);
-          //pos = (int64_t)(upper_bound(
-          //  (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_min),
-          //  (thread T*)(int64_t)(bin_seq + bin_seq_offset + pos_max),
-          //  element
-          //) - (bin_seq + bin_seq_offset) - 1);
+          pos = upper_bound(
+            bin_seq,
+            bin_seq_offset + pos_min,
+            pos_max - pos_min,
+            element
+          ) - bin_seq_offset - 1;
       }
     }
 
     if (pos == (num_bin_edges[dim] - 1)) {
       pos -= 1;
     }
-    hist_index += local_out_strides[dim + 1] * pos;
+    hist_index += local_out_strides[dim + 1] * pos; // 1, 2
     bin_seq_offset += num_bin_edges[dim];
   }
   if (!skip_element) {
     // In the unweighted case, the default weight is 1
     local_out[local_out_strides[0] * tid + hist_index] += has_weight ? weight[tid] : 1;
   }
-  //local_out[local_out_strides[0] * tid] += (T)hist_index;
-
 }
 
 
@@ -225,6 +224,8 @@ void histogramdd_kernel_impl(
     std::cout << "LME RME" << leftmost_edge[dim] << " " << rightmost_edge[dim] << std::endl; 
     std::cout << bin_seq << std::endl;
     std::cout << bin_seq_offset << std::endl;
+    std::cout << num_bin_edges[dim] << std::endl;
+
     bin_seq_offset += num_bin_edges[dim];
   }
 
@@ -248,6 +249,7 @@ void histogramdd_kernel_impl(
   std::cout << "thread hist sizes" << thread_hist_sizes << std::endl;
   std::cout << "thread hist strides" << thread_histograms.strides() << std::endl;
   std::cout << "input" << input << std::endl;
+  std::cout << "input strides" << input.strides() << std::endl;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
@@ -255,10 +257,13 @@ void histogramdd_kernel_impl(
   id<MTLBuffer> weightBuffer = has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength: 0
                                                              options: 0] autorelease];
   size_t weightOffset =  has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0; 
+  if (has_weight) {
+    std::cout << "weight" << weight.value() << std::endl;
+  }
+  
   std::cout << "weight offset passes" << std::endl;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
-  constexpr uint32_t nOffsets = 1;
   
   dispatch_sync(mpsStream->queue(), ^(){
     @autoreleasepool {
@@ -268,7 +273,7 @@ void histogramdd_kernel_impl(
       MTLSize gridSize = MTLSizeMake(kernelOffsetNumThreads, 1, 1);
       const IntArrayRef& iterShape = input.sizes();
       std::vector<uint32_t> iterShapeData(iterShape.size());
-      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
+      std::vector<uint32_t> strides(nDim);
 
       for (const auto i: c10::irange(iterShape.size())) {
         TORCH_CHECK(i <= UINT32_MAX);
@@ -276,31 +281,28 @@ void histogramdd_kernel_impl(
       }
 
       for (const auto i: c10::irange(nDim)) {
-        //for (const auto offset: c10::irange(nOffsets)) {
-        strides[i][0] = input.stride(i);
-        //}
+        strides[i] = input.stride(i);
       }
       std::cout << "input_contig" << input.is_contiguous() << std::endl;
-      id<MTLFunction> kernelDataOffsetsFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
-      id<MTLComputePipelineState> kernelDataOffsetsPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetsFunction
+      id<MTLFunction> kernelDataOffsetFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset", nil);
+      id<MTLComputePipelineState> kernelDataOffsetPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetFunction
                                                                                                 error: &error] autorelease];
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
+      id<MTLBuffer> kernelDataOffset = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
                                                              options: 0] autorelease];
-      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
-      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
+      TORCH_CHECK(kernelDataOffsetPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
+      [computeEncoder setComputePipelineState:kernelDataOffsetPSO];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim  atIndex:0];
+      [computeEncoder setBuffer:kernelDataOffset offset:0 atIndex:1];
       [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
       [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
 
-      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > kernelOffsetNumThreads)
-          kernelOffsetsTGSize = kernelOffsetNumThreads;
+      NSUInteger kernelOffsetTGSize = kernelDataOffsetPSO.maxTotalThreadsPerThreadgroup;
+      if (kernelOffsetTGSize > kernelOffsetNumThreads)
+          kernelOffsetTGSize = kernelOffsetNumThreads;
 
-      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
+      MTLSize kernelOffsetThreadGroupSize = MTLSizeMake(kernelOffsetTGSize, 1, 1);
       [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: kernelOffsetsThreadGroupSize];
+                threadsPerThreadgroup: kernelOffsetThreadGroupSize];
 
       std::cout << "Kernel offset passes" << std::endl;
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
@@ -312,7 +314,7 @@ void histogramdd_kernel_impl(
       std::cout << "input buffer passes" << std::endl;
       [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:2];
       std::cout << "output buffer passes" << std::endl;
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:3];
+      [computeEncoder setBuffer:kernelDataOffset offset:0 atIndex:3];
       std::cout << "All buffers passes" << std::endl;
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:5];

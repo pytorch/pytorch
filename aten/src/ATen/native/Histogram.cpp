@@ -240,9 +240,18 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
     double rightmost_edge = max.to<double>();
 
     if (leftmost_edge == rightmost_edge && input.numel() > 0) {
-        auto extrema = aminmax(input);
-        leftmost_edge = std::get<0>(extrema).item<double>();
-        rightmost_edge = std::get<1>(extrema).item<double>();
+        if (input.is_mps()) {
+            // aminmax has not been implemented on mps.
+            Tensor min = at::amin(input);
+            Tensor max = at::amax(input);
+            
+            leftmost_edge = min.item<double>();
+            rightmost_edge = max.item<double>();
+        } else {
+            auto extrema = aminmax(input);
+            leftmost_edge = std::get<0>(extrema).item<double>();
+            rightmost_edge = std::get<1>(extrema).item<double>();
+        }
     }
 
     if (leftmost_edge == rightmost_edge) {

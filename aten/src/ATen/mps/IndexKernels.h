@@ -102,6 +102,20 @@ kernel void kernel_index_offsets(constant packed_uint3 * strides         [[buffe
     }
 }
 
+kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
+                                device uint           * data_offset     [[buffer(1)]],
+                                constant uint         * iter_shape      [[buffer(2)]],
+                                constant uint         & num_dimensions  [[buffer(3)]],
+                                uint thread_index [[thread_position_in_grid]]) {
+    uint32_t idx = thread_index;
+    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
+        uint32_t remainder = idx % iter_shape[dim];
+        idx /= iter_shape[dim];
+
+        data_offset[thread_index] += remainder * strides[dim];
+    }
+}
+
 template<typename T, typename E>
 kernel void index_put_accumulate_native_dtypes(constant IndexAB & indexAB      [[buffer(0)]],
                                                constant void    * indexSizes   [[buffer(1)]],
