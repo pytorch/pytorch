@@ -1118,8 +1118,8 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand_symint(other.sym_sizes());
 }
 
-Tensor sum_to_size(const Tensor& self, IntArrayRef size) {
-  TORCH_CHECK(is_expandable_to(size, self.sizes()),
+Tensor sum_to_size_symint(const Tensor& self, SymIntArrayRef size) {
+  TORCH_CHECK(is_expandable_to(size, self.sym_sizes()),
            "size {", size, "} is not expandable to size {", self.sizes(), "}.");
 
   return sum_to(self, size);
@@ -3397,7 +3397,7 @@ Tensor ravel(const Tensor& self) {
 static inline void handle_unflatten_exception(const std::runtime_error &e,
                                               const Tensor &self,
                                               int64_t dim,
-                                              IntArrayRef sizes,
+                                              SymIntArrayRef sizes,
                                               c10::optional <DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
@@ -3406,16 +3406,16 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   if (self.has_names()) {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.names()[dim], ": ", self.size(dim), ") in Tensor", self.names());
+                dim, " (", self.names()[dim], ": ", self.sym_size(dim), ") in Tensor", self.names());
 
   } else {
     TORCH_CHECK(false,
                 "unflatten: Provided sizes ", sizes, " don't multiply up to the size of dim ",
-                dim, " (", self.size(dim), ") in the input tensor");
+                dim, " (", self.sym_size(dim), ") in the input tensor");
   }
 }
 
-Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::optional<DimnameList> names) {
+Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3424,9 +3424,9 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
     TORCH_CHECK(names, "unflatten: input is a named tensor but no names were given for unflattened sizes");
   }
 
-  DimVector inferred_size;
+  SymDimVector inferred_size;
   try {
-    inferred_size = at::infer_size_dv(sizes, self.size(dim));
+    inferred_size = at::infer_size_dv(sizes, self.sym_size(dim));
   } catch (const std::runtime_error& e) {
     // at::infer_size would throw std::runtime_error for invalid size,
     // catch the runtime_error and display the error message in a more user-friendly way
@@ -3434,14 +3434,14 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
     handle_unflatten_exception(e, self, dim, sizes, names);
   }
 
-  DimVector shape(self.sizes().begin(), self.sizes().end());
+  SymDimVector shape(self.sym_sizes().begin(), self.sym_sizes().end());
   shape.erase(shape.begin() + dim);
   shape.insert(shape.begin() + dim, inferred_size.begin(), inferred_size.end());
 
   Tensor result;
   {
     NoNamesGuard guard;
-    result = self.view(shape);
+    result = self.view_symint(shape);
   }
 
   if (names) {
@@ -3454,11 +3454,11 @@ Tensor unflatten_impl(const Tensor& self, int64_t dim, IntArrayRef sizes, c10::o
   return result;
 }
 
-Tensor unflatten(const Tensor& self, int64_t dim, IntArrayRef sizes) {
+Tensor unflatten_symint(const Tensor& self, int64_t dim, SymIntArrayRef sizes) {
   return native::unflatten_impl(self, dim, sizes, c10::nullopt);
 }
 
-Tensor unflatten(const Tensor& self, Dimname dim, IntArrayRef sizes, DimnameList names) {
+Tensor unflatten_dimname_symint(const Tensor& self, Dimname dim, SymIntArrayRef sizes, DimnameList names) {
   return native::unflatten_impl(self, dimname_to_position(self, dim), sizes, names);
 }
 
