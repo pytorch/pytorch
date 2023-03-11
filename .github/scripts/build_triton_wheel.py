@@ -77,7 +77,7 @@ def main() -> None:
     parser.add_argument("--triton-version", type=str, default=read_triton_version())
     args = parser.parse_args()
     build_triton(commit_hash=args.commit_hash,
-                 version=args.trition_version,
+                 version=args.triton_version,
                  build_conda=args.build_conda,
                  py_version=args.py_version)
 
