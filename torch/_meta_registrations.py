@@ -169,6 +169,16 @@ def meta_min(self):
     return self.new_empty(())
 
 
+@register_meta(aten.min.dim)
+def meta_min_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
+
+
 @register_meta(aten.angle.default)
 def meta_angle(self):
     if self.is_complex():
