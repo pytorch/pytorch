@@ -2564,6 +2564,36 @@ new_module_tests = [
         desc='complex'
     ),
     dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_size=(3, 4),
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((-1, -2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({-1, -2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='negative_dims',
+    ),
+    dict(
         module_name='ZeroPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
@@ -2591,6 +2621,28 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({-1, -1, -1, -2})',
         input_size=(2, 3, 4, 4),
         desc='negative_dims'
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_size=(2, 3, 4, 4, 4),
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_size=(3, 4, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ConstantPad1d',
@@ -5848,7 +5900,7 @@ class NNTestCase(TestCase):
             self.assertLessEqual(max(differences), PRECISION)  # type: ignore[type-var]
 
 
-class TestBase(object):
+class TestBase:
 
     _required_arg_names = {'constructor_args', 'input', 'extra_args'}
 
@@ -6033,6 +6085,9 @@ class ModuleTest(TestBase):
         cpu_input = self._get_input()
         type_map = {torch.double: torch.float}
         cpu_input_tuple = cpu_input if isinstance(cpu_input, tuple) else (cpu_input,)
+
+        is_any_input_complex = any(map(lambda t: isinstance(t, torch.Tensor) and t.dtype.is_complex, cpu_input_tuple))
+
         gpu_input_tuple = to_gpu(cpu_input_tuple, type_map=type_map)
 
         cpu_module = self.constructor(*self.constructor_args)
@@ -6093,12 +6148,19 @@ class ModuleTest(TestBase):
             # torch.autograd.grad doesn't complain that some inputs
             # are unreachable (which can happen if you differentiate
             # only on the gradient.
+            if is_any_input_complex:
+                outputs_cpu = cpu_output.sum().abs() + sum(x.sum().abs() for x in cpu_gradInputs)
+                outputs_gpu = gpu_output.sum().abs() + sum(x.sum().abs() for x in gpu_gradInputs)
+            else:
+                outputs_cpu = cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs)
+                outputs_gpu = gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs)
+
             cpu_gg = torch.autograd.grad(
-                cpu_output.sum() + sum(x.sum() for x in cpu_gradInputs),
+                outputs_cpu,
                 cpu_input_tuple + (cpu_gradOutput,) + tuple(cpu_module.parameters()),
                 retain_graph=True)
             gpu_gg = torch.autograd.grad(
-                gpu_output.sum() + sum(x.sum() for x in gpu_gradInputs),
+                outputs_gpu,
                 gpu_input_tuple + (gpu_gradOutput,) + tuple(gpu_module.parameters()),
                 retain_graph=True)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, atol=self.precision, rtol=0, exact_dtype=False)
@@ -6108,7 +6170,7 @@ class ModuleTest(TestBase):
         self.test_noncontig(test_case, gpu_module, gpu_input_tuple)
 
 
-class InputVariableMixin(object):
+class InputVariableMixin:
     def _get_input(self):
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
@@ -6477,13 +6539,13 @@ def _test_module_empty_input(test_case, module, inp, check_size=True, inference=
 def _create_basic_net():
     class Layer(nn.Module):
         def __init__(self):
-            super(Layer, self).__init__()
+            super().__init__()
             self.layer_dummy_param = nn.Parameter(torch.empty(3, 5))
             self.register_buffer('layer_dummy_buf', torch.zeros(1, 3, 3, 7))
 
     class Net(nn.Module):
         def __init__(self):
-            super(Net, self).__init__()
+            super().__init__()
             self.l1 = Layer()
             self.dummy_param = nn.Parameter(torch.empty(3, 5))
             self.register_buffer('dummy_buf', torch.zeros(7, 3, 3, 1))

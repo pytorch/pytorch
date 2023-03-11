@@ -132,7 +132,7 @@ class TORCH_API TSLoweringContext : public LoweringContext {
 
  private:
   struct Parameter {
-    torch::jit::Value* param;
+    torch::jit::Value* param{nullptr};
     size_t index = 0;
   };
 

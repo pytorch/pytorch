@@ -24,6 +24,7 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
 
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
@@ -568,7 +569,11 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
 
     sdp::sdp_params kernel_params{q, k, v, mask.has_value(), 0.0, false};
     auto backend = select_sdp_backend(kernel_params);
-    if (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention) {
+    // strides from packed projection for nested tensors when seq_len is 1 will be
+    // and will trigger a contiguous call in the kernel, so we prevent this
+    bool no_seq_len_1_nested = query.is_nested() ? check_for_seq_len_1_nested_tensor(kernel_params, false) : true;
+    if (no_seq_len_1_nested &&
+        (backend == sdp::SDPBackend::flash_attention || backend == sdp::SDPBackend::efficient_attention)) {
       auto x = at::linear(query, qkv_weight, qkv_bias);
       auto chunks = x.chunk(3, -1);
       auto x_size_0 = x.size(0);
@@ -580,9 +585,9 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
       chunks[2] = (chunks[2].view({x_size_0, -1, num_head, dim_per_head}))
                       .transpose(1, 2);
 
-      Tensor y, weights;
-      std::tie(y, weights) = at::_scaled_dot_product_attention(
-          chunks[0], chunks[1], chunks[2], mask, 0.0, false, false);
+      auto y = at::scaled_dot_product_attention(
+          chunks[0], chunks[1], chunks[2], mask, 0.0, false, c10::nullopt);
+
       auto past_sdp = y.transpose(1, 2).reshape({x_size_0, -1, embed_dim});
       return std::make_tuple(
           at::linear(past_sdp, proj_weight, proj_bias), Tensor());
@@ -679,13 +684,14 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
   }
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
-
-std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t, int64_t, int64_t, int64_t, Tensor> _scaled_dot_product_flash_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    bool return_debug_mask,
+    c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -729,8 +735,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
   Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
   Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
 
-  Tensor attention, log_sumexp;
-  std::tie(attention, log_sumexp) =
+  Tensor attention, log_sumexp, debug_attn_mask;
+  int64_t philox_seed{0}, philox_offset{0};
+  std::tie(attention, log_sumexp, philox_seed, philox_offset, debug_attn_mask) =
       at::_flash_attention_forward(
           query_reshaped,
           key_reshaped,
@@ -740,12 +747,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_flash_attention_cuda(
           max_seqlen_batch_q,
           max_seqlen_batch_k,
           dropout_p,
-          is_causal);
+          is_causal,
+          return_debug_mask,
+          scale);
   // Reshape output to convert nnz to batch_size and seq_len
   attention =
       attention.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
 
-  return std::make_tuple(attention, log_sumexp);
+  return std::make_tuple(attention, log_sumexp, cumulative_sequence_length_q, cumulative_sequence_length_k, max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
@@ -753,7 +762,8 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& key,
     const Tensor& value,
     bool compute_log_sumexp,
-    bool is_causal) {
+    bool is_causal,
+    c10::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
@@ -772,13 +782,14 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
       c10::nullopt,
       c10::nullopt,
       compute_log_sumexp,
-      is_causal);
+      is_causal,
+      scale);
   attention = attention.transpose(1,2);
   return std::make_tuple(std::move(attention), std::move(log_sumexp));
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_.has_value(), dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -807,7 +818,7 @@ bool _chunk_grad_outputs_efficient_attention(
 }
 
 
-std::tuple<Tensor, Tensor> _flash_attention_forward(
+std::tuple<Tensor, Tensor, int64_t, int64_t, Tensor> _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -816,7 +827,9 @@ std::tuple<Tensor, Tensor> _flash_attention_forward(
     const int64_t max_seqlen_batch_q,
     const int64_t max_seqlen_batch_k,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    bool return_debug_mask,
+    c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
   /*
   num_splits determines how much to parallelize over the seqlen_q dimension
@@ -825,11 +838,12 @@ std::tuple<Tensor, Tensor> _flash_attention_forward(
   benchmarking. We will hard code it to 0 for now
   */
   constexpr int num_splits{0};
-  auto softmax_scale = std::pow(query.size(-1), -0.5);
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   at::Tensor output = at::empty_like(query);
-  Tensor logsumexp, softmax;
 
-  logsumexp = fmha::mha_fwd(
+  Tensor logsumexp, debug_attn_mask;
+  uint64_t philox_seed{0}, philox_offset{0};
+  std::tie(logsumexp, philox_seed, philox_offset, debug_attn_mask) = fmha::mha_fwd(
       query,
       key,
       value,
@@ -842,12 +856,18 @@ std::tuple<Tensor, Tensor> _flash_attention_forward(
       softmax_scale,
       false, /*zero_tensors = false for all calls here*/
       is_causal,
-      num_splits,
-      c10::nullopt);
-  return std::make_tuple(output, logsumexp);
+      return_debug_mask, /*return_softmax (this is used for testing)*/
+      num_splits);
+
+  debug_attn_mask = return_debug_mask ? debug_attn_mask : at::empty({0}, query.options());
+
+  int64_t signed_philox_seed = sdp::bit_cast<int64_t>(philox_seed);
+  int64_t signed_philox_offset= sdp::bit_cast<int64_t>(philox_offset);
+
+  return std::make_tuple(output, logsumexp, signed_philox_seed, signed_philox_offset, debug_attn_mask);
 #endif
   TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
-  return std::make_tuple(Tensor(), Tensor());
+  return std::make_tuple(Tensor(), Tensor(), 0, 0, Tensor());
 }
 
 std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
@@ -863,7 +883,8 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     // (Mode 1MHK only) Maximum sequence length across batches
     const c10::optional<int64_t> max_seqlen_q_,
     bool compute_logsumexp,
-    bool causal) {
+    bool causal,
+    c10::optional<double> scale) {
 #if defined(USE_FLASH_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
@@ -971,6 +992,7 @@ std::tuple<at::Tensor, at::Tensor> _efficient_attention_forward(
     TORCH_CHECK(B < std::numeric_limits<decltype(A)>::max(), #B " overflows"); \
   }
 
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.num_heads = num_heads;
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);

@@ -3,9 +3,9 @@ import operator
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-import torch.nn.intrinsic as nni
+import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.intrinsic.qat as nniqat
-import torch.nn.qat as nnqat
+import torch.ao.nn.qat as nnqat
 import torch.ao.nn.quantized.reference as nnqr
 from collections import namedtuple
 from typing import Callable, Dict, List, Union
@@ -503,6 +503,8 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.nn.functional.max_pool1d,
         torch.nn.functional.max_pool2d,
         torch.nn.functional.max_pool3d,
+        torch.nn.functional.pixel_shuffle,
+        torch.nn.functional.pixel_unshuffle,
         torch.nn.functional.relu,
         torch.nn.functional.relu6,
         torch.avg_pool1d,
@@ -511,6 +513,7 @@ def _get_share_qparams_op_configs(dtype_configs):
         torch.clamp,
         torch.flatten,
         torch.mean,
+        torch.narrow,
         torch.repeat_interleave,
         torch.transpose,
         torch.squeeze,

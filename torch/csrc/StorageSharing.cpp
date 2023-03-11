@@ -26,6 +26,7 @@
 #endif
 
 #include <ATen/MapAllocator.h>
+#include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <atomic>
 #include <string>
@@ -90,22 +91,23 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
       reinterpret_cast<THPStorage*>(_self)->cdata->device_type() == at::kCPU,
       "_share_filename_: only available on CPU");
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* storage = self->cdata;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  THManagedMapAllocator* ctx;
+  c10::StorageImpl* self_storage_impl = self->cdata;
+  THManagedMapAllocator* ctx =
+      THManagedMapAllocator::fromDataPtr(self_storage_impl->data_ptr());
   // Storage is already in shared memory, just return a handle
-  if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr()))) {
+  if (ctx) {
     // done
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
     int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE;
     std::string handle = at::NewProcessWideShmHandle();
+    // Create a new storage in shared memory
     at::Storage new_storage(c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
-        storage->nbytes(),
+        self_storage_impl->nbytes(),
         THManagedMapAllocator::makeDataPtr(
-            "", handle.c_str(), flags, storage->nbytes()),
+            "", handle.c_str(), flags, self_storage_impl->nbytes()),
         /*allocator=*/nullptr,
         /*resizable=*/false));
 
@@ -113,11 +115,16 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
     {
       // Copying into shared memory can be slow, so release the GIL
       pybind11::gil_scoped_release no_gil;
-      storage_copy(new_storage, _self_aten);
+      // Copy data from old storage into the new one
+      at::storage_copy(new_storage, _self_aten);
     }
 
-    std::swap(*storage, *new_storage.unsafeGetStorageImpl());
-    ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr());
+    // Replace the old data_ptr and allocator with the new ones
+    c10::StorageImpl* new_storage_impl = new_storage.unsafeGetStorageImpl();
+    self_storage_impl->set_data_ptr(std::move(new_storage_impl->data_ptr()));
+    self_storage_impl->set_allocator(new_storage_impl->allocator());
+
+    ctx = THManagedMapAllocator::fromDataPtr(self_storage_impl->data_ptr());
     AT_ASSERT(ctx);
   }
 
@@ -127,7 +134,8 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
   THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle)
     return nullptr;
-  THPObjectPtr size(THPUtils_packUInt64(storage->nbytes() / sizeof(uint8_t)));
+  THPObjectPtr size(
+      THPUtils_packUInt64(self_storage_impl->nbytes() / sizeof(uint8_t)));
   if (!size)
     return nullptr;
 
@@ -173,21 +181,6 @@ static PyObject* THPStorage_newSharedFilename(
   END_HANDLE_TH_ERRORS
 }
 
-static c10::intrusive_ptr<c10::StorageImpl> THPStorage_newFdStorage(
-    ptrdiff_t size) {
-  int flags = at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_EXCLUSIVE |
-      at::ALLOCATOR_MAPPED_KEEPFD | at::ALLOCATOR_MAPPED_UNLINK;
-  std::string handle = at::NewProcessWideShmHandle();
-  auto sptr = at::MapAllocator::makeDataPtr(
-      handle.c_str(), flags, size * sizeof(uint8_t), nullptr);
-  return c10::make_intrusive<at::StorageImpl>(
-      c10::StorageImpl::use_byte_size_t(),
-      size,
-      std::move(sptr),
-      /*allocator=*/nullptr,
-      /*resizable=*/false);
-}
-
 static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
   HANDLE_TH_ERRORS
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -195,7 +188,7 @@ static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
   if (!PyArg_ParseTuple(args, "L", &size)) {
     return nullptr;
   }
-  return THPStorage_New(THPStorage_newFdStorage(size));
+  return THPStorage_New(at::new_shm_fd_storage(size));
   END_HANDLE_TH_ERRORS
 }
 
@@ -205,30 +198,37 @@ static PyObject* THPStorage_shareFd(PyObject* _self, PyObject* noargs) {
       reinterpret_cast<THPStorage*>(_self)->cdata->device_type() == at::kCPU,
       "_share_fd_: only available on CPU");
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* storage = self->cdata;
+  c10::StorageImpl* self_storage_impl = self->cdata;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   at::MapAllocator* ctx;
   // Storage is already in shared memory, just return a handle
-  if ((ctx = at::MapAllocator::fromDataPtr(storage->data_ptr()))) {
+  if ((ctx = at::MapAllocator::fromDataPtr(self_storage_impl->data_ptr()))) {
     // done
   } else {
-    at::Storage new_storage(THPStorage_newFdStorage(storage->nbytes()));
+    at::Storage new_storage(
+        at::new_shm_fd_storage(self_storage_impl->nbytes()));
     at::Storage _self_aten = torch::createStorage(_self);
     {
       // Copying into shared memory can be slow, so release the GIL
       pybind11::gil_scoped_release no_gil;
-      storage_copy(new_storage, _self_aten);
+      // Copy data from old storage into the new one
+      at::storage_copy(new_storage, _self_aten);
     }
 
-    std::swap(*storage, *new_storage.unsafeGetStorageImpl());
-    ctx = at::MapAllocator::fromDataPtr(storage->data_ptr());
+    // Replace the old data_ptr and allocator with the new ones
+    c10::StorageImpl* new_storage_impl = new_storage.unsafeGetStorageImpl();
+    self_storage_impl->set_data_ptr(std::move(new_storage_impl->data_ptr()));
+    self_storage_impl->set_allocator(new_storage_impl->allocator());
+
+    ctx = at::MapAllocator::fromDataPtr(self_storage_impl->data_ptr());
     AT_ASSERT(ctx);
   }
 
   THPObjectPtr storage_handle(THPUtils_packInt32(ctx->fd()));
   if (!storage_handle)
     return nullptr;
-  THPObjectPtr size(THPUtils_packUInt64(storage->nbytes() / sizeof(uint8_t)));
+  THPObjectPtr size(
+      THPUtils_packUInt64(self_storage_impl->nbytes() / sizeof(uint8_t)));
   if (!size)
     return nullptr;
 

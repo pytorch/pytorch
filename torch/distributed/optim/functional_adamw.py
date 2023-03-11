@@ -17,7 +17,7 @@ __all__: List[str] = []
 # NOTE: This should be only used by distributed optimizer internals
 # and not meant to expose to the user.
 @torch.jit.script
-class _FunctionalAdamW(object):
+class _FunctionalAdamW:
     def __init__(
         self,
         params: List[Tensor],
@@ -28,6 +28,7 @@ class _FunctionalAdamW(object):
         amsgrad: bool = False,
         maximize: bool = False,
         foreach: bool = False,
+        fused: bool = False,
         _allow_empty_param_list: bool = False,
     ):
         if not 0.0 <= lr:
@@ -51,6 +52,7 @@ class _FunctionalAdamW(object):
         self.amsgrad = amsgrad
         self.maximize = maximize
         self.foreach = foreach
+        self.fused = fused
         self.state = torch.jit.annotate(Dict[torch.Tensor, Dict[str, torch.Tensor]], {})
 
         if len(params) == 0 and not _allow_empty_param_list:
@@ -114,6 +116,9 @@ class _FunctionalAdamW(object):
                 weight_decay=self.defaults["weight_decay"],
                 eps=self.defaults["eps"],
                 foreach=self.foreach,
+                fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )
 
     def step(self, gradients: List[Optional[Tensor]]):
@@ -181,4 +186,7 @@ class _FunctionalAdamW(object):
                 weight_decay=self.defaults["weight_decay"],
                 eps=self.defaults["eps"],
                 foreach=self.foreach,
+                fused=self.fused,
+                grad_scale=None,
+                found_inf=None,
             )

@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Awaitable, cast, DefaultDict, Dict, List, Match, Optional, Set
 
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict  # Python 3.11+
 
 help_msg = """fast_nvcc [OPTION]... -- [NVCC_ARG]...
 
@@ -78,6 +78,8 @@ url_vars = f"{url_base}#keeping-intermediate-phase-files"
 
 # regex for temporary file names
 re_tmp = r"(?<![\w\-/])(?:/tmp/)?(tmp[^ \"\'\\]+)"
+if os.name == "nt":
+    re_tmp = r"(?<![\w\-0])(?:\/Temp\/)?(tmp[^ \"\'\\]+)"
 
 
 def fast_nvcc_warn(warning: str) -> None:
@@ -141,7 +143,10 @@ def nvcc_dryrun_data(binary: str, args: List[str]) -> DryunData:
     print(result.stdout, end="")
     env = {}
     commands = []
-    for line in result.stderr.splitlines():
+    output = result.stderr
+    if os.name == "nt":
+        output = result.stdout
+    for line in output.splitlines():
         match = re.match(r"^#\$ (.*)$", line)
         if match:
             (stripped,) = match.groups()
@@ -213,9 +218,11 @@ def unique_module_id_files(commands: List[str]) -> List[str]:
         line = re.sub(r"\s*\-\-gen\_module\_id\_file\s*", " ", line)
         if arr:
             (filename,) = arr
+            if os.name == "nt":
+                filename = "%TEMP%\\" + filename
             if not module_id:
                 module_id = module_id_contents(shlex.split(line))
-            uniqueified.append(f"echo -n '{module_id}' > '{filename}'")
+            uniqueified.append(f"echo -n '{module_id}' > \"{filename}\"")
         uniqueified.append(line)
     return uniqueified
 
@@ -261,6 +268,8 @@ def files_mentioned(command: str) -> List[str]:
     """
     Return fully-qualified names of all tmp files referenced by command.
     """
+    if os.name == "nt":
+        return [f"/%TEMP%/{match.group(1)}" for match in re.finditer(re_tmp, command)]
     return [f"/tmp/{match.group(1)}" for match in re.finditer(re_tmp, command)]
 
 
@@ -294,7 +303,9 @@ def nvcc_data_dependencies(commands: List[str]) -> Graph:
                 fatbins[i].add(tmp)
             else:
                 tmp_files[tmp] = i
-        if line.startswith("rm ") and not deps:
+        if (line.startswith("rm ") or line.startswith("erase ")) and not deps:
+            if os.name == "nt":
+                commands[i] = line.replace("/", "\\")
             deps.add(i - 1)
         graph.append(deps)
     return graph
@@ -421,6 +432,8 @@ async def run_graph(
     """
     Return outputs/errors (and optionally time/file info) from commands.
     """
+    if os.name == "nt":
+        env.update(os.environ.copy())
     tasks: List[Awaitable[Result]] = []
     for i, (command, indices) in enumerate(zip(commands, graph)):
         deps = {tasks[j] for j in indices}

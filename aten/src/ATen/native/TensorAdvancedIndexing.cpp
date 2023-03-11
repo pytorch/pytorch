@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
+// The index is a TensorList containing kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -221,6 +221,10 @@ TORCH_META_FUNC2(scatter, reduce)
  const Tensor& index,
  const Tensor& src,
  const c10::string_view reduce) {
+  TORCH_WARN_ONCE(
+      "The reduce argument of torch.scatter with Tensor src is deprecated and will be removed ",
+      "in a future PyTorch release. Use torch.scatter_reduce instead for more reduction options."
+  );
   scatter_meta_impl(*this, self, dim, index, src, reduce);
 }
 
@@ -1191,6 +1195,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
+  TORCH_CHECK(!(self.dim() == 0 && index.numel() > 1), "index_select(): Index to scalar cannot have multiple values.");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
@@ -1472,9 +1477,9 @@ Tensor gather_backward(const Tensor& grad, const Tensor& self, int64_t dim, cons
     return at::_gather_sparse_backward(self, dim, index, grad);
   }
   auto result = grad.new_zeros_symint(self.sym_sizes());
-  // for composite compliance, use out-of-place variant of
-  // `scatter_add` if index tensor is a Tensor Subclass.
-  if (isTensorSubclassLike(index)) {
+  // for composite, vmap and inductor compliance, use out-of-place variant of
+  // `scatter_add` if index or grad tensors is a Tensor Subclass.
+  if (areAnyTensorSubclassLike({index, grad})) {
     return result.scatter_add(dim, index, grad);
   }
   result.scatter_add_(dim, index, grad);
@@ -1721,8 +1726,6 @@ TORCH_IMPL_FUNC(scatter_reduce_two)
  const c10::string_view reduce,
  bool include_self,
  const Tensor& out) {
-  // See issue https://github.com/pytorch/pytorch/issues/74770
-  TORCH_WARN_ONCE("scatter_reduce() is in beta and the API may change at any time.");
 
   dim = at::maybe_wrap_dim(dim, self.dim());
 
@@ -1839,19 +1842,14 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
 
   c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
@@ -1877,7 +1875,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+      .set_check_mem_overlap(false)  // result is intentionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -1896,12 +1894,12 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
-  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
+  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better performance.
   // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+    .set_check_mem_overlap(false)  // result is intentionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)

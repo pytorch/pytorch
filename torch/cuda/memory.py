@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Dict, Union, Tuple
 
 import torch
-from . import is_initialized, _get_device_index, _lazy_init
+from . import is_initialized, _get_device_index, _lazy_init, _get_nvml_device_index
 from ._utils import _dummy_type
 
 from ._memory_viz import segments as _segments, memory as _memory
@@ -193,6 +193,15 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
       number of over-size allocation requests received by the memory allocator.
     - ``"oversize_segments.{current,peak,allocated,freed}"``:
       number of over-size reserved segments from ``cudaMalloc()``.
+
+    The caching allocator can be configured via ENV to round memory allocations in order
+    to reduce fragmentation. Sometimes the overhead from rounding can be higher than
+    the fragmentation it helps reduce. The following stat can be used to check if
+    rounding adds too much overhed:
+
+    - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      memory requested by client code, compare this with allocated_bytes to check if
+      allocation rounding adds too much overhead.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -477,6 +486,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     metrics_to_display = [
         ("allocated_bytes", "Allocated memory", _format_size),
         ("active_bytes", "Active memory", _format_size),
+        ("requested_bytes", "Requested memory", _format_size),
         ("reserved_bytes", "GPU reserved memory", _format_size),
         ("inactive_split_bytes", "Non-releasable memory", _format_size),
         ("allocation", "Allocations", _format_count),
@@ -577,7 +587,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded:
         return ("cuda driver can't be loaded, is cuda enabled?")
-    device = _get_device_index(device, optional=True)
+    device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     lines = []

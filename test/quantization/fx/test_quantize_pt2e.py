@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import torch._dynamo as torchdynamo
+from torch.testing._internal.common_utils import xfailIfPython311
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
@@ -14,6 +15,7 @@ from torch.testing._internal.common_quantized import (
 from torch.ao.quantization import (
     get_default_qconfig,
     QConfigMapping,
+    observer,
 )
 from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
@@ -25,13 +27,15 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
+import itertools
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
+    @xfailIfPython311
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
@@ -76,6 +80,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             self.checkGraphModuleNodes(
                 m, expected_node_list=node_list, expected_node_occurrence=node_occurrence)
 
+    @xfailIfPython311
     def test_qconfig_module_type(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -123,9 +128,72 @@ class TestQuantizePT2E(QuantizationTestCase):
             ]
             self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
+    @xfailIfPython311
+    def test_rearrange_weight_observer_for_decomposed_linear(self):
+        """
+        Check whether weight observer is correctly rearranged for decomposed linear.
+        before:
+            weight - t - observer \
+              input - observer - addmm/mm
+        after:
+            weight - observer - t \
+              input - observer - addmm/mm
+        """
+        class M(torch.nn.Module):
+            def __init__(self, with_bias, use_relu):
+                super().__init__()
+                self.linear = nn.Linear(4, 4, bias=with_bias)
+                self.relu = nn.ReLU()
+                self.use_relu = use_relu
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.relu(x) if self.use_relu else x
+
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            m = M(with_bias, use_relu).eval()
+            example_inputs = (torch.randn(1, 4),)
+
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
+
+            qconfig = get_default_qconfig('qnnpack')
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
+            backend_config = get_qnnpack_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+
+            # 1. Check graph nodes:
+            # - args[0] of t should be the weight observer
+            # - args[-1] of addmm/mm should be t
+            error_msg = 'Weight observer is not correctly rearranged for decomposed linear'
+            for node in m.graph.nodes:
+                if node.target == torch.ops.aten.t.default:
+                    target = node.args[0].target
+                    self.assertTrue(isinstance(getattr(m, target), observer.ObserverBase), error_msg)
+                elif node.target in (torch.ops.aten.addmm.default, torch.ops.aten.mm.default):
+                    target = node.args[-1].target
+                    self.assertTrue(target == torch.ops.aten.t.default, error_msg)
+
+            # 2. Check m.code to ensure `m.recompile()` is called.
+            # If weight observer is rearranged in graph but `m.recompile()` is not called,
+            # m.code would be wrong.
+            code_before_recompile = m.code
+            m.recompile()
+            code_after_recompile = m.code
+            self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
+
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
+    @xfailIfPython311
     def test_resnet18(self):
         import torchvision
         with override_quantized_engine("qnnpack"):

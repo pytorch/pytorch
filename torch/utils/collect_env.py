@@ -1,4 +1,3 @@
-from __future__ import print_function
 
 # Unlike the rest of the PyTorch this file must be python2 compliant.
 # This script outputs relevant system environment info
@@ -44,6 +43,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'miopen_runtime_version',
     'caching_allocator_config',
     'is_xnnpack_available',
+    'cpu_info',
 ])
 
 
@@ -180,7 +180,7 @@ def get_cudnn_version(run_lambda):
     if not files_set:
         return None
     # Alphabetize the result because the order is non-deterministic otherwise
-    files = list(sorted(files_set))
+    files = sorted(files_set)
     if len(files) == 1:
         return files[0]
     result = '\n'.join(files)
@@ -201,6 +201,98 @@ def get_nvidia_smi():
                 smi = '"{}"'.format(candidate_smi)
                 break
     return smi
+
+
+# example outputs of CPU infos
+#  * linux
+#    Architecture:            x86_64
+#      CPU op-mode(s):        32-bit, 64-bit
+#      Address sizes:         46 bits physical, 48 bits virtual
+#      Byte Order:            Little Endian
+#    CPU(s):                  128
+#      On-line CPU(s) list:   0-127
+#    Vendor ID:               GenuineIntel
+#      Model name:            Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#        CPU family:          6
+#        Model:               106
+#        Thread(s) per core:  2
+#        Core(s) per socket:  32
+#        Socket(s):           2
+#        Stepping:            6
+#        BogoMIPS:            5799.78
+#        Flags:               fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr
+#                             sse sse2 ss ht syscall nx pdpe1gb rdtscp lm constant_tsc arch_perfmon rep_good nopl
+#                             xtopology nonstop_tsc cpuid aperfmperf tsc_known_freq pni pclmulqdq monitor ssse3 fma cx16
+#                             pcid sse4_1 sse4_2 x2apic movbe popcnt tsc_deadline_timer aes xsave avx f16c rdrand
+#                             hypervisor lahf_lm abm 3dnowprefetch invpcid_single ssbd ibrs ibpb stibp ibrs_enhanced
+#                             fsgsbase tsc_adjust bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap
+#                             avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1
+#                             xsaves wbnoinvd ida arat avx512vbmi pku ospke avx512_vbmi2 gfni vaes vpclmulqdq
+#                             avx512_vnni avx512_bitalg tme avx512_vpopcntdq rdpid md_clear flush_l1d arch_capabilities
+#    Virtualization features:
+#      Hypervisor vendor:     KVM
+#      Virtualization type:   full
+#    Caches (sum of all):
+#      L1d:                   3 MiB (64 instances)
+#      L1i:                   2 MiB (64 instances)
+#      L2:                    80 MiB (64 instances)
+#      L3:                    108 MiB (2 instances)
+#    NUMA:
+#      NUMA node(s):          2
+#      NUMA node0 CPU(s):     0-31,64-95
+#      NUMA node1 CPU(s):     32-63,96-127
+#    Vulnerabilities:
+#      Itlb multihit:         Not affected
+#      L1tf:                  Not affected
+#      Mds:                   Not affected
+#      Meltdown:              Not affected
+#      Mmio stale data:       Vulnerable: Clear CPU buffers attempted, no microcode; SMT Host state unknown
+#      Retbleed:              Not affected
+#      Spec store bypass:     Mitigation; Speculative Store Bypass disabled via prctl and seccomp
+#      Spectre v1:            Mitigation; usercopy/swapgs barriers and __user pointer sanitization
+#      Spectre v2:            Mitigation; Enhanced IBRS, IBPB conditional, RSB filling, PBRSB-eIBRS SW sequence
+#      Srbds:                 Not affected
+#      Tsx async abort:       Not affected
+#  * win32
+#    Architecture=9
+#    CurrentClockSpeed=2900
+#    DeviceID=CPU0
+#    Family=179
+#    L2CacheSize=40960
+#    L2CacheSpeed=
+#    Manufacturer=GenuineIntel
+#    MaxClockSpeed=2900
+#    Name=Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#    ProcessorType=3
+#    Revision=27142
+#
+#    Architecture=9
+#    CurrentClockSpeed=2900
+#    DeviceID=CPU1
+#    Family=179
+#    L2CacheSize=40960
+#    L2CacheSpeed=
+#    Manufacturer=GenuineIntel
+#    MaxClockSpeed=2900
+#    Name=Intel(R) Xeon(R) Platinum 8375C CPU @ 2.90GHz
+#    ProcessorType=3
+#    Revision=27142
+
+def get_cpu_info(run_lambda):
+    rc, out, err = 0, '', ''
+    if get_platform() == 'linux':
+        rc, out, err = run_lambda('lscpu')
+    elif get_platform() == 'win32':
+        rc, out, err = run_lambda('wmic cpu get Name,Manufacturer,Family,Architecture,ProcessorType,DeviceID,\
+        CurrentClockSpeed,MaxClockSpeed,L2CacheSize,L2CacheSpeed,Revision /VALUE')
+    elif get_platform() == 'darwin':
+        rc, out, err = run_lambda("sysctl -n machdep.cpu.brand_string")
+    cpu_info = 'None'
+    if rc == 0:
+        cpu_info = out
+    else:
+        cpu_info = err
+    return cpu_info
 
 
 def get_platform():
@@ -373,6 +465,7 @@ def get_env_info():
         cmake_version=get_cmake_version(run_lambda),
         caching_allocator_config=get_cachingallocator_config(),
         is_xnnpack_available=is_xnnpack_available(),
+        cpu_info=get_cpu_info(run_lambda),
     )
 
 env_info_fmt = """
@@ -398,6 +491,9 @@ cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+
+CPU:
+{cpu_info}
 
 Versions of relevant libraries:
 {pip_packages}
@@ -476,6 +572,7 @@ def pretty_str(envinfo):
     if mutable_dict['conda_packages']:
         mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
                                                  '[conda] ')
+    mutable_dict['cpu_info'] = envinfo.cpu_info
     return env_info_fmt.format(**mutable_dict)
 
 

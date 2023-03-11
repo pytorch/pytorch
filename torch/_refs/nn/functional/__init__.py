@@ -7,7 +7,6 @@ import torch._prims as prims
 import torch._prims_common as utils
 import torch._refs as refs
 from torch._decomp import register_decomposition
-from torch._decomp.decompositions import Reduction
 from torch._prims_common import (
     check,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
@@ -22,8 +21,6 @@ from torch._prims_common.wrappers import (
     out_wrapper,
 )
 from torch._refs import _make_inplace
-
-from torch._subclasses.fake_tensor import FakeTensor
 
 __all__ = [
     "alpha_dropout",
@@ -454,7 +451,7 @@ def hardshrink(a: TensorLikeType, lambd: float = 0.5):
     # hardshrink(x) = x if x > lambd
     #               = x if x < -lambd
     #               = 0 otherwise
-    return refs.where(refs.logical_and(a >= -lambd, a <= lambd), 0, a)
+    return torch.where(torch.logical_and(a >= -lambd, a <= lambd), 0, a)
 
 
 @register_decomposition(aten.softshrink)
@@ -470,14 +467,16 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     )
     ge_mask = a > lambd
     le_mask = a < -lambd
-    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
-    result = refs.where(ge_mask, a - lambd, a)
-    result = refs.where(le_mask, a + lambd, result)
-    return refs.where(zero_mask, 0, result)
+    zero_mask = torch.logical_not(torch.logical_or(ge_mask, le_mask))
+    result = torch.where(ge_mask, a - lambd, a)
+    result = torch.where(le_mask, a + lambd, result)
+    return torch.where(zero_mask, 0, result)
 
 
 # Losses
 def _reduction_int_to_str(reduction: int) -> str:
+    from torch._decomp.decompositions import Reduction
+
     if reduction == Reduction.NONE.value:
         return "none"
     elif reduction == Reduction.MEAN.value:
@@ -650,6 +649,7 @@ def _nll_loss_nd(
     # TODO: This check does not work with FakeTensor inputs; See Issue #85834
     # Explicit cast for class_check to bool; See Issue #78071
     """
+    from torch._subclasses.fake_tensor import FakeTensor
     num_classes = input.shape[1] if input.ndim > 1 else input.shape[0]
     valid_classes_mask = torch.logical_and(
         (flat_target >= 0), (flat_target < num_classes)

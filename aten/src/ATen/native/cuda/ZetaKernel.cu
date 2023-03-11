@@ -15,7 +15,7 @@ namespace {
  * See note [3-Clause BSD License for the Cephes Math Library].
  */
 // See note [Jiterator]
-const char zeta_name[] = "zeta";
+CONSTEXPR_EXCEPT_WIN_CUDA char zeta_name[] = "zeta";
 void zeta_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
     AT_DISPATCH_FLOATING_TYPES(iter.common_dtype(), "zeta_cuda", [&]() {

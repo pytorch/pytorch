@@ -82,8 +82,8 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
 void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
     void* ptr,
     int64_t alloc_size,
-    int64_t total_allocated,
-    int64_t total_reserved,
+    size_t total_allocated,
+    size_t total_reserved,
     c10::Device device) {
   c10::reportMemoryUsageToProfiler(
       ptr, alloc_size, total_allocated, total_reserved, device);

@@ -62,7 +62,7 @@ if z_value >= 3:
     raise Exception('''\n
 z-value >= 3, there is high chance of perf regression.\n
 To reproduce this regression, run
-`cd .jenkins/pytorch/perf_test/ && bash {}.sh` on your local machine
+`cd .ci/pytorch/perf_test/ && bash {}.sh` on your local machine
 and compare the runtime before/after your code change.
 '''.format(test_name))
 else:

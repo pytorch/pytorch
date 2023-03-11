@@ -70,7 +70,7 @@ void cuda_device_assertions_multiple_writes_from_same_block() {
 
 TEST(CUDATest, cuda_device_assertions_multiple_writes_from_same_block) {
 #ifdef TORCH_USE_CUDA_DSA
-  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled = true;
+  c10::cuda::CUDAKernelLaunchRegistry::get_singleton_ref().enabled_at_runtime = true;
   cuda_device_assertions_multiple_writes_from_same_block();
 #else
   GTEST_SKIP() << "CUDA device-side assertions (DSA) was not enabled at compile time.";

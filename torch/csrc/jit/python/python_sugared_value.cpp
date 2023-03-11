@@ -1012,7 +1012,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
   py::object props = py::module::import("torch._jit_internal")
-                         .attr("_get_named_tuple_properties")(obj);
+                         .attr("_get_named_tuple_properties")(obj, loc);
 
   std::string unqualName;
   std::vector<std::string> field_names;
@@ -1206,6 +1206,9 @@ std::shared_ptr<SugaredValue> toSugaredValue(
       obj.ptr() == py::module::import("torch.jit").attr("_fork").ptr() ||
       obj.ptr() == py::module::import("torch.jit").attr("fork").ptr()) {
     return SpecialFormValue::create(prim::fork);
+  } else if (
+      obj.ptr() == py::module::import("torch.jit").attr("_awaitable").ptr()) {
+    return SpecialFormValue::create(prim::awaitable);
   } else if (
       obj.ptr() == py::module::import("torch.jit").attr("annotate").ptr()) {
     return SpecialFormValue::create(prim::annotate);

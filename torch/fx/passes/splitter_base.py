@@ -43,12 +43,14 @@ class _SplitterSettingBase:
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
+            "--min-acc-module-size",
             "--min_acc_module_size",
             required=False,
             type=int,
             help="Minimum size limit of an accelerator subgraph.",
         )
         parser.add_argument(
+            "--skip-fusion",
             "--skip_fusion",
             default=False,
             action="store_true",
@@ -58,6 +60,7 @@ class _SplitterSettingBase:
             "can reduce overhead.",
         )
         parser.add_argument(
+            "--allow-non-tensor",
             "--allow_non_tensor",
             default=False,
             action="store_true",
@@ -226,7 +229,7 @@ def generate_inputs_for_submodules(
 
     handles = []
     results = {}
-    submodule_to_names = dict((mod, name) for name, mod in model.named_modules())
+    submodule_to_names = {mod: name for name, mod in model.named_modules()}
 
     def pre_forward(module, module_inputs):
         results[submodule_to_names[module]] = copy.deepcopy(module_inputs) if deepcopy else module_inputs

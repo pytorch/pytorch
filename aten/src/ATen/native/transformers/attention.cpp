@@ -15,6 +15,8 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Exception.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/core/DispatchKeySet.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -661,7 +663,32 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 }
 
 int64_t _fused_sdp_choice_cpp(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal){
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+  return static_cast<int64_t>(sdp::SDPBackend::math);
+}
+
+int64_t _fused_sdp_choice_meta(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<double> scale) {
+  auto query_key_set = query_.key_set();
+  bool has_cuda = query_key_set.has(c10::DispatchKey::CUDA);
+  if (has_cuda) {
+    auto choice_int = _fused_sdp_choice_stub(
+        at::kCUDA,
+        query_,
+        key,
+        value,
+        attn_mask_,
+        dropout_p,
+        is_causal,
+        scale);
+    return choice_int;
+  }
   return static_cast<int64_t>(sdp::SDPBackend::math);
 }
 
@@ -678,13 +705,41 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention(
   if (!need_attn_weights) {
     return std::make_tuple(
         at::scaled_dot_product_attention(
-            query_, key, value, attn_mask_, dropout_p, is_causal),
+            query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt),
         Tensor());
   }
   return at::_scaled_dot_product_attention_math(
-      query_, key, value, attn_mask_, dropout_p, is_causal);
+      query_, key, value, attn_mask_, dropout_p, is_causal, c10::nullopt);
 }
 
+inline void validate_sdpa_input(
+    const Tensor& query_,
+    const Tensor& key,
+    const Tensor& value,
+    const c10::optional<Tensor>& attn_mask_,
+    double dropout_p,
+    bool is_causal,
+    c10::optional<double> scale) {
+  TORCH_CHECK(
+      query_.dtype() == key.dtype() && query_.dtype() == value.dtype(),
+      "Expected query, key, and value to have the same dtype, but got query.dtype: ",
+      query_.dtype(), " key.dtype: ", key.dtype(), " and value.dtype: ", value.dtype(), " instead.");
+  TORCH_CHECK(
+      query_.device() == key.device() && query_.device() == value.device(),
+      "Expected query, key, and value to have the same device type, but got query.device: ",
+      query_.device(), " key.device: ", key.device(), " and value.device: ", value.device(), " instead.");
+  TORCH_CHECK(
+      query_.dim() >= 2 && key.dim() >= 2 && value.dim() >= 2,
+      "Expected query, key, and value to all be  at least 2 dimensional, but got query.dim: ",
+      query_.dim(), " key.dim: ", key.dim(), " and value.dim: ", value.dim(), " instead.");
+  if (attn_mask_.has_value()){
+    auto mask_dtype = attn_mask_->dtype();
+    TORCH_CHECK(mask_dtype == at::kBool || mask_dtype == query_.dtype(),
+      "Expected attn_mask dtype to be bool or to match query dtype, but got attn_mask.dtype: ",
+      mask_dtype, " and  query.dtype: ", query_.dtype(), " instead.");
+  }
+  return;
+}
 // Computes scaled dot product attention on query, key and value tensors, using
 // an optional attention mask if passed, and applying dropout if a probability
 // greater than 0.0 is specified.
@@ -719,17 +774,19 @@ Tensor scaled_dot_product_attention(
     const Tensor& value,
     const c10::optional<Tensor>& attn_mask_,
     double dropout_p,
-    bool is_causal) {
+    bool is_causal,
+    c10::optional<double> scale) {
+  validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
   if (query_.device().type() == DeviceType::CUDA){
     choice_int = _fused_sdp_choice_stub(query_.device().type(),
-      query_, key, value, attn_mask_, dropout_p, is_causal);
+      query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   }
   sdp::SDPBackend backend = static_cast<sdp::SDPBackend>(choice_int);
   switch (backend) {
     case sdp::SDPBackend::flash_attention: {
       auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-          query_, key, value, dropout_p, is_causal);
+          query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
       return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::efficient_attention: {
@@ -737,7 +794,7 @@ Tensor scaled_dot_product_attention(
           (query_.requires_grad() || key.requires_grad() ||
            value.requires_grad());
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
-          query_, key, value, compute_logsumexp, is_causal);
+          query_, key, value, compute_logsumexp, is_causal, scale);
       return std::get<0>(out_and_lse);
     }
     case sdp::SDPBackend::math:
@@ -747,7 +804,9 @@ Tensor scaled_dot_product_attention(
           value,
           attn_mask_,
           dropout_p,
-          is_causal));
+          is_causal,
+          c10::nullopt, /*dropout_mask*/
+          scale));
     default:
       TORCH_CHECK(
           false,
@@ -758,7 +817,8 @@ Tensor scaled_dot_product_attention(
 
 std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal) {
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal,
+        const c10::optional<Tensor>& dropout_mask, c10::optional<double> scale) {
   C10_LOG_API_USAGE_ONCE("torch.sdpa.math_fallback");
   if (query_.is_nested() || key.is_nested() || value.is_nested()) {
     TORCH_CHECK(
@@ -769,10 +829,9 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
     auto attn_mask = attn_mask_;
     // Naive, composite implementation defined here.
 
-    // Scale q,k before matmul for stability see https://tinyurl.com/sudb9s96 for math
-    const auto embed_size = SymFloat(query_.sym_size(-1));
-    const auto scaling_factor = embed_size.sqrt().sqrt();
-    const auto query = query_ / scaling_factor;
+    // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for math
+    const auto scaling_factor = sdp::calculate_scale(query_, scale).sqrt();
+    const auto query = query_ * scaling_factor;
     if (is_causal) {
         TORCH_CHECK(!attn_mask.has_value(),
                 "_scaled_dot_product_attention: Explicit attn_mask should not be set when is_causal=True");
@@ -795,14 +854,21 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
         }
         // Otherwise, attn_mask represents an additive attention tensor
     }
-    auto attn = at::matmul(query, key.transpose(-2, -1)/scaling_factor);
+    auto attn = at::matmul(query, key.transpose(-2, -1)*scaling_factor);
     if (attn_mask.has_value()) {
         attn.add_(*attn_mask);
     }
     attn = at::softmax(attn, -1);
     if (dropout_p > 0.0) {
-      attn = at::dropout(attn, dropout_p, true);
+      if (dropout_mask.has_value()) {
+        auto attn_dropout_masked = attn.masked_fill(dropout_mask->logical_not(), 0.0);
+        auto dropout_scaling = 1.0 / (1 - dropout_p);
+        return std::make_tuple(at::matmul(attn_dropout_masked, value * dropout_scaling), attn);
+      } else {
+        attn = at::dropout(attn, dropout_p, true);
+      }
     }
+
     return std::make_tuple(at::matmul(attn, value), attn);
 }
 

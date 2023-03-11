@@ -106,19 +106,24 @@ def download_gha_artifacts(
     return paths
 
 
-def upload_to_rockset(collection: str, docs: List[Any]) -> None:
+def upload_to_rockset(
+    collection: str, docs: List[Any], workspace: str = "commons"
+) -> None:
     print(f"Writing {len(docs)} documents to Rockset")
-    client = rockset.Client(
-        api_server="api.rs2.usw2.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+    client = rockset.RocksetClient(
+        host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
     )
-    client.Collection.retrieve(collection).add_docs(docs)
+    client.Documents.add_documents(
+        collection=collection,
+        data=docs,
+        workspace=workspace,
+    )
     print("Done!")
 
 
 def upload_to_s3(
-    workflow_run_id: int,
-    workflow_run_attempt: int,
-    collection: str,
+    bucket_name: str,
+    key: str,
     docs: List[Dict[str, Any]],
 ) -> None:
     print(f"Writing {len(docs)} documents to S3")
@@ -127,15 +132,23 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    S3_RESOURCE.Object(
-        "ossci-raw-job-status",
-        f"{collection}/{workflow_run_id}/{workflow_run_attempt}",
-    ).put(
+    S3_RESOURCE.Object(f"{bucket_name}", f"{key}",).put(
         Body=gzip.compress(body.getvalue().encode()),
         ContentEncoding="gzip",
         ContentType="application/json",
     )
     print("Done!")
+
+
+def upload_workflow_stats_to_s3(
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    collection: str,
+    docs: List[Dict[str, Any]],
+) -> None:
+    bucket_name = "ossci-raw-job-status"
+    key = f"{collection}/{workflow_run_id}/{workflow_run_attempt}"
+    upload_to_s3(bucket_name, key, docs)
 
 
 def upload_file_to_s3(

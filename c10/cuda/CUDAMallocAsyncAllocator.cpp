@@ -262,9 +262,8 @@ inline void free_impl(PtrInfo::iterator& it) {
 
     if (C10_UNLIKELY(capture_underway)) {
       // See Note [Avoid dangling free streams during CUDA graph capture]
-      capture_free_streams.insert(UsageStream(
-          dummy_unifying_free_stream.stream,
-          dummy_unifying_free_stream.device));
+      capture_free_streams.emplace(
+          dummy_unifying_free_stream.stream, dummy_unifying_free_stream.device);
     }
   }
 

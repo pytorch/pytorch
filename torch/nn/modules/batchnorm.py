@@ -38,7 +38,7 @@ class _NormBase(Module):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_NormBase, self).__init__()
+        super().__init__()
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum
@@ -107,7 +107,7 @@ class _NormBase(Module):
             if num_batches_tracked_key not in state_dict:
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
-        super(_NormBase, self)._load_from_state_dict(
+        super()._load_from_state_dict(
             state_dict,
             prefix,
             local_metadata,
@@ -130,7 +130,7 @@ class _BatchNorm(_NormBase):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_BatchNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
 
@@ -191,7 +191,7 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
     def __init__(self, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(_LazyNormBase, self).__init__(
+        super().__init__(
             # affine and track_running_stats are hardcoded to False to
             # avoid creating tensors that will soon be overwritten.
             0,
@@ -663,7 +663,7 @@ class SyncBatchNorm(_BatchNorm):
         dtype=None
     ) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(SyncBatchNorm, self).__init__(
+        super().__init__(
             num_features, eps, momentum, affine, track_running_stats, **factory_kwargs
         )
         self.process_group = process_group

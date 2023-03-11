@@ -16,7 +16,6 @@
 #include <stack>
 
 using ::c10::Dispatcher;
-using ::c10::DispatchKey;
 namespace torch {
 namespace jit {
 namespace onnx {

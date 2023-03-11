@@ -1,4 +1,5 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.symbolic_shapes import hint_int
 import torch
 import torch.fx as fx
 import operator
@@ -17,7 +18,7 @@ AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
 
 
-class InvalidNodeBase(object):
+class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
 
@@ -202,12 +203,12 @@ def _prod(x):
 
 def _tensor_nbytes(numel, dtype):
     sizes = {
-        torch.float: 4,
+        torch.complex64: 8,
+        torch.complex128: 16,
         torch.float16: 2,
         torch.bfloat16: 2,
         torch.float32: 4,
         torch.float64: 8,
-        torch.int: 4,
         torch.int8: 1,
         torch.int16: 2,
         torch.int32: 4,
@@ -221,21 +222,14 @@ def _tensor_nbytes(numel, dtype):
     return numel * sizes[dtype]
 
 def _size_of(node: fx.Node) -> int:
-    def to_size_hint(s):
-        if isinstance(s, torch.SymInt):
-            py_s = s.node
-            return py_s.shape_env.size_hint(py_s.expr)
-        assert isinstance(s, int)
-        return s
-
     if 'val' in node.meta:
         val = node.meta['val']
         if isinstance(val, py_sym_types):
             return 1
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(to_size_hint(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(to_size_hint(val.numel()), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
@@ -394,19 +388,19 @@ def min_cut_rematerialization_partition(
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
-        joint_module_ops = set(
+        joint_module_ops = {
             str(node.target._overloadpacket)
             for node in joint_module.graph.nodes
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-        )
-        ops_ignored = joint_module_ops - set([str(i) for i in recomputable_ops])
+        }
+        ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
     AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
-        cur_nodes = set([node])
+        cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:
@@ -528,8 +522,8 @@ def min_cut_rematerialization_partition(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
-        fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
-        bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
+        fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
+        bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
         remat_nodes = fw_module_nodes & bw_module_nodes
 
         counts = defaultdict(int)

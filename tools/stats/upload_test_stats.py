@@ -11,7 +11,7 @@ from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
     unzip,
-    upload_to_s3,
+    upload_workflow_stats_to_s3,
 )
 
 
@@ -33,8 +33,12 @@ def parse_xml_report(
     """Convert a test report xml file into a JSON-serializable list of test cases."""
     print(f"Parsing {tag}s for test report: {report}")
 
-    job_id = get_job_id(report)
-    print(f"Found job id: {job_id}")
+    try:
+        job_id = get_job_id(report)
+        print(f"Found job id: {job_id}")
+    except Exception:
+        job_id = None
+        print("Failed to find job id")
 
     test_cases: List[Dict[str, Any]] = []
 
@@ -336,14 +340,14 @@ if __name__ == "__main__":
         test_case_summary, pytest_parallel_times
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "test_run_summary",
         test_case_summary,
     )
 
-    upload_to_s3(
+    upload_workflow_stats_to_s3(
         args.workflow_run_id,
         args.workflow_run_attempt,
         "invoking_file_times",
@@ -352,6 +356,6 @@ if __name__ == "__main__":
 
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
-        upload_to_s3(
+        upload_workflow_stats_to_s3(
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )

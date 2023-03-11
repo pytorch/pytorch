@@ -2,6 +2,7 @@
 
 <!-- toc -->
 
+  - [Release Compatibility Matrix](#release-compatibility-matrix)
   - [General Overview](#general-overview)
   - [Cutting a release branch preparations](#cutting-a-release-branch-preparations)
   - [Cutting release branches](#cutting-release-branches)
@@ -34,6 +35,16 @@
 
 <!-- tocstop -->
 
+## Release Compatibility Matrix
+
+Following is the Release Compatibility Matrix for PyTorch releases:
+
+| PyTorch version | Python | Stable CUDA | Experimental CUDA |
+| --- | --- | --- | --- |
+| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
+| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
+| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
+
 ## General Overview
 
 Releasing a new version of PyTorch generally entails 3 major steps:
@@ -50,7 +61,7 @@ Following Requirements needs to be met prior to final RC Cut:
 * Resolve all outstanding issues in the milestones(for example [1.11.0](https://github.com/pytorch/pytorch/milestone/28))before first RC cut is completed. After RC cut is completed following script should be executed from builder repo in order to validate the presence of the fixes in the release branch :
 ``` python github_analyze.py --repo-path ~/local/pytorch --remote upstream  --branch release/1.11 --milestone-id 26 --missing-in-branch ```
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems(Linux, MacOS, Windows), Python versions as well as CPU architectures(x86 and arm) and accelerator versions(CUDA, ROCm).
-* All the nighly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+* All the nightly jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
@@ -105,7 +116,7 @@ These are examples of changes that should be made to the *default* branch after 
 ### Making release branch specific changes for domain libraries
 
 Domain library branch cut is done a week after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Domain Library POC.
-After the branch cut is performed, the Pytorch Dev Infra memeber should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
+After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : https://github.com/pytorch/vision/pull/5400
@@ -238,7 +249,7 @@ Patch releases should be considered if a regression meets the following criteria
 
 ### Issue Tracker for Patch releases
 
-For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority Github issue or a CI failure from previous RC. An example of this would look like:
+For patch releases issue tracker needs to be created. For patch release, we require all cherry-pick changes to have links to either a high-priority GitHub issue or a CI failure from previous RC. An example of this would look like:
 * https://github.com/pytorch/pytorch/issues/51886
 
 Only following issues are accepted:
@@ -260,7 +271,7 @@ Only following issues are accepted:
 
 > Main POC: Patch Release managers
 
-1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
+1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
 
 # Hardware / Software Support in Binary Build Matrix

@@ -163,7 +163,11 @@ namespace c10 {
   _(aten, is_scripting)              \
   _(aten, _unwrap_optional)          \
   _(prim, fork)                      \
+  _(prim, awaitable)                 \
   _(prim, forkClosure)               \
+  _(prim, awaitableClosure)          \
+  _(prim, awaitable_nowait)          \
+  _(prim, awaitable_wait)            \
   _(prim, RaiseException)            \
   _(prim, Closure)                   \
   _(prim, CreateObject)              \

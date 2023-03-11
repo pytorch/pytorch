@@ -96,13 +96,13 @@ class Job(context.Managed):
         self.exit_group = session_class.compile(self.exit_group)
 
     def __enter__(self):
-        super(Job, self).__enter__()
+        super().__enter__()
         self.epoch_group.__enter__()
         return self
 
     def __exit__(self, *args):
         self.epoch_group.__exit__()
-        super(Job, self).__exit__(*args)
+        super().__exit__(*args)
 
     def add_stop_condition(self, output):
         if isinstance(output, core.BlobReference):
@@ -146,7 +146,7 @@ def db_name(epoch, node_name, db_prefix, path_prefix=None):
     return db_name
 
 
-class CheckpointManager(object):
+class CheckpointManager:
     """
     Controls saving and loading of workspaces on every epoch boundary of a job.
     If a CheckpointManager instance is passed to JobRunner, then JobRunner will
@@ -429,7 +429,7 @@ class CheckpointManager(object):
             return True
 
 
-class MultiNodeCheckpointManager(object):
+class MultiNodeCheckpointManager:
     """
     Coordinates checkpointing and checkpointing across multiple nodes.
     Each of `init`, `load` and `save` will build TaskGroups which will
@@ -634,7 +634,7 @@ class MultiNodeCheckpointManager(object):
             return True
 
 
-class UploadTaskGroupBuilder(object):
+class UploadTaskGroupBuilder:
     """A simple class to upload checkpoints."""
     def build(self, epoch, checkpoint_manager):
         """Builds the task group to upload checkpoints.
@@ -652,7 +652,7 @@ class UploadTaskGroupBuilder(object):
         raise NotImplementedError()
 
 
-class JobRunner(object):
+class JobRunner:
     """
     Implement the runtime logic for jobs with checkpointing at the level of
     epoch. Can be used to run either single-host or distributed jobs. Job

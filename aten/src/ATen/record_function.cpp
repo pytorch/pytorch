@@ -153,7 +153,7 @@ class CacheEntry {
 
   // Includes sampling callbacks which are waiting to run.
   c10::SmallVector<CallbackAndCounter, kSoftLimitCallbacks> callbacks_;
-  RecordScope scope_;
+  RecordScope scope_{RecordScope::FUNCTION};
 
   StepCallbacks active_callbacks_;
 

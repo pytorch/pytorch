@@ -1,14 +1,37 @@
 # ${generated_comment}
 
-from torch import Tensor, Generator, strided, memory_format, contiguous_format, strided
-from typing import List, Tuple, Optional, Union, Any, ContextManager, Callable, overload, Iterator, NamedTuple, Sequence, TypeVar
-from typing_extensions import Literal
-from torch._six import inf
-
-from torch.types import _int, _float, _bool, Number, _dtype, _device, _qscheme, _size, _layout, SymInt, Device
-import torch
-
 import builtins
+from typing import (
+    Any,
+    Callable,
+    ContextManager,
+    Iterator,
+    List,
+    Literal,
+    NamedTuple,
+    Optional,
+    overload,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
+
+import torch
+from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor
+from torch.types import (
+    _bool,
+    _device,
+    _dtype,
+    _float,
+    _int,
+    _layout,
+    _qscheme,
+    _size,
+    Device,
+    Number,
+    SymInt,
+)
 
 ${function_hints}
 

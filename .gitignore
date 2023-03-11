@@ -64,6 +64,7 @@ third_party/build/
 tools/coverage_plugins_package/pip-wheel-metadata/
 tools/shared/_utils_internal.py
 tools/fast_nvcc/wrap_nvcc.sh
+tools/fast_nvcc/wrap_nvcc.bat
 tools/fast_nvcc/tmp/
 torch.egg-info/
 torch/_C/__init__.pyi
@@ -75,6 +76,7 @@ torch/nn/functional.pyi
 torch/utils/data/datapipes/datapipe.pyi
 torch/csrc/autograd/generated/*
 torch/csrc/lazy/generated/*.[!m]*
+torch_compile_debug/
 # Listed manually because some files in this directory are not generated
 torch/testing/_internal/generated/annotated_fn_args.py
 torch/testing/_internal/data/*.pt
@@ -131,11 +133,24 @@ torchgen/packaged/*
 .ipynb_checkpoints
 
 # Editor temporaries
+*.swa
+*.swb
+*.swc
+*.swd
+*.swe
+*.swf
+*.swg
+*.swh
+*.swi
+*.swj
+*.swk
+*.swl
+*.swm
 *.swn
 *.swo
 *.swp
-*.swm
 *~
+.~lock.*
 
 # macOS dir files
 .DS_Store
@@ -342,3 +357,4 @@ venv/
 
 # Log files
 *.log
+sweep/

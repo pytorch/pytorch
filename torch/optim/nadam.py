@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling,
-                        _differentiable_doc, _foreach_doc, _default_to_foreach)
+                        _differentiable_doc, _foreach_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
 from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
@@ -26,7 +26,7 @@ class NAdam(Optimizer):
         defaults = dict(lr=lr, betas=betas, eps=eps,
                         weight_decay=weight_decay, momentum_decay=momentum_decay,
                         foreach=foreach, differentiable=differentiable)
-        super(NAdam, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -187,8 +187,7 @@ def nadam(params: List[Tensor],
         raise RuntimeError("API has changed, `mu_products` argument must contain a list of singleton tensors")
 
     if foreach is None:
-        foreach = _default_to_foreach([params, grads, exp_avgs, exp_avg_sqs,
-                                       mu_products, state_steps], differentiable=differentiable)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError('torch.jit.script not supported with foreach optimizers')

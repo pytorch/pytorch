@@ -15,7 +15,7 @@ class PairwiseSimilarity(ModelLayer):
 
     def __init__(self, model, input_record, output_dim, pairwise_similarity_func='dot',
                  name='pairwise_similarity', **kwargs):
-        super(PairwiseSimilarity, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Struct), (
             "Incorrect input type. Expected Struct, but received: {0}".
             format(input_record))

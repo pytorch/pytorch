@@ -23,7 +23,7 @@ class BlobWeightedSum(ModelLayer):
         name='blob_weighted_sum',
         **kwargs
     ):
-        super(BlobWeightedSum, self).__init__(model, name, input_record, **kwargs)
+        super().__init__(model, name, input_record, **kwargs)
 
         self.blobs = self.input_record.field_blobs()
 

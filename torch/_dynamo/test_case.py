@@ -1,7 +1,6 @@
 import contextlib
 import importlib
 import sys
-from unittest.mock import patch
 
 import torch
 import torch.testing
@@ -52,7 +51,7 @@ class TestCase(TorchTestCase):
         super().setUpClass()
         cls._exit_stack = contextlib.ExitStack()
         cls._exit_stack.enter_context(
-            patch.object(config, "raise_on_ctx_manager_usage", True)
+            config.patch(raise_on_ctx_manager_usage=True, suppress_errors=False),
         )
 
     def setUp(self):

@@ -29,7 +29,7 @@ std::vector<TensorGroup> take_tensors(
       tensor_size = tensor.numel() * tensor.element_size();
     }
 
-    auto& type_group = groups[type_id(tensor)];
+    auto& type_group = groups[static_cast<int64_t>(type_id(tensor))];
     type_group.tensors.push_back(tensor);
 
     if (fine_grained) {

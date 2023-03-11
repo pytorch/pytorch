@@ -1,3 +1,5 @@
+merge_base_with = "master"
+
 [[linter]]
 code = 'FLAKE8'
 include_patterns = ['**/*.py']
@@ -35,6 +37,7 @@ init_command = [
     'flake8-bugbear==20.1.4',
     'flake8-comprehensions==3.3.0',
     'flake8-executable==2.0.4',
+    'flake8-logging-format==0.9.0',
     'flake8-pyi==20.5.0',
     'mccabe==0.6.1',
     'pycodestyle==2.6.0',
@@ -46,6 +49,8 @@ init_command = [
 code = 'CLANGFORMAT'
 include_patterns = [
     'aten/src/ATen/*.h',
+    'aten/src/ATen/mps/**/*.mm',
+    'aten/src/ATen/native/mps/**/*.mm',
     'aten/src/ATen/native/vulkan/**/*.h',
     'aten/src/ATen/native/vulkan/**/*.cpp',
     'c10/**/*.h',
@@ -122,6 +127,13 @@ exclude_patterns = [
     'caffe2/contrib/fakelowp/test/test_batchmatmul_nnpi_fp16.py',
     'test/test_numpy_interop.py',
     'torch/torch_version.py',
+    'torch/fx/proxy.py',
+    'torch/fx/passes/shape_prop.py',
+    'torch/fx/node.py',
+    'torch/fx/experimental/symbolic_shapes.py',
+    'torch/fx/experimental/proxy_tensor.py',
+    'torch/_subclasses/fake_utils.py',
+    'torch/_subclasses/fake_tensor.py',
 ]
 command = [
     'python3',
@@ -138,7 +150,6 @@ init_command = [
     'expecttest==0.1.3',
     'mypy==0.960',
     'types-requests==2.27.25',
-    'types-six==1.16.15',
     'types-PyYAML==6.0.7',
     'types-tabulate==0.8.8',
     'types-protobuf==3.19.18',
@@ -222,7 +233,6 @@ exclude_patterns = [
     # caffe2_pb.h, otherwise we'd have to build protos as part of this CI job.
     # FunctionsManual.cpp is excluded to keep this diff clean. It will be fixed
     # in a follow up PR.
-    # /torch/csrc/generic/*.cpp is excluded because those files aren't actually built.
     # that are not easily converted to accepted c++
     'c10/test/**/*.cpp',
     'torch/csrc/jit/passes/onnx/helper.cpp',
@@ -235,7 +245,6 @@ exclude_patterns = [
     'torch/csrc/cuda/nccl.*',
     'torch/csrc/cuda/python_nccl.cpp',
     'torch/csrc/autograd/FunctionsManual.cpp',
-    'torch/csrc/generic/*.cpp',
     'torch/csrc/jit/codegen/cuda/runtime/*',
     'torch/csrc/utils/disable_torch_function.cpp',
 ]
@@ -346,11 +355,23 @@ command = [
 is_formatter = true
 
 [[linter]]
+code = 'CONSTEXPR'
+include_patterns=['aten/src/ATen/native/cuda/*.cu']
+command = [
+    'python3',
+    'tools/linter/adapters/constexpr_linter.py',
+    '--',
+    '@{{PATHSFILE}}',
+]
+is_formatter = true
+
+[[linter]]
 code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
     '**/*.diff',
+    '**/*.patch',
     'third_party/**',
     'aten/src/ATen/native/vulkan/api/vk_mem_alloc.h',
     'test/cpp/jit/upgrader_models/*.ptl',
@@ -680,7 +701,7 @@ init_command = [
 [[linter]]
 code = 'SHELLCHECK'
 include_patterns = [
-    '.jenkins/pytorch/**/*.sh'
+    '.ci/pytorch/**/*.sh'
 ]
 command = [
     'python3',
@@ -824,11 +845,13 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_subclasses/**/*.py',
     'torch/_*.py',
+    'torch/**/*.pyi',
     'torch/testing/_internal/opinfo/**/*.py',
     'torchgen/**/*.py',
-    'functorch/functorch/_src/aot_autograd.py',
-    'functorch/functorch/_src/compilers.py',
     'torch/_functorch/make_functional.py',
+    'torch/_functorch/functional_call.py',
+    'torch/nn/utils/_named_member_accessor.py',
+    'torch/nn/utils/stateless.py',
     'torch/testing/*.py',
     'torch/distributed/fsdp/**/*.py',
     'test/distributed/fsdp/**/*.py',
@@ -836,6 +859,9 @@ include_patterns = [
     'torch/distributed/_composable/**/*.py',
     'test/distributed/_composable/**/*.py',
     'torch/testing/_internal/common_dist_composable.py',
+    'test/test_value_ranges.py',
+    'torch/utils/_sympy/interp.py',
+    'torch/utils/_sympy/reference.py',
 ]
 command = [
     'python3',
@@ -874,4 +900,33 @@ command = [
     """,
     '--',
     '@{{PATHSFILE}}'
+]
+
+[[linter]]
+code = 'BAZEL_LINTER'
+include_patterns = ['WORKSPACE']
+command = [
+    'python3',
+    'tools/linter/adapters/bazel_linter.py',
+    '--binary=.lintbin/bazel',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/s3_init.py',
+    '--config-json=tools/linter/adapters/s3_init_config.json',
+    '--linter=bazel',
+    '--dry-run={{DRYRUN}}',
+    '--output-dir=.lintbin',
+    '--output-name=bazel',
+]
+is_formatter = true
+
+[[linter]]
+code = 'LINTRUNNER_VERSION'
+include_patterns = ['**']
+command = [
+    'python3',
+    'tools/linter/adapters/lintrunner_version_linter.py'
 ]

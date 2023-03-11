@@ -89,7 +89,7 @@ class Node(context.DefaultManaged):
         return self._kwargs
 
 
-class WorkspaceType(object):
+class WorkspaceType:
     """
     Determines whether tasks of a TaskGroup will run directly at the global
     workspace, which is kept alive across runs, or whether a new child
@@ -351,7 +351,7 @@ class TaskGroup(context.Managed):
             self.remote_nets())
 
 
-class TaskOutput(object):
+class TaskOutput:
     """
     Represents the output of a task. An output can be a blob,
     a list of blob, or a record.
@@ -409,7 +409,7 @@ def final_output(blob_or_record):
     return cur_task.add_output(blob_or_record)
 
 
-class TaskOutputList(object):
+class TaskOutputList:
     """ Keeps a list of outputs for a task """
     def __init__(self, outputs=None):
         self.outputs = outputs or []
@@ -535,7 +535,7 @@ class Task(context.Managed):
         self._num_instances = num_instances
 
     def __enter__(self):
-        super(Task, self).__enter__()
+        super().__enter__()
 
         # temporarily remove from _tasks_to_add to ensure correct order
         if self.group is not None:
@@ -548,7 +548,7 @@ class Task(context.Managed):
         return self
 
     def __exit__(self, type, value, traceback):
-        super(Task, self).__exit__(type, value, traceback)
+        super().__exit__(type, value, traceback)
 
         self._net_builder.__exit__(type, value, traceback)
         if type is None:
@@ -644,7 +644,7 @@ class Task(context.Managed):
             self.name, self.node, self.outputs())
 
 
-class SetupNets(object):
+class SetupNets:
     """
     Allow to register a list of nets to be run at initialization
     and finalization of Tasks or TaskGroups.

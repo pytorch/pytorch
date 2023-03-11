@@ -1,18 +1,19 @@
+import collections
+import functools
 import inspect
-import sys
 import types
 from typing import Dict, List
 
 import torch._C
 from torch._guards import Guard, GuardSource
 
-from .. import config, variables
-from ..bytecode_transformation import create_instruction
+from .. import variables
+from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-from ..utils import identity, proxy_args_kwargs
-from .base import VariableTracker
+from ..utils import check_constant_args, identity, proxy_args_kwargs
+from .base import MutableLocal, VariableTracker
 from .functions import (
     NestedUserFunctionVariable,
     UserFunctionVariable,
@@ -24,7 +25,7 @@ from .functions import (
 
 class SuperVariable(VariableTracker):
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
-        super(SuperVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.typevar = typevar
         self.objvar = objvar
         self.specialized = specialized  # directly get attr from self.typevar if true
@@ -34,9 +35,9 @@ class SuperVariable(VariableTracker):
         codegen(self.typevar)
         if self.objvar is not None:
             codegen(self.objvar)
-            return [create_instruction("CALL_FUNCTION", 2)]
+            return create_call_function(2, True)
         else:
-            return [create_instruction("CALL_FUNCTION", 1)]
+            return create_call_function(1, True)
 
     def const_getattr(self, tx, name):
         assert self.objvar, "1-arg super not implemented"
@@ -44,14 +45,11 @@ class SuperVariable(VariableTracker):
             return getattr(self.typevar.as_python_constant(), name)
         search_type = self.typevar.as_python_constant()
 
-        # We default to the python type of the object. However,
-        # 1. If this is a `type`, then the original object represents the user
-        # defined type.
-        # 2. If this is `torch._C._TensorMeta`, the original object is the user
-        # defined type of a custom tensor subclass.
-        # TODO(future PR): figure out how to do this in a less hacky way
+        # We default to the python type of the object. However, if this is
+        # a `type` or subclass of `type`, then the original object represents
+        # the user defined type.
         type_to_use = self.objvar.python_type()
-        if type_to_use is type or type_to_use is torch._C._TensorMeta:
+        if issubclass(type_to_use, type):
             type_to_use = self.objvar.value
 
         # TODO(jansel): there is a small chance this could trigger user code, prevent that
@@ -148,7 +146,7 @@ class ComptimeVariable(VariableTracker):
 
 class ClosureVariable(UnknownVariable):
     def __init__(self, name, **kwargs):
-        super(ClosureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.name = name
 
     def reconstruct(self, codegen):
@@ -157,17 +155,17 @@ class ClosureVariable(UnknownVariable):
 
 class NewCellVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewCellVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class NewGlobalVariable(VariableTracker):
     def __init__(self, **kwargs):
-        super(NewGlobalVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
 
 
 class ContextWrappingVariable(VariableTracker):
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(ContextWrappingVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
         self.recursively_contains = (
@@ -183,124 +181,17 @@ class ContextWrappingVariable(VariableTracker):
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
 
+    def reconstruct(self, codegen):
+        attr_source = AttrSource(
+            codegen.tx.import_source(self.module_name()), self.fn_name()
+        )
+        return attr_source.reconstruct(codegen)
+
     def module_name(self):
-        return "torch"
+        raise NotImplementedError("module_name called on base")
 
-    def reconstruct(self, codegen, target_inst=None):
-        """
-        Generate following Python Bytecode, with a `torch._C._set_grad_enable` call
-        Python 3.8
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
-
-            12 SETUP_FINALLY           10 (to 24)
-
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
-            22 BEGIN_FINALLY
-
-            24 LOAD_GLOBAL              0 (torch)
-            26 LOAD_ATTR                1 (_C)
-            28 LOAD_METHOD              2 (_set_grad_enable)
-            30 LOAD_CONST               2 (True)
-            32 CALL_METHOD              1
-            34 POP_TOP
-            36 END_FINALLY
-            38 LOAD_CONST               0 (None)
-            40 RETURN_VALUE
-
-        Instructions 0-10 and 24-34 call torch._C.set_grad_enable(True/False)
-
-        Python 3.9, 3.10
-             0 LOAD_GLOBAL              0 (torch)
-             2 LOAD_ATTR                1 (_C)
-             4 LOAD_METHOD              2 (_set_grad_enable)
-             6 LOAD_CONST               1 (False)
-             8 CALL_METHOD              1
-            10 POP_TOP
-
-            12 SETUP_FINALLY           22 (to 36)
-
-            14 LOAD_GLOBAL              3 (user_inst)
-            16 CALL_FUNCTION            0
-            18 POP_TOP
-            20 POP_BLOCK
-
-            22 LOAD_GLOBAL              0 (torch)
-            24 LOAD_ATTR                1 (_C)
-            26 LOAD_METHOD              2 (_set_grad_enable)
-            28 LOAD_CONST               2 (True)
-            30 CALL_METHOD              1
-            32 POP_TOP
-
-            34 JUMP_FORWARD            14 (to 50)
-
-            36 LOAD_GLOBAL              0 (torch)
-            38 LOAD_ATTR                1 (_C)
-            40 LOAD_METHOD              2 (_set_grad_enable)
-            42 LOAD_CONST               2 (True)
-            44 CALL_METHOD              1
-            46 POP_TOP
-            48 RERAISE
-
-            50 LOAD_CONST               0 (None)
-            52 RETURN_VALUE
-
-        """
-        if self.target_values == self.initial_values:
-            return ([], [])
-
-        def set_context_insts(values):
-            global_torch_source = codegen.tx.import_source("torch")
-            attr_source = AttrSource(global_torch_source, self._func_name())
-            load_set_context_enabling_insts = attr_source.reconstruct(codegen)
-
-            loads = [codegen.create_load_const(val) for val in values]
-
-            return [
-                *load_set_context_enabling_insts,
-                *loads,
-                create_instruction("CALL_FUNCTION", len(values)),
-                create_instruction("POP_TOP"),
-            ]
-
-        init_block = set_context_insts(self.target_values)
-        finally_block = set_context_insts(self.initial_values)
-        setup_final_inst = create_instruction("SETUP_FINALLY", target=finally_block[0])
-        prologue = init_block + [setup_final_inst]
-
-        # Generate the epilogue - starts with 20 POP_BLOCK and ends at 34 POP_TOP
-        if sys.version_info < (3, 9):
-            # Generate the prologue that ends with setup_finally
-            epilogue = [
-                create_instruction("POP_BLOCK"),
-                codegen.create_begin_finally(),
-                *finally_block,
-                create_instruction("END_FINALLY"),
-            ]
-        else:
-            except_block = set_context_insts(self.initial_values)
-            epilogue = [
-                create_instruction("POP_BLOCK"),
-                *except_block,
-                create_instruction("JUMP_FORWARD", target=target_inst),
-                *finally_block,
-                create_instruction("RERAISE"),
-            ]
-
-        return (prologue, epilogue)
-
-    def _call_func(self, tx, initial_values):
-        raise NotImplementedError("_call_func called on base")
-
-    def _func_name(self):
-        raise NotImplementedError("_func_name called on base")
+    def fn_name(self):
+        raise NotImplementedError("fn_name called on base")
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -335,7 +226,7 @@ class GradModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(GradModeVariable, self).__init__(
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         self.guards = self.guards | self._guards_singleton
@@ -351,14 +242,11 @@ class GradModeVariable(ContextWrappingVariable):
         ),
         torch._C._set_grad_enabled(value)
 
-    def _func_name(self):
-        return "_C._set_grad_enabled"
+    def module_name(self):
+        return "torch"
 
     def fn_name(self):
-        if self.target_values[0]:
-            return "enable_grad"
-        else:
-            return "no_grad"
+        return "set_grad_enabled"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
@@ -374,38 +262,44 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if isinstance(bound_args.arguments[key], VariableTracker):
-                target_values.append(bound_args.arguments[key])
+            arg = bound_args.arguments[key]
+            if isinstance(arg, VariableTracker):
+                target_values.append(bound_args.arguments[key].as_python_constant())
             else:
-                target_values.append(
-                    variables.ConstantVariable(bound_args.arguments[key])
-                )
+                target_values.append(bound_args.arguments[key])
 
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
     def __init__(self, target_values, initial_values=None, **kwargs):
-        super(AutocastModeVariable, self).__init__(
+        mode = kwargs.pop("mode", None)
+        super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = [val.as_python_constant() for val in target_values]
-        self.mode = None
+        self.target_values = target_values
+        self.mode = mode
 
     def exit(self, tx, *args):
-        tx.output.create_node(
-            "call_function", exit_functional_autocast, (self.mode,), {}
+        self.mode = (
+            exit_functional_autocast(self.mode[0]),
+            tx.output.create_node(
+                "call_function", exit_functional_autocast, (self.mode[1],), {}
+            ),
         )
 
     def enter(self, tx):
-        self.mode = tx.output.create_node(
-            "call_function", enter_functional_autocast, (*self.target_values,), {}
+        self.mode = (
+            enter_functional_autocast(*self.target_values),
+            tx.output.create_node(
+                "call_function", enter_functional_autocast, (*self.target_values,), {}
+            ),
         )
 
-    def _func_name(self):
-        return "torch.amp.autocast_mode.autocast"
+    def module_name(self):
+        return "torch.amp.autocast_mode"
 
     def fn_name(self):
-        return "torch.amp.autocast_mode.autocast"
+        return "autocast"
 
 
 def enter_functional_autocast(*vals):
@@ -426,7 +320,7 @@ class NullContextVariable(ContextWrappingVariable):
     """
 
     def __init__(self, target_values=None, **kwargs):
-        super(NullContextVariable, self).__init__(target_values=target_values, **kwargs)
+        super().__init__(target_values=target_values, **kwargs)
 
     def enter(self, tx):
         return variables.ConstantVariable(None, **VariableTracker.propagate(self))
@@ -441,9 +335,93 @@ class NullContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
 
+class CUDAStreamContextVariable(ContextWrappingVariable):
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        from .builder import wrap_fx_proxy_cls
+
+        current_stream = wrap_fx_proxy_cls(
+            CUDAStreamVariable,
+            tx,
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.current_stream,
+                (None,),
+                {},
+            ),
+        )
+        return CUDAStreamContextVariable(
+            target_values=[target_value],
+            initial_values=[current_stream],
+            **kwargs,
+        )
+
+    def __init__(self, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx):
+        # CUDA stream generated inside of traced function
+        if self.target_values[0].as_proxy() is not None:
+            tx.output.create_proxy(
+                "call_function",
+                torch.cuda.set_stream,
+                (self.target_values[0].as_proxy(),),
+                {},
+            )
+        # CUDA stream passed from outside of traced function
+        else:
+            stream = self.target_values[0].value
+            tx.output.create_proxy(
+                "call_function",
+                torch._C._cuda_setStream,
+                (stream.stream_id, stream.device_index, stream.device_type),
+                {},
+            )
+        torch.cuda.set_stream(self.target_values[0].value)
+
+    def exit(self, tx, *args):
+        tx.output.create_proxy(
+            "call_function",
+            torch.cuda.set_stream,
+            (self.initial_values[0].as_proxy(),),
+            {},
+        )
+        torch.cuda.set_stream(self.initial_values[0].value)
+
+    def module_name(self):
+        return "torch.cuda"
+
+    def fn_name(self):
+        return "stream"
+
+
+class CUDAStreamVariable(VariableTracker):
+    def __init__(self, proxy, value, **kwargs):
+        if proxy is not None and "example_value" in proxy.node.meta:
+            assert proxy.node.meta["example_value"] == value
+        super().__init__(**kwargs)
+        self.proxy = proxy
+        self.value = value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        unimplemented("cuda stream")
+
+    def as_proxy(self):
+        return self.proxy
+
+
 class WithExitFunctionVariable(VariableTracker):
-    def __init__(self, ctx: VariableTracker, target, **kwargs):
-        super(WithExitFunctionVariable, self).__init__(**kwargs)
+    def __init__(self, ctx: ContextWrappingVariable, target, **kwargs):
+        super().__init__(**kwargs)
+        assert isinstance(ctx, ContextWrappingVariable)
         self.ctx = ctx
         self.target = target
 
@@ -462,9 +440,11 @@ class WithExitFunctionVariable(VariableTracker):
         ).reconstruct(codegen)
 
         if codegen.tx.output.partial_convert:
+            loads = [codegen.create_load_const(val) for val in self.ctx.target_values]
+            output.extend(loads)
             output.extend(
                 [
-                    create_instruction("CALL_FUNCTION", 0),
+                    *create_call_function(len(loads), True),
                     create_instruction("SETUP_WITH", target=self.target),
                     create_instruction("POP_TOP"),
                 ]
@@ -482,7 +462,7 @@ class InspectSignatureVariable(VariableTracker):
         return InspectSignatureVariable(callable)
 
     def __init__(self, inspected, **kwargs):
-        super(InspectSignatureVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.inspected = inspected
 
 
@@ -562,7 +542,7 @@ class AutogradFunctionContextVariable(VariableTracker):
 
 class LambdaVariable(VariableTracker):
     def __init__(self, fn, **kwargs):
-        super(LambdaVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.fn = fn
 
     def call_function(
@@ -573,7 +553,7 @@ class LambdaVariable(VariableTracker):
 
 class GetAttrVariable(VariableTracker):
     def __init__(self, obj, name, **kwargs):
-        super(GetAttrVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
         assert isinstance(name, str)
         self.obj = obj
@@ -582,8 +562,12 @@ class GetAttrVariable(VariableTracker):
     def __str__(self):
         return f"{self.__class__.__name__}({self.obj}, {self.name})"
 
+    @staticmethod
+    def create_getattr_proxy(base_proxy: torch.fx.Proxy, attr):
+        return getattr(base_proxy, attr)
+
     def as_proxy(self):
-        return getattr(self.obj.as_proxy(), self.name)
+        return GetAttrVariable.create_getattr_proxy(self.obj.as_proxy(), self.name)
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
@@ -685,12 +669,12 @@ class GetAttrVariable(VariableTracker):
                 self.obj.inspected.num_parameters(),
                 **VariableTracker.propagate(self, self.obj, self.obj.inspected),
             )
-        return super(GetAttrVariable, self).call_method(tx, name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class PythonModuleVariable(VariableTracker):
     def __init__(self, value: types.ModuleType, **kwargs):
-        super(PythonModuleVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
 
     def python_type(self):
@@ -708,19 +692,55 @@ class SkipFilesVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def fold_through_function_to_wrapper():
+        return {
+            collections.namedtuple: variables.UserDefinedClassVariable,
+        }
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from .builtin import BuiltinVariable
+
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
         if inspect.getattr_static(self.value, "_torchdynamo_disable", False):
-            unimplemented(
-                f"call {config.dynamo_import}.disable() wrapped function {self.value}"
+            unimplemented(f"call torch._dynamo.disable() wrapped function {self.value}")
+        # Allowlist a few popular classes(e.g, collections.OrderedDict) calls in skip files.
+        elif self.value is collections.OrderedDict and (
+            len(args) == 0
+            or len(args) == 1
+            and BuiltinVariable.is_supported_call_dict_arg(tx, args[0])
+        ):
+            return BuiltinVariable.call_dict_helper(
+                tx,
+                collections.OrderedDict,
+                None if len(args) == 0 else args[0],
+                **options,
+            )
+        # Fold through the functions(e.g, collections.namedtuple)
+        # that inputs & outputs are all python constants
+        elif (
+            self.value in self.fold_through_function_to_wrapper().keys()
+            and check_constant_args(args, kwargs)
+        ):
+            value = self.value(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+            return self.fold_through_function_to_wrapper().get(self.value)(
+                value, mutable_local=MutableLocal(), **options
             )
         else:
             try:
                 path = inspect.getfile(self.value)
             except TypeError:
                 path = f"Builtin {self.value.__name__}"
-            unimplemented("call_function in skip_files " + path)
+            unimplemented(
+                f"call_function {self.value.__qualname__} in skip_files {path}"
+            )
 
 
 class TypingVariable(VariableTracker):
@@ -777,3 +797,17 @@ class NumpyVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+
+# Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
+class NullVariable(VariableTracker):
+    def __init__(self, **kwargs):
+        super(NullVariable, self).__init__(**kwargs)
+
+    def __str__(self):
+        return "NullVariable"
+
+    def reconstruct(self, codegen):
+        if sys.version_info < (3, 11):
+            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+        return [create_instruction("PUSH_NULL")]

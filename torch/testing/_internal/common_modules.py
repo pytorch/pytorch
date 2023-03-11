@@ -6,12 +6,13 @@ from functools import wraps, partial
 from itertools import chain, product
 import itertools
 import torch.nn.functional as F
+from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types, floating_and_complex_types_and
 from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
-    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
+    skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
@@ -23,8 +24,8 @@ from typing import List, Tuple, Type, Set, Dict
 MODULE_NAMESPACES: List[ModuleType] = [
     torch.nn.modules,
     torch.ao.nn.qat.modules,
-    torch.nn.quantizable.modules,
-    torch.nn.quantized.modules,
+    torch.ao.nn.quantizable.modules,
+    torch.ao.nn.quantized.modules,
     torch.ao.nn.quantized.modules,
 ]
 
@@ -33,7 +34,7 @@ MODULES_TO_SKIP: Set[Type] = {
     torch.nn.Module,  # abstract base class
     torch.nn.Container,  # deprecated
     torch.nn.NLLLoss2d,  # deprecated
-    torch.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
+    torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
     torch.ao.nn.quantized.MaxPool2d,  # aliases to nn.MaxPool2d
 }
 
@@ -63,8 +64,8 @@ TrainEvalMode = Enum('TrainEvalMode', ('train_only', 'eval_only', 'train_and_eva
 class modules(_TestParametrizer):
     """ PROTOTYPE: Decorator for specifying a list of modules over which to run a test. """
 
-    def __init__(self, module_info_list, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
-        self.module_info_list = module_info_list
+    def __init__(self, module_info_iterable, allowed_dtypes=None, train_eval_mode=TrainEvalMode.train_and_eval):
+        self.module_info_list = list(module_info_iterable)
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
         self.train_eval_mode = train_eval_mode
 
@@ -132,7 +133,7 @@ def get_module_common_name(module_cls):
         return module_cls.__name__
 
 
-class FunctionInput(object):
+class FunctionInput:
     """ Contains args and kwargs to pass as input to a function. """
     __slots__ = ['args', 'kwargs']
 
@@ -141,7 +142,7 @@ class FunctionInput(object):
         self.kwargs = kwargs
 
 
-class ModuleInput(object):
+class ModuleInput:
     """ Contains args / kwargs for module instantiation + forward pass. """
     __slots__ = ['constructor_input', 'forward_input', 'desc', 'reference_fn']
 
@@ -164,7 +165,7 @@ class ModuleInput(object):
             self.reference_fn = copy_reference_fn
 
 
-class ModuleInfo(object):
+class ModuleInfo:
     """ Module information to be used in testing. """
 
     def __init__(self,
@@ -947,8 +948,15 @@ def module_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_grad, t
 
     return samples
 
+def make_packed_sequence(inp, batch_sizes):
+    required_grad = inp.requires_grad
+    inp.requires_grad_(False)  # user won't have access to inp so won't be able to get its grads
+    seq = pack_padded_sequence(inp, batch_sizes)
+    seq.data.requires_grad_(required_grad)
+    return seq
 
-def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
+
+def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, with_packed_sequence=False, **kwargs):
     # Currently all samples below are for validating the no-batch-dim support.
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     is_rnn = kwargs['is_rnn']
@@ -980,7 +988,7 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
         samples.append(
             ModuleInput(
                 constructor_input=FunctionInput(**cons_args),
-                forward_input=FunctionInput(make_input((2, 2))),
+                forward_input=FunctionInput(make_input((3, 2))),
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
@@ -991,6 +999,21 @@ def module_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, tr
                 reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
             )
         )
+        if with_packed_sequence:
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(**cons_args),
+                    forward_input=FunctionInput(make_packed_sequence(make_input((5, 2, 2)), torch.tensor([5, 3]))),
+                    reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+                )
+            )
+            samples.append(
+                ModuleInput(
+                    constructor_input=FunctionInput(**cons_args),
+                    forward_input=FunctionInput(make_packed_sequence(make_input((5, 5, 2)), torch.tensor([5, 3, 3, 2, 2]))),
+                    reference_fn=partial(no_batch_dim_reference_rnn_gru, batch_first=b_f),
+                )
+            )
 
     return samples
 
@@ -1032,6 +1055,7 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
             )
         )
 
+
     return samples
 
 
@@ -1059,6 +1083,14 @@ rnn_gru_lstm_module_info_decorators = (
         unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors",
         active_if=(TEST_CUDNN and TEST_WITH_ROCM), dtypes=(torch.float,), device_type='cuda'
     ),
+    DecorateInfo(
+        skipCUDAVersionIn([(11, 7)]), "TestExpandedWeightModule", "test_module",
+        device_type='cuda'
+    ),
+    DecorateInfo(
+        skipCUDAVersionIn([(11, 7)]), "TestDecomp", "test_rnn_decomp_module",
+        device_type='cuda'
+    )
 )
 
 # Database of ModuleInfo entries in alphabetical order.
@@ -1180,12 +1212,11 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64, torch.complex128]),
                    # These fail only on ROCm
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
-                                dtypes=[torch.complex32, torch.complex64], active_if=TEST_WITH_ROCM),
+                                dtypes=[torch.complex32], active_if=TEST_WITH_ROCM),
                    # Not implmented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_forward',
                                 dtypes=(torch.chalf,), device_type='cpu'),
@@ -1344,7 +1375,6 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
                    # This was wrongly being skipped before and needs investigation.
                    # See https://github.com/pytorch/pytorch/issues/80247
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64]),
                ),

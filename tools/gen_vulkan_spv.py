@@ -61,7 +61,7 @@ class UniqueKeyLoader(Loader):
         return mapping
 
 
-class VulkanShaderGenerator(object):
+class VulkanShaderGenerator:
     standard_header = """
 #version 450 core
 #define PRECISION $precision

@@ -7,13 +7,13 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, is_ignored_fn, Union, is_union
+    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await, is_ignored_fn, Union, is_union
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
 from torch._C import TensorType, TupleType, FloatType, IntType, ComplexType, \
     ListType, StringType, DictType, BoolType, OptionalType, InterfaceType, AnyType, \
-    NoneType, DeviceObjType, StreamObjType, FutureType, EnumType, UnionType, NumberType
+    NoneType, DeviceObjType, StreamObjType, FutureType, AwaitType, EnumType, UnionType, NumberType
 
 
 from textwrap import dedent
@@ -26,7 +26,7 @@ if torch.distributed.rpc.is_available():
 
 from torch._ops import OpOverloadPacket
 
-class Module(object):
+class Module:
     def __init__(self, name, members):
         self.name = name
         self.members = members
@@ -38,7 +38,7 @@ class Module(object):
             raise RuntimeError(f"Module {self.name} has no member called {name}") from None
 
 
-class EvalEnv(object):
+class EvalEnv:
     env = {
         'torch': Module('torch', {'Tensor': torch.Tensor}),
         'Tensor': torch.Tensor,
@@ -48,7 +48,8 @@ class EvalEnv(object):
         'Dict': Dict,
         'Optional': Optional,
         'Union': Union,
-        'Future': Future
+        'Future': Future,
+        'Await': _Await
     }
 
     def __init__(self, rcb):
@@ -351,7 +352,7 @@ def try_ann_to_type(ann, loc):
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
-        if set(ann.__args__) == set([int, float, complex]):
+        if set(ann.__args__) == {int, float, complex}:
             return NumberType.get()
         inner: List = []
         # We need these extra checks because both `None` and invalid
@@ -369,6 +370,9 @@ def try_ann_to_type(ann, loc):
         return RRefType(try_ann_to_type(ann.__args__[0], loc))
     if is_future(ann):
         return FutureType(try_ann_to_type(ann.__args__[0], loc))
+    if is_await(ann):
+        elementType = try_ann_to_type(ann.__args__[0], loc) if hasattr(ann, "__args__") else AnyType.get()
+        return AwaitType(elementType)
     if ann is float:
         return FloatType.get()
     if ann is complex:

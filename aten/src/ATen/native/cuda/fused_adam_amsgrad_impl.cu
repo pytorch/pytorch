@@ -8,7 +8,7 @@
 
 namespace at::native {
 
-void _fused_adam_cuda_impl_(
+void _fused_adam_amsgrad_cuda_impl_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -20,7 +20,6 @@ void _fused_adam_cuda_impl_(
     const double beta2,
     const double weight_decay,
     const double eps,
-    const bool amsgrad,
     const bool maximize,
     const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf
@@ -45,7 +44,8 @@ void _fused_adam_cuda_impl_(
             maximize,
             /* amsgrad */true,
             grad_scale_ptr,
-            found_inf_ptr);
+            found_inf_ptr,
+            ADAM_MODE::ORIGINAL);
         });
 }
 

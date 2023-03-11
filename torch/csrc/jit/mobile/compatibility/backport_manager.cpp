@@ -15,11 +15,9 @@
 namespace torch {
 namespace jit {
 
-using caffe2::serialize::FileAdapter;
 using caffe2::serialize::IStreamAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::PyTorchStreamWriter;
-using caffe2::serialize::ReadAdapterInterface;
 
 // Current support bytecode version
 namespace {

@@ -214,16 +214,15 @@ def check_branch(subcommand: str, branch: Optional[str]) -> Optional[str]:
     cmd = ["git", "status", "--untracked-files=no", "--porcelain"]
     p = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
-        universal_newlines=True,
+        text=True,
     )
     if p.stdout.strip():
         return "Need to have clean working tree to checkout!\n\n" + p.stdout
     # next check that the branch name doesn't already exist
     cmd = ["git", "show-ref", "--verify", "--quiet", "refs/heads/" + branch]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)  # type: ignore[assignment]
+    p = subprocess.run(cmd, capture_output=True, check=False)  # type: ignore[assignment]
     if not p.returncode:
         return f"Branch {branch!r} already exists"
     return None
@@ -314,7 +313,7 @@ def conda_solve(
     )
     cmd.extend(channel_args)
     cmd.extend(SPECS_TO_INSTALL)
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+    p = subprocess.run(cmd, capture_output=True, check=True)
     # parse solution
     solve = json.loads(p.stdout)
     link = solve["actions"]["LINK"]
@@ -363,7 +362,7 @@ def _site_packages(dirname: str, platform: str) -> str:
 def _ensure_commit(git_sha1: str) -> None:
     """Make sure that we actually have the commit locally"""
     cmd = ["git", "cat-file", "-e", git_sha1 + "^{commit}"]
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    p = subprocess.run(cmd, capture_output=True, check=False)
     if p.returncode == 0:
         # we have the commit locally
         return
@@ -390,10 +389,9 @@ def _nightly_version(spdir: str) -> str:
     cmd = ["git", "show", "--no-patch", "--format=%s", git_version]
     p = subprocess.run(
         cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
-        universal_newlines=True,
+        text=True,
     )
     m = SHA1_RE.search(p.stdout)
     if m is None:
@@ -544,9 +542,8 @@ def _available_envs() -> Dict[str, str]:
     p = subprocess.run(
         cmd,
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        universal_newlines=True,
+        capture_output=True,
+        text=True,
     )
     lines = p.stdout.splitlines()
     envs = {}

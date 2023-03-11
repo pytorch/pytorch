@@ -10,37 +10,6 @@ include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
 
-if(NOT INTERN_BUILD_MOBILE)
-  # ---[ Check that our programs run.  This is different from the native CMake
-  # compiler check, which just tests if the program compiles and links.  This is
-  # important because with ASAN you might need to help the compiled library find
-  # some dynamic libraries.
-  cmake_push_check_state(RESET)
-  if(CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_OSX_ARCHITECTURES MATCHES "^(x86_64|arm64)$")
-    list(APPEND CMAKE_REQUIRED_FLAGS "-arch ${CMAKE_HOST_SYSTEM_PROCESSOR}")
-  endif()
-  if(CMAKE_CROSSCOMPILING)
-    CHECK_C_SOURCE_COMPILES("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  else()
-    CHECK_C_SOURCE_RUNS("
-    int main() { return 0; }
-    " COMPILER_WORKS)
-  endif()
-  if(NOT COMPILER_WORKS)
-    # Force cmake to retest next time around
-    unset(COMPILER_WORKS CACHE)
-    message(FATAL_ERROR
-        "Could not run a simple program built with your compiler. "
-        "If you are trying to use -fsanitize=address, make sure "
-        "libasan is properly installed on your system (you can confirm "
-        "if the problem is this by attempting to build and run a "
-        "small program.)")
-  endif()
-  cmake_pop_check_state()
-endif()
-
 set(CAFFE2_USE_EXCEPTION_PTR 1)
 
 # ---[ Check if we want to turn off deprecated warning due to glog.
@@ -136,85 +105,6 @@ if(NOT MSVC)
   endif()
 endif()
 
-# ---[ If we are using msvc, set no warning flags
-# Note(jiayq): if you are going to add a warning flag, check if this is
-# totally necessary, and only add when you see fit. If it is needed due to
-# a third party library (like Protobuf), mention it in the comment as
-# "THIRD_PARTY_NAME related"
-# From https://docs.microsoft.com/en-us/cpp/error-messages/compiler-warnings/
-if(${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
-  add_compile_options(
-      ##########################################
-      # Protobuf related. Cannot remove.
-      # This is directly copied from
-      #     https://github.com/google/protobuf/blob/master/cmake/README.md
-      ##########################################
-      /wd4018 # 'expression' : signed/unsigned mismatch
-      /wd4065 # (3): switch with default but no case.
-      /wd4146 # unary minus operator applied to unsigned type, result still unsigned
-      /wd4244 # Conversion from 'type1' to 'type2', possible loss of data.
-      /wd4251 # 'identifier' : class 'type' needs to have dll-interface to be used by clients of class 'type2'
-      /wd4267 # Conversion from 'size_t' to 'type', possible loss of data.
-      /wd4305 # 'identifier' : truncation from 'type1' to 'type2'
-      /wd4355 # 'this' : used in base member initializer list
-      /wd4506 # (1): no definition for inline function. Protobuf related.
-      /wd4661 # No suitable definition provided for explicit template instantiation request
-      /wd4800 # 'type' : forcing value to bool 'true' or 'false' (performance warning)
-      /wd4996 # 'function': was declared deprecated
-      ##########################################
-      # Third party related. Cannot remove.
-      ##########################################
-      /wd4141 # (1): inline used twice. google benchmark related.
-      /wd4503 # (1): decorated name length exceeded, name was truncated.
-              #      Eigen related.
-      /wd4554 # (3): check operator precedence for possible error.
-              # Eigen related.
-      /wd4805 # (1): Unsafe mix of types in gtest/gtest.h. Gtest related.
-      ##########################################
-      # These are directly ATen related. However, several are covered by
-      # the above now. We leave them here for documentation purposes only.
-      #/wd4267 # Conversion from 'size_t' to 'type', possible loss of data.
-      /wd4522 # (3): 'class' : multiple assignment operators specified
-      /wd4838 # (1): conversion from 'type_1' to 'type_2' requires a
-              #      narrowing conversion
-      #/wd4305 # 'identifier' : truncation from 'type1' to 'type2'
-      #/wd4244 # Conversion from 'type1' to 'type2', possible loss of data.
-      /wd4190 # (1): 'identifier1' has C-linkage specified, but returns UDT
-              #      'identifier2' which is incompatible with C
-      /wd4101 # (3): 'identifier' : unreferenced local variable
-      #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
-      #        #      mainly on Linux, this is ignored.
-      /wd4275 # (2): non - DLL-interface classkey 'identifier' used as
-              #      base for DLL-interface classkey 'identifier'
-      ##########################################
-      # These are directly Caffe2 related. However, several are covered by
-      # protobuf now. We leave them here for documentation purposes only.
-      ##########################################
-      #/wd4018 # (3): Signed/unsigned mismatch. We've used it in many places
-      #        #      of the code and it would be hard to correct all.
-      #/wd4244 # (2/3/4): Possible loss of precision. Various cases where we
-      #        #      implicitly cast TIndex to int etc. Need cleaning.
-      #/wd4267 # (3): Conversion of size_t to smaller type. Same as 4244.
-      #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
-      #        #      mainly on Linux, this is ignored.
-      /wd4273 # (1): inconsistent dll linkage. This is related to the
-              #      caffe2 FLAGS_* definition using dllimport in header and
-              #      dllexport in cc file. The strategy is copied from gflags.
-  )
-
-  # Make sure windows.h does not include additional headers.
-  add_definitions("/DWIN32_LEAN_AND_MEAN")
-
-  # Make sure windef.h does not define max/min macros.
-  # Required by ATen among others.
-  add_definitions("/DNOMINMAX")
-
-  set(CMAKE_SHARED_LINKER_FLAGS
-      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
-  set(CMAKE_EXE_LINKER_FLAGS
-      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217 /ignore:4099")
-endif()
-
 # ---[ If we are building on ios, or building with opengl support, we will
 # enable -mfpu=neon-fp16 for iOS Metal build. For Android, this fpu setting
 # is going to be done with android-cmake by setting
@@ -227,29 +117,6 @@ if(IOS AND (${IOS_ARCH} MATCHES "armv7*"))
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-arch" ${IOS_ARCH})
   add_definitions("-Wno-deprecated-declarations")
-endif()
-
-# ---[ If we use asan, turn on the flags.
-# TODO: This only works with new style gcc and clang (not the old -faddress-sanitizer).
-# Change if necessary on old platforms.
-if(USE_ASAN)
-  set(CAFFE2_ASAN_COMPILER_FLAGS "-fsanitize=address -fPIE")
-  set(CAFFE2_ASAN_LINKER_FLAGS "-pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_ASAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_ASAN_LINKER_FLAGS}")
-endif()
-
-if(USE_TSAN)
-  set(CAFFE2_TSAN_COMPILER_FLAGS "-fsanitize=thread -fPIE")
-  set(CAFFE2_TSAN_LINKER_FLAGS "-pie")
-  set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_TSAN_COMPILER_FLAGS}")
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
-  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
-  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${CAFFE2_TSAN_LINKER_FLAGS}")
 endif()
 
 # ---[ Create CAFFE2_BUILD_SHARED_LIBS for macros.h.in usage.

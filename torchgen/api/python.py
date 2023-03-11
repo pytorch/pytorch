@@ -284,7 +284,7 @@ class PythonArgument:
                     "MemoryFormat::Contiguous": "contiguous_format",
                     "QScheme::PER_TENSOR_AFFINE": "per_tensor_affine",
                 }.get(self.default, self.default)
-            return f"{name}: {type_str}={default}"
+            return f"{name}: {type_str} = {default}"
         else:
             return f"{name}: {type_str}"
 
@@ -756,9 +756,9 @@ def signature_from_schema(
     args.extend(func.arguments.post_tensor_options_kwarg_only)
     args.extend(func.arguments.out)
 
-    input_arg_set = set(a.name for a in func.arguments.flat_positional)
-    kwarg_only_set = set(a.name for a in func.arguments.flat_kwarg_only)
-    out_arg_set = set(a.name for a in func.arguments.out)
+    input_arg_set = {a.name for a in func.arguments.flat_positional}
+    kwarg_only_set = {a.name for a in func.arguments.flat_kwarg_only}
+    out_arg_set = {a.name for a in func.arguments.out}
 
     input_args = tuple(map(argument, filter(lambda a: a.name in input_arg_set, args)))
     input_kwargs = tuple(
@@ -995,10 +995,18 @@ def returns_named_tuple_pyi(signature: PythonSignature) -> Optional[Tuple[str, s
     namedtuple_name = signature.name
     field_names = namedtuple_fieldnames(signature.returns.returns)
     if field_names:
-        tuple_args = [
-            f'("{name}", {typ})' for name, typ in zip(field_names, python_returns)
-        ]
-        namedtuple_def = f'NamedTuple("{namedtuple_name}", [{", ".join(tuple_args)}])'
+        namedtuple_def_lines = [f"class {namedtuple_name}(NamedTuple):"]
+        namedtuple_def_lines.extend(
+            f"    {name}: {typ}" for name, typ in zip(field_names, python_returns)
+        )
+        namedtuple_def_lines.append("")  # add an extra newline
+        namedtuple_def = "\n".join(namedtuple_def_lines)
+        # Example:
+        # namedtuple_def = (
+        #     "class max(NamedTuple):\n"
+        #     "    values: Tensor\n"
+        #     "    indices: Tensor\n"
+        # )
         return namedtuple_name, namedtuple_def
     return None
 
@@ -1072,7 +1080,7 @@ def dispatch_lambda_args(
         method=False,
         cpp_no_default_args=f.cpp_no_default_args,
     )
-    out_args: Set[str] = set(a.name for a in schema.arguments.out)
+    out_args: Set[str] = {a.name for a in schema.arguments.out}
 
     # Convert from cpp argument to lambda argument
     def dispatch_lambda_arg(cpp_arg: Binding) -> DispatchLambdaArgument:
@@ -1109,6 +1117,7 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor,at::Tensor>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,int64_t>",
     "::std::tuple<at::Tensor,at::Tensor,double,int64_t>",
     "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t>",
@@ -1116,6 +1125,8 @@ SUPPORTED_RETURN_TYPES = {
     "::std::tuple<double,int64_t>",
     "::std::tuple<at::Tensor,::std::vector<at::Tensor>>",
     "::std::vector<at::Tensor>",
+    # Needed for flash attention forw/backward
+    "::std::tuple<at::Tensor,at::Tensor,at::Tensor,at::Tensor,int64_t,int64_t,int64_t,int64_t,at::Tensor>",
     "at::Scalar",
     "bool",
     "int64_t",

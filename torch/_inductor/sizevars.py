@@ -18,16 +18,6 @@ log = logging.getLogger(__name__)
 
 
 @dataclasses.dataclass
-class ZeroGuard:
-    """
-    An expression we should check equals zero.
-    Guards are currently not checked.  Plan to add this later.
-    """
-
-    expr: Expr
-
-
-@dataclasses.dataclass
 class PositiveGuard:
     """
     An expression we should check for > 0
@@ -37,7 +27,7 @@ class PositiveGuard:
     expr: Expr
 
 
-class SizeVarAllocator(object):
+class SizeVarAllocator:
     def __init__(self, shape_env=None):
         super().__init__()
         if shape_env is None:
@@ -46,6 +36,9 @@ class SizeVarAllocator(object):
         self.var_to_val = self.shape_env.var_to_val
         self.guards = []
         self.replacements: Dict[sympy.Symbol, Expr] = self.shape_env.replacements
+        # maps of dynamic sizes that have to be precomputed on the host to the kernel args
+        self.precomputed_replacements: Dict[Expr, sympy.Symbol] = dict()
+        self.inv_precomputed_replacements: Dict[sympy.Symbol, Expr] = dict()
         self.need_seed = False
         self.stride_vars = self.make_stride_vars_cache()
         self.simplify_with_ranges = self.make_simplify_with_ranges_cache()
@@ -247,7 +240,7 @@ class SizeVarAllocator(object):
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
-        self.shape_env.evaluate_expr(sympy.Eq(left, right))
+        assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
     def maybe_guard_equals(self, left: Expr, right: Expr) -> bool:
@@ -330,6 +323,9 @@ class SizeVarAllocator(object):
         right = self.size_hint(left)
         self.guard_equals(left, sympy.Integer(right))
         return int(right)
+
+    def guard_static_shapes(self, left: List[Expr]) -> List[int]:
+        return [self.guard_static_shape(x) for x in left]
 
     def __getitem__(self, val: int) -> Expr:
         return self.shape_env.duck_int(val)
@@ -425,6 +421,13 @@ class SizeVarAllocator(object):
         order.sort(key=lambda x: (strides[x] == 0, strides[x]))
         return order
 
+    def lookup_precomputed_size(self, expr: Expr):
+        if expr not in self.precomputed_replacements:
+            sym = sympy_symbol(f"ps{len(self.precomputed_replacements)}")
+            self.precomputed_replacements[expr] = sym
+            self.inv_precomputed_replacements[sym] = expr
+        return self.precomputed_replacements[expr]
+
     def codegen(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
         if self.need_seed:
@@ -447,7 +450,21 @@ class SizeVarAllocator(object):
         # Assign all symbolic shapes needed to local variables
         needed = set(self.var_to_val.keys()) - set(self.replacements.keys())
 
-        for name, value in graph_inputs.items():
+        def is_expr(x):
+            return isinstance(x[1], sympy.Expr)
+
+        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
+        graph_inputs_tensors = list(
+            filter(lambda x: not is_expr(x), graph_inputs.items())
+        )
+
+        for name, shape in graph_inputs_expr:
+            shape = self.simplify(shape)
+            if shape in needed:
+                needed.remove(shape)
+                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
+
+        for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -457,7 +474,7 @@ class SizeVarAllocator(object):
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
 
-        for name, value in graph_inputs.items():
+        for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
                 shape = self.simplify(shape)
@@ -466,6 +483,12 @@ class SizeVarAllocator(object):
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
+
+    def codegen_precomputed_sizes(self, code: IndentedBuffer):
+        from .codegen.wrapper import pexpr
+
+        for sym, expr in self.inv_precomputed_replacements.items():
+            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
 
     def codegen_sizevar(self, x: Expr) -> str:
         from .codegen.wrapper import pexpr

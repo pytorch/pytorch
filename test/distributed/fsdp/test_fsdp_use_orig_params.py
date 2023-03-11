@@ -4,7 +4,8 @@ import copy
 import functools
 import itertools
 import sys
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+import unittest
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 import torch
 import torch.nn as nn
@@ -20,6 +21,7 @@ from torch.distributed.fsdp._common_utils import clean_tensor_name
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
@@ -32,6 +34,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
 )
 
 if not dist.is_available():
@@ -189,7 +192,8 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             for (n1, p1), (n2, p2) in zip(
                 ddp_model.module.named_parameters(), fsdp_model.named_parameters()
             ):
-                self.assertEqual(n1, n2)
+                # Allow for FSDP prefixes
+                self.assertEqual(n1, clean_tensor_name(n2))
                 torch.testing.assert_close(p1, p2)
 
     def _get_sharding_strategy_from_str(
@@ -448,7 +452,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             ddp_model.module.named_parameters(),
             fsdp_model.named_parameters(),
         ):
-            self.assertEqual(ddp_n, fsdp_n)
+            self.assertEqual(ddp_n, clean_tensor_name(fsdp_n))
             if fsdp_p.numel() == 0:
                 # Not in this rank's shard
                 self.assertTrue(fsdp_p.grad is None)
@@ -503,7 +507,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim = torch.optim.Adam(fsdp_model.parameters(), lr=LR)
+        optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         fsdp_kwargs["use_orig_params"] = True
         fsdp_model_orig_params = TransformerWithSharedParams.init(
             self.process_group,
@@ -512,7 +516,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_kwargs=fsdp_kwargs,
             deterministic=True,
         )
-        optim_orig_params = torch.optim.Adam(fsdp_model_orig_params.parameters(), lr=LR)
+        optim_orig_params = torch.optim.Adam(
+            fsdp_model_orig_params.parameters(), foreach=False, lr=LR
+        )
         return fsdp_model, optim, fsdp_model_orig_params, optim_orig_params
 
     def _check_fsdp_parameter_parity(self, fsdp1: FSDP, fsdp2: FSDP) -> None:
@@ -962,53 +968,6 @@ class TestFSDPUseOrigParamsWriteback(FSDPTest):
 
 class TestFSDPUseOrigParamsFQNs(FSDPTest):
     @skip_if_lt_x_gpu(2)
-    def test_param_and_buffer_names(self):
-        """
-        Tests that, for ``use_orig_params=True``, the parameter and buffer
-        names match those of a local model even when sharded, meaning that they
-        do not include FSDP-specific prefixes.
-        """
-        self.run_subtests(
-            {"auto_wrap_policy": [None, always_wrap_policy]},
-            self._test_param_and_buffer_names,
-        )
-
-    def _test_param_and_buffer_names(self, auto_wrap_policy: Optional[Callable]):
-        class Container(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = nn.Parameter(torch.randn((5, 5)))
-                self.register_buffer("buf", torch.randn((5, 5)))
-
-            def forward(self, x):
-                return x @ self.param + self.buf
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.param = nn.Parameter(torch.randn((5, 5)))
-                self.lin = nn.Linear(5, 5)
-                self.container = Container()
-                self.register_buffer("buf", torch.randn((5, 5)))
-
-            def forward(self, x):
-                z = self.container(x)
-                z = z @ self.param + self.buf
-                z = self.lin(z)
-                return z
-
-        model = Model()
-        fsdp_model = FSDP(
-            Model(), auto_wrap_policy=auto_wrap_policy, use_orig_params=True
-        )
-        param_names = [n for n, _ in model.named_parameters()]
-        fsdp_param_names = [n for n, _ in fsdp_model.named_parameters()]
-        self.assertEqual(param_names, fsdp_param_names)
-        buffer_names = [n for n, _ in model.named_buffers()]
-        fsdp_buffer_names = [n for n, _ in fsdp_model.named_buffers()]
-        self.assertEqual(buffer_names, fsdp_buffer_names)
-
-    @skip_if_lt_x_gpu(2)
     def test_named_parameters_in_forward(self):
         """
         Tests that calling ``named_parameters()`` during forward returns FQNs
@@ -1024,7 +983,10 @@ class TestFSDPUseOrigParamsFQNs(FSDPTest):
 
             def forward(self, x: torch.Tensor) -> torch.Tensor:
                 nonlocal param_shapes
-                param_names = [tup[0] for tup in self.named_parameters()]
+                # Allow for FSDP prefixes
+                param_names = [
+                    clean_tensor_name(tup[0]) for tup in self.named_parameters()
+                ]
                 params = [tup[1] for tup in self.named_parameters()]
                 assert (
                     param_shapes[0] is not None and param_shapes[1] is not None
@@ -1217,6 +1179,25 @@ class TestFSDPUseOrigParamsNoSync(FSDPTest):
         for param in fsdp_model.parameters():
             if param.grad is not None:
                 self.assertEqual(param.grad.dtype, torch.float32)
+
+
+# Define this to be large enough to trigger stack corruption
+NUM_SIZE0_TENSORS = 1000
+
+
+class TestMultiTensorApply(TestCase):
+    def test_multi_tensor_apply_size0_tensors_cpu(self):
+        size0_tensors = [torch.empty(0, device="cpu") for _ in range(NUM_SIZE0_TENSORS)]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_multi_tensor_apply_size0_tensors_cuda(self):
+        size0_tensors = [
+            torch.empty(0, device="cuda") for _ in range(NUM_SIZE0_TENSORS)
+        ]
+        # Check that this does not segfault
+        torch._foreach_mul_(size0_tensors, 0.1)
 
 
 instantiate_parametrized_tests(TestFSDPUseOrigParamsMultipleParamGroups)

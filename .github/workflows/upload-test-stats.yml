@@ -41,9 +41,8 @@ jobs:
 
       - run: |
           pip3 install requests==2.26
-          pip3 install rockset==0.8.3
+          pip3 install rockset==1.0.3
           pip3 install boto3==1.19.12
-          pip3 install six==1.16.0
 
       - name: Upload test stats
         env:

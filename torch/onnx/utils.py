@@ -686,9 +686,19 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
+
     return graph
 
 
@@ -959,7 +969,7 @@ def _create_jit_graph(
 
         if isinstance(model, torch.jit.ScriptModule):
             try:
-                graph = model.forward.graph
+                graph = model.forward.graph  # type: ignore[attr-defined]
             except AttributeError as e:
                 raise RuntimeError("'forward' method must be a script method") from e
             _C._jit_pass_onnx_function_substitution(graph)
@@ -1062,7 +1072,7 @@ def _pre_trace_quant_model(model, args):
     This is due to https://github.com/pytorch/pytorch/issues/75761.
     """
     if any(
-        hasattr(m, "_packed_params") for m in getattr(model, "modules", lambda: [])()
+        hasattr(m, "_packed_params") for m in getattr(model, "modules", list)()
     ) or any(getattr(arg, "is_quantized", False) for arg in args):
         return torch.jit.trace(model, args)
     return model
@@ -1136,7 +1146,12 @@ def _model_to_graph(
             example_outputs_final += unpack_quantized_tensor(example_output)
         out_vars, desc = torch.jit._flatten(example_outputs_final)
         _C._jit_pass_onnx_assign_output_shape(
-            graph, out_vars, desc, GLOBALS.onnx_shape_inference, is_script
+            graph,
+            out_vars,
+            desc,
+            GLOBALS.onnx_shape_inference,
+            is_script,
+            GLOBALS.export_onnx_opset_version,
         )
 
     # NB: ONNX requires complete information about output types, which might be
@@ -1158,28 +1173,38 @@ def _model_to_graph(
                 out_desc,
                 GLOBALS.onnx_shape_inference,
                 is_script,
+                GLOBALS.export_onnx_opset_version,
             )
 
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
-
-    if training is None or training == _C_onnx.TrainingMode.EVAL:
-        params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
 
     if (
         do_constant_folding
         and GLOBALS.export_onnx_opset_version
         >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
+        if training is None or training == _C_onnx.TrainingMode.EVAL:
+            params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1464,6 +1489,15 @@ def _export(
     if export_type is None:
         export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
+    # Discussed deprecation with Nikita Shulga and Sergii Dymchenko from Meta
+    if _C_onnx._CAFFE2_ATEN_FALLBACK:
+        warnings.warn(
+            "Caffe2 ONNX exporter is deprecated in version 2.0 and will be "
+            "removed in 2.2. Please use PyTorch 2.1 or older for this capability.",
+            category=FutureWarning,
+            stacklevel=2,
+        )
+
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
             "torch.nn.DataParallel is not supported by ONNX "
@@ -1618,7 +1652,7 @@ def _export(
                 not val_use_external_data_format
             ):
                 try:
-                    _C._check_onnx_proto(proto, full_check=True)
+                    _C._check_onnx_proto(proto)
                 except RuntimeError as e:
                     raise errors.CheckerError(e) from e
     finally:
@@ -1682,7 +1716,15 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
     call from C++.
     """
     try:
-        return symbolic_fn(g, *args)
+        graph_context = jit_utils.GraphContext(
+            graph=g,
+            block=g.block(),
+            opset=GLOBALS.export_onnx_opset_version,
+            original_node=None,  # type: ignore[arg-type]
+            params_dict=_params_dict,
+            env={},
+        )
+        return symbolic_fn(graph_context, *args)
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch
         # to symbolic_fn.  Otherwise, the backtrace will have the clues
@@ -1837,7 +1879,7 @@ def _run_symbolic_function(
         }
         outputs = node.outputsSize()
         attrs["outputs"] = outputs
-        return graph_context.at(
+        return graph_context.aten_op(
             op_name,
             *inputs,
             overload_name=_get_aten_op_overload_name(node),
@@ -1895,7 +1937,7 @@ def _run_symbolic_function(
                 k + "_" + node.kindOf(k)[0]: symbolic_helper._node_get(node, k)
                 for k in node.attributeNames()
             }
-            return graph_context.at(
+            return graph_context.aten_op(
                 op_name,
                 *inputs,
                 overload_name=_get_aten_op_overload_name(node),

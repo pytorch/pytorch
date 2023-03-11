@@ -3,6 +3,8 @@
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
+#include <utility>
+
 namespace c10 {
 namespace impl {
 
@@ -41,15 +43,15 @@ const std::shared_ptr<SafePyObject>& TorchDispatchModeTLS::get_stack_at(
 }
 
 int64_t TorchDispatchModeTLS::stack_len() {
-  return torchDispatchModeState.stack_.size();
+  return static_cast<int64_t>(torchDispatchModeState.stack_.size());
 }
 
 const TorchDispatchModeTLS& TorchDispatchModeTLS::get_state() {
   return torchDispatchModeState;
 }
 
-void TorchDispatchModeTLS::set_state(const TorchDispatchModeTLS& state) {
-  torchDispatchModeState = state;
+void TorchDispatchModeTLS::set_state(TorchDispatchModeTLS state) {
+  torchDispatchModeState = std::move(state);
   if (torchDispatchModeState.stack_.empty()) {
     c10::impl::tls_set_dispatch_key_included(DispatchKey::Python, false);
     c10::impl::tls_set_dispatch_key_included(

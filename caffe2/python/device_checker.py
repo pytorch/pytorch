@@ -6,7 +6,7 @@ from caffe2.python import workspace
 from caffe2.python.core import InferOpBlobDevicesAsDict
 
 
-class DeviceChecker(object):
+class DeviceChecker:
     """A device checker in Python to check consistency across multiple devices.
 
     This is not the most efficient way to check devices, as the Python interface

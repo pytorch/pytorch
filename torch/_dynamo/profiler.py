@@ -107,7 +107,7 @@ class Profiler:
 
         last_op_end_time = -1
         captured_region_end_time = -1
-        events = list(sorted(self.prof.events(), key=lambda x: x.time_range.start))
+        events = sorted(self.prof.events(), key=lambda x: x.time_range.start)
         for e in events:
             if e.name == "TORCHDYNAMO":
                 captured_region_end_time = e.time_range.end

@@ -1304,7 +1304,7 @@ def _RemapParameterBlobsForSharedModel(model, all_params):
     modify_ops(model.net)
 
 
-class CollectivesConcurrencyControl(object):
+class CollectivesConcurrencyControl:
     """
     Creates common worlds (up to max_concurrent_context) and manage the
     sequential execution of collectives that shares the same context with

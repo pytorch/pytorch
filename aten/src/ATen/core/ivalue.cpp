@@ -108,6 +108,8 @@ c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
       }
       case Tag::GenericList:
         return ListType::create(v.toList().elementType());
+      case Tag::Await:
+        return AwaitType::create(v.toAwait()->elementType());
       case Tag::Future:
         return FutureType::create(v.toFuture()->elementType());
       case Tag::RRef:
@@ -235,6 +237,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       break;
     }
     case Tag::Future:
+    case Tag::Await:
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
@@ -325,6 +328,7 @@ IValue IValue::equals(const IValue& rhs) const {
       return rhs.isList() && lhs.toList() == rhs.toList();
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -375,6 +379,7 @@ size_t IValue::hash(const IValue& v) {
     case Tag::GenericList:
     case Tag::Blob:
     case Tag::Future:
+    case Tag::Await:
     case Tag::RRef:
     case Tag::Object:
     case Tag::PyObject:
@@ -805,6 +810,8 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return out << "RRef";
     case IValue::Tag::Future:
       return out << "Future";
+    case IValue::Tag::Await:
+      return out << "Await";
     case IValue::Tag::Uninitialized:
       return out << "Uninitialized";
     case IValue::Tag::Device:
@@ -872,7 +879,7 @@ IValue IValue::deepcopy(
     case IValue::Tag::Tuple: {
       std::vector<IValue> copied_tuple;
       for (const auto& e : toTupleRef().elements()) {
-        copied_tuple.push_back(e.deepcopy(memo));
+        copied_tuple.emplace_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(std::move(copied_tuple)));
     }
@@ -1060,11 +1067,11 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
-        weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(tensor.storage().getWeakStorageImpl());
       }
     }
   } else {
@@ -1074,7 +1081,7 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        weakStorageImpls.emplace_back(sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }

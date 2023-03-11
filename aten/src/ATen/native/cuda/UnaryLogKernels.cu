@@ -12,7 +12,7 @@
 
 namespace at::native {
 
-const char log_name[] = "log_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log_name[] = "log_kernel";
 void log_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -44,7 +44,7 @@ void log_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
-const char log10_name[] = "log10_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log10_name[] = "log10_kernel";
 void log10_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -81,7 +81,7 @@ void log1p_kernel_cuda(TensorIteratorBase& iter) {
   });
 }
 
-const char log2_name[] = "log2_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char log2_name[] = "log2_kernel";
 void log2_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {

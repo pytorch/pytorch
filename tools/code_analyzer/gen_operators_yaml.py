@@ -55,15 +55,15 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 # There are a few main inputs to this application
 # -----------------------------------------------
 #
-# 1. Inference Root Operators (--root_ops): Root operators (called directly
+# 1. Inference Root Operators (--root-ops): Root operators (called directly
 #    from TorchScript) used by inference use-cases.
 #
-# 2. Training Root Operators (--training_root_ops): Root operators used
+# 2. Training Root Operators (--training-root-ops): Root operators used
 #    by training use-cases. Currently, this list is the list of all operators
 #    used by training, and not just the root operators. All Training ops are
 #    also considered for inference, so these are merged into inference ops.
 #
-# 3. Operator Depencency Graph (--dep_graph_yaml_path): A path to the
+# 3. Operator Depencency Graph (--dep-graph-yaml-path): A path to the
 #    operator dependency graph used to determine which operators depend on
 #    which other operators for correct functioning. This is used for
 #    generating the transitive closure of all the operators used by the
@@ -71,12 +71,12 @@ from torchgen.selective_build.selector import merge_kernel_metadata
 #    For tracing based selective build, we don't need to perform this
 #    transitive cloure.
 #
-# 4. Model Metadata (--model_name, --model_versions, --model_assets,
-#    --model_backends): Self-descriptive. These are used to tell this
+# 4. Model Metadata (--model-name, --model-versions, --model-assets,
+#    --model-backends): Self-descriptive. These are used to tell this
 #    script which model operator lists to fetch from the Unified Model
 #    Build Metadata YAML file.
 #
-# 5. Unified Model YAML file (--models_yaml_path): A path to the Unified
+# 5. Unified Model YAML file (--models-yaml-path): A path to the Unified
 #    model YAML operator list file. This yaml file contains (for each
 #    model/version/asset/backend) the set of used root and traced
 #    operators. This is used to extract the actual set of operators
@@ -490,45 +490,53 @@ def fill_output(output: Dict[str, object], options: object):
 
 def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
     parser.add_argument(
+        "--root-ops",
         "--root_ops",
         help="A comma separated list of root operators used by the model",
         required=False,
     )
     parser.add_argument(
+        "--training-root-ops",
         "--training_root_ops",
         help="A comma separated list of root operators used for training",
         required=False,
     )
     parser.add_argument(
+        "--output-path",
         "--output_path",
         help="The location of the output yaml file.",
         required=True,
     )
     parser.add_argument(
+        "--dep-graph-yaml-path",
         "--dep_graph_yaml_path",
         type=str,
         help="A path to the Operator Dependency Graph YAML file.",
         required=True,
     )
     parser.add_argument(
+        "--model-name",
         "--model_name",
         type=str,
         help="The name of the model that uses the specified root operators.",
         required=True,
     )
     parser.add_argument(
+        "--model-versions",
         "--model_versions",
         type=str,
         help="A comma separated list of model versions.",
         required=False,
     )
     parser.add_argument(
+        "--model-assets",
         "--model_assets",
         type=str,
         help="A comma separate list of model asset names (if absent, defaults to all assets for this model).",
         required=False,
     )
     parser.add_argument(
+        "--model-backends",
         "--model_backends",
         type=str,
         default="CPU",
@@ -536,12 +544,14 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         required=False,
     )
     parser.add_argument(
+        "--models-yaml-path",
         "--models_yaml_path",
         type=str,
         help="The path to where the unified Mobile Model Config YAML resides.",
         required=True,
     )
     parser.add_argument(
+        "--include-all-operators",
         "--include_all_operators",
         action="store_true",
         default=False,
@@ -549,6 +559,7 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         required=False,
     )
     parser.add_argument(
+        "--rule-name",
         "--rule_name",
         type=str,
         help="The name of pt_operator_library rule resulting in this generation",

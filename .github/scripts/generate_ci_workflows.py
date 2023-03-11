@@ -2,13 +2,13 @@
 
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Dict, Set, List, Iterable
+from typing import Dict, Set, List, Literal, Iterable
 
 import jinja2
 
 import os
 import sys
-from typing_extensions import Literal, TypedDict
+from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
 
@@ -143,7 +143,7 @@ LINUX_BINARY_SMOKE_WORKFLOWS = [
         package_type="manywheel",
         build_configs=generate_binary_build_matrix.generate_wheels_matrix(
             OperatingSystem.LINUX,
-            arches=["11.6"],
+            arches=["11.7"],
             python_versions=["3.8"]),
         branches="master",
     ),
@@ -265,18 +265,6 @@ MACOS_BINARY_BUILD_WORKFLOWS = [
         abi_version=generate_binary_build_matrix.CXX11_ABI,
         build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
             OperatingSystem.MACOS, generate_binary_build_matrix.CXX11_ABI
-        ),
-        ciflow_config=CIFlowConfig(
-            labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},
-            isolated_workflow=True,
-        ),
-    ),
-    BinaryBuildWorkflow(
-        os=OperatingSystem.MACOS,
-        package_type="libtorch",
-        abi_version=generate_binary_build_matrix.PRE_CXX11_ABI,
-        build_configs=generate_binary_build_matrix.generate_libtorch_matrix(
-            OperatingSystem.MACOS, generate_binary_build_matrix.PRE_CXX11_ABI
         ),
         ciflow_config=CIFlowConfig(
             labels={LABEL_CIFLOW_BINARIES, LABEL_CIFLOW_BINARIES_LIBTORCH},

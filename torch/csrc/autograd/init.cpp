@@ -55,6 +55,17 @@ struct MultithreadingEnabled {
   bool old_;
 };
 
+struct ViewReplayEnabled {
+  ViewReplayEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
+  }
+  ~ViewReplayEnabled() {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
+  }
+  bool old_;
+};
+
 struct DisableAutocast {
   c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
 };
@@ -286,8 +297,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::getNumGPUs() > 0) {
       activities.insert(ActivityType::CUDA);
     }
+#elif defined(USE_KINETO)
+    if (at::hasXPU()) {
+      activities.insert(ActivityType::XPU);
+    }
 #endif
     return activities;
+  });
+
+  m.def("_unsafe_set_version_counter", [](at::Tensor t, int64_t i) {
+    auto vc = torch::autograd::impl::version_counter(t);
+    vc.set_version(i);
   });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
@@ -360,6 +380,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .def(py::init<bool>());
   py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
       .def(py::init<>());
+  py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
+      .def(py::init<bool>());
   py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(

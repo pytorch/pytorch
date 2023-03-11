@@ -65,7 +65,11 @@ void ${module_variant_name}_test_forward_backward(
   write_ivalue_to_file(torch::IValue(cpp_output), forward_output_file_path);
 
   // Backward pass
-  cpp_output.sum().backward();
+  if (cpp_output.is_complex()) {
+    cpp_output.sum().abs().backward();
+  } else {
+    cpp_output.sum().backward();
+  }
 
   // Put all gradients into a c10::Dict, save it into a file to be compared in Python later
   c10::Dict<std::string, torch::Tensor> grad_dict;
@@ -109,7 +113,10 @@ def run_python_forward_backward(unit_test_class, test_params):
     script_module = torch.jit.trace(module, torch.tensor(0))
 
     # Backward pass
-    python_output.sum().backward()
+    if python_output.dtype.is_complex:
+        python_output.sum().abs().backward()
+    else:
+        python_output.sum().backward()
 
     # Put all gradients into a dict, to be compared later
     python_grad_dict = {}

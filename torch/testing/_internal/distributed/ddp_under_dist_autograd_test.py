@@ -92,7 +92,7 @@ def _remote_method_async(method, rref, *args, **kwargs):
 class RemoteEM(nn.Module):
     def __init__(self, num_embeddings: int, embedding_dim: int):
         gLogger.info(f"Initing RemoteEM with {num_embeddings} {embedding_dim}")
-        super(RemoteEM, self).__init__()
+        super().__init__()
         init_em = [0.5] * embedding_dim
         self.em = nn.EmbeddingBag(
             num_embeddings,
@@ -118,7 +118,7 @@ def getLinear(d_in, d_out):
 class RemoteNet(nn.Module):
     def __init__(self, d_in: int, d_out: int):
         gLogger.info(f"Initing RemoteNet with {d_in} {d_out}")
-        super(RemoteNet, self).__init__()
+        super().__init__()
         self.fc = getLinear(d_in, d_out)
         self.relu = nn.ReLU()
 
@@ -134,7 +134,7 @@ class HybridModel(nn.Module):
         remote_net_rref: rpc.RRef,
         process_group_for_ddp: dist.ProcessGroup = None,
     ):
-        super(HybridModel, self).__init__()
+        super().__init__()
         self.remote_em_rref = remote_em_rref
         self.remote_net_rref = remote_net_rref
         self.fc1 = getLinear(D_DENSE, D_DENSE)

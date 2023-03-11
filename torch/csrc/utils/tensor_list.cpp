@@ -17,8 +17,8 @@ static PyObject* recursive_to_list(
     IntArrayRef strides,
     int64_t dim,
     ScalarType scalarType,
-    int64_t elementSize) {
-  int64_t ndim = sizes.size();
+    size_t elementSize) {
+  int64_t ndim = static_cast<int64_t>(sizes.size());
   if (dim == ndim) {
     return torch::utils::load_scalar(data, scalarType);
   }

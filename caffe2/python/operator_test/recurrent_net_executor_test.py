@@ -18,7 +18,7 @@ from hypothesis import given, settings
 class TestRNNExecutor(test_util.TestCase):
 
     def setUp(self):
-        super(TestRNNExecutor, self).setUp()
+        super().setUp()
         self.batch_size = 8
         self.input_dim = 20
         self.hidden_dim = 30
