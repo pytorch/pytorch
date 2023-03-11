@@ -508,7 +508,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                             recurse=False, remove_duplicate=False
                         ):
                             new_source = ParamBufferSource(source, n)
-                            new_name = new_source.name()
+                            new_name = f"{name}.{n}"
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
@@ -517,7 +517,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                             recurse=False, remove_duplicate=False
                         ):
                             new_source = ParamBufferSource(source, n)
-                            new_name = new_source.name()
+                            new_name = f"{name}.{n}"
                             self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
             name = f"{base}_{i}"
