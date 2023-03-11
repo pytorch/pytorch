@@ -5029,7 +5029,6 @@ class TestQuantizedConv(TestCase):
         output_dtype=torch.quint8,
         X2_scale=1.0,
         X2_zero_point=128,
-        qconv=None, qconv_prepack=None
     ):
         # ONEDNN only supports symmetric quantization of weight
         if (qengine_is_onednn() or qengine_is_x86()) and W_zero_point is not None:
@@ -5114,16 +5113,6 @@ class TestQuantizedConv(TestCase):
                 packed_bias, strides, pads, dilations, groups,
                 Y_scale, Y_zero_point
             )
-        if qconv_prepack is not None:
-            W_prepack = qconv_prepack(
-                W_q, bias_float, strides, pads, dilations, groups)
-            Y_q = qconv(
-                X_q,
-                X2_q,
-                W_prepack,
-                Y_scale,
-                Y_zero_point,
-            )
 
         # Make sure the results match
         # assert_array_almost_equal compares using the following formula:
@@ -5137,189 +5126,181 @@ class TestQuantizedConv(TestCase):
         # For example, the result of round(2.5) + 1 is 3 while
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
-        import subprocess
-        # cpu_info = subprocess.run(['lscpu'], stdout=subprocess.PIPE)
-        out = subprocess.check_output(
-            ["lscpu"],
-            stderr=subprocess.STDOUT,
-        ).decode("utf-8")
-        print("out is: {}".format(out), flush=True)
         np.testing.assert_array_almost_equal(
             result_ref_q.int_repr().cpu().numpy(), Y_q_inductor.cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
-            groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q},
-            Y_q: {Y_q}, Y_q_int_repr: {Y_q.int_repr().cpu().numpy()}''')
+            groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q}''')
 
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
 
-    # @skipIfNoONEDNN
-    # def test_inductor_qconv1d(self):
-    #     batch_size = 3
-    #     groups_list = [1, 3]
-    #     input_channels_per_group = 2
-    #     output_channels_per_group = 2
-    #     length = 4
-    #     kernel = 3
-    #     stride = 1
-    #     pad = 1
-    #     dilation = 1
-    #     X_scale = 1.5
-    #     X_zero_point = 2
-    #     W_scale = [1.5]
-    #     W_zero_point = [0]
-    #     Y_scale = 4.2
-    #     Y_zero_point = 0
-    #     use_bias_list = [False, True]
-    #     use_channelwise_list = [False, True]
-    #     options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-    #     for groups, use_bias, use_channelwise in options:
-    #         input_channels = input_channels_per_group * groups
-    #         output_channels = output_channels_per_group * groups
-    #         with override_quantized_engine('x86'):
-    #             conv1d = torch.nn.Conv1d(
-    #                 input_channels,
-    #                 output_channels,
-    #                 kernel,
-    #                 stride,
-    #                 pad,
-    #                 dilation,
-    #                 groups,
-    #             )
-    #             qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-    #             qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
+    @skipIfNoONEDNN
+    def test_inductor_qconv1d(self):
+        batch_size = 3
+        groups_list = [1, 3]
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        length = 4
+        kernel = 3
+        stride = 1
+        pad = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [0]
+        Y_scale = 4.2
+        Y_zero_point = 0
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
+        for groups, use_bias, use_channelwise in options:
+            input_channels = input_channels_per_group * groups
+            output_channels = output_channels_per_group * groups
+            with override_quantized_engine('x86'):
+                conv1d = torch.nn.Conv1d(
+                    input_channels,
+                    output_channels,
+                    kernel,
+                    stride,
+                    pad,
+                    dilation,
+                    groups,
+                )
+                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
 
-    #             X_qdtype = torch.quint8
-    #             weight_dtype = torch.qint8
+                X_qdtype = torch.quint8
+                weight_dtype = torch.qint8
 
-    #             self._test_inductor_qconv_impl(
-    #                 qconv_inductor, qconv_prepack_inductor, conv1d, batch_size,
-    #                 input_channels_per_group, (length, ),
-    #                 output_channels_per_group, groups, kernel, [stride], [pad], None,
-    #                 [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
-    #                 Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
-    #                 input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
+                self._test_inductor_qconv_impl(
+                    qconv_inductor, qconv_prepack_inductor, conv1d, batch_size,
+                    input_channels_per_group, (length, ),
+                    output_channels_per_group, groups, kernel, [stride], [pad], None,
+                    [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
+                    input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
-    # @skipIfNoONEDNN
-    # def test_inductor_qconv2d(self):
-    #     batch_size = 3
-    #     groups_list = [1, 10]
-    #     input_channels_per_group = 2
-    #     output_channels_per_group = 2
-    #     height = 10
-    #     width = 10
-    #     kernel_h = 3
-    #     kernel_w = 3
-    #     stride_h = 2
-    #     stride_w = 2
-    #     pad_h = 1
-    #     pad_w = 1
-    #     dilation = 1
-    #     X_scale = 1.5
-    #     X_zero_point = 2
-    #     W_scale = [1.5]
-    #     W_zero_point = [0]
-    #     Y_scale = 4.2
-    #     Y_zero_point = 0
-    #     use_bias_list = [False, True]
-    #     use_channelwise_list = [False, True]
-    #     options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-    #     for groups, use_bias, use_channelwise in options:
-    #         with override_quantized_engine('x86'):
-    #             input_channels = input_channels_per_group * groups
-    #             output_channels = output_channels_per_group * groups
-    #             kernels = (kernel_h, kernel_w)
-    #             strides = (stride_h, stride_w)
-    #             pads = (pad_h, pad_w)
-    #             dilations = (dilation, dilation)
+    @skipIfNoONEDNN
+    def test_inductor_qconv2d(self):
+        batch_size = 3
+        groups_list = [1, 10]
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        height = 10
+        width = 10
+        kernel_h = 3
+        kernel_w = 3
+        stride_h = 2
+        stride_w = 2
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [0]
+        Y_scale = 4.2
+        Y_zero_point = 0
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
+        for groups, use_bias, use_channelwise in options:
+            with override_quantized_engine('x86'):
+                input_channels = input_channels_per_group * groups
+                output_channels = output_channels_per_group * groups
+                kernels = (kernel_h, kernel_w)
+                strides = (stride_h, stride_w)
+                pads = (pad_h, pad_w)
+                dilations = (dilation, dilation)
 
-    #             qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
-    #             qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-    #             conv_op = torch.nn.Conv2d(
-    #                 input_channels,
-    #                 output_channels,
-    #                 kernels,
-    #                 strides,
-    #                 pads,
-    #                 dilations,
-    #                 groups,
-    #             )
+                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
+                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                conv_op = torch.nn.Conv2d(
+                    input_channels,
+                    output_channels,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
 
-    #             X_qdtype = torch.quint8
-    #             weight_dtype = torch.qint8
-    #             self._test_inductor_qconv_impl(
-    #                 qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
-    #                 input_channels_per_group, (height, width),
-    #                 output_channels_per_group, groups, kernels, strides, pads, None,
-    #                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-    #                 Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
-    #                 input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
+                X_qdtype = torch.quint8
+                weight_dtype = torch.qint8
+                self._test_inductor_qconv_impl(
+                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                    input_channels_per_group, (height, width),
+                    output_channels_per_group, groups, kernels, strides, pads, None,
+                    dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
+                    input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
-    # @skipIfNoONEDNN
-    # def test_inductor_qconv2d_relu(self):
-    #     batch_size = 3
-    #     input_channels_per_group = 2
-    #     height = 10
-    #     width = 10
-    #     output_channels_per_group = 2
-    #     groups_list = [1, 10]
-    #     kernel_h = 3
-    #     kernel_w = 3
-    #     stride_h = 2
-    #     stride_w = 2
-    #     pad_h = 1
-    #     pad_w = 1
-    #     dilation = 1
-    #     X_scale = 1.5
-    #     X_zero_point = 2
-    #     W_scale = [1.5]
-    #     W_zero_point = [0]
-    #     Y_scale = 4.2
-    #     Y_zero_point = 3
-    #     use_bias_list = [False, True]
-    #     use_channelwise_list = [False, True]
-    #     options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-    #     for groups, use_bias, use_channelwise in options:
-    #         with override_quantized_engine('x86'):
-    #             input_channels = input_channels_per_group * groups
-    #             output_channels = output_channels_per_group * groups
-    #             kernels = (kernel_h, kernel_w)
-    #             strides = (stride_h, stride_w)
-    #             pads = (pad_h, pad_w)
-    #             dilations = (dilation, dilation)
+    @skipIfNoONEDNN
+    def test_inductor_qconv2d_relu(self):
+        batch_size = 3
+        input_channels_per_group = 2
+        height = 10
+        width = 10
+        output_channels_per_group = 2
+        groups_list = [1, 10]
+        kernel_h = 3
+        kernel_w = 3
+        stride_h = 2
+        stride_w = 2
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [0]
+        Y_scale = 4.2
+        Y_zero_point = 3
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
+        for groups, use_bias, use_channelwise in options:
+            with override_quantized_engine('x86'):
+                input_channels = input_channels_per_group * groups
+                output_channels = output_channels_per_group * groups
+                kernels = (kernel_h, kernel_w)
+                strides = (stride_h, stride_w)
+                pads = (pad_h, pad_w)
+                dilations = (dilation, dilation)
 
-    #             qconv_inductor = torch.ops.quantized.conv_relu_int8_packed_weight
-    #             qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-    #             conv_op = torch.nn.Conv2d(
-    #                 input_channels,
-    #                 output_channels,
-    #                 kernels,
-    #                 strides,
-    #                 pads,
-    #                 dilations,
-    #                 groups,
-    #             )
+                qconv_inductor = torch.ops.quantized.conv_relu_int8_packed_weight
+                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                conv_op = torch.nn.Conv2d(
+                    input_channels,
+                    output_channels,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
 
-    #             X_qdtype = torch.quint8
-    #             weight_dtype = torch.qint8
+                X_qdtype = torch.quint8
+                weight_dtype = torch.qint8
 
-    #             self._test_inductor_qconv_impl(
-    #                 qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
-    #                 input_channels_per_group, (height, width),
-    #                 output_channels_per_group, groups, kernels, strides, pads, None,
-    #                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-    #                 Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
-    #                 input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
+                self._test_inductor_qconv_impl(
+                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                    input_channels_per_group, (height, width),
+                    output_channels_per_group, groups, kernels, strides, pads, None,
+                    dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
+                    input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add(self):
         batch_size = 3
-        groups_list = [2]
+        groups_list = [1, 10]
         input_channels_per_group = 2
         output_channels_per_group = 2
-        height = 3
-        width = 3
+        height = 10
+        width = 10
         kernel_h = 3
         kernel_w = 3
         stride_h = 2
@@ -5333,8 +5314,8 @@ class TestQuantizedConv(TestCase):
         W_zero_point = [-3]
         Y_scale = 4.2
         Y_zero_point = 0
-        use_bias_list = [False]
-        use_channelwise_list = [False]
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
         X2_scale = 1.2
         X2_zero_point_list = [0, 4]
         options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
@@ -5359,8 +5340,6 @@ class TestQuantizedConv(TestCase):
                     groups,
                 )
 
-                qconv = torch.ops.quantized.conv2d_add
-                qconv_prepack = torch.ops.quantized.conv2d_prepack
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
                 self._test_inductor_qconv_impl(
@@ -5370,124 +5349,124 @@ class TestQuantizedConv(TestCase):
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
                     Y_scale, Y_zero_point, use_bias, "add", use_channelwise, False,
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype,
-                    X2_scale=X2_scale, X2_zero_point=X2_zero_point, qconv=qconv, qconv_prepack=qconv_prepack)
+                    X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
-    # @skipIfNoONEDNN
-    # def test_inductor_qconv2d_add_relu(self):
-    #     batch_size = 3
-    #     height = 3
-    #     width = 3
-    #     groups_list = [2]
-    #     input_channels_per_group = 2
-    #     output_channels_per_group = 2
-    #     kernel_h = 3
-    #     kernel_w = 3
-    #     stride_h = 2
-    #     stride_w = 2
-    #     pad_h = 1
-    #     pad_w = 1
-    #     dilation = 1
-    #     X_scale = 1.5
-    #     X_zero_point = 2
-    #     W_scale = [1.5]
-    #     W_zero_point = [-3]
-    #     Y_scale = 4.2
-    #     Y_zero_point = 3
-    #     use_bias_list = [False]
-    #     use_channelwise_list = [False]
-    #     X2_scale = 1.2
-    #     X2_zero_point_list = [0, 4]
+    @skipIfNoONEDNN
+    def test_inductor_qconv2d_add_relu(self):
+        batch_size = 3
+        height = 10
+        width = 10
+        groups_list = [1, 10]
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        kernel_h = 3
+        kernel_w = 3
+        stride_h = 2
+        stride_w = 2
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [-3]
+        Y_scale = 4.2
+        Y_zero_point = 3
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        X2_scale = 1.2
+        X2_zero_point_list = [0, 4]
 
-    #     options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
-    #     for groups, use_bias, use_channelwise, X2_zero_point in options:
-    #         with override_quantized_engine('x86'):
-    #             input_channels = input_channels_per_group * groups
-    #             output_channels = output_channels_per_group * groups
-    #             kernels = (kernel_h, kernel_w)
-    #             strides = (stride_h, stride_w)
-    #             pads = (pad_h, pad_w)
-    #             dilations = (dilation, dilation)
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, X2_zero_point_list)
+        for groups, use_bias, use_channelwise, X2_zero_point in options:
+            with override_quantized_engine('x86'):
+                input_channels = input_channels_per_group * groups
+                output_channels = output_channels_per_group * groups
+                kernels = (kernel_h, kernel_w)
+                strides = (stride_h, stride_w)
+                pads = (pad_h, pad_w)
+                dilations = (dilation, dilation)
 
-    #             qconv_inductor = torch.ops.quantized.conv_add_relu_int8_packed_weight
-    #             qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-    #             conv_op = torch.nn.Conv2d(
-    #                 input_channels,
-    #                 output_channels,
-    #                 kernels,
-    #                 strides,
-    #                 pads,
-    #                 dilations,
-    #                 groups,
-    #             )
+                qconv_inductor = torch.ops.quantized.conv_add_relu_int8_packed_weight
+                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                conv_op = torch.nn.Conv2d(
+                    input_channels,
+                    output_channels,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
 
-    #             X_qdtype = torch.quint8
-    #             weight_dtype = torch.qint8
-    #             self._test_inductor_qconv_impl(
-    #                 qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
-    #                 input_channels_per_group, (height, width),
-    #                 output_channels_per_group, groups, kernels, strides, pads, None,
-    #                 dilations, X_scale, X_zero_point, W_scale, W_zero_point,
-    #                 Y_scale, Y_zero_point, use_bias, "add_relu", use_channelwise, False,
-    #                 input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype,
-    #                 X2_scale=X2_scale, X2_zero_point=X2_zero_point)
+                X_qdtype = torch.quint8
+                weight_dtype = torch.qint8
+                self._test_inductor_qconv_impl(
+                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                    input_channels_per_group, (height, width),
+                    output_channels_per_group, groups, kernels, strides, pads, None,
+                    dilations, X_scale, X_zero_point, W_scale, W_zero_point,
+                    Y_scale, Y_zero_point, use_bias, "add_relu", use_channelwise, False,
+                    input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype,
+                    X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
-    # @skipIfNoONEDNN
-    # def test_inductor_qconv3d(self):
-    #     batch_size = 3
-    #     input_channels_per_group = 2
-    #     D = 6
-    #     H = 6
-    #     W = 6
-    #     output_channels_per_group = 2
-    #     groups_list = [1, 3]
-    #     kernel_d = 3
-    #     kernel_h = 3
-    #     kernel_w = 3
-    #     stride_d = 2
-    #     stride_h = 2
-    #     stride_w = 2
-    #     pad_d = 1
-    #     pad_h = 1
-    #     pad_w = 1
-    #     dilation = 1
-    #     X_scale = 1.5
-    #     X_zero_point = 2
-    #     W_scale = [1.5]
-    #     W_zero_point = [0]
-    #     Y_scale = 4.2
-    #     Y_zero_point = 0
-    #     use_bias_list = [False, True]
-    #     use_channelwise_list = [False, True]
-    #     options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
-    #     for groups, use_bias, use_channelwise in options:
-    #         with override_quantized_engine('x86'):
-    #             input_channels = input_channels_per_group * groups
-    #             output_channels = output_channels_per_group * groups
-    #             kernels = (kernel_d, kernel_h, kernel_w)
-    #             strides = (stride_d, stride_h, stride_w)
-    #             pads = (pad_d, pad_h, pad_w)
-    #             dilations = (dilation, dilation, dilation)
+    @skipIfNoONEDNN
+    def test_inductor_qconv3d(self):
+        batch_size = 3
+        input_channels_per_group = 2
+        D = 6
+        H = 6
+        W = 6
+        output_channels_per_group = 2
+        groups_list = [1, 3]
+        kernel_d = 3
+        kernel_h = 3
+        kernel_w = 3
+        stride_d = 2
+        stride_h = 2
+        stride_w = 2
+        pad_d = 1
+        pad_h = 1
+        pad_w = 1
+        dilation = 1
+        X_scale = 1.5
+        X_zero_point = 2
+        W_scale = [1.5]
+        W_zero_point = [0]
+        Y_scale = 4.2
+        Y_zero_point = 0
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list)
+        for groups, use_bias, use_channelwise in options:
+            with override_quantized_engine('x86'):
+                input_channels = input_channels_per_group * groups
+                output_channels = output_channels_per_group * groups
+                kernels = (kernel_d, kernel_h, kernel_w)
+                strides = (stride_d, stride_h, stride_w)
+                pads = (pad_d, pad_h, pad_w)
+                dilations = (dilation, dilation, dilation)
 
-    #             qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
-    #             qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-    #             conv_op = torch.nn.Conv3d(
-    #                 input_channels,
-    #                 output_channels,
-    #                 kernels,
-    #                 strides,
-    #                 pads,
-    #                 dilations,
-    #                 groups,
-    #             )
-    #             X_qdtype = torch.quint8
-    #             weight_dtype = torch.qint8
-    #             self._test_inductor_qconv_impl(
-    #                 qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
-    #                 input_channels_per_group, (D, H, W), output_channels_per_group,
-    #                 groups, kernels, strides, pads, None, dilations, X_scale,
-    #                 X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
-    #                 use_bias, "none", use_channelwise, use_transpose=False,
-    #                 input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
+                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
+                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                conv_op = torch.nn.Conv3d(
+                    input_channels,
+                    output_channels,
+                    kernels,
+                    strides,
+                    pads,
+                    dilations,
+                    groups,
+                )
+                X_qdtype = torch.quint8
+                weight_dtype = torch.qint8
+                self._test_inductor_qconv_impl(
+                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                    input_channels_per_group, (D, H, W), output_channels_per_group,
+                    groups, kernels, strides, pads, None, dilations, X_scale,
+                    X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,
+                    use_bias, "none", use_channelwise, use_transpose=False,
+                    input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
     # TODO: merge this test with test_qconv2d when CUDNN runtime flags becomes available
     """Tests the correctness of quantized 2D convolution cudnn op."""
