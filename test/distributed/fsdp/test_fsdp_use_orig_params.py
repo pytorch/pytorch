@@ -486,43 +486,6 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    def _get_fsdp_models_and_optims(
-        self,
-        sharding_strategy: ShardingStrategy,
-        cpu_offload: CPUOffload,
-    ) -> Tuple[FSDP, torch.optim.Optimizer, FSDP, torch.optim.Optimizer]:
-        """
-        Returns a pair of (FSDP model, optimizer) for ``use_orig_params=False``
-        and ``True``, respectively.
-        """
-        LR = 1e-2  # larger learning rate to amplify gradient differences
-        fsdp_kwargs = {
-            "sharding_strategy": sharding_strategy,
-            "cpu_offload": cpu_offload,
-            "use_orig_params": False,
-        }
-        fsdp_model = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            fsdp_kwargs=fsdp_kwargs,
-            deterministic=True,
-            add_bn=False,
-        )
-        optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
-        fsdp_kwargs["use_orig_params"] = True
-        fsdp_model_orig_params = TransformerWithSharedParams.init(
-            self.process_group,
-            FSDPInitMode.RECURSIVE,
-            CUDAInitMode.CUDA_BEFORE,
-            fsdp_kwargs=fsdp_kwargs,
-            deterministic=True,
-        )
-        optim_orig_params = torch.optim.Adam(
-            fsdp_model_orig_params.parameters(), foreach=False, lr=LR
-        )
-        return fsdp_model, optim, fsdp_model_orig_params, optim_orig_params
-
     def _get_dist_models_and_optims(
         self,
         local_model: nn.Module,
