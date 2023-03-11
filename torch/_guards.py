@@ -332,24 +332,31 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
         assert isinstance(state, ModuleCheckpointState)
         self.names_to_sources = state.names_to_sources
 
-    def register(self, source: Source):
+    def register(self, name: str, source: Source):
         """
         Registers a source object.
+
+        :param name: A name to register under. When in doubt, the source name can be used,
+        but do note that the source name's role is to be used for eval() to get to the original
+        argument. Ex: getattr(foo, 'bar')[0].baz[0].weight is a viable source name, but unfit for
+        keying. This function will make any passed in name unique to the current state of the trace.
+        :type name: str
 
         :param source: A Source object representing the source to be registered.
         :type source: Source
 
         :raises AssertionError: If a source with the same name already exists but has a different source name.
 
-        :return: None.
+        :return: The new unique name.
         """
         from torch._dynamo.utils import unique_normalized_attr_name
 
-        name = unique_normalized_attr_name(source.name())
+        name = unique_normalized_attr_name(name)
         if name in self.names_to_sources:
             breakpoint()
             raise AssertionError("Illegal, unreachable state. ")
         self.names_to_sources[name] = source
+        return name
 
 
 _CURRENT_TRACING_CONTEXT = None
