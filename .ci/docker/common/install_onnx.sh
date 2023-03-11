@@ -9,6 +9,7 @@ pip_install beartype==0.10.4 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \
+  ninja==1.10.2 \
   networkx==2.0 \
   numpy==1.22.4 \
   onnx==1.13.1 \
