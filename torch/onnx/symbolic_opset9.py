@@ -140,6 +140,7 @@ __all__ = [
     "log1p",
     "log2",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "logsumexp",
@@ -940,7 +941,9 @@ def expand_as(g: jit_utils.GraphContext, self, other):
         for d in range(self_t.dim()):
             if torch.equal(self_t.mean(d).unsqueeze(d).expand_as(self_t), self_t):
                 dims.append(d)
-                self = g.op("Constant", value_t=self_t.mean(dims).to(orig_type))
+                self = g.op(
+                    "Constant", value_t=self_t.mean(dims, keepdim=True).to(orig_type)
+                )
 
     shape = g.op("Shape", other)
     return g.op("Expand", self, shape)
@@ -1913,12 +1916,10 @@ def _pad_circular(g: jit_utils.GraphContext, input: _C.Value, pad: _C.Value):
     for idx in range(ndim):
         pad_r = padding[-(2 * idx + 1)]
         pad_l = padding[-(2 * idx + 2)]
-        # get size for targeting the last idx, as Slice don't take start=[-1], end=[-1]
-        size = symbolic_helper._get_tensor_sizes(input)
         tensors = []
         if pad_l > 0:
             left = symbolic_helper._slice_helper(
-                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[size[2 + idx]]
+                g, cur, axes=[2 + idx], starts=[-(pad_l)], ends=[_constants.INT64_MAX]
             )
             tensors.append(left)
 
@@ -2293,6 +2294,12 @@ def logical_or(g: jit_utils.GraphContext, input, other):
 @_beartype.beartype
 def logical_xor(g: jit_utils.GraphContext, input, other):
     return g.op("Xor", input, other)
+
+
+@_onnx_symbolic("aten::logical_not")
+@_beartype.beartype
+def logical_not(g: jit_utils.GraphContext, input):
+    return g.op("Not", g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL))
 
 
 @_onnx_symbolic("aten::__rshift_")

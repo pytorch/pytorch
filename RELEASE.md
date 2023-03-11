@@ -271,7 +271,7 @@ Only following issues are accepted:
 
 > Main POC: Patch Release managers
 
-1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates)
+1. Patch Release Managers will follow the process of [Drafting RCs (Release Candidates)](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
 2. Patch Release Managers will follow the process of [Promoting RCs to Stable](#promoting-rcs-to-stable)
 
 # Hardware / Software Support in Binary Build Matrix
