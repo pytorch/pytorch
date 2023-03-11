@@ -53,17 +53,21 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   CONDA_COMMON_DEPS="astunparse pyyaml mkl=2021.4.0 mkl-include=2021.4.0 setuptools"
   if [ "$ANACONDA_PYTHON_VERSION" = "3.11" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
+    # and libpython-static for torch deploy
     # TODO: Stop using `-c malfet`
-    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 -c malfet
+    conda_install numpy=1.23.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}" -c malfet
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.10" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    # and libpython-static for torch deploy
+    conda_install numpy=1.21.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    # and libpython-static for torch deploy
+    conda_install numpy=1.19.2 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0
+    # and libpython-static for torch deploy
+    conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} llvmdev=8.0.0 "libpython-static=${ANACONDA_PYTHON_VERSION}"
   else
     # Install `typing-extensions` for 3.7
     conda_install numpy=1.18.5 ${CONDA_COMMON_DEPS} typing-extensions
@@ -93,9 +97,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     # Pinned scikit-learn due to https://github.com/scikit-learn/scikit-learn/issues/14485 (affects gcc 5.5 only)
     pip_install scikit-learn==0.20.3
   fi
-
-  # Required to test torch deploy
-  conda_install "libpython-static=${ANACONDA_PYTHON_VERSION}"
 
   popd
 fi
