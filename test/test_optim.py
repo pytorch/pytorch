@@ -4082,7 +4082,7 @@ class TestSWAUtils(TestCase):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
-    def test_averaged_model_default_avg_fn_pickable(self):
+    def test_averaged_model_default_avg_fn_picklable(self):
         dnn = torch.nn.Sequential(
             torch.nn.Conv2d(1, 5, kernel_size=3),
             torch.nn.ReLU(),
