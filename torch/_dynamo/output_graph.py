@@ -340,7 +340,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graphargs.append(arg)
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
-        self.tracing_context.module_context.register(arg.source)
+        self.tracing_context.module_context.register(arg.source.name(), arg.source)
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -505,7 +505,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
                 assert self.names_to_sources is not None
-                self.tracing_context.module_context.register(source)
+                self.tracing_context.module_context.register(name, source)
                 if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
@@ -719,6 +719,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                         assert (
                             node._original_name in self.names_to_sources
                         ), f"{node._original_name} not found"
+                        self.names_to_sources[node.name] = self.names_to_sources[
+                            node._original_name
+                        ]
                     else:
                         raise AssertionError(f"Unknown node {node.name}")
         torch._dynamo.utils.increment_op_count(tot)
