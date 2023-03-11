@@ -20,6 +20,8 @@ template_rule(
         "cmakedefine01 GLOO_USE_MPI": "define GLOO_USE_MPI 0",
         "cmakedefine01 GLOO_USE_AVX": "define GLOO_USE_AVX 0",
         "cmakedefine01 GLOO_USE_LIBUV": "define GLOO_USE_LIBUV 0",
+        # The `GLOO_HAVE_TRANSPORT_TCP_TLS` line should go above the `GLOO_HAVE_TRANSPORT_TCP` in order to properly substitute the template.
+        "cmakedefine01 GLOO_HAVE_TRANSPORT_TCP_TLS": "define GLOO_HAVE_TRANSPORT_TCP_TLS 1",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_TCP": "define GLOO_HAVE_TRANSPORT_TCP 1",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_IBVERBS": "define GLOO_HAVE_TRANSPORT_IBVERBS 0",
         "cmakedefine01 GLOO_HAVE_TRANSPORT_UV": "define GLOO_HAVE_TRANSPORT_UV 0",
@@ -35,6 +37,7 @@ cc_library(
             "gloo/rendezvous/*.h",
             "gloo/transport/*.h",
             "gloo/transport/tcp/*.h",
+            "gloo/transport/tcp/tls/*.h",
         ],
         exclude = [
             "gloo/rendezvous/redis_store.h",

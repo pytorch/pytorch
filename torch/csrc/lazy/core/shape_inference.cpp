@@ -51,6 +51,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/CompositeExplicitAutogradFunctions.h>
+#include <ATen/CompositeExplicitAutogradNonFunctionalFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
@@ -400,7 +401,7 @@ std::vector<Shape> compute_shape_std(
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<at::Scalar>& correction,
     bool keepdim) {
   if (dim.has_value()) {
     auto shape = at::native::shape_from_dim_mask(
@@ -488,7 +489,7 @@ std::vector<Shape> compute_shape_index_select(
 
   auto self_sizes = self.sizes();
   std::vector<int64_t> output_sizes(self_sizes.begin(), self_sizes.end());
-  TORCH_CHECK(output_sizes.size() > 0, "Empty output_sizes is not supported.");
+  TORCH_CHECK(!output_sizes.empty(), "Empty output_sizes is not supported.");
   output_sizes[dim] = index_size;
 
   return {Shape(self.scalar_type(), output_sizes)};
@@ -512,7 +513,7 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   for (auto& tensor : tensors) {
     extended_dim_shape += tensor.sizes()[dim];
   }
-  TORCH_CHECK(out_shape.size() > 0, "Scalar tensors are not supported in cat.");
+  TORCH_CHECK(!out_shape.empty(), "Scalar tensors are not supported in cat.");
   TORCH_CHECK(
       extended_dim_shape <= std::numeric_limits<int64_t>::max(),
       "Size overflow");
@@ -1113,7 +1114,7 @@ TORCH_API std::vector<Shape> compute_shape_clone(
 }
 
 std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
+  TORCH_CHECK(!tensors.empty(), "stack expects a non-empty TensorList");
   auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
 
   // Copied from 'check_stack_inputs' in TensorShape.cpp
@@ -1304,7 +1305,7 @@ std::vector<Shape> compute_shape_select_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::select_scatter(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::select_scatter(
       self_meta, src_meta, dim, index);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
@@ -1329,7 +1330,7 @@ std::vector<Shape> compute_shape_diagonal_scatter(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::diagonal_scatter(
+  auto out_meta = at::compositeexplicitautogradnonfunctional::diagonal_scatter(
       self_meta, src_meta, offset, dim1, dim2);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
@@ -1355,8 +1356,9 @@ std::vector<Shape> compute_shape_slice_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::slice_scatter_symint(
-      self_meta, src_meta, dim, start, end, step);
+  auto out_meta =
+      at::compositeexplicitautogradnonfunctional::slice_scatter_symint(
+          self_meta, src_meta, dim, start, end, step);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
@@ -1380,8 +1382,9 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
       /*layout=*/c10::make_optional(src.layout()),
       /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
       /*pin_memory=*/c10::nullopt);
-  auto out_meta = at::compositeexplicitautograd::as_strided_scatter_symint(
-      self_meta, src_meta, size, stride, storage_offset);
+  auto out_meta =
+      at::compositeexplicitautogradnonfunctional::as_strided_scatter_symint(
+          self_meta, src_meta, size, stride, storage_offset);
   return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 

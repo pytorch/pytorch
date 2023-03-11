@@ -5,6 +5,8 @@
 
 #include <c10/util/irange.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -54,8 +56,8 @@ void SubgraphRewriter::RegisterRewritePattern(
     const std::vector<std::pair<std::string, std::string>>& value_name_pairs) {
   std::unordered_map<std::string, std::string> value_name_map(
       value_name_pairs.begin(), value_name_pairs.end());
-  RewritePatternDescr d = {pattern, replacement, value_name_map};
-  patterns_.push_back(d);
+  RewritePatternDescr d = {pattern, replacement, std::move(value_name_map)};
+  patterns_.push_back(std::move(d));
 }
 
 Module SubgraphRewriter::runOnModule(const Module& module) {

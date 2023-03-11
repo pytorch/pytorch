@@ -2,7 +2,7 @@
  * @generated
  * This is an auto-generated file. Please do not modify it by hand.
  * To re-generate, please run:
- * cd ~/pytorch && python torch/csrc/jit/mobile/upgrader_mobile.cpp
+ * cd ~/pytorch && python torchgen/operator_versions/gen_mobile_upgraders.py
  */
 
 #include <caffe2/serialize/versions.h>
@@ -27,45 +27,65 @@ getOperatorVersionMapForMobile() {
                     std::vector<Upgrader>({
                         Upgrader({0, 3, "div_Scalar_0_3", 0})
                     })},
+                {std::string("aten::div.Scalar_mode"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 3, "div_Scalar_mode_0_3", 1})
+                    })},
                 {std::string("aten::div.Tensor"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 3, "div_Tensor_0_3", 1})
+                        Upgrader({0, 3, "div_Tensor_0_3", 2})
+                    })},
+                {std::string("aten::div.Tensor_mode"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 3, "div_Tensor_mode_0_3", 3})
                     })},
                 {std::string("aten::div.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 3, "div_out_0_3", 4})
+                        Upgrader({0, 3, "div_out_0_3", 8})
+                    })},
+                {std::string("aten::div.out_mode"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 3, "div_out_mode_0_3", 9})
                     })},
                 {std::string("aten::div_.Scalar"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 3, "div__Scalar_0_3", 2})
+                        Upgrader({0, 3, "div__Scalar_0_3", 4})
+                    })},
+                {std::string("aten::div_.Scalar_mode"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 3, "div__Scalar_mode_0_3", 5})
                     })},
                 {std::string("aten::div_.Tensor"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 3, "div__Tensor_0_3", 3})
+                        Upgrader({0, 3, "div__Tensor_0_3", 6})
+                    })},
+                {std::string("aten::div_.Tensor_mode"),
+                    std::vector<Upgrader>({
+                        Upgrader({0, 3, "div__Tensor_mode_0_3", 7})
                     })},
                 {std::string("aten::gelu"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 9, "gelu_0_9", 5})
+                        Upgrader({0, 9, "gelu_0_9", 11})
                     })},
                 {std::string("aten::gelu.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 9, "gelu_out_0_9", 6})
+                        Upgrader({0, 9, "gelu_out_0_9", 12})
                     })},
                 {std::string("aten::linspace"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 7, "linspace_0_7", 7})
+                        Upgrader({0, 7, "linspace_0_7", 13})
                     })},
                 {std::string("aten::linspace.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 7, "linspace_out_0_7", 8})
+                        Upgrader({0, 7, "linspace_out_0_7", 14})
                     })},
                 {std::string("aten::logspace"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 8, "logspace_0_8", 9})
+                        Upgrader({0, 8, "logspace_0_8", 15})
                     })},
                 {std::string("aten::logspace.out"),
                     std::vector<Upgrader>({
-                        Upgrader({0, 8, "logspace_out_0_8", 10})
+                        Upgrader({0, 8, "logspace_out_0_8", 16})
                     })},
       });
   return operatorVersionMapForMobile;
@@ -122,6 +142,25 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                    }),
                    ByteCodeFunctionWithOperator({
                            mobile::Function::registerFunc(
+                               "div_Scalar_mode_0_3",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 3},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               3
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::div", "Scalar_mode", 3}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
                                "div_Tensor_0_3",
                                std::vector<Instruction>({
                                            Instruction{OpCode::STOREN, 1, 2},
@@ -159,6 +198,25 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                            std::vector<OperatorString>({
                                    OperatorString({"aten::is_floating_point", "", 1}),
                                    OperatorString({"aten::div", "Tensor", 2}),
+                                   OperatorString({"aten::div", "Tensor_mode", 3}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "div_Tensor_mode_0_3",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 3},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               3
+                           ),
+                           std::vector<OperatorString>({
                                    OperatorString({"aten::div", "Tensor_mode", 3}),
                            }), // operators list
                    }),
@@ -210,6 +268,25 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                    }),
                    ByteCodeFunctionWithOperator({
                            mobile::Function::registerFunc(
+                               "div__Scalar_mode_0_3",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 3},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               3
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::div_", "Scalar_mode", 3}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
                                "div__Tensor_0_3",
                                std::vector<Instruction>({
                                            Instruction{OpCode::STOREN, 1, 2},
@@ -247,6 +324,25 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                            std::vector<OperatorString>({
                                    OperatorString({"aten::is_floating_point", "", 1}),
                                    OperatorString({"aten::div_", "Tensor", 2}),
+                                   OperatorString({"aten::div_", "Tensor_mode", 3}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "div__Tensor_mode_0_3",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 3},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               3
+                           ),
+                           std::vector<OperatorString>({
                                    OperatorString({"aten::div_", "Tensor_mode", 3}),
                            }), // operators list
                    }),
@@ -298,6 +394,49 @@ const std::vector<ByteCodeFunctionWithOperator>& getUpgraderBytecodeList() {
                                    OperatorString({"aten::is_floating_point", "", 1}),
                                    OperatorString({"aten::div", "out", 3}),
                                    OperatorString({"aten::div", "out_mode", 4}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "div_out_mode_0_3",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 4},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::MOVE, 4, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               4
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::div", "out_mode", 4}),
+                           }), // operators list
+                   }),
+                   ByteCodeFunctionWithOperator({
+                           mobile::Function::registerFunc(
+                               "full_names_0_4",
+                               std::vector<Instruction>({
+                                           Instruction{OpCode::STOREN, 1, 7},
+                                           Instruction{OpCode::MOVE, 1, 0},
+                                           Instruction{OpCode::MOVE, 2, 0},
+                                           Instruction{OpCode::MOVE, 3, 0},
+                                           Instruction{OpCode::MOVE, 4, 0},
+                                           Instruction{OpCode::MOVE, 5, 0},
+                                           Instruction{OpCode::MOVE, 6, 0},
+                                           Instruction{OpCode::MOVE, 7, 0},
+                                           Instruction{OpCode::OP, 0, 0},
+                                           Instruction{OpCode::RET, 0, 0},
+                                   }), // instructions list,
+                               std::vector<c10::IValue>(), // constants list,
+                               std::vector<c10::TypePtr>(), // types list,
+                               7
+                           ),
+                           std::vector<OperatorString>({
+                                   OperatorString({"aten::full", "names", 7}),
                            }), // operators list
                    }),
                    ByteCodeFunctionWithOperator({

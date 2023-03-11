@@ -120,7 +120,9 @@ Padding Layers
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
+    nn.ZeroPad1d
     nn.ZeroPad2d
+    nn.ZeroPad3d
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
@@ -442,6 +444,8 @@ Utility functions in other modules
     nn.utils.rnn.pad_packed_sequence
     nn.utils.rnn.pad_sequence
     nn.utils.rnn.pack_sequence
+    nn.utils.rnn.unpack_sequence
+    nn.utils.rnn.unpad_sequence
 
 .. autosummary::
     :toctree: generated

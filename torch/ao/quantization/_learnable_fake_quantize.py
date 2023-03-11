@@ -30,7 +30,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
     """
     def __init__(self, observer, quant_min=0, quant_max=255, scale=1., zero_point=0., channel_len=-1,
                  use_grad_scaling=False, **observer_kwargs):
-        super(_LearnableFakeQuantize, self).__init__()
+        super().__init__()
         assert quant_min < quant_max, 'quant_min must be strictly less than quant_max.'
         self.quant_min = quant_min
         self.quant_max = quant_max
@@ -75,7 +75,7 @@ class _LearnableFakeQuantize(torch.ao.quantization.FakeQuantizeBase):
 
     @torch.jit.export
     def enable_static_estimate(self):
-        r"""Enables static observer estimates and disbales learning of
+        r"""Enables static observer estimates and disables learning of
         quantization parameters. Forward path returns fake quantized X.
         """
         self.toggle_qparam_learning(enabled=False) \

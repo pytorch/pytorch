@@ -72,6 +72,8 @@ jobs:
           QEMU_BINARY_PATH: ${{ runner.temp }}/bin
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
+        with:
+          version: v0.10.0
       - name: Setup job specific variables
         run: |
           set -eou pipefail
@@ -85,7 +87,7 @@ jobs:
           {
             echo "DOCKER_IMAGE=pytorch-nightly";
             echo "INSTALL_CHANNEL=pytorch-nightly";
-            echo "TRITON_VERSION=2.0.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)";
+            echo "TRITON_VERSION=2.1.0+$(cut -c -10 .github/ci_commit_pins/triton.txt)";
           } >> "${GITHUB_ENV}"
       - name: Run docker build / push
         # WITH_PUSH is used here to determine whether or not to add the --push flag

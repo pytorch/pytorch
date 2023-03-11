@@ -250,17 +250,17 @@ def prepareInputTensorsToRandomTopoTest(seed,
 def reproString(current_seed, args):
     repro_str = "python {0}".format(__file__)
     if args.cuda_fuser:
-        repro_str += " --cuda_fuser"
+        repro_str += " --cuda-fuser"
     if args.legacy_fuser:
-        repro_str += " --legacy_fuser"
+        repro_str += " --legacy-fuser"
     if args.profiling_executor:
-        repro_str += " --profiling_executor"
+        repro_str += " --profiling-executor"
     if args.fp16:
         repro_str += " --fp16"
     if args.cpu:
         repro_str += " --cpu"
-    repro_str += " --max_num_tensor {0} --max_tensor_dim {1} --max_tensor_size {2}"\
-        " --depth_factor {3} --seed {4} --repro_run".format(
+    repro_str += " --max-num-tensor {0} --max-tensor-dim {1} --max-tensor-size {2}"\
+        " --depth-factor {3} --seed {4} --repro-run".format(
             args.max_num_tensor, args.max_tensor_dim, args.max_tensor_size,
             args.depth_factor, current_seed)
     return repro_str
@@ -337,21 +337,21 @@ def runTest(seed, args):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--cuda_fuser", action='store_true', default=True)
-    parser.add_argument("--legacy_fuser", action='store_true', default=False)
-    parser.add_argument("--profiling_executor", action='store_true', default=False)
+    parser.add_argument("--cuda-fuser", "--cuda_fuser", action='store_true', default=True)
+    parser.add_argument("--legacy-fuser", "--legacy_fuser", action='store_true', default=False)
+    parser.add_argument("--profiling-executor", "--profiling_executor", action='store_true', default=False)
     parser.add_argument("--fp16", action='store_true', default=False)
     parser.add_argument("--cpu", action='store_true', default=False)
-    parser.add_argument("--debug_print", action='store_true', default=False)
-    parser.add_argument("--debug_tensor", action='store_true', default=False)
-    parser.add_argument("--max_num_tensor", default=MAX_TENSOR, type=int)
-    parser.add_argument("--max_tensor_dim", default=MAX_TENSOR_DIM, type=int)
-    parser.add_argument("--max_tensor_size", default=MAX_TENSOR_SIZE, type=int)
-    parser.add_argument("--depth_factor", default=GRAPH_FACTOR, type=int)
+    parser.add_argument("--debug-print", "--debug_print", action='store_true', default=False)
+    parser.add_argument("--debug-tensor", "--debug_tensor", action='store_true', default=False)
+    parser.add_argument("--max-num-tensor", "--max_num_tensor", default=MAX_TENSOR, type=int)
+    parser.add_argument("--max-tensor-dim", "--max_tensor_dim", default=MAX_TENSOR_DIM, type=int)
+    parser.add_argument("--max-tensor-size", "--max_tensor_size", default=MAX_TENSOR_SIZE, type=int)
+    parser.add_argument("--depth-factor", "--depth-factor", default=GRAPH_FACTOR, type=int)
     parser.add_argument("--seed", default=45589, type=int)
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--iterations", default=4, type=int)
-    group.add_argument("--repro_run", action='store_true', default=False)
+    group.add_argument("--repro-run", "--repro_run", action='store_true', default=False)
     return parser.parse_args()
 
 

@@ -151,7 +151,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 
     e2_nat_constraints = []
     for arg in n.args[1:]:
-        assert isinstance(arg, Node) or isinstance(arg, int)
+        assert isinstance(arg, (Node, int))
         if isinstance(arg, Node):
             assert isinstance(symbols[arg], DVar)
             e2_nat_constraints.append(BinConstraintD(0, symbols[arg], op_leq))

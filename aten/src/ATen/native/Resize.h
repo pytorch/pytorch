@@ -7,6 +7,8 @@
 
 #include <c10/core/CPUAllocator.h>
 
+#include <utility>
+
 
 namespace at { namespace native {
 
@@ -76,7 +78,7 @@ static inline void checkInBoundsForStorage(
     ArrayRef<T> size,
     ArrayRef<T> stride,
     T storage_offset,
-    const caffe2::TypeMeta data_type,
+    const caffe2::TypeMeta& data_type,
     const Storage& new_storage) {
   T storage_size_bytes =
       at::detail::computeStorageNbytes(size, stride, data_type.itemsize());
@@ -130,7 +132,7 @@ static inline void checkSetStorage(Tensor& result, Storage storage, T storage_of
                 "Attempted to set the storage of a tensor on device \"", result.storage().device(),
                 "\" to a storage on different device \"", storage.device(),
                 "\".  This is no longer allowed; the devices must match.");
-    result.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
+    result.unsafeGetTensorImpl()->set_storage_keep_dtype(std::move(storage));
   }
 
   // storageOffset
@@ -148,7 +150,7 @@ inline void setStrided(
     ArrayRef<T> stride,
     T storage_offset) {
   TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
-  for (auto val : stride) {
+  for (const auto& val : stride) {
     TORCH_CHECK(val >= 0,
                 "as_strided: Negative strides are not supported at the moment, "
                 "got strides: ", stride);

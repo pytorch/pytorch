@@ -40,7 +40,6 @@
 #include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <torch/csrc/Exceptions.h>
-#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -1186,15 +1185,10 @@ Arguments:
           .def_property_readonly("options", &::c10d::ProcessGroup::getOptions)
           .def(
               "broadcast",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 const ::c10d::BroadcastOptions& opts) {
-                return ::c10d::ops::broadcast(self, tensors, opts);
-              },
+              &::c10d::ProcessGroup::broadcast,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1202,23 +1196,18 @@ Arguments:
                  int rootRank) {
                 ::c10d::BroadcastOptions opts;
                 opts.rootRank = rootRank;
-                return ::c10d::ops::broadcast(self, {x}, opts);
+                std::vector<at::Tensor> tensors = {x};
+                return self->broadcast(tensors, opts);
               },
               py::arg("tensor"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "allreduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 const ::c10d::AllreduceOptions& opts) {
-                return ::c10d::ops::allreduce(self, tensors, opts);
-              },
+              &::c10d::ProcessGroup::allreduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1226,7 +1215,7 @@ Arguments:
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                return ::c10d::ops::allreduce(self, xs, opts);
+                return self->allreduce(xs, opts);
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1240,30 +1229,21 @@ Arguments:
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                return ::c10d::ops::allreduce(self, xs, opts);
+                return self->allreduce(xs, opts);
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "allreduce_coalesced",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& xs,
-                 ::c10d::AllreduceCoalescedOptions opts) {
-                return ::c10d::ops::allreduce_coalesced(self, xs, opts);
-              },
+              &::c10d::ProcessGroup::allreduce_coalesced,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "reduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 const ::c10d::ReduceOptions& opts) {
-                return ::c10d::ops::reduce(self, tensors, opts);
-              },
+              &::c10d::ProcessGroup::reduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::ReduceOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -1278,41 +1258,19 @@ Arguments:
                 opts.reduceOp = op;
                 opts.rootRank = rootRank;
                 std::vector<at::Tensor> xs = {x};
-                return ::c10d::ops::reduce(self, xs, opts);
+                return self->reduce(xs, opts);
               },
               py::arg("tensor"),
               py::arg("root"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "allgather",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<std::vector<at::Tensor>>& output_tensors,
-                 const std::vector<at::Tensor>& input_tensor,
-                 const ::c10d::AllgatherOptions& opts) {
-                return ::c10d::ops::allgather(
-                    self, output_tensors, input_tensor, opts);
-              },
+              &::c10d::ProcessGroup::allgather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "_allgather_base",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 at::Tensor& output_tensor,
-                 at::Tensor& input_tensor,
-                 const ::c10d::AllgatherOptions& opts) {
-                return ::c10d::ops::_allgather_base(
-                    self, output_tensor, input_tensor, opts);
-              },
-              py::arg("output"),
-              py::arg("input"),
-              py::arg("opts") = ::c10d::AllgatherOptions(),
-              py::call_guard<py::gil_scoped_release>())
-
           .def(
               "allgather",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1320,36 +1278,29 @@ Arguments:
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return ::c10d::ops::allgather(
-                    self, outputs, inputs, ::c10d::AllgatherOptions());
+                return self->allgather(
+                    outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
               py::call_guard<py::gil_scoped_release>())
-
+          .def(
+              "_allgather_base",
+              &::c10d::ProcessGroup::_allgather_base,
+              py::arg("output"),
+              py::arg("input"),
+              py::arg("opts") = ::c10d::AllgatherOptions(),
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather_coalesced",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<std::vector<at::Tensor>>& output_lists,
-                 const std::vector<at::Tensor>& input_list,
-                 const ::c10d::AllgatherOptions& opts) {
-                return ::c10d::ops::allgather_coalesced(
-                    self, output_lists, input_list, opts);
-              },
+              &::c10d::ProcessGroup::allgather_coalesced,
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "gather",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<std::vector<at::Tensor>>& output_tensors,
-                 const std::vector<at::Tensor>& input_tensors,
-                 const ::c10d::GatherOptions& opts) {
-                return ::c10d::ops::gather(
-                    self, output_tensors, input_tensors, opts);
-              },
+              &::c10d::ProcessGroup::gather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -1365,27 +1316,19 @@ Arguments:
                 opts.rootRank = rootRank;
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return ::c10d::ops::gather(self, outputs, inputs, opts);
+                return self->gather(outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "scatter",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& output_tensors,
-                 const std::vector<std::vector<at::Tensor>>& input_tensors,
-                 const ::c10d::ScatterOptions& opts) {
-                return ::c10d::ops::scatter(
-                    self, output_tensors, input_tensors, opts);
-              },
+              &::c10d::ProcessGroup::scatter,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1396,27 +1339,19 @@ Arguments:
                 opts.rootRank = rootRank;
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 std::vector<at::Tensor> outputs = {output};
-                return ::c10d::ops::scatter(self, outputs, inputs, opts);
+                return self->scatter(outputs, inputs, opts);
               },
               py::arg("output_tensor"),
               py::arg("input_tensors"),
               py::arg("root"),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "reduce_scatter",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 std::vector<at::Tensor>& output_tensors,
-                 const std::vector<std::vector<at::Tensor>>& input_tensors,
-                 const ::c10d::ReduceScatterOptions& opts) {
-                return ::c10d::ops::reduce_scatter(
-                    self, output_tensors, input_tensors, opts);
-              },
+              &::c10d::ProcessGroup::reduce_scatter,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "reduce_scatter",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
@@ -1427,43 +1362,22 @@ Arguments:
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
-                return ::c10d::ops::reduce_scatter(self, outputs, inputs, opts);
+                return self->reduce_scatter(outputs, inputs, opts);
               },
               py::arg("output"),
               py::arg("input"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "_reduce_scatter_base",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 at::Tensor& output_tensor,
-                 at::Tensor& input_tensor,
-                 const ::c10d::ReduceScatterOptions& opts) {
-                return ::c10d::ops::_reduce_scatter_base(
-                    self, output_tensor, input_tensor, opts);
-              },
+              &::c10d::ProcessGroup::_reduce_scatter_base,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "alltoall_base",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 at::Tensor& output,
-                 at::Tensor& input,
-                 std::vector<int64_t> outputSplitSizes,
-                 std::vector<int64_t> inputSplitSizes,
-                 const ::c10d::AllToAllOptions& opts) {
-                return ::c10d::ops::alltoall_base(
-                    self,
-                    output,
-                    input,
-                    outputSplitSizes,
-                    inputSplitSizes,
-                    opts);
-              },
+              &::c10d::ProcessGroup::alltoall_base,
               py::arg("output"),
               py::arg("input"),
               py::arg("output_split_sizes"),
@@ -1472,74 +1386,32 @@ Arguments:
               py::call_guard<py::gil_scoped_release>())
           .def(
               "alltoall",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& output_tensors,
-                 const std::vector<at::Tensor>& input_tensors,
-                 const ::c10d::AllToAllOptions& opts) {
-                return ::c10d::ops::alltoall(
-                    self, output_tensors, input_tensors, opts);
-              },
+              &::c10d::ProcessGroup::alltoall,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
               py::call_guard<py::gil_scoped_release>())
-
-          .def(
-              "alltoall",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& output_tensors,
-                 const std::vector<at::Tensor>& input_tensors) {
-                return ::c10d::ops::alltoall(
-                    self,
-                    output_tensors,
-                    input_tensors,
-                    ::c10d::AllToAllOptions());
-              },
-              py::arg("output_tensors"),
-              py::arg("input_tensors"),
-              py::call_guard<py::gil_scoped_release>())
-
           .def(
               "send",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 int64_t dstRank,
-                 int64_t tag) {
-                return ::c10d::ops::send(self, tensors, dstRank, tag);
-              },
+              &::c10d::ProcessGroup::send,
               py::arg("tensors"),
               py::arg("dstRank"),
               py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "recv",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 int64_t srcRank,
-                 int64_t tag) {
-                return ::c10d::ops::recv(self, tensors, srcRank, tag);
-              },
+              &::c10d::ProcessGroup::recv,
               py::arg("tensors"),
               py::arg("srcRank"),
               py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "recv_anysource",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const std::vector<at::Tensor>& tensors,
-                 int64_t tag) {
-                return ::c10d::ops::recv_any_source(self, tensors, tag);
-              },
+              &::c10d::ProcessGroup::recvAnysource,
               py::call_guard<py::gil_scoped_release>())
-
           .def(
               "barrier",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 const ::c10d::BarrierOptions& opts) {
-                return ::c10d::ops::barrier(self, opts);
-              },
+              &::c10d::ProcessGroup::barrier,
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
@@ -1557,7 +1429,7 @@ Arguments:
                  bool waitAllRanks) {
                 ::c10d::BarrierOptions opts;
                 opts.timeout = timeout;
-                return ::c10d::ops::monitored_barrier(self, opts, waitAllRanks);
+                return self->monitoredBarrier(opts, waitAllRanks);
               },
               py::arg("timeout") = ::c10d::kUnsetTimeout,
               py::arg("wait_all_ranks") = false,
@@ -1622,7 +1494,7 @@ Arguments:
           processGroup,
           "Options",
           R"(
-Base class for all processs group options implementations, such as the nccl
+Base class for all processes group options implementations, such as the nccl
 options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
 )")
           .def(
@@ -1642,7 +1514,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
       "_round_robin_process_groups",
       [](std::vector<c10::intrusive_ptr<::c10d::ProcessGroup>> processGroups)
           -> c10::intrusive_ptr<::c10d::ProcessGroup> {
-        if (processGroups.size() == 0) {
+        if (processGroups.empty()) {
           throw std::invalid_argument("Specify at least 1 process group");
         }
         const auto& first = processGroups.front();
@@ -2072,6 +1944,14 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = kProcessGroupDefaultTimeout,
               py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_abort",
+              [](const c10::intrusive_ptr<::c10d::ProcessGroupNCCL>& self,
+                 const c10::optional<std::string>& abortReason) {
+                return self->abort(abortReason);
+              },
+              py::arg("abort_reason") = py::none(),
+              py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
           .def_property_readonly(
@@ -2224,7 +2104,7 @@ Example::
                 ``fut.then()`` will return another ``CUDAFuture`` that holds the return value of the
                 callback and a ``CUDAEvent`` that recorded the callback stream.
 
-                    1. For CPU work, ``fut.done()`` returns true when work has been complted and value()
+                    1. For CPU work, ``fut.done()`` returns true when work has been completed and value()
                        tensors are ready.
                     2. For GPU work, ``fut.done()`` returns true only whether the operation has been enqueued.
                     3. For mixed CPU-GPU work (e.g. sending GPU tensors with GLOO), ``fut.done()`` returns

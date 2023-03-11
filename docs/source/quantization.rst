@@ -3,8 +3,8 @@
 Quantization
 ============
 
-.. automodule:: torch.quantization
-.. automodule:: torch.quantization.fx
+.. automodule:: torch.ao.quantization
+.. automodule:: torch.ao.quantization.fx
 
 .. warning ::
      Quantization is in beta and subject to change.
@@ -185,7 +185,7 @@ PTDQ API Example::
   # create a model instance
   model_fp32 = M()
   # create a quantized model instance
-  model_int8 = torch.quantization.quantize_dynamic(
+  model_int8 = torch.ao.quantization.quantize_dynamic(
       model_fp32,  # the original model
       {torch.nn.Linear},  # a set of layers to dynamically quantize
       dtype=torch.qint8)  # the target dtype for quantized weights
@@ -232,11 +232,11 @@ PTSQ API Example::
       def __init__(self):
           super().__init__()
           # QuantStub converts tensors from floating point to quantized
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
           self.relu = torch.nn.ReLU()
           # DeQuantStub converts tensors from quantized to floating point
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           # manually specify where tensors will be converted from floating
@@ -258,21 +258,21 @@ PTSQ API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'x86' for server inference and 'qnnpack'
   # for mobile inference. Other quantization configurations such as selecting
-  # symmetric or assymetric quantization and MinMax or L2Norm calibration techniques
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
   # can be specified here.
   # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
   # for server inference.
-  # model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-  model_fp32.qconfig = torch.quantization.get_default_qconfig('x86')
+  # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+  model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('x86')
 
   # Fuse the activations to preceding layers, where applicable.
   # This needs to be done manually depending on the model architecture.
   # Common fusions include `conv + relu` and `conv + batchnorm + relu`
-  model_fp32_fused = torch.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
+  model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32, [['conv', 'relu']])
 
   # Prepare the model for static quantization. This inserts observers in
   # the model that will observe activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare(model_fp32_fused)
+  model_fp32_prepared = torch.ao.quantization.prepare(model_fp32_fused)
 
   # calibrate the prepared model to determine quantization parameters for activations
   # in a real world setting, the calibration would be done with a representative dataset
@@ -283,7 +283,7 @@ PTSQ API Example::
   # quantizes the weights, computes and stores the scale and bias value to be
   # used with each activation tensor, and replaces key operators with quantized
   # implementations.
-  model_int8 = torch.quantization.convert(model_fp32_prepared)
+  model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
   # run the model, relevant calculations will happen in int8
   res = model_int8(input_fp32)
@@ -333,12 +333,12 @@ QAT API Example::
       def __init__(self):
           super().__init__()
           # QuantStub converts tensors from floating point to quantized
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
           self.bn = torch.nn.BatchNorm2d(1)
           self.relu = torch.nn.ReLU()
           # DeQuantStub converts tensors from quantized to floating point
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           x = self.quant(x)
@@ -357,22 +357,22 @@ QAT API Example::
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'x86' for server inference and 'qnnpack'
   # for mobile inference. Other quantization configurations such as selecting
-  # symmetric or assymetric quantization and MinMax or L2Norm calibration techniques
+  # symmetric or asymmetric quantization and MinMax or L2Norm calibration techniques
   # can be specified here.
   # Note: the old 'fbgemm' is still available but 'x86' is the recommended default
   # for server inference.
-  # model_fp32.qconfig = torch.quantization.get_default_qconfig('fbgemm')
-  model_fp32.qconfig = torch.quantization.get_default_qat_qconfig('x86')
+  # model_fp32.qconfig = torch.ao.quantization.get_default_qconfig('fbgemm')
+  model_fp32.qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
 
   # fuse the activations to preceding layers, where applicable
   # this needs to be done manually depending on the model architecture
-  model_fp32_fused = torch.quantization.fuse_modules(model_fp32,
+  model_fp32_fused = torch.ao.quantization.fuse_modules(model_fp32,
       [['conv', 'bn', 'relu']])
 
   # Prepare the model for QAT. This inserts observers and fake_quants in
   # the model needs to be set to train for QAT logic to work
   # the model that will observe weight and activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused.train())
+  model_fp32_prepared = torch.ao.quantization.prepare_qat(model_fp32_fused.train())
 
   # run the training loop (not shown)
   training_loop(model_fp32_prepared)
@@ -382,7 +382,7 @@ QAT API Example::
   # used with each activation tensor, fuses modules where appropriate,
   # and replaces key operators with quantized implementations.
   model_fp32_prepared.eval()
-  model_int8 = torch.quantization.convert(model_fp32_prepared)
+  model_int8 = torch.ao.quantization.convert(model_fp32_prepared)
 
   # run the model, relevant calculations will happen in int8
   res = model_int8(input_fp32)
@@ -438,7 +438,7 @@ FXPTQ API Example::
     get_default_qat_qconfig_mapping,
     QConfigMapping,
   )
-  import torch.quantization.quantize_fx as quantize_fx
+  import torch.ao.quantization.quantize_fx as quantize_fx
   import copy
 
   model_fp = UserModel()
@@ -450,7 +450,7 @@ FXPTQ API Example::
   # we need to deepcopy if we still want to keep model_fp unchanged after quantization since quantization apis change the input model
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
-  qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_dynamic_qconfig)
   # a tuple of one or more example inputs are needed to trace the model
   example_inputs = (input_fp32)
   # prepare
@@ -772,18 +772,18 @@ Default settings for x86::
 
     # set the qconfig for PTQ
     # Note: the old 'fbgemm' is still available but 'x86' is the recommended default on x86 CPUs
-    qconfig = torch.quantization.get_default_qconfig('x86')
+    qconfig = torch.ao.quantization.get_default_qconfig('x86')
     # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('x86')
+    qconfig = torch.ao.quantization.get_default_qat_qconfig('x86')
     # set the qengine to control weight packing
     torch.backends.quantized.engine = 'x86'
 
 Default settings for qnnpack::
 
     # set the qconfig for PTQ
-    qconfig = torch.quantization.get_default_qconfig('qnnpack')
+    qconfig = torch.ao.quantization.get_default_qconfig('qnnpack')
     # or, set the qconfig for QAT
-    qconfig = torch.quantization.get_default_qat_qconfig('qnnpack')
+    qconfig = torch.ao.quantization.get_default_qat_qconfig('qnnpack')
     # set the qengine to control weight packing
     torch.backends.quantized.engine = 'qnnpack'
 
@@ -907,7 +907,7 @@ be done at a future time.
 Custom API Example::
 
   import torch
-  import torch.nn.quantized as nnq
+  import torch.ao.nn.quantized as nnq
   from torch.ao.quantization import QConfigMapping
   import torch.ao.quantization.quantize_fx
 
@@ -1039,14 +1039,14 @@ If you see an error similar to::
   RuntimeError: Could not run 'quantized::some_operator' with arguments from the 'CPU' backend...
 
 This means that you are trying to pass a non-quantized Tensor to a quantized
-kernel. A common workaround is to use ``torch.quantization.QuantStub`` to
+kernel. A common workaround is to use ``torch.ao.quantization.QuantStub`` to
 quantize the tensor.  This needs to be done manually in Eager mode quantization.
 An e2e example::
 
   class M(torch.nn.Module):
       def __init__(self):
           super().__init__()
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
 
       def forward(self, x):
@@ -1064,18 +1064,18 @@ If you see an error similar to::
   RuntimeError: Could not run 'aten::thnn_conv2d_forward' with arguments from the 'QuantizedCPU' backend.
 
 This means that you are trying to pass a quantized Tensor to a non-quantized
-kernel. A common workaround is to use ``torch.quantization.DeQuantStub`` to
+kernel. A common workaround is to use ``torch.ao.quantization.DeQuantStub`` to
 dequantize the tensor.  This needs to be done manually in Eager mode quantization.
 An e2e example::
 
   class M(torch.nn.Module):
       def __init__(self):
           super().__init__()
-          self.quant = torch.quantization.QuantStub()
+          self.quant = torch.ao.quantization.QuantStub()
           self.conv1 = torch.nn.Conv2d(1, 1, 1)
           # this module will not be quantized (see `qconfig = None` logic below)
           self.conv2 = torch.nn.Conv2d(1, 1, 1)
-          self.dequant = torch.quantization.DeQuantStub()
+          self.dequant = torch.ao.quantization.DeQuantStub()
 
       def forward(self, x):
           # during the convert step, this will be replaced with a
@@ -1166,26 +1166,14 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.nn.quantizable
 .. py:module:: torch.ao.nn.quantizable.modules
 .. py:module:: torch.ao.nn.quantized
+.. py:module:: torch.ao.nn.quantized.reference
+.. py:module:: torch.ao.nn.quantized.reference.modules
 .. py:module:: torch.ao.nn.sparse
 .. py:module:: torch.ao.nn.sparse.quantized
 .. py:module:: torch.ao.nn.sparse.quantized.dynamic
 .. py:module:: torch.ao.ns
 .. py:module:: torch.ao.ns.fx
-.. py:module:: torch.ao.quantization
-.. py:module:: torch.ao.quantization.fx
 .. py:module:: torch.ao.quantization.backend_config
 .. py:module:: torch.ao.pruning
 .. py:module:: torch.ao.pruning.scheduler
 .. py:module:: torch.ao.pruning.sparsifier
-
-.. py:module:: torch.nn.qat
-.. py:module:: torch.nn.qat.modules
-.. py:module:: torch.nn.qat.dynamic
-.. py:module:: torch.nn.qat.dynamic.modules
-.. py:module:: torch.nn.quantized
-.. py:module:: torch.nn.quantized.modules
-.. py:module:: torch.nn.quantized.dynamic
-.. py:module:: torch.nn.quantized.dynamic.modules
-
-.. py:module:: torch.ao.nn.quantized.reference
-.. py:module:: torch.ao.nn.quantized.reference.modules

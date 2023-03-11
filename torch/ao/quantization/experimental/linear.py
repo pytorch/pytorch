@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 
-from torch.nn.quantized.modules.utils import WeightedQuantizedModule
+from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import quantize_APoT
 

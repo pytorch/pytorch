@@ -1,13 +1,13 @@
 import collections
 import dataclasses
 import enum
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from torch._guards import GuardSource, Source
 
 from . import utils
-from .bytecode_transformation import create_instruction
-from .utils import rename_implicit
+from .bytecode_transformation import create_call_function, create_instruction
+from .utils import enum_repr, rename_implicit
 
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
@@ -60,6 +60,11 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass
+class LocalInputSource(LocalSource):
+    pos: int
+
+
+@dataclasses.dataclass
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -82,7 +87,7 @@ class GlobalSource(Source):
     global_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.global_name, add=True)]
+        return [codegen.create_load_global(self.global_name, False, add=True)]
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -97,9 +102,8 @@ class GlobalWeakRefSource(Source):
 
     def reconstruct(self, codegen):
         return [
-            codegen.create_load_global(self.global_name, add=True),
-            create_instruction("CALL_FUNCTION", 0),
-        ]
+            codegen.create_load_global(self.global_name, True, add=True),
+        ] + create_call_function(0, False)
 
     def guard_source(self):
         return GuardSource.GLOBAL
@@ -115,6 +119,7 @@ class AttrSource(Source):
 
     def __init__(self, base, member):
         super().__init__()
+        assert base, "Can't construct an AttrSource without a valid base source"
         if "." in member:
             member_parts = member.split(".")
             self.base = AttrSource(base, ".".join(member_parts[:-1]))
@@ -122,6 +127,7 @@ class AttrSource(Source):
         else:
             self.base = base
             self.member = member
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return self.base.reconstruct(codegen) + codegen.create_load_attrs(self.member)
@@ -130,7 +136,7 @@ class AttrSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        if self.member.isnumeric():
+        if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
 
@@ -176,6 +182,9 @@ class TensorPropertySource(Source):
 class NegateSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
@@ -188,9 +197,54 @@ class NegateSource(Source):
 
 
 @dataclasses.dataclass
+class DefaultsSource(Source):
+    base: Source
+    idx_key: Union[int, str]
+    is_kw: bool
+    field: str
+
+    def __init__(self, base, idx_key, is_kw=False):
+        super().__init__()
+        assert (
+            base
+        ), "Base must be a valid source in order to properly track and guard this Defaults to its origin."
+        self.base = base
+        self.idx_key = idx_key
+        self.is_kw = is_kw
+        if self.is_kw:
+            assert isinstance(idx_key, str)
+            self.field = "__kwdefaults__"
+            self._name = f"{self.base.name()}.{self.field}['{self.idx_key}']"
+        else:
+            assert isinstance(idx_key, int)
+            self.field = "__defaults__"
+            self._name = f"{self.base.name()}.{self.field}[{self.idx_key}]"
+
+    def reconstruct(self, codegen):
+        instrs = self.base.reconstruct(codegen)
+        instrs.extend(codegen.create_load_attrs(self.field))
+        instrs.extend(
+            [
+                codegen.create_load_const(self.idx_key),
+                create_instruction("BINARY_SUBSCR"),
+            ]
+        )
+        return instrs
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self._name
+
+
+@dataclasses.dataclass
 class GetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         instrs = self.base.reconstruct(codegen)
@@ -210,17 +264,23 @@ class GetItemSource(Source):
         if isinstance(self.index, Source):
             return f"{self.base.name()}[{self.index.name()}]"
         else:
-            return f"{self.base.name()}[{self.index!r}]"
+            if isinstance(self.index, enum.Enum):
+                return f"{self.base.name()}[{enum_repr(self.index)}]"
+            else:
+                return f"{self.base.name()}[{self.index!r}]"
 
 
 @dataclasses.dataclass
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen):
         codegen.load_import_from(utils.__name__, "tuple_iterator_getitem")
-        return self.base.reconstruct(codegen) + [
-            codegen.create_load_const(self.index),
-            create_instruction("CALL_FUNCTION", 2),
-        ]
+        return (
+            self.base.reconstruct(codegen)
+            + [
+                codegen.create_load_const(self.index),
+            ]
+            + create_call_function(2, True)
+        )
 
     def name(self):
         return f"___tuple_iterator_getitem({self.base.name()}, {self.index!r})"
@@ -230,9 +290,12 @@ class TupleIteratorGetItemSource(GetItemSource):
 class TypeSource(Source):
     base: Source
 
+    def __post_init__(self):
+        assert self.base is not None
+
     def reconstruct(self, codegen):
         codegen.load_import_from("builtins", "type")
-        return self.base.reconstruct(codegen) + [create_instruction("CALL_FUNCTION", 1)]
+        return self.base.reconstruct(codegen) + create_call_function(1, True)
 
     def guard_source(self):
         return self.base.guard_source()
@@ -242,9 +305,36 @@ class TypeSource(Source):
 
 
 @dataclasses.dataclass
+class SuperSource(Source):
+    type: Source
+    obj: Source
+
+    def __post_init__(self):
+        assert self.type is not None
+        assert self.obj is not None
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "super")
+        return (
+            self.type.reconstruct(codegen)
+            + self.obj.reconstruct(codegen)
+            + create_call_function(2, True)
+        )
+
+    def guard_source(self):
+        return self.obj.guard_source()
+
+    def name(self):
+        return f"super({self.type.name()}, {self.obj.name()})"
+
+
+@dataclasses.dataclass
 class ODictGetItemSource(Source):
     base: Source
     index: Any
+
+    def __post_init__(self):
+        assert self.base is not None
 
     def reconstruct(self, codegen):
         return (
@@ -252,8 +342,8 @@ class ODictGetItemSource(Source):
             + self.base.reconstruct(codegen)
             + [
                 codegen.create_load_const(self.index),
-                create_instruction("CALL_FUNCTION", 2),
             ]
+            + create_call_function(2, True)
         )
 
     def guard_source(self):
@@ -287,7 +377,7 @@ class ConstantSource(Source):
     source_name: str
 
     def reconstruct(self, codegen):
-        return [codegen.create_load_global(self.source_name, add=False)]
+        return [codegen.create_load_global(self.source_name, False, add=False)]
 
     def guard_source(self):
         return GuardSource.CONSTANT

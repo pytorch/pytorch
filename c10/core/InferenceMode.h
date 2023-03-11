@@ -9,7 +9,7 @@ namespace c10 {
 
 // A RAII, thread local (!) guard that enables or disables inference mode upon
 // construction, and sets it back to the original value upon destruction.
-struct TORCH_API InferenceMode {
+struct C10_API InferenceMode {
   // Note [Expected TLS state in InferenceMode]:
   //   InferenceMode: ADInplaceOrView not in
   //   raw_local_dispatch_key_set.included(),

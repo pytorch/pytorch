@@ -40,7 +40,6 @@ on:
         default: "linux.2xlarge"
         description: |
           List of CUDA architectures CI build should target.
-
       test-matrix:
         required: false
         type: string
@@ -158,7 +157,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c '.jenkins/pytorch/build.sh'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts && steps.build.outcome != 'skipped'

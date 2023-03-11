@@ -10,6 +10,7 @@
 #include <ATen/FuncTorchTLS.h>
 #include <ATen/PythonTorchFunctionTLS.h>
 #include <ATen/SavedTensorHooks.h>
+#include <ATen/ThreadLocalPythonObjects.h>
 #include <ATen/record_function.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <c10/core/impl/TorchDispatchModeTLS.h>
@@ -75,6 +76,9 @@ class TORCH_API ThreadLocalState {
   at::impl::SavedTensorDefaultHooksTLS saved_tensors_default_hooks_state_;
 
   bool functionalization_reapply_views_state_;
+
+  // TLS for arbitrary python objects that is registered via hooks
+  at::impl::ThreadLocalPythonObjects saved_objects_;
 
   friend class ThreadLocalStateGuard;
 };

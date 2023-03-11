@@ -529,6 +529,7 @@ struct GeometricKernel {
 
 template<typename RNG>
 void exponential_kernel(TensorIteratorBase& iter, double lambda_, RNG gen) {
+  TORCH_CHECK(isFloatingType(iter.dtype()), "Exponential distribution is a continuous probability distribution. dtype must be a floating point but you specified ", iter.dtype());
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "exponential_cuda", [&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto lambda = static_cast<accscalar_t>(lambda_);

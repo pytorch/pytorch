@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <sstream>
+#include <utility>
 
 namespace torch {
 namespace jit {
@@ -321,7 +322,7 @@ void inlineFallbackGraphAndAddSRCopyOutOp(std::shared_ptr<Graph> graph) {
   auto false_block = if_v.elseBlock();
   std::vector<Value*> false_block_outputs(
       if_v.elseOutputs().begin(), if_v.elseOutputs().end());
-  TORCH_INTERNAL_ASSERT(false_block_outputs.size() != 0);
+  TORCH_INTERNAL_ASSERT(!false_block_outputs.empty());
 
   for (auto out : false_block_outputs) {
     TORCH_INTERNAL_ASSERT(out->type()->cast<TensorType>());
@@ -378,7 +379,7 @@ void insertDynamicShapesGuard(
           ->create(Symbol::prim("TensorExprDynamicGuard"), inputs_to_check, 1)
           ->insertBefore(guarded_node);
 
-  typecheck_node->tys_(attr::types, guard_types);
+  typecheck_node->tys_(attr::types, std::move(guard_types));
   Value* typecheck_result = typecheck_node->output()->setType(BoolType::get());
 
   // Insert if
@@ -429,7 +430,8 @@ void insertDynamicShapesGuard(
     ss << "SS_" << -pair.first;
     subgraph->addInput(ss.str())->setType(IntType::get());
   }
-  guarded_node->is_(attr::symbolic_shape_inputs, symbolic_shape_inputs);
+  guarded_node->is_(
+      attr::symbolic_shape_inputs, std::move(symbolic_shape_inputs));
 
   std::vector<std::vector<std::string>> input_striding;
   for (auto& vec : input_info) {
@@ -439,7 +441,7 @@ void insertDynamicShapesGuard(
   }
   auto ival = IValue(input_striding);
   guarded_node->ival_(attr::striding_inputs_desc, ival);
-  typecheck_node->ival_(attr::striding_inputs_desc, ival);
+  typecheck_node->ival_(attr::striding_inputs_desc, std::move(ival));
 
   for (Value* v : subgraph->inputs()) {
     if (auto t = v->type()->cast<TensorType>()) {
@@ -455,7 +457,7 @@ void insertDynamicShapesGuard(
   std::vector<std::string> output_striding =
       fmap(output_strides, [&](StrideInput inp) { return toString(inp); });
   auto output_ival = IValue(output_striding);
-  guarded_node->ival_(attr::striding_outputs_desc, output_ival);
+  guarded_node->ival_(attr::striding_outputs_desc, std::move(output_ival));
 
   if (add_composed_op) {
     // only in SR flow do we check for values on the stack and
@@ -498,7 +500,7 @@ Operation StaticRuntimeCopyOuts(const Node* node) {
   return [num_ten_inputs](Stack& stack) {
     std::vector<IValue> inputs = pop(stack, num_ten_inputs);
     // uncommon case - first run
-    if (stack.size() == 0) {
+    if (stack.empty()) {
       for (IValue elem : inputs) {
         push(stack, std::move(elem));
       }
@@ -548,7 +550,7 @@ RegisterOperators reg_guard({
 
           // Map from symbolic dimension value to its set's index
           std::map<int64_t, size_t> sym_dim_flat_index;
-          TORCH_INTERNAL_ASSERT(types.size() >= 1);
+          TORCH_INTERNAL_ASSERT(!types.empty());
 
           // we should just be fusing fusion groups with a single device
           // and with tensors not requiring grad

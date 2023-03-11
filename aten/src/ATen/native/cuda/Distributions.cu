@@ -128,7 +128,7 @@ void gamma_cuda_kernel(
 
 } // namespace
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_dirichlet_kernel(at::TensorIteratorBase &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -205,4 +205,4 @@ void launch_dirichlet_grad_kernel(TensorIteratorBase &iter) {
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

@@ -19,6 +19,12 @@ namespace at {
 namespace cuda {
 namespace {
 
+// allocations above this size will not be rounded up to the next power of two
+const size_t kMaxRoundThreshold = 32 * 1024 * 1024;
+
+// allocations above this size will not be cached
+const size_t kMaxCachedSize = kMaxRoundThreshold;
+
 struct BlockSize {
   size_t size_{0};
   void* ptr_{nullptr};
@@ -174,12 +180,17 @@ class CUDAHostAllocator {
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
+    size_t rounded_size = size;
+    if (size < kMaxRoundThreshold) {
+        rounded_size = c10::llvm::PowerOf2Ceil(size);
+    }
+
     // Round up the allocation to the nearest power of two to improve reuse.
     void* ptr = nullptr;
     C10_CUDA_CHECK(cudaHostAlloc(
-        &ptr, c10::llvm::PowerOf2Ceil(size), cudaHostAllocDefault));
+        &ptr, rounded_size, cudaHostAllocDefault));
     auto block = new Block();
-    block->size_ = c10::llvm::PowerOf2Ceil(size);
+    block->size_ = rounded_size;
     block->ptr_ = ptr;
     block->allocated_ = true;
 
@@ -220,12 +231,17 @@ class CUDAHostAllocator {
     }
 
     if (!events) {
-      std::lock_guard<std::mutex> g(free_list_mutex_);
-      free_list_.insert(block);
+      if (block->size_ <= kMaxCachedSize) {
+        std::lock_guard<std::mutex> g(free_list_mutex_);
+        free_list_.insert(block);
+      } else {
+        std::lock_guard<std::mutex> g(blocks_mutex_);
+        delete_block(block);
+      }
     } else {
       std::lock_guard<std::mutex> g(cuda_events_mutex_);
       for (auto&& event : *events) {
-        cuda_events_.push_front({std::move(event), block});
+        cuda_events_.emplace_front(std::move(event), block);
       }
     }
   }
@@ -278,14 +294,18 @@ class CUDAHostAllocator {
     std::vector<Block*> blocks_to_remove(free_list_.begin(), free_list_.end());
     free_list_.clear();
     for (auto* block : blocks_to_remove) {
-      blocks_.erase(block);
-      ptr_to_block_.erase(block->ptr_);
-      AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
-      delete block;
+      delete_block(block);
     }
   }
 
  private:
+  void delete_block(Block* block) {
+    blocks_.erase(block);
+    ptr_to_block_.erase(block->ptr_);
+    AT_CUDA_CHECK(cudaFreeHost(block->ptr_));
+    delete block;
+  }
+
   void process_events() {
     while (true) {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
@@ -338,8 +358,13 @@ class CUDAHostAllocator {
       }
 
       if (available) {
-        std::lock_guard<std::mutex> g(free_list_mutex_);
-        free_list_.insert(block);
+        if (block->size_ <= kMaxCachedSize) {
+          std::lock_guard<std::mutex> g(free_list_mutex_);
+          free_list_.insert(block);
+        } else {
+          std::lock_guard<std::mutex> g(blocks_mutex_);
+          delete_block(block);
+        }
       }
     }
   }

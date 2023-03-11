@@ -378,7 +378,7 @@ def kaiser(
                        device=device,
                        requires_grad=requires_grad)
 
-    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(torch.tensor(beta))
+    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(torch.tensor(beta, device=device))
 
 
 @_add_docstr(

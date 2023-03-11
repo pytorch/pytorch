@@ -13,10 +13,10 @@ This command will generate the commands for the default compilers (see DEFAULTS
 below) for inference, run them and visualize the logs.
 
 If you want to just print the commands, you could use the following command
--> python benchmarks/runner.py --print_run_commands --suites=torchbench --inference
+-> python benchmarks/runner.py --print-run-commands --suites=torchbench --inference
 
 Similarly, if you want to just visualize the already finished logs
--> python benchmarks/runner.py --visualize_logs --suites=torchbench --inference
+-> python benchmarks/runner.py --visualize-logs --suites=torchbench --inference
 
 If you want to test float16
 -> python benchmarks/runner.py --suites=torchbench --inference --dtypes=float16
@@ -68,7 +68,7 @@ TABLE = {
         "ts_nvfuser": "--training --nvfuser --speedup-dynamo-ts ",
         "eager": "--training --backend=eager ",
         "aot_eager": "--training --backend=aot_eager ",
-        "aot_cudagraphs": "--training --backend=aot_cudagraphs ",
+        "cudagraphs": "--training --backend=cudagraphs ",
         "aot_nvfuser": "--training --nvfuser --backend=aot_ts_nvfuser ",
         "nvprims_nvfuser": "--training --backend=nvprims_nvfuser ",
         "inductor": "--training --inductor ",
@@ -174,15 +174,22 @@ def parse_args():
         help="Choose the output directory to save the logs",
         default=DEFAULT_OUTPUT_DIR,
     )
+    parser.add_argument(
+        "--keep-output-dir",
+        action="store_true",
+        help="Do not cleanup the output directory before running",
+    )
 
     # Choose either generation of commands, pretty parsing or e2e runs
     group = parser.add_mutually_exclusive_group(required=False)
     group.add_argument(
+        "--print-run-commands",
         "--print_run_commands",
         action="store_true",
         help="Generate commands and saves them to run.sh",
     )
     group.add_argument(
+        "--visualize-logs",
         "--visualize_logs",
         action="store_true",
         help="Pretty print the log files and draw graphs",
@@ -215,6 +222,21 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--base-sha",
+        help="commit id for the tested pytorch",
+    )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        help="Total number of partitions, to be passed to the actual benchmark script",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        help="ID of partition, to be passed to the actual benchmark script",
+    )
+
+    parser.add_argument(
         "--update-dashboard",
         action="store_true",
         default=False,
@@ -242,7 +264,7 @@ def parse_args():
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
+        help="does all of --no-graphs, --no-update-archive, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -263,6 +285,36 @@ def parse_args():
         "--dashboard-gh-cli-path",
         default=DASHBOARD_DEFAULTS["dashboard_gh_cli_path"],
         help="Github CLI path",
+    )
+    parser.add_argument(
+        "--batch-size",
+        "--batch_size",
+        type=int,
+        default=None,
+        help="batch size for benchmarking",
+    )
+    parser.add_argument(
+        "--threads",
+        "-t",
+        type=int,
+        default=None,
+        help="number of threads to use for eager and inductor.",
+    )
+    launcher_group = parser.add_argument_group("CPU Launcher Parameters")
+    launcher_group.add_argument(
+        "--enable-cpu-launcher",
+        "--enable_cpu_launcher",
+        action="store_true",
+        default=False,
+        help="Use torch.backends.xeon.run_cpu to get the peak performance on Intel(R) Xeon(R) Scalable Processors.",
+    )
+    launcher_group.add_argument(
+        "--cpu-launcher-args",
+        "--cpu_launcher_args",
+        type=str,
+        default="",
+        help="Provide the args of torch.backends.xeon.run_cpu. "
+        "To look up what optional arguments this launcher offers: python -m torch.backends.xeon.run_cpu --help",
     )
     args = parser.parse_args()
     return args
@@ -300,12 +352,23 @@ def generate_csv_name(args, dtype, suite, device, compiler, testing):
 
 def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
     mode = get_mode(args)
-    with open("run.sh", "w") as runfile:
+    suites_str = "_".join(suites)
+    devices_str = "_".join(devices)
+    dtypes_str = "_".join(dtypes)
+    compilers_str = "_".join(compilers)
+    generated_file = "run_{}_{}_{}_{}_{}.sh".format(
+        mode, devices_str, dtypes_str, suites_str, compilers_str
+    )
+    with open(generated_file, "w") as runfile:
         lines = []
 
+        lines.append("#!/bin/bash")
+        lines.append("set -x")
         lines.append("# Setup the output directory")
-        lines.append(f"rm -rf {output_dir}")
-        lines.append(f"mkdir {output_dir}")
+        if not args.keep_output_dir:
+            lines.append(f"rm -rf {output_dir}")
+        # It's ok if the output directory already exists
+        lines.append(f"mkdir -p {output_dir}")
         lines.append("")
 
         for testing in ["performance", "accuracy"]:
@@ -318,9 +381,11 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                 for compiler in compilers:
                     base_cmd = info[compiler]
                     output_filename = f"{output_dir}/{generate_csv_name(args, dtype, suite, device, compiler, testing)}"
-                    cmd = f"python benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
+                    launcher_cmd = "python"
+                    if args.enable_cpu_launcher:
+                        launcher_cmd = f"python -m torch.backends.xeon.run_cpu {args.cpu_launcher_args}"
+                    cmd = f"{launcher_cmd} benchmarks/dynamo/{suite}.py --{testing} --{dtype} -d{device} --output={output_filename}"
                     cmd = f"{cmd} {base_cmd} {args.extra_args} --no-skip --dashboard"
-
                     skip_tests_str = get_skip_tests(suite)
                     cmd = f"{cmd} {skip_tests_str}"
 
@@ -331,14 +396,27 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler in (
+                    if compiler in (
                         "inductor",
                         "inductor_no_cudagraphs",
                     ):
-                        cmd = f"{cmd} --cold_start_latency"
+                        cmd = f"{cmd} --cold-start-latency"
+
+                    if args.batch_size is not None:
+                        cmd = f"{cmd} --batch-size {args.batch_size}"
+
+                    if args.threads is not None:
+                        cmd = f"{cmd} --threads {args.threads}"
+
+                    if args.total_partitions is not None:
+                        cmd = f"{cmd} --total-partitions {args.total_partitions}"
+
+                    if args.partition_id is not None:
+                        cmd = f"{cmd} --partition-id {args.partition_id}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
+    return generated_file
 
 
 def generate_dropdown_comment(title, body):
@@ -353,12 +431,15 @@ def generate_dropdown_comment(title, body):
 
 
 def build_summary(args):
-    import git
-
     out_io = io.StringIO()
 
     def print_commit_hash(path, name):
-        if exists(path):
+        if args.base_sha is not None:
+            if name == "pytorch":
+                out_io.write(f"{name} commit: {args.base_sha}\n")
+        elif exists(path):
+            import git
+
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
             date = repo.head.object.committed_datetime
@@ -368,7 +449,10 @@ def build_summary(args):
             out_io.write(f"{name} Absent\n")
 
     def env_var(name):
-        out_io.write(f"{name} = {os.environ[name]}\n")
+        if name in os.environ:
+            out_io.write(f"{name} = {os.environ[name]}\n")
+        else:
+            out_io.write(f"{name} = {None}\n")
 
     out_io.write("\n")
     out_io.write("### Run name ###\n")
@@ -378,7 +462,6 @@ def build_summary(args):
     out_io.write("\n")
     out_io.write("### Commit hashes ###\n")
     print_commit_hash("../pytorch", "pytorch")
-    print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")
@@ -398,14 +481,15 @@ def build_summary(args):
     env_var("CUDA_HOME")
     env_var("USE_LLVM")
 
-    out_io.write("\n")
-    out_io.write("### GPU details ###\n")
-    out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
-    out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
-    out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
-    out_io.write(
-        f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
-    )
+    if "cuda" in args.devices:
+        out_io.write("\n")
+        out_io.write("### GPU details ###\n")
+        out_io.write(f"CUDNN VERSION: {torch.backends.cudnn.version()}\n")
+        out_io.write(f"Number CUDA Devices: {torch.cuda.device_count()}\n")
+        out_io.write(f"Device Name: {torch.cuda.get_device_name(0)}\n")
+        out_io.write(
+            f"Device Memory [GB]: {torch.cuda.get_device_properties(0).total_memory/1e9}\n"
+        )
 
     title = "## Build Summary"
     comment = generate_dropdown_comment(title, out_io.getvalue())
@@ -682,12 +766,19 @@ class ParsePerformanceLogs(Parser):
         return str_io.getvalue()
 
     def generate_executive_summary(self):
+        machine = "A100 GPUs"
+        if "cpu" in self.devices:
+            get_machine_cmd = "lscpu| grep 'Model name' | awk -F':' '{print $2}'"
+            machine = subprocess.getstatusoutput(get_machine_cmd)[1].strip()
         description = (
             "We evaluate different backends "
             "across three benchmark suites - torchbench, huggingface and timm. We run "
-            "these experiments on A100 GPUs. Each experiment runs one iteration of forward "
-            "and backward pass. For accuracy, we check the numerical correctness of forward "
-            "pass outputs and gradients by comparing with native pytorch. We measure speedup "
+            "these experiments on "
+            + machine
+            + ". Each experiment runs one iteration of forward pass "
+            "and backward pass for training and forward pass only for inference. "
+            "For accuracy, we check the numerical correctness of forward pass outputs and gradients "
+            "by comparing with native pytorch. We measure speedup "
             "by normalizing against the performance of native pytorch. We report mean "
             "compilation latency numbers and peak memory footprint reduction ratio. \n\n"
             "Caveats\n"
@@ -696,7 +787,6 @@ class ParsePerformanceLogs(Parser):
             "2) Experiments do not cover dynamic shapes.\n"
             "3) Experimental setup does not have optimizer.\n\n"
         )
-
         comment = generate_dropdown_comment("", description)
         str_io = io.StringIO()
         str_io.write("\n")
@@ -1244,13 +1334,17 @@ class DashboardUpdater:
             f.write(comment)
             filename = f.name
 
+        issue_number = "93794"
+        if self.args.dtypes[0] == "float32":
+            issue_number = "93518"
+
         subprocess.check_call(
             [
                 self.args.dashboard_gh_cli_path,
                 "issue",
                 "comment",
-                "--repo=https://github.com/pytorch/torchdynamo.git",
-                "681",
+                "--repo=https://github.com/pytorch/pytorch.git",
+                issue_number,
                 "-F",
                 filename,
             ]
@@ -1314,20 +1408,27 @@ if __name__ == "__main__":
     args.suites = suites
 
     if args.print_run_commands:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
+        print(
+            f"Running commands are generated in file {generated_file}. Please run (bash {generated_file})."
+        )
     elif args.visualize_logs:
         parse_logs(args, dtypes, suites, devices, compilers, flag_compilers, output_dir)
     elif args.run:
-        generate_commands(args, dtypes, suites, devices, compilers, output_dir)
+        generated_file = generate_commands(
+            args, dtypes, suites, devices, compilers, output_dir
+        )
         # generate memoized archive name now so that the date is reflective
         # of when the run started
         get_archive_name(args, dtypes[0])
         # TODO - Do we need to worry about segfaults
         try:
-            os.system("bash run.sh")
+            os.system(f"bash {generated_file}")
         except Exception as e:
             print(
-                "Running commands failed. Please run manually (bash run.sh) and inspect the errors."
+                f"Running commands failed. Please run manually (bash {generated_file}) and inspect the errors."
             )
             raise e
         if not args.log_operator_inputs:

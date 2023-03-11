@@ -45,7 +45,7 @@ class Exponential(ExponentialFamily):
     def __init__(self, rate, validate_args=None):
         self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
-        super(Exponential, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Exponential, _instance)
@@ -70,7 +70,7 @@ class Exponential(ExponentialFamily):
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        return -torch.log(1 - value) / self.rate
+        return -torch.log1p(-value) / self.rate
 
     def entropy(self):
         return 1.0 - torch.log(self.rate)

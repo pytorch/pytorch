@@ -18,8 +18,7 @@
 #include <ATen/ops/avg_pool2d_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 __device__ inline int min(int a, int b) {
@@ -456,5 +455,4 @@ TORCH_IMPL_FUNC(avg_pool2d_backward_out_cuda) (
   );
 }
 
-} // at::native
-} // at
+} // namespace at::native

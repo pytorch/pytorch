@@ -223,7 +223,7 @@ Tensor run_batchnorm_context(
   vTensor v_output{
       context,
       v_input.sizes(),
-      v_input.options(),
+      input_arg.scalar_type(),
   };
 
   batchnorm::record_op(

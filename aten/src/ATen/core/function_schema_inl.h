@@ -11,7 +11,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   // it is simpler for now to work directly on this schema
 
   out << schema.name();
-  if (schema.overload_name() != "") {
+  if (!schema.overload_name().empty()) {
     out << "." << schema.overload_name();
   }
   out << "(";
@@ -27,7 +27,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   }
 
   if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
+    if(!schema.arguments().empty())
       out << ", ";
     out << "...";
   }
@@ -51,7 +51,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
    */
   bool need_paren = !(
     (returns.size() == 1 && !schema.is_varret()) ||
-    (returns.size() == 0 && schema.is_varret()));
+    (returns.empty() && schema.is_varret()));
 
   if (returns.size() == 1 && !schema.is_varret()) {
     std::stringstream return_ss;
@@ -69,7 +69,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     // PR (https://github.com/pytorch/pytorch/pull/23204) has more context about
     // this. test_serialize_and_deserialize (https://github.com/pytorch/pytorch/blob/master/test/test_function_schema.py#L15)
     // also covers this case.
-    if (return_str.size() > 0 && return_str.front() == '(') {
+    if (!return_str.empty() && return_str.front() == '(') {
       need_paren = true;
     }
   }
@@ -84,7 +84,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     out << returns.at(i);
   }
   if (schema.is_varret()) {
-    if (returns.size() != 0) {
+    if (!returns.empty()) {
       out << ", ";
     }
     out << "...";

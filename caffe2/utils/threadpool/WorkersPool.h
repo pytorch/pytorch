@@ -213,8 +213,8 @@ class BlockingCounter {
 
 // A workload for a worker.
 struct Task {
-  Task() {}
-  virtual ~Task() {}
+  Task() = default;
+  virtual ~Task() = default;
   virtual void Run() = 0;
 };
 
@@ -331,7 +331,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
 class WorkersPool {
  public:
-  WorkersPool() {}
+  WorkersPool() = default;
 
   void Execute(const std::vector<std::shared_ptr<Task>>& tasks) {
     CAFFE_ENFORCE_GE(tasks.size(), 1);

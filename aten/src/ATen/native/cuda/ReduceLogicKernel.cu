@@ -6,7 +6,7 @@
 #include <ATen/native/ReduceOps.h>
 #include <ATen/Dispatch.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 void and_kernel_cuda(TensorIterator& iter) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
@@ -35,4 +35,4 @@ void or_kernel_cuda(TensorIterator& iter) {
 REGISTER_DISPATCH(and_stub, &and_kernel_cuda);
 REGISTER_DISPATCH(or_stub, &or_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

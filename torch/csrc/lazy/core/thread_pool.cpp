@@ -40,20 +40,16 @@ class ThreadPool {
     // it on a separate thread. This prevents tricky thread-pool-size-deadlocks
     // caused by an undersized thread pool and closures that end up doing sync
     // waits on the pool threads.
-    bool scheduled = false;
     {
-      std::lock_guard<std::mutex> lock(mutex_);
+      std::unique_lock<std::mutex> lock(mutex_);
       if (work_.size() < waiting_) {
         work_.emplace_back(std::move(closure));
-        scheduled = true;
+        lock.unlock();
+        cv_.notify_one();
+        return;
       }
     }
-    if (scheduled) {
-      cv_.notify_one();
-    } else {
-      // NOLINTNEXTLINE(bugprone-use-after-move)
-      ScheduleOnThread(std::move(closure));
-    }
+    ScheduleOnThread(std::move(closure));
   }
 
  private:

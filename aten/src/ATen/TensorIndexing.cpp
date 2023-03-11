@@ -65,7 +65,7 @@ static inline void set_item(const Tensor& self, ArrayRef<TensorIndex> indices, c
 } // namespace indexing
 
 Tensor Tensor::index(ArrayRef<at::indexing::TensorIndex> indices) const {
-  TORCH_CHECK(indices.size() > 0, "Passing an empty index list to Tensor::index() is not valid syntax");
+  TORCH_CHECK(!indices.empty(), "Passing an empty index list to Tensor::index() is not valid syntax");
   OptionalDeviceGuard device_guard(device_of(*this));
   return at::indexing::get_item(*this, indices);
 }
@@ -74,13 +74,13 @@ Tensor Tensor::index(std::initializer_list<at::indexing::TensorIndex> indices) c
 }
 
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, Tensor const & rhs) {
-  TORCH_CHECK(indices.size() > 0, "Passing an empty index list to Tensor::index_put_() is not valid syntax");
+  TORCH_CHECK(!indices.empty(), "Passing an empty index list to Tensor::index_put_() is not valid syntax");
   OptionalDeviceGuard device_guard(device_of(*this));
   at::indexing::set_item(*this, indices, rhs);
   return *this;
 }
 Tensor & Tensor::index_put_(ArrayRef<at::indexing::TensorIndex> indices, const Scalar& v) {
-  TORCH_CHECK(indices.size() > 0, "Passing an empty index list to Tensor::index_put_() is not valid syntax");
+  TORCH_CHECK(!indices.empty(), "Passing an empty index list to Tensor::index_put_() is not valid syntax");
   OptionalDeviceGuard device_guard(device_of(*this));
   at::indexing::set_item(*this, indices, v);
   return *this;

@@ -22,6 +22,7 @@ const std::set<libkineto::ActivityType> cpuTypes{
     libkineto::ActivityType::CPU_INSTANT_EVENT,
     libkineto::ActivityType::USER_ANNOTATION,
     libkineto::ActivityType::EXTERNAL_CORRELATION,
+    libkineto::ActivityType::XPU_RUNTIME,
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::PYTHON_FUNCTION,
 };
@@ -32,6 +33,13 @@ const std::set<libkineto::ActivityType> cudaTypes = {
     libkineto::ActivityType::CONCURRENT_KERNEL,
     // CUDA_RUNTIME appears in both cpuTypes and cudaTypes.
     libkineto::ActivityType::CUDA_RUNTIME,
+};
+const std::set<libkineto::ActivityType> xpuTypes = {
+    libkineto::ActivityType::GPU_MEMCPY,
+    libkineto::ActivityType::GPU_MEMSET,
+    libkineto::ActivityType::CONCURRENT_KERNEL,
+    // XPU_RUNTIME appears in both cpuTypes and xpuTypes.
+    libkineto::ActivityType::XPU_RUNTIME,
 };
 } // namespace
 #endif // USE_KINETO
@@ -151,7 +159,7 @@ class ExperimentalConfigWrapper {
     // Kineto supports reading performance events per kernel/iteration
     // using CUPTI Range based profiler API. In this mode however we
     // do not trace CPU or GPU events.
-    bool cupti_range_profiler = config_.profiler_metrics.size() > 0;
+    bool cupti_range_profiler = !config_.profiler_metrics.empty();
     if (cupti_range_profiler &&
         activities.count(torch::autograd::profiler::ActivityType::CPU)) {
       LOG(WARNING)
@@ -214,6 +222,9 @@ void prepareTrace(
   if (activities.count(torch::autograd::profiler::ActivityType::CPU)) {
     k_activities.insert(cpuTypes.begin(), cpuTypes.end());
   }
+  if (activities.count(torch::autograd::profiler::ActivityType::XPU)) {
+    k_activities.insert(xpuTypes.begin(), xpuTypes.end());
+  }
   if (activities.count(torch::autograd::profiler::ActivityType::CUDA)) {
     k_activities.insert(cudaTypes.begin(), cudaTypes.end());
   }
@@ -273,6 +284,19 @@ void popUserCorrelationId() {
 void recordThreadInfo() {
 #ifdef USE_KINETO
   libkineto::api().activityProfiler().recordThreadInfo();
+#endif // USE_KINETO
+}
+
+void logInvariantViolation(
+    const std::string& assertion,
+    const std::string& error,
+    const std::string& profile_id,
+    const std::string& group_profile_id) {
+#ifdef USE_KINETO
+  if (libkineto::api().isProfilerInitialized()) {
+    libkineto::api().activityProfiler().logInvariantViolation(
+        profile_id, assertion, error, group_profile_id);
+  }
 #endif // USE_KINETO
 }
 

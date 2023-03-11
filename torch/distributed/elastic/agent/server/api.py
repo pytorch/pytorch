@@ -928,7 +928,7 @@ class SimpleElasticAgent(ElasticAgent):
                 f"Done waiting for other agents. Elapsed: {time.time() - start} seconds"
             )
         except SignalException as e:
-            log.warn(f"Got termination signal: {e.sigval}")
+            log.warning(f"Got termination signal: {e.sigval}")
             raise
         except Exception:
             log.exception(

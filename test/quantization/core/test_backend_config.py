@@ -1,9 +1,9 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
-import torch.nn.intrinsic as nni
-import torch.nn.qat as nnqat
-import torch.nn.quantized._reference as nnqr
+import torch.ao.nn.intrinsic as nni
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.quantized.reference as nnqr
 from torch.testing._internal.common_quantization import QuantizationTestCase
 
 from torch.ao.quantization.backend_config import (
@@ -137,8 +137,7 @@ class TestBackendConfig(QuantizationTestCase):
             ._set_root_node_getter(_default_root_node_getter) \
             ._set_extra_inputs_getter(self._extra_inputs_getter) \
             ._set_num_tensor_args_to_observation_type(self._num_tensor_args_to_observation_type) \
-            ._set_input_type_to_index(self._input_type_to_index) \
-            ._set_input_output_observed(False)
+            ._set_input_type_to_index(self._input_type_to_index)
 
     def _get_backend_pattern_config_dict1(self):
         return {
@@ -161,7 +160,6 @@ class TestBackendConfig(QuantizationTestCase):
             "extra_inputs_getter": self._extra_inputs_getter,
             "num_tensor_args_to_observation_type": self._num_tensor_args_to_observation_type,
             "input_type_to_index": self._input_type_to_index,
-            "input_output_observed": False,
         }
 
     def test_backend_op_config_set_observation_type(self):
@@ -233,12 +231,6 @@ class TestBackendConfig(QuantizationTestCase):
         conf._set_input_type_to_index(self._input_type_to_index)
         self.assertEqual(conf._input_type_to_index, self._input_type_to_index)
 
-    def test_backend_op_config_set_input_output_observed(self):
-        conf = BackendPatternConfig(torch.nn.Embedding)
-        self.assertTrue(conf._input_output_observed is None)
-        conf._set_input_output_observed(False)
-        self.assertEqual(conf._input_output_observed, False)
-
     def test_backend_op_config_from_dict(self):
         conf_dict1 = self._get_backend_pattern_config_dict1()
         conf1 = BackendPatternConfig.from_dict(conf_dict1)
@@ -253,7 +245,6 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertTrue(conf1._extra_inputs_getter is None)
         self.assertEqual(len(conf1._num_tensor_args_to_observation_type), 0)
         self.assertEqual(len(conf1._input_type_to_index), 0)
-        self.assertTrue(conf1._input_output_observed is None)
         # Test temporary/internal keys
         conf_dict2 = self._get_backend_pattern_config_dict2()
         conf2 = BackendPatternConfig.from_dict(conf_dict2)
@@ -268,7 +259,6 @@ class TestBackendConfig(QuantizationTestCase):
         self.assertEqual(conf2._extra_inputs_getter, self._extra_inputs_getter)
         self.assertEqual(conf2._num_tensor_args_to_observation_type, self._num_tensor_args_to_observation_type)
         self.assertEqual(conf2._input_type_to_index, self._input_type_to_index)
-        self.assertEqual(conf2._input_output_observed, False)
 
     def test_backend_op_config_to_dict(self):
         conf1 = self._get_backend_op_config1()

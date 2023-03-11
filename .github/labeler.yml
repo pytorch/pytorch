@@ -16,6 +16,7 @@
 - torch/_subclasses/fake_utils.py
 - torch/_subclasses/meta_utils.py
 - test/distributed/test_dynamo_distributed.py
+- test/distributed/test_inductor_collectives.py
 - functorch/_src/partitioners.py
 - functorch/_src/aot_autograd.py
 

@@ -234,6 +234,12 @@ public:
                                    sin_cos.x, 0x0A);                  //cos(b)           sin(b)
     return _mm256_mul_pd(exp, cos_sin);
   }
+  Vectorized<c10::complex<double>> exp2() const {
+    // Use identity 2**x = exp(log(2) * x)
+    const __m256d ln_2 = _mm256_set1_pd(c10::ln_2<double>);
+    Vectorized<c10::complex<double>> scaled_values = _mm256_mul_pd(values, ln_2);
+    return scaled_values.exp();
+  }
   Vectorized<c10::complex<double>> expm1() const {
     AT_ERROR("not supported for complex numbers");
   }
@@ -361,17 +367,24 @@ template <> Vectorized<c10::complex<double>> inline operator*(const Vectorized<c
 
 template <> Vectorized<c10::complex<double>> inline operator/(const Vectorized<c10::complex<double>> &a, const Vectorized<c10::complex<double>> &b) {
   //re + im*i = (a + bi)  / (c + di)
-  //re = (ac + bd)/abs_2()
-  //im = (bc - ad)/abs_2()
+  auto mask = _mm256_set1_pd(-0.f);
+  auto fabs_cd = _mm256_andnot_pd(mask, b);     // |c|    |d|
+  auto fabs_dc = _mm256_permute_pd(fabs_cd, 0x05);   // |d|    |c|
+  auto scale = _mm256_div_pd(_mm256_set1_pd(1.0f), _mm256_max_pd(fabs_cd, fabs_dc));  // 1/sc     1/sc
+  auto a2 = _mm256_mul_pd(a, scale);         // a/sc     b/sc
+  auto b2 = _mm256_mul_pd(b, scale);         // c/sc     d/sc
+  auto acbd2 = _mm256_mul_pd(a2, b2);
+
   const __m256d sign_mask = _mm256_setr_pd(-0.0, 0.0, -0.0, 0.0);
-  auto ac_bd = _mm256_mul_pd(a, b);         //ac       bd
+  auto dc2 = _mm256_permute_pd(b2, 0x05);    // d/sc         c/sc
+  dc2 = _mm256_xor_pd(sign_mask, dc2);       // -d/|c,d|        c/sc
+  auto adbc2 = _mm256_mul_pd(a2, dc2);       //-ad/sc^2      bc/sc^2
+  auto res2 = _mm256_hadd_pd(acbd2, adbc2);  //(ac+bd)/sc^2  (bc-ad)/sc^2
 
-  auto d_c = _mm256_permute_pd(b, 0x05);    //d        c
-  d_c = _mm256_xor_pd(sign_mask, d_c);      //-d       c
-  auto ad_bc = _mm256_mul_pd(a, d_c);       //-ad      bc
-
-  auto re_im = _mm256_hadd_pd(ac_bd, ad_bc);//ac + bd  bc - ad
-  return _mm256_div_pd(re_im, b.abs_2_());
+  // get the denominator
+  auto denom2 = Vectorized<c10::complex<double>>(b2).abs_2_();  // (c^2+d^2)/sc^2   (c^2+d^2)/sc^2
+  res2 = _mm256_div_pd(res2, denom2);
+  return res2;
 }
 
 // reciprocal. Implement this here so we can use multiplication.

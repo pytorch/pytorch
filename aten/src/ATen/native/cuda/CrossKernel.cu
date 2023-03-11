@@ -5,7 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template <typename T, typename OffsetCalc, typename StrideType>
 __global__ void cross_kernel(
@@ -89,4 +89,4 @@ void cross_impl(const Tensor& result, const Tensor& x1, const Tensor& x2, int64_
 
 REGISTER_DISPATCH(cross_stub, &cross_impl);
 
-}}
+} // namespace at::native

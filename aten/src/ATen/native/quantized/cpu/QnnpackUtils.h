@@ -48,7 +48,9 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
         per_channel_(this->orig_weight.qscheme() == at::kPerChannelAffine),
         input_scale(std::move(input_scale)),
         w_scales(std::move(w_scales)),
-        w_zero_points(std::move(w_zps)) {}
+        w_zero_points(std::move(w_zps)) {
+          weight_sizes = this->orig_weight.sizes().vec();
+        }
 
   std::unique_ptr<qnnpack::PackBMatrix> w;
   at::Tensor orig_weight;
@@ -58,6 +60,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
   at::Tensor w_scales;
   std::vector<uint8_t> w_zero_points;
   std::vector<float> requantization_scales;
+  std::vector<int64_t> weight_sizes;
 
   at::Tensor apply(
       at::Tensor input,

@@ -6,9 +6,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 std::string IRPrinter::dtypeToCppString(const Dtype& dtype) {
   return dtype.ToCppString();
@@ -288,7 +286,7 @@ void IRPrinter::visit(RampPtr v) {
 
 void IRPrinter::visit(LoadPtr v) {
   // TODO: support the mask case
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle();
   } else {
     os() << *v->base_handle() << "[";
@@ -416,7 +414,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
 
 void IRPrinter::visit(StorePtr v) {
   // TODO: handle the mask
-  if (v->indices().size() == 0) {
+  if (v->indices().empty()) {
     os() << *v->base_handle() << " = " << *v->value() << ";";
     return;
   }
@@ -667,9 +665,7 @@ void print(const Tensor& t) {
   std::cout << std::to_string(t);
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 namespace std {
 std::string to_string(ExprPtr expr) {

@@ -40,10 +40,12 @@ def write_to_zip(file_path, strip_file_path, zf, prepend_str=""):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Zip py source")
     parser.add_argument("paths", nargs="*", help="Paths to zip.")
-    parser.add_argument("--install_dir", help="Root directory for all output files")
-    parser.add_argument("--strip_dir", help="The absolute directory we want to remove from zip")
-    parser.add_argument("--prepend_str", help="A string to prepend onto all paths of a file in the zip", default="")
-    parser.add_argument("--zip_name", help="Output zip name")
+    parser.add_argument("--install-dir", "--install_dir", help="Root directory for all output files")
+    parser.add_argument("--strip-dir", "--strip_dir", help="The absolute directory we want to remove from zip")
+    parser.add_argument(
+        "--prepend-str", "--prepend_str", help="A string to prepend onto all paths of a file in the zip", default=""
+    )
+    parser.add_argument("--zip-name", "--zip_name", help="Output zip name")
 
     args = parser.parse_args()
 

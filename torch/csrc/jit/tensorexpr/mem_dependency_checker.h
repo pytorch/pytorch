@@ -328,7 +328,7 @@ class TORCH_API MemDependencyChecker : public IRVisitor {
     DependencySet writes;
 
     // writes just Store currently.
-    auto stores = NodeFinder<Store>::find(v);
+    auto stores = NodeFinder<Store>::find(std::move(v));
     for (const auto& s : stores) {
       auto bound = stmtToAccess_.equal_range(s);
       for (auto it = bound.first; it != bound.second; ++it) {

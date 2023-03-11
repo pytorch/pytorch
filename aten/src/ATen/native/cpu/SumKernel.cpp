@@ -9,8 +9,7 @@
 
 #include <algorithm>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // Load vector from a smaller type (more elements) to a larger type (fewer elements),
@@ -640,4 +639,4 @@ REGISTER_DISPATCH(nansum_stub, &nansum_kernel_impl);
 REGISTER_NO_AVX512_DISPATCH(nansum_stub);
 #endif
 
-}}  // namespace at::native
+}  // namespace at::native

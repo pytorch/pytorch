@@ -143,6 +143,7 @@ class TestCheckpoint(TestCase):
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
             self.assertEqual(p1.grad, p2.grad)
 
+
 instantiate_parametrized_tests(TestCheckpoint)
 
 

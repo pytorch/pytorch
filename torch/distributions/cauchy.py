@@ -1,5 +1,5 @@
 import math
-from torch._six import inf, nan
+from torch import inf, nan
 from numbers import Number
 
 import torch
@@ -36,7 +36,7 @@ class Cauchy(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Cauchy, self).__init__(batch_shape, validate_args=validate_args)
+        super().__init__(batch_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Cauchy, _instance)
@@ -67,7 +67,7 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
+        return -math.log(math.pi) - self.scale.log() - (((value - self.loc) / self.scale)**2).log1p()
 
     def cdf(self, value):
         if self._validate_args:

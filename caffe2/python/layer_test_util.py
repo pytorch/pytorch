@@ -32,7 +32,7 @@ class OpSpec(namedtuple("OpSpec", "type input output arg")):
 class LayersTestCase(test_util.TestCase):
 
     def setUp(self):
-        super(LayersTestCase, self).setUp()
+        super().setUp()
         self.setup_example()
 
     def setup_example(self):

@@ -44,6 +44,7 @@
 #include <thread>
 #include <typeinfo>
 #include <unordered_set>
+#include <utility>
 
 namespace torch {
 namespace autograd {
@@ -410,7 +411,7 @@ std::vector<Node*> get_current_graph_task_execution_order() {
   }
 
   // We could potentially check if there is only a single device here
-  // but explicitly require this context doens't seem bad either
+  // but explicitly require this context doesn't seem bad either
   TORCH_CHECK(
       !c10::AutogradState::get_tls_state().get_multithreading_enabled(),
       "get_current_graph_task_execution_order expects the current backward to be "
@@ -649,7 +650,6 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // Need to unlock before we call markCompleted to avoid holding locks
     // when the callbacks are called.
     lock.unlock();
-    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->markCompleted(std::move(vars));
   } catch (std::exception& e) {
     future_result_->setErrorIfNeeded(std::current_exception());
@@ -676,7 +676,7 @@ void GraphTask::exec_post_processing() {
   // See Note [Streaming backwards].
   // Syncs caller_current_stream with leaf streams, so final_callbacks may use
   // any grad on its device's current stream.
-  if (leaf_streams.size() > 0) {
+  if (!leaf_streams.empty()) {
     for (const auto& leaf_stream : leaf_streams) {
       // stash_current_streams() stashed streams for all device IDs that already
       // had a CUDA context before the GraphTask executed. For inactive devices,
@@ -743,7 +743,6 @@ void GraphTask::set_exception(
     const std::shared_ptr<Node>& fn) {
   set_exception_without_signal(fn);
   if (!future_completed_.exchange(true)) {
-    // NOLINTNEXTLINE(performance-move-const-arg)
     future_result_->setError(std::move(eptr));
   }
 }
@@ -751,6 +750,16 @@ void GraphTask::set_exception(
 static variable_list call_pre_hooks(Node& fn, variable_list inputs) {
   for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
+  }
+  return inputs;
+}
+
+static variable_list call_tensor_pre_hooks(Node& fn, variable_list inputs) {
+  for (const auto& hook : fn.tensor_pre_hooks()) {
+    inputs = (*hook)(inputs);
+  }
+  for (const auto& pair : fn.retains_grad_hooks()) {
+    inputs = (*pair.second)(inputs);
   }
   return inputs;
 }
@@ -840,7 +849,7 @@ void validate_outputs(
     if (grad.layout() != metadata.layout()) {
       // TODO: Currently we only support (*, Sparse) combination for
       // (tensor.layout(), tensor.grad.layout()) In future, there will be an
-      // oppportunity to support more combinations of layouts if they are
+      // opportunity to support more combinations of layouts if they are
       // composable (example., operations like addition etc., are well defined
       // between tensors of different layouts.), as well as all parts of
       // autograd like AccumulateGrad correctly handle this. We allow grad to be
@@ -883,8 +892,8 @@ static variable_list call_function(
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
-      call_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
-
+      call_tensor_pre_hooks(fn, InputBuffer::variables(std::move(inputBuffer)));
+  inputs = call_pre_hooks(fn, std::move(inputs));
   if (!graph_task->keep_graph_) {
     fn.will_release_variables();
   }
@@ -921,7 +930,6 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;
@@ -943,13 +951,26 @@ void Engine::evaluate_function(
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
+    variable_list new_inputs = inputs.buffer;
+    if (!fn_info.needed_) {
+      // We always want to call tensor pre-hooks, but want to avoid calling it
+      // twice. needed_ = True indicates that we will call tensor pre-hooks
+      // later.
+      //
+      // See NOTE [Hooks ordering] for more context.
+      new_inputs = call_tensor_pre_hooks(
+          *func, InputBuffer::variables(std::move(inputs)));
+    }
     if (auto* capture_vec = fn_info.captures_.get()) {
+      const auto opt_parent_stream = (*func).stream(c10::DeviceType::CUDA);
       // Lock mutex for writing to graph_task->captured_vars_.
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-        captured_grad = inputs[capture.input_idx_];
-        for (auto& hook : capture.hooks_) {
+        captured_grad = new_inputs[capture.input_idx_];
+        // NOTE [Deprecated capture hooks]
+        for (const auto& hook :
+             capture.DO_NOT_USE_DEPRECATED_get_capture_hooks()) {
           captured_grad = (*hook)(captured_grad);
         }
         if (opt_parent_stream) {
@@ -987,7 +1008,7 @@ void Engine::evaluate_function(
     for (const auto i : c10::irange(num_outputs)) {
       auto& output = outputs[i];
       at::OptionalDeviceGuard guard(device_of(output));
-      if (output.defined() && isnan(output).any().item<uint8_t>()) {
+      if (output.defined() && isnan(output)._is_any_true().item<bool>()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i
            << "th output.";
@@ -1190,10 +1211,11 @@ auto Engine::execute(
         input_stream,
         opt_next_stream);
 
-    execute_with_graph_task(graph_task, graph_root, std::move(input_buffer));
+    execute_with_graph_task(
+        graph_task, std::move(graph_root), std::move(input_buffer));
   } else {
     execute_with_graph_task(
-        graph_task, graph_root, InputBuffer(variable_list()));
+        graph_task, std::move(graph_root), InputBuffer(variable_list()));
   }
   // Avoid a refcount bump for the Future, since we check for refcount in
   // DistEngine (see TORCH_INTERNAL_ASSERT(futureGrads.use_count() == 1)
@@ -1478,7 +1500,7 @@ void GraphTask::init_to_execute(
   // recursion, but the actual code does this iteratively. Refer to the
   // numbering to see how the actual code corresponds. A difference to note is
   // that in the iterative version, when you are working with the current Node,
-  // you are reponsible to update your parent's is_needed after all your
+  // you are responsible to update your parent's is_needed after all your
   // children have been updated.
   //
   // is_needed = {fn: True for fn in outputs}             # (0)
@@ -1522,9 +1544,9 @@ void GraphTask::init_to_execute(
   captured_vars_.resize(output_idx);
 
   struct Frame {
-    Frame(Node* fn) : fn_(fn), next_next_fn_(0) {}
-    Node* fn_;
-    size_t next_next_fn_;
+    Frame(Node* fn) : fn_(fn) {}
+    Node* fn_{};
+    size_t next_next_fn_{};
 
     Node* get_next_fn() {
       const auto& next = fn_->next_edges();

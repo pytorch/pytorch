@@ -220,7 +220,7 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
   TensorOptions options(at::kQUInt8);
 
   auto custom_vec = std::make_unique<std::vector<uint8_t>>();
-  custom_vec->reserve(numel);
+  custom_vec->resize(numel);
 
   uint8_t* custom_data = custom_vec->data();
   for (const auto i : c10::irange(numel)) {
@@ -263,7 +263,7 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
   TensorOptions options(at::kQUInt8);
 
   auto custom_vec = std::make_unique<std::vector<uint8_t>>();
-  custom_vec->reserve(numel);
+  custom_vec->resize(numel);
 
   uint8_t* custom_data = custom_vec->data();
   for (const auto i : c10::irange(numel)) {

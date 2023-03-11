@@ -17,7 +17,6 @@ from caffe2.python.modeling.net_modifier import NetModifier
 from caffe2.python.optimizer import get_param_device, Optimizer
 from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
-from future.utils import viewitems, viewvalues
 
 import logging
 import numpy as np
@@ -48,7 +47,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             This attribute access will be consistent with MTML model.
         '''
 
-        super(LayerModelHelper, self).__init__(name=name)
+        super().__init__(name=name)
         self._layer_names = set()
         self._layers = []
         self._param_to_shape = {}
@@ -222,7 +221,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         self.add_global_constant('ZERO_RANGE', [0, 0], dtype='int32')
 
     def _add_global_constants(self, init_net):
-        for initializer_op in viewvalues(self.global_constant_initializers):
+        for initializer_op in self.global_constant_initializers.values():
             init_net._net.op.extend([initializer_op])
 
     def create_init_net(self, name):
@@ -632,7 +631,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         blob_to_device=None,
     ):
         logger.info("apply regularizer on loss")
-        for param, regularizer in viewitems(self.param_to_reg):
+        for param, regularizer in self.param_to_reg.items():
             if regularizer is None:
                 continue
             logger.info("add regularizer {0} for param {1} to loss".format(regularizer, param))
@@ -657,7 +656,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
-        for param, regularizer in viewitems(self.param_to_reg):
+        for param, regularizer in self.param_to_reg.items():
             if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
@@ -713,7 +712,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
-        for param, optimizer in viewitems(self.param_to_optim):
+        for param, optimizer in self.param_to_optim.items():
             assert optimizer is not None, \
                 "default optimizer must have been set in add_layer"
             # note that not all params has gradient and thus we sent None if

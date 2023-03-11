@@ -25,13 +25,13 @@ static PyObject* THCPEvent_pynew(
   unsigned char interprocess = 0;
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  static char* kwlist[] = {
+  constexpr const char* kwlist[] = {
       "enable_timing", "blocking", "interprocess", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
           "|bbb",
-          kwlist,
+          const_cast<char**>(kwlist),
           &enable_timing,
           &blocking,
           &interprocess)) {
@@ -43,9 +43,7 @@ static PyObject* THCPEvent_pynew(
     return nullptr;
   }
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   unsigned int flags = (blocking ? cudaEventBlockingSync : cudaEventDefault) |
       (enable_timing ? cudaEventDefault : cudaEventDisableTiming) |
       (interprocess ? cudaEventInterprocess : cudaEventDefault);
@@ -88,7 +86,6 @@ static PyObject* THCPEvent_from_ipc_handle(
   if (!ptr) {
     return nullptr;
   }
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   THCPEvent* self = (THCPEvent*)ptr.get();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

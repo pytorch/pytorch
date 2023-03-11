@@ -15,6 +15,8 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <torch/csrc/utils/memory.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -41,7 +43,7 @@ c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     case prim::TupleConstruct: {
       auto tt = n->output()->type()->expect<TupleType>();
       if (tt->name()) {
-        namedTupleConstruct(stack, tt, n->inputs().size());
+        namedTupleConstruct(stack, std::move(tt), n->inputs().size());
       } else {
         tupleConstruct(stack, n->inputs().size());
       }
@@ -142,6 +144,7 @@ std::unordered_set<Symbol> skip_list = {
     prim::profile,
     prim::profile_ivalue,
     prim::unchecked_unwrap_optional, // TODO remove
+    prim::awaitable,
     aten::dequantize,
     // TODO (zach): we should consider skipping tensor factories in the cases
     // where the constant tensor would be large but cheap to create.
@@ -172,10 +175,9 @@ struct ConstantPropagator {
       std::shared_ptr<Graph> graph,
       bool aliasing_types,
       bool ignore_custom_classes)
-      : graph_(std::move(graph)) {
-    aliasing_types_ = aliasing_types;
-    ignore_custom_classes_ = ignore_custom_classes;
-  }
+      : graph_(std::move(graph)),
+        aliasing_types_(aliasing_types),
+        ignore_custom_classes_(ignore_custom_classes) {}
 
   void propagateNode(Node* n) {
     std::vector<IValue> outputs;
@@ -357,7 +359,7 @@ struct ConstantPropagator {
     }
     return no_mutation && !n->kind().is_onnx() &&
         skip_list.count(n->kind()) == 0 && !n->isNondeterministic() &&
-        !n->hasSideEffects() && n->blocks().size() == 0;
+        !n->hasSideEffects() && n->blocks().empty();
   }
 
   void ConstantPropagation(at::ArrayRef<Block*> blocks) {

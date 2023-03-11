@@ -6,7 +6,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import CUDA11OrLater, SM53OrLater
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
 
 from torch.testing._internal.common_utils import (
     IS_ARM64,
+    IS_JETSON,
     parametrize,
     run_tests,
     TEST_WITH_ROCM,
@@ -40,7 +41,7 @@ class TestMatmulCuda(TestCase):
         super(self.__class__, self).tearDown()
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
     # imported 'tol' as 'xtol' to avoid aliasing in code above
     @toleranceOverride({torch.float16: xtol(atol=1e-1, rtol=1e-1),
                         torch.bfloat16: xtol(atol=1e-1, rtol=1e-1),
@@ -55,6 +56,11 @@ class TestMatmulCuda(TestCase):
         #
         # Get dims
         n, m, p = (size + 1, size, size + 2)
+        # Disable reduced precision reductions in BFloat16 to bypass some kernels
+        # which fail the threshold check
+        orig = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        if dtype == torch.bfloat16 and torch.cuda.get_device_capability() >= (8, 6):
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
         # Make random tensors on CPU (seed set on common_utils.py import)
         # (Not using numpy because it does not support bfloat16)
         make_arg = partial(make_tensor, dtype=dtype, device="cpu")
@@ -93,12 +99,26 @@ class TestMatmulCuda(TestCase):
         res_cuda = res_cuda.to("cpu")
         # Compare
         self.assertEqual(res_cpu, res_cuda)
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
 
     @onlyCUDA
-    @unittest.skipIf(not CUDA11OrLater, "Only CUDA 11+ is supported")
+    def test_cublas_addmm_alignment(self):
+        dtype = torch.half
+        device = 'cuda'
+        A = torch.rand((5120 * 2560 + 1), requires_grad=True, dtype=dtype, device=device)
+        A = A[1:].reshape(5120, 2560)
+        # check that heuristic does not fail on 2-byte alignment
+        X = torch.rand((26, 1, 2560), requires_grad=True, dtype=dtype, device=device)
+        B = torch.rand((5120), requires_grad=True, dtype=dtype, device=device)
+        out = torch.nn.functional.linear(X, A, B)
+        self.assertEqual(out, torch.matmul(X, A.transpose(1, 0)) + B)
+
+    @onlyCUDA
+    @unittest.skipIf(TEST_WITH_ROCM, "Only CUDA 11+ is supported")
+    @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1e-5)})
     @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or (CUDA11OrLater and SM53OrLater) else []))
+              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),

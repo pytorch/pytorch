@@ -9,10 +9,9 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 
-const char sin_name[] = "sin";
+CONSTEXPR_EXCEPT_WIN_CUDA char sin_name[] = "sin";
 void sin_kernel_cuda(TensorIteratorBase& iter) {
   auto common_dtype = iter.common_dtype();
   if (at::isComplexType(common_dtype)) {
@@ -51,5 +50,4 @@ void sin_kernel_cuda(TensorIteratorBase& iter) {
 
 REGISTER_DISPATCH(sin_stub, &sin_kernel_cuda);
 
-} // namespace native
-} // namespace at
+} // namespace at::native

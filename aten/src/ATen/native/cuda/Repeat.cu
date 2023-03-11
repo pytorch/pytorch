@@ -50,8 +50,7 @@ static void compute_cuda(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 Tensor repeat_interleave_cuda(
     const Tensor& repeat,
@@ -65,5 +64,4 @@ Tensor repeat_interleave_cuda(
   return output;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

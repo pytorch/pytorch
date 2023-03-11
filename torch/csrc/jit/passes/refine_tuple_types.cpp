@@ -3,6 +3,8 @@
 
 #include <ATen/core/type_factory.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
 
@@ -25,7 +27,7 @@ static void VisitTupleNode(Node* node) {
   }
 
   // Construct new tuple type based on input types.
-  output->setType(tuple_type.withContained(types));
+  output->setType(tuple_type.withContained(std::move(types)));
 }
 } // anonymous namespace
 

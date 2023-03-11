@@ -47,12 +47,14 @@ static const char* backend_to_string(const at::Backend& backend) {
       return "torch.lazy";
     case at::Backend::XLA:
       return "torch.xla";
+    case at::Backend::Meta:
+      return "torch.meta";
     default:
       AT_ERROR("Unimplemented backend ", backend);
   }
 }
 
-std::string options_to_string(const at::TensorOptions options) {
+std::string options_to_string(const at::TensorOptions& options) {
   std::ostringstream ss;
   ss << backend_to_string(options.backend()) << "."
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";

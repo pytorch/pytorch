@@ -8,10 +8,9 @@
 #include <ATen/native/cuda/Math.cuh>
 #include <ATen/native/cuda/jit_utils.h>
 
-namespace at {
-    namespace native {
+namespace at::native {
         namespace {
-            const char chebyshev_polynomial_u_name[] = "chebyshev_polynomial_u_forward";
+            CONSTEXPR_EXCEPT_WIN_CUDA char chebyshev_polynomial_u_name[] = "chebyshev_polynomial_u_forward";
 
             void chebyshev_polynomial_u_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
@@ -29,5 +28,4 @@ namespace at {
         } // namespace (anonymous)
 
         REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_kernel_cuda);
-    } // namespace native
-} // namespace at
+} // namespace at::native

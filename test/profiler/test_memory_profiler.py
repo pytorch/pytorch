@@ -844,14 +844,17 @@ class TestMemoryProfilerE2E(TestCase):
             if key.storage.allocation_id == max(ids | {-1})
         }
 
-    def _run_and_check_parameters_and_gradients(self, inner_fn, model):
+    def _run_and_check_parameters_and_gradients(self, inner_fn, model, grads_none: bool = False):
 
         with profile() as prof:
             inner_fn()
 
         memory_profile = prof._memory_profile()
 
-        def assert_category(t: torch.Tensor, category: _memory_profiler.Category):
+        def assert_category(t: torch.Tensor, category: _memory_profiler.Category, should_be_none: bool = False):
+            if should_be_none:
+                assert t is None, "tensor should be None but is not."
+                return
             self.assertIsNotNone(t)
             categories = self._lookup_tensor_categories(t, memory_profile)
             self.assertGreater(len(categories), 0)
@@ -859,7 +862,7 @@ class TestMemoryProfilerE2E(TestCase):
 
         for p in model.parameters():
             assert_category(p, _memory_profiler.Category.PARAMETER)
-            assert_category(p.grad, _memory_profiler.Category.GRADIENT)
+            assert_category(p.grad, _memory_profiler.Category.GRADIENT, grads_none)
 
         # Rely on internal asserts
         _ = memory_profile.timeline
@@ -929,16 +932,15 @@ class TestMemoryProfilerE2E(TestCase):
             _ = model(torch.ones((2, 2)))
 
         def fwd_bwd_step():
+            optimizer.zero_grad()
             y = model(torch.ones((2, 2)))
             torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
             optimizer.step()
-            optimizer.zero_grad()
 
         # If we profile the first step then gradients will not have been
         # created when we call `model.forward`, so if we don't call `.backward`
         # then gradients are never created.
-        with self.assertRaises(AssertionError):
-            self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model)
+        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model, grads_none=True)
 
         # On the first step we must rely on `AccumulateGrad`, since gradients
         # did not exist when `model.forward` was called.
@@ -1078,10 +1080,10 @@ class TestMemoryProfilerE2E(TestCase):
 
         def inner_fn():
             y = model(torch.ones((2, 2)))
-            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
             optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-            optimizer.step()
             optimizer.zero_grad()
+            torch.nn.functional.mse_loss(y, torch.rand((2, 1))).backward()
+            optimizer.step()
 
         self._run_and_check_parameters_and_gradients(inner_fn=inner_fn, model=model)
         self.assertEqual(len(list(model.parameters())), 6)
@@ -1220,9 +1222,7 @@ class TestMemoryProfilerE2E(TestCase):
 
             -- Optimizer --------------------------------------------------------------------------------------------
             aten::add_.Tensor                        3 (PARAMETER), 25 (GRADIENT)                  -> 3 (PARAMETER)
-            aten::add_.Tensor                        5 (PARAMETER), 23 (GRADIENT)                  -> 5 (PARAMETER)
-            aten::zero_                              25 (GRADIENT)                                 -> 25 (GRADIENT)
-            aten::zero_                              23 (GRADIENT)                                 -> 23 (GRADIENT)""",
+            aten::add_.Tensor                        5 (PARAMETER), 23 (GRADIENT)                  -> 5 (PARAMETER)""",
         )
 
     def test_categories_e2e_simple_module_fwd(self) -> None:
@@ -1317,9 +1317,7 @@ class TestMemoryProfilerE2E(TestCase):
             aten::clone                              9 (GRADIENT)                                  -> 11 (OPTIMIZER_STATE)
             aten::detach                             11 (OPTIMIZER_STATE)                          -> 11 (OPTIMIZER_STATE)
             aten::detach                             11 (OPTIMIZER_STATE)                          -> 11 (OPTIMIZER_STATE)
-            aten::add_.Tensor                        3 (PARAMETER), 11 (OPTIMIZER_STATE)           -> 3 (PARAMETER)
-            aten::zero_                              7 (GRADIENT)                                  -> 7 (GRADIENT)
-            aten::zero_                              9 (GRADIENT)                                  -> 9 (GRADIENT)""",
+            aten::add_.Tensor                        3 (PARAMETER), 11 (OPTIMIZER_STATE)           -> 3 (PARAMETER)""",
         )
 
     def test_categories_e2e_sequential_fwd(self) -> None:
@@ -1550,9 +1548,9 @@ class TestMemoryProfilerE2E(TestCase):
             destroy                    ???                         27(v1)            2 kB
             increment_version          PARAMETER                    2(v0)         1024 kB
             destroy                    ???                         29(v1)         1024 kB
-            increment_version          GRADIENT                    16(v0)          128 kB
-            increment_version          GRADIENT                    17(v0)            2 kB
-            increment_version          GRADIENT                    13(v0)         1024 kB""")
+            destroy                    GRADIENT                    16(v0)          128 kB
+            destroy                    GRADIENT                    17(v0)            2 kB
+            destroy                    GRADIENT                    13(v0)         1024 kB""")
 
 
 if __name__ == "__main__":

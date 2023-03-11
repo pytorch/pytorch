@@ -55,7 +55,7 @@ class Transformer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(Transformer, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
 
         if custom_encoder is not None:
@@ -94,9 +94,9 @@ class Transformer(Module):
             src_mask: the additive mask for the src sequence (optional).
             tgt_mask: the additive mask for the tgt sequence (optional).
             memory_mask: the additive mask for the encoder output (optional).
-            src_key_padding_mask: the ByteTensor mask for src keys per batch (optional).
-            tgt_key_padding_mask: the ByteTensor mask for tgt keys per batch (optional).
-            memory_key_padding_mask: the ByteTensor mask for memory keys per batch (optional).
+            src_key_padding_mask: the Tensor mask for src keys per batch (optional).
+            tgt_key_padding_mask: the Tensor mask for tgt keys per batch (optional).
+            memory_key_padding_mask: the Tensor mask for memory keys per batch (optional).
 
         Shape:
             - src: :math:`(S, E)` for unbatched input, :math:`(S, N, E)` if `batch_first=False` or
@@ -111,13 +111,11 @@ class Transformer(Module):
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
             Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
-            positions. If a ByteTensor is provided, the non-zero positions are not allowed to attend
-            while the zero positions will be unchanged. If a BoolTensor is provided, positions with ``True``
+            positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
             is provided, it will be added to the attention weight.
             [src/tgt/memory]_key_padding_mask provides specified elements in the key to be ignored by
-            the attention. If a ByteTensor is provided, the non-zero positions will be ignored while the zero
-            positions will be unchanged. If a BoolTensor is provided, the positions with the
+            the attention. If a BoolTensor is provided, the positions with the
             value of ``True`` will be ignored while the position with the value of ``False`` will be unchanged.
 
             - output: :math:`(T, E)` for unbatched input, :math:`(T, N, E)` if `batch_first=False` or
@@ -186,7 +184,7 @@ class TransformerEncoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
-        super(TransformerEncoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
@@ -213,11 +211,23 @@ class TransformerEncoder(Module):
         Shape:
             see the docs in Transformer class.
         """
-        if src_key_padding_mask is not None:
-            _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
-                raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(mask),
+            other_name="mask",
+            target_type=src.dtype
+        )
+
+        mask = F._canonical_mask(
+            mask=mask,
+            mask_name="mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
+        )
+
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
@@ -331,7 +341,7 @@ class TransformerDecoder(Module):
     __constants__ = ['norm']
 
     def __init__(self, decoder_layer, num_layers, norm=None):
-        super(TransformerDecoder, self).__init__()
+        super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
         self.num_layers = num_layers
@@ -398,7 +408,8 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Fast path:
-        forward() will use a special optimized implementation if all of the following
+        forward() will use a special optimized implementation described in
+        `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
         conditions are met:
 
         - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor
@@ -418,6 +429,10 @@ class TransformerEncoderLayer(Module):
         mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ will be
         returned, and an additional speedup proportional to the fraction of the input that
         is padding can be expected.
+
+        .. _`FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`:
+         https://arxiv.org/abs/2205.14135
+
     """
     __constants__ = ['batch_first', 'norm_first']
 
@@ -426,7 +441,7 @@ class TransformerEncoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerEncoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         # Implementation of Feedforward model
@@ -455,7 +470,7 @@ class TransformerEncoderLayer(Module):
         self.activation = activation
 
     def __setstate__(self, state):
-        super(TransformerEncoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
         if not hasattr(self, 'activation'):
             self.activation = F.relu
 
@@ -471,19 +486,30 @@ class TransformerEncoderLayer(Module):
         Args:
             src: the sequence to the encoder layer (required).
             src_mask: the mask for the src sequence (optional).
-            is_causal: If specified, applies a causal mask as src_mask. Mutually exclusive with providing src_mask.
+            is_causal: If specified, applies a causal mask as src_mask.
               Default: ``False``.
             src_key_padding_mask: the mask for the src keys per batch (optional).
 
         Shape:
             see the docs in Transformer class.
         """
+        src_key_padding_mask = F._canonical_mask(
+            mask=src_key_padding_mask,
+            mask_name="src_key_padding_mask",
+            other_type=F._none_or_dtype(src_mask),
+            other_name="src_mask",
+            target_type=src.dtype
+        )
 
-        if src_key_padding_mask is not None:
-            _skpm_dtype = src_key_padding_mask.dtype
-            if _skpm_dtype != torch.bool and not torch.is_floating_point(src_key_padding_mask):
-                raise AssertionError(
-                    "only bool and floating types of key_padding_mask are supported")
+        src_mask = F._canonical_mask(
+            mask=src_mask,
+            mask_name="src_mask",
+            other_type=None,
+            other_name="",
+            target_type=src.dtype,
+            check_other=False,
+        )
+
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
         if not src.dim() == 3:
@@ -623,7 +649,7 @@ class TransformerDecoderLayer(Module):
                  layer_norm_eps: float = 1e-5, batch_first: bool = False, norm_first: bool = False,
                  device=None, dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(TransformerDecoderLayer, self).__init__()
+        super().__init__()
         self.self_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
                                             **factory_kwargs)
         self.multihead_attn = MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=batch_first,
@@ -650,7 +676,7 @@ class TransformerDecoderLayer(Module):
     def __setstate__(self, state):
         if 'activation' not in state:
             state['activation'] = F.relu
-        super(TransformerDecoderLayer, self).__setstate__(state)
+        super().__setstate__(state)
 
     def forward(
         self,
@@ -720,6 +746,7 @@ class TransformerDecoderLayer(Module):
 
 
 def _get_clones(module, N):
+    # FIXME: copy.deepcopy() is not defined on nn.module
     return ModuleList([copy.deepcopy(module) for i in range(N)])
 
 

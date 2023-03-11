@@ -140,12 +140,46 @@ class TestPrims(TestCase):
 
                 self.assertEqual(y, y_np, exact_device=False)
 
+    @dtypes(torch.float32)
+    def test_collapse(self, device, dtype):
+        t = torch.rand(2, 2, 2)
+        dim_ranges = [(0, 0), (0, 1), (1, 2), (0, 2)]
+        expected_shapes = [(2, 2, 2), (4, 2), (2, 4), (8,)]
+
+        for (start, end), shape in zip(dim_ranges, expected_shapes):
+            expect = t.reshape(shape)
+
+            copy = prims.collapse(t, start, end)
+            self.assertEqual(copy, expect)
+            self.assertFalse(copy._is_view())
+
+            view = prims.collapse_view(t, start, end)
+            self.assertEqual(view, expect)
+            self.assertTrue(view._is_view())
+
+        t_discontig = t.transpose(0, 1)
+        with self.assertRaises(ValueError, msg="no such view exists"):
+            view = prims.collapse_view(t_discontig, 0, 2)
+
+        copy = prims.collapse(t_discontig, 0, 1)
+        self.assertEqual(copy, t_discontig.reshape(4, 2))
+
+        error_dims = [(-1, 1), (0, 3), (1, -1)]
+        for start, end in error_dims:
+            for fn in [prims.collapse, prims.collapse_view]:
+                with self.assertRaises(AssertionError):
+                    fn(t, start, end)
+
     @onlyCUDA
     def test_nvfuser_impl_is_used(self, device):
         # This test is to ensure that when the nvfuser implementation exists it is used
         # Assuming one-to-one mapping between prims and nvfuser implementations
         # This test is not intended to test the correctness of the nvfuser implementation
-        from torch._C._nvfuser import FusionDefinition as fd
+        try:
+            from nvfuser import FusionDefinition as fd
+        except ImportError:
+            from nvfuser._C import FusionDefinition as fd
+
 
         prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.ops))
         ops_without_nvfuser_impl = {
@@ -1164,8 +1198,7 @@ class TestDecomp(TestCase):
     @onlyCUDA
     @dtypes(torch.float16, torch.float32)
     def test_masked_fill_decomposition_under_nvprim_context(self, device, dtype):
-        # masked_fill decomposition extracts cpu scalar tensor value when
-        # filling out a cuda tensor. This triggers data-dependent control flow
+        # Test masked_fill decomposition doesn't trigger data-dependent control flow
         # on TorchRefsNvfuser speculative lowering.
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsNvfuserCapabilityMode
@@ -1184,7 +1217,7 @@ class TestDecomp(TestCase):
             with TorchRefsNvfuserCapabilityMode():
                 gm = make_fx(gm)(x, mask, y)
         # masked_fill decomposition fails inside `get_isolated_graphmodule`
-        self.assertTrue(any(GET_ISOLATED_GRAPHMODULE_ERROR in str(w.message) for w in caught))
+        self.assertFalse(any(GET_ISOLATED_GRAPHMODULE_ERROR in str(w.message) for w in caught))
 
     @ops([op for op in op_db if op.supports_varargs], dtypes=OpDTypes.any_one)
     def test_decomposition_method_vararg(self, device, dtype, op):

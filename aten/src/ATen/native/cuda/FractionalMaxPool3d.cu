@@ -27,8 +27,7 @@
 #include <cfloat>
 #include <cmath>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -341,5 +340,4 @@ Tensor fractional_max_pool3d_backward_cuda(
     return gradInput;
  }
 
-}// native
-}// at
+}// namespace at::native

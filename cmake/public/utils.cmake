@@ -429,18 +429,6 @@ function(torch_compile_options libname)
         ${MSVC_RUNTIME_LIBRARY_OPTION}
         $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:${MSVC_DEBINFO_OPTION}>
         /EHsc
-        /DNOMINMAX
-        /wd4267
-        /wd4251
-        /wd4522
-        /wd4522
-        /wd4838
-        /wd4305
-        /wd4244
-        /wd4190
-        /wd4101
-        /wd4996
-        /wd4275
         /bigobj>
       )
   else()
@@ -451,7 +439,6 @@ function(torch_compile_options libname)
       -Wno-unused-function
       -Wno-unused-result
       -Wno-missing-field-initializers
-      -Wno-write-strings
       -Wno-unknown-pragmas
       -Wno-type-limits
       -Wno-array-bounds
@@ -511,26 +498,6 @@ function(torch_compile_options libname)
       $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<OR:$<CONFIG:Release>,$<CONFIG:RelWithDebInfo>>>:-O2>)
 
 endfunction()
-
-
-##############################################################################
-# Set standard target properties.
-# Usage:
-#   torch_set_target_props(lib_name)
-function(torch_set_target_props libname)
-  if(MSVC AND AT_MKL_MT)
-    set(VCOMP_LIB "vcomp")
-    set_target_properties(${libname} PROPERTIES LINK_FLAGS_MINSIZEREL "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES LINK_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES LINK_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
-    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_MINSIZEREL "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELWITHDEBINFO "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_RELEASE "/NODEFAULTLIB:${VCOMP_LIB}")
-    set_target_properties(${libname} PROPERTIES STATIC_LIBRARY_FLAGS_DEBUG "/NODEFAULTLIB:${VCOMP_LIB}d")
-  endif()
-endfunction()
-
 
 ##############################################################################
 # Set old-style FindCuda.cmake compile flags from modern CMake cuda flags.

@@ -2,8 +2,10 @@ import copy
 import logging
 import random
 import weakref
+from typing import Optional
 
 import torch
+import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import fake_mode_from_tensors
@@ -18,6 +20,7 @@ from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 from torch.overrides import TorchFunctionMode
 
 from . import config
+from .fx_utils import matches_module_function_pattern
 
 from .mkldnn import mkldnn_fuse_fx
 
@@ -55,13 +58,16 @@ def replace_fx(gm: torch.fx.GraphModule):
                     )
                 )
             gm.graph.erase_node(node)
+    gm.graph.lint()
     gm.recompile()
     return gm
 
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     is_cpu = all(
-        example_input.device == torch.device("cpu") for example_input in example_inputs
+        example_input.device == torch.device("cpu")
+        for example_input in example_inputs
+        if isinstance(example_input, torch.Tensor)
     )
 
     fake_mode = fake_mode_from_tensors(example_inputs)
@@ -83,36 +89,13 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     gm = remove_identity(gm)
     gm = fuse_conv_bn(gm)
     # do mkldnn fusion(conv(linear)+unary(binary)
-    gm = mkldnn_fuse_fx(gm, example_inputs)
+    # This is skipped when dynamic shapes is enabled, as the resulting
+    # mkl packing ops don't support dynamic shapes.  Once they do support,
+    # you can remove this.  A good test case is wav2vec2, see
+    # https://github.com/pytorch/pytorch/issues/91719
+    if not dynamo_config.dynamic_shapes:
+        gm = mkldnn_fuse_fx(gm, example_inputs)
     return gm
-
-
-# check the pattern: (nn.module, F.function) matched.
-def matches_module_function_pattern(pattern, node, modules):
-    if len(node.args) == 0:
-        return False
-    if not isinstance(node.args[0], torch.fx.Node) or not isinstance(
-        node, torch.fx.Node
-    ):
-        return False
-    # the first node is call_module
-    if node.args[0].op != "call_module":
-        return False
-    if not isinstance(node.args[0].target, str):
-        return False
-    if node.args[0].target not in modules:
-        return False
-    if type(modules[node.args[0].target]) is not pattern[0]:
-        return False
-    # the second node is call_function
-    if node.op != "call_function":
-        return False
-    if node.target != pattern[1]:
-        return False
-    # make sure node.args[0] output is only used by current node.
-    if len(node.args[0].users) > 1:
-        return False
-    return True
 
 
 def fetch_attr(target: str, mod):
@@ -174,7 +157,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     for pattern in module_function_patterns:
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
@@ -212,7 +195,7 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
                 replace_node_module(node.args[0], modules, fused_conv)
                 node.replace_all_uses_with(node.args[0])
                 gm.graph.erase_node(node)
-                gm.graph.lint()
+    gm.graph.lint()
     gm.recompile()
 
     return gm
@@ -249,7 +232,7 @@ class NormalizedLinearNode:
         if len(self.node.args) > 2:
             return self.node.args[2]
         else:
-            return self.node.kwargs["bias"]
+            return self.node.kwargs["bias"] if "bias" in self.node.kwargs else None
 
 
 class NormalizedMatmulNode:
@@ -316,15 +299,11 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
-                new_args = (
-                    [
-                        g.create_node(
-                            user.op, user.target, args=(arg,), kwargs=user.kwargs
-                        )
-                        for arg in node.args[0]
-                    ],
-                )
-                node.args = new_args
+                new_tensors = [
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    for arg in node.args[0]
+                ]
+                node.args = (new_tensors,) + node.args[1:]
                 user.replace_all_uses_with(cat_or_view)
                 g.erase_node(user)
     g.lint()
@@ -370,8 +349,10 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = (W * X^T + bias.unsqueeze(-1))^T
 def linear_transpose(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(weight, input.transpose(-1, -2))
     return torch.matmul(weight, input.transpose(-1, -2)) + bias.unsqueeze(-1)
 
 
@@ -464,8 +445,10 @@ def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 # ---->
 # Y2 = X1.transpose(-1, -2) * W1^T + bias1
 def transpose_linear(
-    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+    input: torch.Tensor, weight: torch.Tensor, bias: Optional[torch.Tensor]
 ) -> torch.Tensor:
+    if bias is None:
+        return torch.matmul(input.transpose(-1, -2), weight.t())
     return torch.matmul(input.transpose(-1, -2), weight.t()) + bias
 
 
@@ -478,7 +461,7 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
 
 
 philox_rand_like = _prims._make_prim(
-    schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
+    schema="philox_rand_like(Tensor input, Tensor seed, SymInt offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
     meta=_philox_rand_like_meta,
     impl_aten=_philox_rand_like,

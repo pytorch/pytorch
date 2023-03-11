@@ -19,12 +19,29 @@ from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import (  # type: ignore[import]
-        DataType,
-        Fusion,
-        FusionDefinition,
-        Tensor,
-    )
+    try:
+        from nvfuser import (  # type: ignore[attr-defined, import]
+            DataType,
+            FusionDefinition,
+            Tensor,
+        )
+
+        def create_fusion_definition():
+            fd = FusionDefinition()
+            return fd, fd
+
+    except ImportError:
+        from nvfuser._C import (  # type: ignore[import]
+            DataType,
+            Fusion,
+            FusionDefinition,
+            Tensor,
+        )
+
+        def create_fusion_definition():
+            fusion = Fusion()
+            return fusion, FusionDefinition(fusion)
+
 else:
     DataType = None
 
@@ -74,7 +91,12 @@ def compute_contiguity(shape, strides):
     Contiguous dimensions are represented by True, strided dimensions
     are represented by False.
     """
-    return torch._C._nvfuser.compute_contiguity(shape, strides)
+    try:
+        from nvfuser import compute_contiguity  # type: ignore[attr-defined]
+    except ImportError:
+        from nvfuser._C import compute_contiguity
+
+    return tuple(compute_contiguity(shape, strides))
 
 
 def to_nvfuser_template_args(args):
@@ -146,8 +168,8 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     output_node = next(filter(lambda n: n.op == "output", gm.graph.nodes))
     orig_flat_out, _ = tree_flatten(output_node.args[0])
 
-    fusion = Fusion()
-    with FusionDefinition(fusion) as fd:
+    fusion, fd = create_fusion_definition()
+    with fd:
 
         def _to_nvfuser_constant(arg):
             if isinstance(arg, Number):

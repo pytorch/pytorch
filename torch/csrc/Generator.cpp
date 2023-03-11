@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <structmember.h>
 
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -15,6 +16,10 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#endif
+
+#ifdef USE_MPS
+#include <ATen/mps/MPSGeneratorImpl.h>
 #endif
 
 using namespace at;
@@ -52,25 +57,26 @@ static PyObject* THPGenerator_pynew(
   auto device = r.deviceWithDefault(0, at::Device(at::kCPU));
 
   THPGeneratorPtr self((THPGenerator*)type->tp_alloc(type, 0));
-#ifdef USE_CUDA
   if (device.type() == at::kCPU) {
     self->cdata = make_generator<CPUGeneratorImpl>();
-  } else if (device.type() == at::kCUDA) {
+  }
+#ifdef USE_CUDA
+  else if (device.type() == at::kCUDA) {
     self->cdata = make_generator<CUDAGeneratorImpl>(device.index());
+  }
+#elif USE_MPS
+  else if (device.type() == at::kMPS) {
+    self->cdata = make_generator<MPSGeneratorImpl>();
+  }
+#endif
+  else if (device.type() == at::kPrivateUse1) {
+    self->cdata = at::GetGeneratorForPrivateuse1(device.index());
   } else {
     AT_ERROR(
         "Device type ",
         c10::DeviceTypeName(device.type()),
         " is not supported for torch.Generator() api.");
   }
-#else
-  TORCH_CHECK(
-      device.type() == at::kCPU,
-      "Device type ",
-      c10::DeviceTypeName(device.type()),
-      " is not supported for torch.Generator() api.");
-  self->cdata = make_generator<CPUGeneratorImpl>();
-#endif
   return (PyObject*)self.release();
   END_HANDLE_TH_ERRORS
 }

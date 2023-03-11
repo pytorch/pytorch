@@ -160,7 +160,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
     return default_device_ordinal_;
   }
 
-  virtual void SetDefaultDeviceOrdinal(int64_t ordinal) override {
+  void SetDefaultDeviceOrdinal(int64_t ordinal) override {
     default_device_ordinal_ = ordinal;
   }
 

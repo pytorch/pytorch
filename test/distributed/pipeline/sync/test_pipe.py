@@ -18,6 +18,7 @@ from torch import Tensor
 
 from torch.distributed.pipeline.sync import Pipe, NoChunk, WithDevice
 from torch.distributed.pipeline.sync.pipe import PipeSequential
+from torch.testing._internal.common_utils import run_tests
 
 skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
 
@@ -662,7 +663,7 @@ def test_named_children(setup_rpc):
     model = nn.Sequential(OrderedDict([("a", a), ("b", b)]))
     model = Pipe(model)
 
-    names = set(n for n, _ in model.named_modules())
+    names = {n for n, _ in model.named_modules()}
     assert "partitions.0.0" in names
     assert "partitions.1.0" in names
 
@@ -819,3 +820,7 @@ def test_with_device_wrapper(setup_rpc):
     assert torch.device('cuda:0') == model(torch.rand(16, 16).cuda(0)).local_value().device
     assert [torch.device('cuda:0')] == model.devices
     assert torch.device('cuda:0') == fc2.weight.device
+
+
+if __name__ == "__main__":
+    run_tests()

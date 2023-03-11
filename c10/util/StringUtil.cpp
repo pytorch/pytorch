@@ -1,4 +1,3 @@
-#include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 
 #include <cstring>

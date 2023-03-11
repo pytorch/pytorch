@@ -261,7 +261,7 @@ using namespace c10::hip;
 // to resolve potential warnings.
 #if __CUDA_ARCH__ == 750
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1024;
-#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870
+#elif __CUDA_ARCH__ == 860 || __CUDA_ARCH__ == 870 || __CUDA_ARCH__ == 890
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 1536;
 #else
 constexpr uint32_t CUDA_MAX_THREADS_PER_SM = 2048;
@@ -384,7 +384,7 @@ __host__ __device__
         const char* assertion,
         const char* file,
         unsigned int line,
-        const char* function) throw() __attribute__((__noreturn__));
+        const char* function) noexcept __attribute__((__noreturn__));
 
 #if (defined(__HIP_ARCH__) || defined(__HIP__)) && \
     !defined(TORCH_DISABLE_GPU_ASSERTS)
@@ -434,8 +434,7 @@ __device__ __attribute__((noinline)) __attribute__((weak)) void __assert_fail(
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
 // treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && \
-    !(defined(__clang__) && defined(_LIBCPP_VERSION))
+#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
 #define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value

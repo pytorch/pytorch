@@ -46,7 +46,7 @@ class TORCH_API RandomSampler : public Sampler<> {
   size_t index() const noexcept;
 
  private:
-  Tensor indices_;
+  at::Tensor indices_;
   int64_t index_ = 0;
 };
 } // namespace samplers

@@ -112,7 +112,7 @@ def _report_compression_stats(bucket, state):
         state.next_stats_report = state.iter + state.compression_stats_logging_frequency
 
 
-class PowerSGDState(object):
+class PowerSGDState:
     r"""
     Stores both the algorithm's hyperparameters and the internal state for all the gradients during the training.
     Particularly, ``matrix_approximation_rank`` and ``start_powerSGD_iter`` are the main hyperparameters that should be tuned by the user.

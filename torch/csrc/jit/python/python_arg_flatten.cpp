@@ -5,9 +5,7 @@
 
 #include <torch/csrc/autograd/grad_mode.h>
 
-namespace torch {
-namespace jit {
-namespace python {
+namespace torch::jit::python {
 
 using namespace torch::autograd;
 using namespace at;
@@ -194,6 +192,4 @@ PyObject* unflatten(ArrayRef<Variable> vars, const IODescriptor& desc) {
   return output.release().ptr();
 }
 
-} // namespace python
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::python

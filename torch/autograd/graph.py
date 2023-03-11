@@ -5,6 +5,7 @@ from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
 from collections import defaultdict
 import weakref
+import abc
 
 __all__ = [
     "saved_tensors_hooks",
@@ -12,7 +13,120 @@ __all__ = [
     "disable_saved_tensors_hooks",
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
+    "Node",
 ]
+
+class Node(abc.ABC):
+    @abc.abstractmethod
+    def name(self) -> str:
+        r"""Returns the name.
+
+        Example::
+
+            >>> import torch
+            >>> a = torch.tensor([0., 0., 0.], requires_grad=True)
+            >>> b = a.clone()
+            >>> assert isinstance(b.grad_fn, torch.autograd.graph.Node)
+            >>> print(b.grad_fn.name())
+            CloneBackward0
+        """
+        ...
+
+    @property
+    @abc.abstractmethod
+    def next_functions(self) -> Tuple[Tuple[Optional['Node'], int], ...]:
+        ...
+
+    @abc.abstractmethod
+    def metadata(self) -> dict:
+        r"""Returns the metadata."""
+        ...
+
+    @abc.abstractmethod
+    def _register_hook_dict(self, tensor: torch.Tensor) -> None:
+        ...
+
+    @abc.abstractmethod
+    def register_hook(self, fn: Callable[..., Any]) -> RemovableHandle:
+        r"""Registers a backward hook.
+
+        The hook will be called every time a gradient with respect to the
+        Node is computed. The hook should have the following signature::
+
+            hook(grad_inputs: Tuple[Tensor], grad_outputs: Tuple[Tensor]) -> Tuple[Tensor] or None
+
+
+        The hook should not modify its argument, but it can optionally return
+        a new gradient which will be used in place of :attr:`grad_outputs`.
+
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
+
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
+        Example::
+
+            >>> import torch
+            >>> a = torch.tensor([0., 0., 0.], requires_grad=True)
+            >>> b = a.clone()
+            >>> assert isinstance(b.grad_fn, torch.autograd.graph.Node)
+            >>> handle = b.grad_fn.register_hook(lambda gI, gO: (gO[0] * 2,))
+            >>> b.sum().backward(retain_graph=True)
+            >>> print(a.grad)
+            tensor([2., 2., 2.])
+            >>> handle.remove() # Removes the hook
+            >>> a.grad = None
+            >>> b.sum().backward(retain_graph=True)
+            >>> print(a.grad)
+            tensor([1., 1., 1.])
+        """
+        ...
+
+    @abc.abstractmethod
+    def register_prehook(self, fn: Callable[..., Any]) -> RemovableHandle:
+        r"""Registers a backward pre-hook.
+
+        The hook will be called every time a gradient with respect to the
+        Node is computed. The hook should have the following signature::
+
+            hook(grad_outputs: Tuple[Tensor]) -> Tuple[Tensor] or None
+
+        The hook should not modify its argument, but it can optionally return
+        a new gradient which will be used in place of :attr:`grad_outputs`.
+
+        This function returns a handle with a method ``handle.remove()``
+        that removes the hook from the module.
+
+        .. note::
+            See :ref:`backward-hooks-execution` for more information on how when this hook
+            is executed, and how its execution is ordered relative to other hooks.
+
+        Example::
+
+            >>> a = torch.tensor([0., 0., 0.], requires_grad=True)
+            >>> b = a.clone()
+            >>> assert isinstance(b.grad_fn, torch.autograd.graph.Node)
+            >>> handle = b.grad_fn.register_prehook(lambda gI: (gI[0] * 2,))
+            >>> b.sum().backward(retain_graph=True)
+            >>> print(a.grad)
+            tensor([2., 2., 2.])
+            >>> handle.remove()
+            >>> a.grad = None
+            >>> b.sum().backward(retain_graph=True)
+            >>> print(a.grad)
+            tensor([1., 1., 1.])
+        """
+        ...
+
+    @classmethod
+    def __subclasshook__(cls, C):
+        if cls is Node:
+            if ((C is not None and C is getattr(torch._C._functions, C.__name__, None))
+                    or issubclass(C, torch.autograd.function.BackwardCFunction)):
+                return True
+        return NotImplemented
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -200,6 +314,10 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
 
     This function returns a handle with a method ``handle.remove()`` that removes the hook.
 
+    .. note::
+        See :ref:`backward-hooks-execution` for more information on how when this hook
+        is executed, and how its execution is ordered relative to other hooks.
+
     Example::
 
         >>> import torch
@@ -227,7 +345,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     def get_grad_fn(t):
         # or grad accumulator
         if t.requires_grad and t.grad_fn is None:
-            return t.clone().grad_fn.next_functions[0][0]
+            return t.expand_as(t).grad_fn.next_functions[0][0]
         else:
             return t.grad_fn
 

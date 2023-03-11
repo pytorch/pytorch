@@ -77,8 +77,7 @@ def run_command(
     try:
         return subprocess.run(
             args,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             check=False,
         )
     finally:
@@ -106,8 +105,7 @@ def clang_search_dirs() -> List[str]:
     result = subprocess.run(
         [compiler, "-E", "-x", "c++", "-", "-v"],
         stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         check=True,
     )
     stderr = result.stderr.decode().strip().split("\n")
@@ -204,6 +202,7 @@ def main() -> None:
         help="clang-tidy binary path",
     )
     parser.add_argument(
+        "--build-dir",
         "--build_dir",
         required=True,
         help=(
@@ -253,6 +252,14 @@ def main() -> None:
 
     abs_build_dir = Path(args.build_dir).resolve()
 
+    # Get the absolute path to clang-tidy and use this instead of the relative
+    # path such as .lintbin/clang-tidy. The problem here is that os.chdir is
+    # per process, and the linter uses it to move between the current directory
+    # and the build folder. And there is no .lintbin directory in the latter.
+    # When it happens in a race condition, the linter command will fails with
+    # the following no such file or directory error: '.lintbin/clang-tidy'
+    binary_path = os.path.abspath(args.binary)
+
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=os.cpu_count(),
         thread_name_prefix="Thread",
@@ -261,7 +268,7 @@ def main() -> None:
             executor.submit(
                 check_file,
                 filename,
-                args.binary,
+                binary_path,
                 abs_build_dir,
             ): filename
             for filename in args.filenames

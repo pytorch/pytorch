@@ -390,7 +390,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   KERNEL(rnn_tanh_cell, lower_precision_fp)
   KERNEL(rnn_relu_cell, lower_precision_fp)
   KERNEL(_scaled_dot_product_flash_attention, lower_precision_fp)
-  KERNEL(_scaled_dot_product_attention, lower_precision_fp)
+  KERNEL(scaled_dot_product_attention, lower_precision_fp)
 
   // fp32
   KERNEL(acos, fp32)
@@ -506,11 +506,13 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(_convolution, deprecated, lower_precision_fp)
   KERNEL_CPU(matmul, lower_precision_fp)
   KERNEL_CPU(conv_tbc, lower_precision_fp)
+  KERNEL_CPU(mkldnn_rnn_layer, lower_precision_fp)
+  KERNEL_CPU(conv_transpose1d, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_CPU2(conv_transpose3d, input, lower_precision_fp)
+  KERNEL_CPU(prelu, lower_precision_fp)
 
   // fp32 cast policy
-  KERNEL_CPU(conv_transpose1d, fp32)
-  KERNEL_CPU2(conv_transpose2d, input, fp32)
-  KERNEL_CPU2(conv_transpose3d, input, fp32)
   KERNEL_CPU(avg_pool3d, fp32)
   KERNEL_CPU(binary_cross_entropy, fp32)
   KERNEL_CPU(grid_sampler, fp32)
@@ -600,7 +602,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(_lu_with_info, fp32)
   KERNEL_CPU(qr, fp32)
   KERNEL_CPU(svd, fp32)
-  KERNEL_CPU(symeig, fp32)
   KERNEL_CPU(triangular_solve, fp32)
   KERNEL_CPU(fractional_max_pool2d, fp32)
   KERNEL_CPU(fractional_max_pool3d, fp32)

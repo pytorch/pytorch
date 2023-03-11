@@ -20,7 +20,6 @@ using torch::distributed::rpc::JitFuture;
 using torch::distributed::rpc::Message;
 using torch::distributed::rpc::MessageType;
 using torch::distributed::rpc::RpcAgent;
-using torch::distributed::rpc::RpcCommandBase;
 using torch::distributed::rpc::WorkerInfo;
 
 void addSendRpcBackward(
@@ -93,7 +92,6 @@ c10::intrusive_ptr<Message> getMessageWithProfiling(
   auto wrappedProfilingMsg = RpcWithProfilingReq(
       msgType,
       std::move(wrappedRpcMessage),
-      // NOLINTNEXTLINE(performance-move-const-arg)
       std::move(profilerConfig),
       globallyUniqueProfilingId);
 
@@ -165,7 +163,6 @@ c10::intrusive_ptr<JitFuture> sendMessageWithAutograd(
         auto msgWithProfiling = getMessageWithProfiling(
             std::move(msg),
             rpc::MessageType::RUN_WITH_PROFILING_REQ,
-            // NOLINTNEXTLINE(performance-move-const-arg)
             std::move(profilerConfig));
         return agent.send(dst, std::move(msgWithProfiling), rpcTimeoutSeconds);
       }

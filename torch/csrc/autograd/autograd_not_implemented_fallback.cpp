@@ -13,6 +13,7 @@
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/functions/utils.h>
 
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -114,7 +115,7 @@ void autogradNotImplementedFallbackImpl(
       stack_start,
       num_arguments);
 
-  const bool any_requires_grad = tensors_requiring_grad_on_stack.size() > 0;
+  const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
@@ -184,7 +185,15 @@ void autogradNotImplementedFallbackImpl(
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
               t.use_count() <= 1, op_name); // Okay to return undefined tensor
-        if (!is_aliased_output[idx_ret] && t.has_storage())
+        // note(crcrpar): `_foreach_norm` returns a list of scalar Tensors and
+        // each Tensor shares a storage of a hidden, intermediate 1D Tensor
+        // created inside the CUDA implementation. This is because the
+        // reference implementation of nvidia/apex repo returns this 1D Tensor
+        // where each element represents the norm of corresponding input Tensor,
+        // here I want to return the same number of Tensors as the input
+        // TensorList, see https://github.com/pytorch/pytorch/issues/93940
+        if (!is_aliased_output[idx_ret] && t.has_storage() &&
+            op_name != "aten::_foreach_norm")
           TORCH_INTERNAL_ASSERT(t.storage().use_count() == 1);
       },
       stack,
@@ -348,7 +357,7 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::MULTI_OUTPUT_NODE
                                             : CreationMeta::NO_GRAD_MODE));
-      // ^ pass in creation meta unecessarily even if not isDifferentiableType,
+      // ^ pass in creation meta unnecessarily even if not isDifferentiableType,
       // but we don't have that
       //   information here anyway.
       stack->at(stack->size() - num_returns + aliased_output_idx) = result;
@@ -377,7 +386,8 @@ void autogradNotImplementedInplaceOrViewFallbackImpl(
               ? CreationMeta::INFERENCE_MODE
               : (at::GradMode::is_enabled() ? CreationMeta::DEFAULT
                                             : CreationMeta::NO_GRAD_MODE));
-      stack->at(stack->size() - num_returns + aliased_output_idx) = result;
+      stack->at(stack->size() - num_returns + aliased_output_idx) =
+          std::move(result);
     }
   }
 }

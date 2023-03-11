@@ -65,21 +65,20 @@ void gemm<float>(CUDABLAS_GEMM_ARGTYPES(float));
 #endif
 template <>
 void gemm<at::Half>(CUDABLAS_GEMM_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemm<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16));
-#endif
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11000 && !defined(_MSC_VER)
+#if !defined(USE_ROCM) && !defined(_MSC_VER)
 enum GEMMAndBiasActivationEpilogue {
-  None,
-  RELU,
-  GELU,
+  NONE,
+  BIAS,
+  BIAS_RELU,
+  BIAS_GELU,
 };
 
 // NOTE: GELU activation is not supported prior to CUDA 11.4 and will
 // do nothing if passed in that case.
-template <typename Dtype>
+template <typename Dtype, typename RDtype, typename BDtype>
 void gemm_and_bias(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -91,10 +90,11 @@ void gemm_and_bias(
     int64_t mat1_ld,
     const Dtype* mat2_ptr,
     int64_t mat2_ld,
-    const Dtype* bias,
-    Dtype* result_ptr,
+    const BDtype* bias,
+    RDtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::BIAS,
+    bool use_heuristic = true);
 #endif
 
 #define CUDABLAS_BGEMM_ARGTYPES(Dtype)                                                        \
@@ -118,10 +118,8 @@ template <>
 void bgemm<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>));
 template <>
 void bgemm<at::Half>(CUDABLAS_BGEMM_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16));
-#endif
 
 #define CUDABLAS_TRSM_ARGTYPES(Dtype)                                  \
   cublasHandle_t handle, cublasSideMode_t side, cublasFillMode_t uplo, \
@@ -188,10 +186,8 @@ void gemv<c10::complex<float>>(CUDABLAS_GEMV_ARGTYPES(c10::complex<float>));
 #endif
 template <>
 void gemv<at::Half>(CUDABLAS_GEMV_ARGTYPES(at::Half));
-#if defined(USE_ROCM) || defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 template <>
 void gemv<at::BFloat16>(CUDABLAS_GEMV_ARGTYPES(at::BFloat16));
-#endif
 
 /* LEVEL 1 BLAS FUNCTIONS */
 

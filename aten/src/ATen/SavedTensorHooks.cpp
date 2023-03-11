@@ -26,7 +26,7 @@ bool SavedTensorDefaultHooks::is_enabled() {
 
 void SavedTensorDefaultHooks::disable(const std::string& message) {
   tls.disabled_error_message = message;
-  if (tls.stack.size() > 0) {
+  if (!tls.stack.empty()) {
     assertSavedTensorHooksNotDisabled();
   }
 }

@@ -79,7 +79,7 @@ struct AttentionKernel {
       cutlass::sizeof_bits<scalar_t>::value == 16;
   static constexpr bool kKeepOutputInRF = kSingleValueIteration;
   static constexpr bool kNeedsOutputAccumulatorBuffer =
-      !kKeepOutputInRF && !std::is_same<output_accum_t, output_t>::value;
+      !kKeepOutputInRF && !cutlass::platform::is_same<output_accum_t, output_t>::value;
 
   static_assert(kQueriesPerBlock % 32 == 0, "");
   static_assert(kKeysPerBlock % 32 == 0, "");
@@ -105,6 +105,9 @@ struct AttentionKernel {
     output_accum_t*
         output_accum_ptr; // [num_queries, num_heads, head_dim_value]
     lse_scalar_t* logsumexp_ptr; // [num_heads, num_queries] - can be null
+
+    // Softmax Scale
+    accum_t scale;
 
     // Dimensions/strides
     int32_t head_dim;
@@ -608,7 +611,7 @@ struct AttentionKernel {
                                 warp_id(),
                                 p.num_keys - iter_key_start,
                                 iteratorC_tile_offset,
-                                1.0f / std::sqrt(float(p.head_dim)));
+                                p.scale);
                           }));
                     }));
 
@@ -863,15 +866,19 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
       int(__CUDA_ARCH_OR_ZERO__));                                  \
   _ATTENTION_KERNEL_FORWARD_END();
 
+// On windows we don't build with /Zc:preprocessor
+// See: https://stackoverflow.com/questions/5134523/msvc-doesnt-expand-va-args-correctly
+#define EXPAND( x ) x
+
 // All kernels are disabled by default
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM50(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(50, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(50, __VA_ARGS__))
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM70(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(70, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(70, __VA_ARGS__))
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM75(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(75, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(75, __VA_ARGS__))
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM80(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(80, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD_DISABLED(80, __VA_ARGS__))
 
 // Enable the right one based on __CUDA_ARCH__
 #if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ < 500
@@ -879,17 +886,17 @@ __global__ void __launch_bounds__(AK::kNumThreads, AK::kMinBlocksPerSm)
 #elif __CUDA_ARCH__ < 700
 #undef INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM50
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM50(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD(50, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD(50, __VA_ARGS__))
 #elif __CUDA_ARCH__ < 750
 #undef INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM70
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM70(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD(70, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD(70, __VA_ARGS__))
 #elif __CUDA_ARCH__ < 800
 #undef INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM75
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM75(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD(75, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD(75, __VA_ARGS__))
 #elif __CUDA_ARCH__ >= 800
 #undef INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM80
 #define INSTANTIATE_ATTENTION_KERNEL_FORWARD_SM80(...) \
-  INSTANTIATE_ATTENTION_KERNEL_FORWARD(80, __VA_ARGS__)
+  EXPAND(INSTANTIATE_ATTENTION_KERNEL_FORWARD(80, __VA_ARGS__))
 #endif

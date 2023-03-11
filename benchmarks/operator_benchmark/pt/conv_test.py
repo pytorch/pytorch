@@ -40,7 +40,7 @@ op_bench.generate_pt_test(configs.conv_1d_configs_short + configs.conv_1d_config
 
 
 """
-Microbenchmarks for Conv2d and ConvTranspose2d operators.
+Microbenchmarks for Conv2d, ConvTranspose2d, and Conv2dPointwise operators.
 """
 
 
@@ -70,10 +70,26 @@ class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
         return self.convtranspose2d(input)
 
 
+class Conv2dPointwiseBenchmark(op_bench.TorchBenchmarkBase):
+    def init(self, IC, OC, stride, N, H, W, G, pad, device):
+        self.inputs = {
+            "input": torch.rand(N, IC, H, W, device=device)
+        }
+        # Use 1 as kernel for pointwise convolution
+        self.conv2d = nn.Conv2d(
+            IC, OC, 1, stride=stride, groups=G, padding=pad).to(device=device)
+        self.set_module_name('Conv2dPointwise')
+
+    def forward(self, input):
+        return self.conv2d(input)
+
+
 op_bench.generate_pt_test(configs.conv_2d_configs_short + configs.conv_2d_configs_long,
                           Conv2dBenchmark)
 op_bench.generate_pt_test(configs.conv_2d_configs_short + configs.conv_2d_configs_long,
                           ConvTranspose2dBenchmark)
+op_bench.generate_pt_test(configs.conv_2d_pw_configs_short + configs.conv_2d_pw_configs_long,
+                          Conv2dPointwiseBenchmark)
 
 
 """

@@ -5,14 +5,17 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAMathCompat.h>
 
+#include <c10/core/TensorImpl.h>
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 
-#include <iostream>
 #ifdef USE_FLASH_ATTENTION
 #include <ATen/native/transformers/cuda/mem_eff_attention/kernel_backward.h>
+#include <ATen/native/transformers/cuda/flash_attn/fmha_api.h>
 #endif
 
 #define ASSIGN_CHECK_OVERFLOW(A, B)                                            \
@@ -69,6 +72,72 @@ namespace at {
 
 namespace native {
 
+std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const int64_t philox_seed,
+    const int64_t philox_offset,
+    c10::optional<double> scale) {
+#if defined(USE_FLASH_ATTENTION)
+  /*
+  num_splits determines how much to parallelize over the seqlen_q dimension
+  num_splits=0 means
+  it will be set by an internal heuristic. We're exposing num_splits mostly for
+  benchmarking. We will hard code it to 0 for now
+  */
+  constexpr int num_splits{0};
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
+  //  CUDA code assumes that dout is contiguous
+  auto contiguous_grad_out = grad_out.contiguous();
+  auto contiguous_out = out.contiguous();
+  Tensor dq = at::empty_like(query);
+  Tensor dk = at::empty_like(key);
+  Tensor dv = at::empty_like(value);
+  //  The kernel computes irregadless we will drop for this functions return
+  Tensor grad_softmax;
+
+  uint64_t unsigned_philox_seed = sdp::bit_cast<uint64_t>(philox_seed);
+  uint64_t unsigned_philox_offset = sdp::bit_cast<uint64_t>(philox_offset);
+
+  std::tie(dq, dk, dv, grad_softmax) = fmha::mha_bwd(
+          contiguous_grad_out,
+          query,
+          key,
+          value,
+          contiguous_out,
+          logsumexp,
+          dq,
+          dk,
+          dv,
+          cumulative_sequence_length_q,
+          cumulative_sequence_length_k,
+          max_seqlen_batch_q,
+          max_seqlen_batch_k,
+          dropout_p,
+          softmax_scale,
+          false, /*zero_tensors = false for all calls here*/
+          is_causal,
+          num_splits,
+          unsigned_philox_seed,
+          unsigned_philox_offset
+  );
+  return std::make_tuple(dq, dk, dv);
+#endif
+  TORCH_CHECK(false, "USE_FLASH_ATTENTION was not enabled for build.")
+  return std::make_tuple(Tensor(), Tensor(), Tensor());
+}
+
+
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& grad_out_,
     const at::Tensor& query,
@@ -77,7 +146,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     bool causal,
-    bool chunk_grad_outputs) {
+    bool chunk_grad_outputs,
+    c10::optional<double> scale) {
   #if defined(USE_FLASH_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
@@ -180,6 +250,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
     p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
     p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
     p.delta_ptr = (float*)delta.data_ptr();
+    p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     p.head_dim = query.size(3);
     p.head_dim_value = value.size(3);
     p.num_queries = query.size(1);
@@ -260,6 +331,71 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_cuda(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const at::Tensor& logsumexp,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_k,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    const int64_t philox_seed,
+    const int64_t philox_offset,
+    c10::optional<double> scale){
+  if (!grad_out_.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+
+  const int64_t batch_size = query.size(0);
+  const int64_t num_heads = query.size(1);
+  const int64_t head_dim = query.size(3);
+
+  Tensor q_t = query.transpose(1, 2);
+  Tensor k_t = key.transpose(1, 2);
+  Tensor v_t = value.transpose(1, 2);
+
+
+  int64_t Nnz_q{batch_size * max_seqlen_batch_q};
+  int64_t Nnz_kv{batch_size * max_seqlen_batch_k};
+
+  // For the standard MHA these will actually be views
+  Tensor query_reshaped = q_t.reshape({Nnz_q, num_heads, head_dim});
+  Tensor key_reshaped = k_t.reshape({Nnz_kv, num_heads, head_dim});
+  Tensor value_reshaped = v_t.reshape({Nnz_kv, num_heads, head_dim});
+
+  auto grad_out_reshaped = grad_out_.transpose(1,2).reshape({{Nnz_q, num_heads, head_dim}});
+  auto out_reshaped = out.transpose(1,2).reshape({Nnz_q, num_heads, head_dim});
+
+  Tensor grad_q, grad_k, grad_v;
+  std::tie(grad_q, grad_k, grad_v) = at::_flash_attention_backward(
+    grad_out_reshaped,
+    query_reshaped,
+    key_reshaped,
+    value_reshaped,
+    out_reshaped,
+    logsumexp,
+    cumulative_sequence_length_q,
+    cumulative_sequence_length_k,
+    max_seqlen_batch_q,
+    max_seqlen_batch_k,
+    dropout_p,
+    is_causal,
+    philox_seed,
+    philox_offset,
+    scale);
+
+  grad_q = grad_q.view({batch_size, max_seqlen_batch_q, num_heads, head_dim}).transpose(1,2);
+  grad_k = grad_k.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+  grad_v = grad_v.view({batch_size, max_seqlen_batch_k, num_heads, head_dim}).transpose(1,2);
+
+  return std::make_tuple(grad_q, grad_k, grad_v);
+}
+
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(
     const at::Tensor& grad_out_,
@@ -269,7 +405,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
     const at::Tensor& out,
     const at::Tensor& logsumexp,
     bool causal,
-    bool chunk_grad_outputs){
+    bool chunk_grad_outputs,
+    c10::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -280,7 +417,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_att
   auto v_t = value.transpose(1, 2);
 
   Tensor grad_q, grad_k, grad_v;
-  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal, chunk_grad_outputs);
+  std::tie(grad_q, grad_k, grad_v) = at::_efficient_attention_backward(grad_out, q_t, k_t, v_t, out_t, logsumexp, causal, chunk_grad_outputs, scale);
   return std::make_tuple(grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2));
 }
 

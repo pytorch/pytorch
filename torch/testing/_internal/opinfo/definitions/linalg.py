@@ -1,7 +1,7 @@
 import itertools
 import unittest
 from functools import partial
-from itertools import product
+from itertools import chain, product
 from typing import Iterable, List
 
 import numpy as np
@@ -13,7 +13,6 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     _get_magma_version,
     _get_torch_cuda_version,
-    CUDA11OrLater,
     with_tf32_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -39,13 +38,14 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     skipIfSlowGradcheckEnv,
     slowTest,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
     DecorateInfo,
     ErrorInput,
     gradcheck_wrapper_hermitian_input,
+    L,
+    M,
     OpInfo,
     ReductionOpInfo,
     S,
@@ -792,6 +792,90 @@ def error_inputs_lstsq_grad_oriented(op_info, device, **kwargs):
     )
 
 
+def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
+    )
+
+    # Shapes for 2D Tensors
+    shapes_2d = ((S, S), (3, 5), (5, 3))
+
+    # Shapes for 3D Tensors
+    shapes_3d = ((S, S, S),)
+
+    kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
+    kwargs_3d = (
+        dict(offset=1, dim1=1, dim2=2),
+        dict(offset=2, dim1=0, dim2=1),
+        dict(offset=-2, dim1=0, dim2=1),
+    )
+
+    for shape, kwarg in chain(
+        product(shapes_2d, kwargs_2d), product(shapes_3d, kwargs_3d)
+    ):
+        yield SampleInput(make_arg(shape), kwargs=kwarg)
+
+
+def error_inputs_diagonal_diag_embed(op_info, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    shapes1d = (0, 1, (0,), (1,))
+    shapes2d = ((M, L),)
+    shapes3d = ((M, S, L),)
+
+    kwargs1d = {}
+
+    kwargs2d = (
+        # dim1 == dim2 is not allowed
+        dict(dim1=1, dim2=1),
+        # out of bounds dims are not allowed
+        dict(dim1=10000),
+        dict(dim2=10000),
+    )
+
+    kwargs3d = kwargs2d
+
+    samples1d = product(shapes1d, kwargs1d)
+    samples2d = product(shapes2d, kwargs2d)
+    samples3d = product(shapes3d, kwargs3d)
+
+    for shape, kwargs in chain(samples1d, samples2d, samples3d):
+        arg = make_arg(shape)
+        sample = SampleInput(input=arg, kwargs=kwargs)
+
+        dim1 = kwargs.get("dim1")
+        dim2 = kwargs.get("dim2")
+
+        if "diagonal" in op_info.name:
+            num_dim = arg.dim()
+        elif op_info.name in ("diag_embed", "_refs.diag_embed"):
+            # these are valid inputs for diag_embed
+            if shape in ((0,), (1,)):
+                continue
+            num_dim = arg.dim() + 1
+        else:
+            raise RuntimeError("should be unreachable")
+
+        bound1 = -num_dim
+        bound2 = num_dim - 1
+        dim_range = range(bound1, bound2 + 1)
+        dim1_cond = dim1 and dim1 not in dim_range
+        dim2_cond = dim2 and dim2 not in dim_range
+
+        if dim1 == dim2:
+            err = f"diagonal dimensions cannot be identical {dim1}, {dim2}"
+            yield ErrorInput(sample, error_regex=err, error_type=RuntimeError)
+        elif dim1_cond or dim2_cond:
+            err_dim = dim1 if dim1_cond else dim2
+            err = (
+                r"Dimension out of range \(expected to be in range of "
+                rf"\[{bound1}, {bound2}\], but got {err_dim}\)"
+            )
+            yield ErrorInput(sample, error_regex=err, error_type=IndexError)
+        else:
+            raise RuntimeError("should be unreachable")
+
+
 def sample_inputs_linalg_cholesky(
     op_info, device, dtype, requires_grad=False, **kwargs
 ):
@@ -1175,6 +1259,19 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
+        "linalg.diagonal",
+        aten_name="linalg_diagonal",
+        aten_backward_name="diagonal_backward",
+        dtypes=all_types_and_complex_and(
+            torch.bool, torch.bfloat16, torch.float16, torch.chalf
+        ),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_diagonal_diag_embed,
+        error_inputs_func=error_inputs_diagonal_diag_embed,
+    ),
+    OpInfo(
         "linalg.cholesky",
         aten_name="linalg_cholesky",
         dtypes=floating_and_complex_types(),
@@ -1203,9 +1300,7 @@ op_db: List[OpInfo] = [
         aten_name="linalg_vecdot",
         ref=lambda x, y, *, dim=-1: (x.conj() * y).sum(dim),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         sample_inputs_func=sample_inputs_linalg_vecdot,
         check_batched_forward_grad=False,
         supports_forward_ad=True,
@@ -1538,9 +1633,7 @@ op_db: List[OpInfo] = [
         # Need this lambda because gradcheck does not work with TensorList inputs
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.bfloat16),
-        dtypesIfCUDA=floating_and_complex_types_and(
-            torch.half, *[torch.bfloat16] if (CUDA11OrLater or TEST_WITH_ROCM) else []
-        ),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -2186,6 +2279,13 @@ python_ref_db: List[OpInfo] = [
     #
     # torch.linalg
     #
+    PythonRefInfo(
+        "_refs.linalg.diagonal",
+        torch_opinfo_name="linalg.diagonal",
+        supports_out=False,
+        supports_nvfuser=False,
+        op_db=op_db,
+    ),
     ReductionPythonRefInfo(
         "_refs.linalg.vector_norm",
         torch_opinfo_name="linalg.vector_norm",

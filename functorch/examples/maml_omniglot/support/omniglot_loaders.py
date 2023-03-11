@@ -82,7 +82,7 @@ class Omniglot(data.Dataset):
             os.path.exists(os.path.join(self.root, self.processed_folder, "images_background"))
 
     def download(self):
-        from six.moves import urllib
+        import urllib
         import zipfile
 
         if self._check_exists():

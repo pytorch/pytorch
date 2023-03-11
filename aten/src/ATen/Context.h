@@ -10,10 +10,12 @@
 #include <ATen/detail/HIPHooksInterface.h>
 #include <ATen/detail/MPSHooksInterface.h>
 #include <ATen/detail/ORTHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 
 #include <cstdint>
@@ -38,6 +40,8 @@ class TORCH_API Context {
       return at::detail::getDefaultCPUGenerator();
     } else if (device_type == at::kCUDA) {
       return at::detail::getCUDAHooks().getDefaultCUDAGenerator(device.index());
+    } else if (device_type == at::kMPS) {
+      return at::detail::getMPSHooks().getDefaultMPSGenerator();
     } else {
       AT_ERROR(DeviceTypeName(device_type), " device type not enabled.");
     }
@@ -92,6 +96,9 @@ class TORCH_API Context {
   }
   static bool hasXLA() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::XLA);
+  }
+  static bool hasXPU() {
+    return detail::getXPUHooks().hasXPU();
   }
   static bool hasLazy() {
     return c10::impl::hasDeviceGuardImpl(at::DeviceType::Lazy);
@@ -247,6 +254,8 @@ class TORCH_API Context {
   void setQEngine(at::QEngine e);
   static const std::vector<at::QEngine>& supportedQEngines();
   static bool isXNNPACKAvailable();
+  void setCheckSparseTensorInvariants(bool e);
+  bool checkSparseTensorInvariants() const;
   // This method is used to release the original weight after pre-packing.
   // It should be called once before loading/running the model.
   // NB: By default it is set to true for mobile builds.
@@ -286,7 +295,9 @@ class TORCH_API Context {
   bool benchmark_cudnn = false;
 #endif
   Float32MatmulPrecision float32_matmul_precision =
-      at::Float32MatmulPrecision::HIGHEST;
+      c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
+      ? at::Float32MatmulPrecision::HIGH
+      : at::Float32MatmulPrecision::HIGHEST;
   int benchmark_limit_cudnn = 10;
   bool allow_tf32_cudnn = true;
   bool allow_fp16_reduction_cublas = true;
@@ -300,6 +311,7 @@ class TORCH_API Context {
 #endif
   bool display_vmap_fallback_warnings_ = false;
   c10::optional<at::QEngine> quantized_engine = c10::nullopt;
+  bool enable_sparse_tensor_invariant_checks = false;
 
   Allocator* prev_allocator_ptr_{nullptr};
 };
@@ -363,6 +375,10 @@ static inline bool hasORT() {
   return globalContext().hasORT();
 }
 
+static inline bool hasXPU() {
+  return globalContext().hasXPU();
+}
+
 // Despite its name, this function returns the number of *CUDA* GPUs.
 static inline size_t getNumGPUs() {
   // WARNING: DO NOT ADD LOGIC TO HANDLE OTHER DEVICE TYPES TO THIS
@@ -423,6 +439,13 @@ static inline void manual_seed(uint64_t seed) {
         cuda_gen.set_current_seed(seed);
       }
     }
+  }
+
+  if (hasMPS()) {
+    auto mps_gen = globalContext().defaultGenerator(DeviceType::MPS);
+    // See Note [Acquire lock when using random generators]
+    std::lock_guard<std::mutex> lock(mps_gen.mutex());
+    mps_gen.set_current_seed(seed);
   }
 }
 

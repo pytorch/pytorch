@@ -13,7 +13,7 @@
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at::native {
 namespace {
 
 using namespace vec;
@@ -74,4 +74,4 @@ static void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, co
 REGISTER_DISPATCH(arange_stub, &arange_kernel);
 REGISTER_DISPATCH(linspace_stub, &linspace_kernel);
 
-}} // namespace at::native
+} // namespace at::native

@@ -10,12 +10,11 @@ import tempfile
 import warnings
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
-from ._six import string_classes as _string_classes
 from torch._sources import get_source_lines_and_file
 from torch.types import Storage
 from torch.storage import _get_dtype_from_pickle_storage_type
 from typing import Any, BinaryIO, Callable, cast, Dict, Optional, Type, Tuple, Union, IO
-from typing_extensions import TypeAlias
+from typing_extensions import TypeAlias  # Python 3.10+
 import copyreg
 import pickle
 import pathlib
@@ -57,8 +56,10 @@ class SourceChangeWarning(Warning):
 @contextmanager
 def mkdtemp():
     path = tempfile.mkdtemp()
-    yield path
-    shutil.rmtree(path)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 _package_registry = []
@@ -234,11 +235,10 @@ def storage_to_tensor_type(storage):
 
 
 def _is_path(name_or_buffer):
-    return isinstance(name_or_buffer, str) or \
-        isinstance(name_or_buffer, pathlib.Path)
+    return isinstance(name_or_buffer, (str, pathlib.Path))
 
 
-class _opener(object):
+class _opener:
     def __init__(self, file_like):
         self.file_like = file_like
 
@@ -1080,7 +1080,7 @@ def _get_restore_location(map_location):
         def restore_location(storage, location):
             location = map_location.get(location, location)
             return default_restore_location(storage, location)
-    elif isinstance(map_location, _string_classes):
+    elif isinstance(map_location, str):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
     elif isinstance(map_location, torch.device):

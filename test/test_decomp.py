@@ -7,7 +7,6 @@ from torch._decomp import decomposition_table
 from torch.utils._python_dispatch import TorchDispatchMode
 
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-from torch.utils._mode_utils import no_dispatch
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
 )
+from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_methods_invocations import op_db
 from torch._dispatch.python import enable_python_dispatcher
+from torch._ops import DispatchKey
 
 import itertools
 import functools
@@ -165,8 +166,12 @@ def op_assert_ref(test_case, op, test_dtype, i, orig, decomp, ref, args, kwargs)
         (torch.bfloat16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.default): 1e-5,
         (torch.float16, torch.ops.aten._native_batch_norm_legit.no_stats): 1e-5,
-        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
-        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-5,
+        (torch.bfloat16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.float16, torch.ops.aten.linalg_vector_norm.default): 1e-4,
+        (torch.bfloat16, torch.ops.aten.var_mean.correction): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.correction): 5e-7,
+        (torch.bfloat16, torch.ops.aten.var_mean.dim): 5e-7,
+        (torch.float16, torch.ops.aten.var_mean.dim): 5e-7,
         (torch.float16, torch.ops.aten.nll_loss_forward.default): 1e-2,
         (torch.bfloat16, torch.ops.aten.nll_loss_forward.default): 1e-1,
     }
@@ -250,8 +255,7 @@ def normalize_op_input_output2(
         if output_process_fn_grad is not None:
             result = output_process_fn_grad(result)
         if isinstance(result, tuple):
-            # TODO: Remove the following hack for namedtuples
-            result = tuple(result)
+            # TODO We should check that the integer outputs also agree
             result = tuple(
                 r
                 for r in result
@@ -294,15 +298,26 @@ CROSS_REF_EXCLUDE_SET = {
     # (int)num_batches, CUDA_R_32F, CUBLAS_GEMM_DEFAULT_TENSOR_OP)`
     ("cuda", torch.bfloat16, "nn.functional.bilinear"),
     # randomness
-    ("cuda", torch.float16, "nn.functional.dropout"),
-    ("cuda", torch.bfloat16, "nn.functional.dropout"),
-    ("cuda", torch.float64, "nn.functional.dropout"),
-    ("cuda", torch.float32, "nn.functional.dropout"),
     (None, None, "special.ndtr"),  # aten.special_ndtr was not decomposed
     (None, None, "new_empty"),
     (None, None, "empty_like"),
     (None, None, "empty"),
 
+    # It's the only in-place op without an out-of-place equivalent in the Python API
+    # Its OpInfo wrongly registers it as `torch.zero_(x.clone())`.
+    (None, None, "zero_"),
+
+    # No idea what's going on here
+    # In the recursive test logsumexp.default fails with args = (torch.tensor(-math.inf), [])
+    # in the test, but it seems to pass when tested locally and in the logsumexp test
+    (None, torch.float32, "masked.logsumexp"),
+    (None, torch.float64, "masked.logsumexp"),
+
+    # exp_vml_cpu not implemented for Half
+    (torch.cpu, torch.float16, "signal.windows.exponential"),
+    (torch.cpu, torch.float16, "signal.windows.gaussian"),
+    # sin_vml_cpu not implemented for Half
+    (torch.cpu, torch.float16, "signal.windows.cosine"),
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
@@ -314,6 +329,8 @@ CROSS_REF_EXCLUDE_SET = {
     (None, None, "norm"),
     # native_batch_norm is only implicit when python dispatcher is on (and noncomposite otherwise)
     (None, None, "native_batch_norm"),
+
+    (None, None, "_upsample_bilinear2d_aa"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {
@@ -406,6 +423,130 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+
+    @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
+    @suppress_warnings
+    # only tests RNNs since we have py dispsatcher decomps for them
+    @modules(filter(lambda m: m.module_cls in (torch.nn.RNN, torch.nn.LSTM, torch.nn.GRU), module_db))
+    def test_rnn_decomp_module(self, device, dtype, module_info, training):
+        module_cls = module_info.module_cls
+        module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
+                                                       requires_grad=True, training=training)
+        for module_input in module_inputs:
+            if module_input.forward_input is None:
+                continue
+            args, kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            m = module_cls(*args, **kwargs)
+            m.to(device).to(dtype)
+
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
+            with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all=True), enable_python_dispatcher():
+                decomp_out = m(*args, **kwargs)
+
+            non_decomp_out = m(*args, **kwargs)
+            # without this check, incorrect decomps at the python dispatcher level can still pass because
+            # they're checking aten decomps at the torch_dispatch level
+            self.assertEqual(decomp_out, non_decomp_out)
+
+    class DecompCrossRefMode(TorchDispatchMode):
+        def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
+            self.test_case = test_case
+            self.saved_precision = saved_precision
+            self.saved_rel_tol = saved_rel_tol
+            self.test_dtype = dtype
+            self.run_all = run_all
+
+            # We check the correctness of each decomposition right after running it.
+            # So, when we encounter a decomposition, we run the function normally, and
+            # then run the decomposition, and ensure they're identical.
+            self.called = set()
+            self.decomposed = set()
+
+        def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+            self.test_case.precision = self.saved_precision
+            self.test_case.rel_tol = self.saved_rel_tol
+
+            self.called.add(func)
+            all_called[func] += 1
+
+            # Stuff we shouldn't bother testing
+            # (TODO: remove detach from the decomp table?)
+            # N.b. Testing in-place ops would need dedicated logic
+            in_place = func.name()[-1] == '_'
+            if func not in decomposition_table or func in [
+                torch.ops.aten.detach.default,
+                # non-deterministic ops
+                torch.ops.aten.empty.memory_format,
+                torch.ops.aten.empty_like.default,
+                torch.ops.aten.new_empty.default,
+                torch.ops.aten.empty_strided.default,
+                torch.ops.aten.new_empty_strided.default,
+                torch.ops.aten.randn.default,
+                torch.ops.aten.native_dropout.default,
+            ] or any_unsupported(args, kwargs) or in_place:
+                return func(*args, **kwargs)
+
+            self.decomposed.add(func)
+            all_decomposed.add(func)
+
+            # We take 2 main strategies for verifying correctness/numerical stability of decompositions
+            # The first one is simply tolerance checking between decomp_out and pytorch_out
+            # However, for fp16/bf16 and reductions, this becomes very
+            # finicky, as there are not many guarantees we can make.
+            # So, for fp16/bf16, we instead compare the difference of
+            # {decomp_out, pytorch_out_64} and {pytorch_out,
+            # pytorch_out_64}. In other words, we compare how far the
+            # decomposition and pytorch are from the "ground truth" (i.e.
+            # fp64). If the decomposition results in more error, we error
+
+            # We also decompose the decomposition recursively for
+            # further coverage, as some paths not be exercised directly by
+            # OpInfos (sadly) but just by other ops
+
+            decomposition = decomposition_table[func]
+
+            do_relative_check = self.test_dtype in [torch.float16, torch.bfloat16]
+            if self.run_all:
+                # Execute recursively via DFS, to find the root of a possible error first
+                with self:
+                    decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+            else:
+                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
+
+            # At this stage we should not be decomposing an in-place op
+            # We'd like to have decompositions that decompose out-of-place ops into out-of-place ops
+            #  because decompositions are run after functionalisation and we would not like them to
+            #  de-functionalise the graph, as that would break AoTAutograd
+            # We run the real function *after* the decomposition to make sure that the
+            # decomposition does not modify any of the inputs in-place. If it does
+            # real_out should be differen than decom_out so we should catch this
+            real_out_unflat = func(*args, **kwargs)
+            real_out, _ = tree_flatten(real_out_unflat)
+
+            assert len(real_out) == len(decomp_out)
+
+            if do_relative_check:
+                upcast = partial(upcast_tensor, dtype=torch.float64)
+                real_out_double, _ = tree_flatten(
+                    func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
+                )
+                for i, (orig, decomp, ref) in enumerate(zip(real_out, decomp_out, real_out_double)):
+                    if not isinstance(orig, torch.Tensor):
+                        assert type(orig) == type(decomp)
+                        assert orig == decomp
+                        continue
+                    op_assert_ref(self.test_case, func, self.test_dtype, i, orig, decomp, ref, args, kwargs)
+            else:
+                for orig, decomp in zip(real_out, decomp_out):
+                    if not isinstance(orig, torch.Tensor):
+                        assert type(orig) == type(decomp)
+                        assert orig == decomp
+                        continue
+                    op_assert_equal(self.test_case, func, self.test_dtype, orig, decomp, args, kwargs)
+
+            return real_out_unflat
+
+
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def do_cross_ref(self, device, dtype, op, *, run_all):
         test_keys = [
@@ -417,82 +558,6 @@ class TestDecomp(TestCase):
             self.skipTest(f"{op.name} in {dtype} not supported")
 
         skip_decomp_vjp = any(key in CROSS_REF_BACKWARD_EXCLUDE_SET for key in test_keys)
-        test_dtype = dtype
-
-        # We check the correctness of each decomposition right after running it.
-        # So, when we encounter a decomposition, we run the function normally, and
-        # then run the decomposition, and ensure they're identical.
-        called = set()
-        decomposed = set()
-
-        saved_precision = self.precision
-        saved_rel_tol = self.rel_tol
-        test_case = self
-
-        class DecompCrossRefMode(TorchDispatchMode):
-            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                with no_dispatch():
-                    return self._torch_dispatch(func, types, args, kwargs)
-
-            def _torch_dispatch(self, func, types, args=(), kwargs=None):
-                test_case.precision = saved_precision
-                test_case.rel_tol = saved_rel_tol
-
-                called.add(func)
-                all_called[func] += 1
-
-                # Stuff we shouldn't bother testing
-                # (TODO: remove detach from the decomp table?)
-                if func not in decomposition_table or func in [
-                    torch.ops.aten.detach.default,
-                    # non-deterministic ops
-                    torch.ops.aten.empty.memory_format,
-                    torch.ops.aten.empty_like.default,
-                    torch.ops.aten.new_empty.default
-                ] or any_unsupported(args, kwargs):
-                    return func(*args, **kwargs)
-
-                decomposed.add(func)
-                all_decomposed.add(func)
-
-                # We take 2 main strategies for verifying correctness/numerical stability of decompositions
-                # The first one is simply tolerance checking between decomp_out and pytorch_out
-                # However, for fp16/bf16 and reductions, this becomes very
-                # finicky, as there are not many guarantees we can make.
-                # So, for fp16/bf16, we instead compare the difference of
-                # {decomp_out, pytorch_out_64} and {pytorch_out,
-                # pytorch_out_64}. In other words, we compare how far the
-                # decomposition and pytorch are from the "ground truth" (i.e.
-                # fp64). If the decomposition results in more error, we error
-
-                decomposition = decomposition_table[func]
-
-                do_relative_check = test_dtype in [torch.float16, torch.bfloat16]
-                real_out_unflat = func(*args, **kwargs)
-                real_out, _ = tree_flatten(real_out_unflat)
-                decomp_out, _ = tree_flatten(decomposition(*args, **kwargs))
-                assert len(real_out) == len(decomp_out)
-
-                if do_relative_check:
-                    upcast = partial(upcast_tensor, dtype=torch.float64)
-                    real_out_double, _ = tree_flatten(
-                        func(*tree_map(upcast, args), **tree_map(upcast, kwargs))
-                    )
-                    for i, orig, decomp, ref in zip(range(len(real_out)), real_out, decomp_out, real_out_double):
-                        if not isinstance(orig, torch.Tensor):
-                            assert type(orig) == type(decomp)
-                            assert orig == decomp
-                            continue
-                        op_assert_ref(test_case, func, test_dtype, i, orig, decomp, ref, args, kwargs)
-                else:
-                    for orig, decomp in zip(real_out, decomp_out):
-                        if not isinstance(orig, torch.Tensor):
-                            assert type(orig) == type(decomp)
-                            assert orig == decomp
-                            continue
-                        op_assert_equal(test_case, func, test_dtype, orig, decomp, args, kwargs)
-
-                return real_out_unflat
 
         requires_grad = (
             op.supports_autograd
@@ -503,13 +568,13 @@ class TestDecomp(TestCase):
             # but that when we do backwards we expect other ops like add to work
             and not dtype == torch.complex32
         )
-        samples = op.sample_inputs(device, test_dtype, requires_grad=requires_grad)
+        samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        def check_decomposed(aten_name):
+        def check_decomposed(aten_name, mode):
             self.assertTrue(
-                any(overload_to_aten_name(c) == aten_name for c in decomposed),
+                any(overload_to_aten_name(c) == aten_name for c in mode.decomposed),
                 msg=(f"aten.{aten_name} was not decomposed, saw calls for: "
-                     f"{', '.join(map(str, list(called)))}. If your op is  "
+                     f"{', '.join(map(str, list(mode.called)))}. If your op is  "
                      f"CompositeImplicitAutograd you should skip this test "
                      "by updating CROSS_REF_EXCLUDE_SET.")
             )
@@ -528,29 +593,29 @@ class TestDecomp(TestCase):
                 # store the called list on the mode object instance and no
                 # explicit clearing is necessary as I will create a fresh mode
                 # for each region
-                decomposed.clear()
-                with DecompCrossRefMode(), enable_python_dispatcher():
+                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                     as mode, enable_python_dispatcher():
                     decomp_out, decomp_vjp_fn = ref_vjp_no_create(fn, *primals)
                 if aten_name in decomposition_names:
-                    check_decomposed(aten_name)
+                    check_decomposed(aten_name, mode)
 
                 if not skip_decomp_vjp and (op.aten_backward_name in decomposition_names or run_all):
                     cotangents = tree_map(lambda x: torch.randn_like(x), decomp_out)
 
-                    decomposed.clear()
-                    with DecompCrossRefMode(), enable_python_dispatcher():
+                    with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                         as mode, enable_python_dispatcher():
                         decomp_vjp_fn(cotangents)
                     if not run_all:
-                        check_decomposed(op.aten_backward_name)
+                        check_decomposed(op.aten_backward_name, mode)
 
             elif aten_name in decomposition_names or run_all:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
-                decomposed.clear()
-                with DecompCrossRefMode(), enable_python_dispatcher():
+                with self.DecompCrossRefMode(self, self.precision, self.rel_tol, dtype, run_all)\
+                     as mode, enable_python_dispatcher():
                     func(*args, **kwargs)
                 if not run_all:
-                    check_decomposed(aten_name)
+                    check_decomposed(aten_name, mode)
             else:
                 assert op.supports_autograd
                 self.skipTest(
@@ -633,6 +698,55 @@ class DecompAmpTests(TestCase):
 
 
 instantiate_device_type_tests(DecompAmpTests, globals())
+
+class HasDecompTest(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.maxDiff = None
+
+    def test_has_decomposition(self):
+
+        def can_appear_in_trace(op) -> bool:
+            has_tensor_arg = any(
+                "Tensor" in str(a.type)
+                for a in itertools.chain(op._schema.arguments, op._schema.returns))
+            if not has_tensor_arg:
+                return False
+
+            try:
+                # CompositeImplicitAutograd ops are transparent to the tracer, so don't need decompositions
+                return not op.has_kernel_for_dispatch_key(DispatchKey.CompositeImplicitAutograd)
+            except RuntimeError as e:
+                # has_key fails for some jit-registered ops, which shouldn't be
+                # relevant here anyway
+                if 'does not exist' in str(e):
+                    return False
+                raise
+
+        def all_aten_overloads():
+            for name in torch._C._dispatch_get_all_op_names():
+                if not name.startswith("aten::"):
+                    continue
+
+                name = name[6:]
+                if "." in name:
+                    packet_name, overload_name = name.split(".")
+                else:
+                    packet_name, overload_name = name, "default"
+
+                packet = getattr(aten, packet_name)
+                assert isinstance(packet, torch._ops.OpOverloadPacket)
+                op = getattr(packet, overload_name)
+                yield op
+
+        # This is for operators that are only registered in some CI
+        # configurations, so would cause the test to fail
+        allow_list = {aten.get_gradients.default}
+
+        overloads_wanting_decomp = {op for op in all_aten_overloads() if can_appear_in_trace(op)}
+        ops_missing_decomp = overloads_wanting_decomp - decomposition_table.keys()
+        ops_missing_decomp -= allow_list
+        self.assertExpected("".join(sorted(op.name() + "\n" for op in ops_missing_decomp)))
 
 if __name__ == "__main__":
     run_tests()

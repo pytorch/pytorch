@@ -5,10 +5,8 @@ from .backend_config import BackendConfig
 from .fx import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from ._pt2e.utils import (
-    # _infer_nn_stack_trace_and_append_on_meta,
-    _get_renamed_nn_module_stack,
     _fuse_conv_bn_,
-    _rearrange_weight_observer_for_addmm,
+    _rearrange_weight_observer_for_decomposed_linear,
 )
 
 from typing import Tuple, Any, Dict
@@ -19,15 +17,14 @@ def prepare_pt2e(
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
 ):
-    # TODO[jerryzh168]: check if the model is using EXIR - aten dialect
-    # disabled for now, looks like runing torchdynamo.export twice results in
-    # errors
-    # _infer_nn_stack_trace_and_append_on_meta(model, model, example_inputs)
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
     for n in model.graph.nodes:
-        renamed_stack = _get_renamed_nn_module_stack(n.meta.get("nn_module_stack", None))
-        current_scope = list(renamed_stack.items())[-1]
+        nn_module_stack = n.meta.get("nn_module_stack", None)
+        current_scope = ("", type(None))
+        if nn_module_stack:
+            bt = list(nn_module_stack.values())[-1]
+            current_scope = (bt[0].split(".")[-1], bt[1])
         node_name_to_scope[n.name] = current_scope
 
     # TODO: check qconfig_mapping to make sure conv and bn are both configured
@@ -45,7 +42,7 @@ def prepare_pt2e(
 
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
-    _rearrange_weight_observer_for_addmm(model)
+    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def convert_pt2e(

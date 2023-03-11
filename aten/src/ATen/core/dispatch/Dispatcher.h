@@ -343,6 +343,7 @@ public:
   OperatorHandle& operator=(OperatorHandle&&) noexcept = default;
   OperatorHandle(const OperatorHandle&) = default;
   OperatorHandle& operator=(const OperatorHandle&) = default;
+  // NOLINTNEXTLINE(performance-trivially-destructible)
   ~OperatorHandle();
 
   const OperatorName& operator_name() const {

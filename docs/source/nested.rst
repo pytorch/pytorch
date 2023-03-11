@@ -24,7 +24,7 @@ with the main difference being :ref:`construction of the inputs <construction>`.
 
 As this is a prototype feature, the :ref:`operations supported <supported operations>` are still
 limited. However, we welcome issues, feature requests and contributions. More information on contributing can be found
-`on this wiki <https://github.com/pytorch/pytorch/wiki/NestedTensor-Backend>`_.
+`in this Readme <https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/native/nested/README.md>`_.
 
 .. _construction:
 
@@ -212,3 +212,4 @@ NestedTensor and any constraints they have.
    :func:`torch.Tensor.reshape_as`; "Similar constraint as for ``reshape``."
    :func:`torch.transpose`; "Supports transposing of all dims except ``dim=0``."
    :func:`torch.Tensor.view`; "Rules for the new shape are similar to that of ``reshape``."
+   :func:`torch.empty_like`; "Behavior is analogous to that of regular tensors; returns a new empty nested tensor (i.e. with uninitialized values) matching the nested structure of the input."

@@ -8,7 +8,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Math.cuh>
 
-namespace at { namespace native {
+namespace at::native {
 
 // We manually overload ceil because std::ceil does not work with std::complex types.
 template <typename scalar_t>
@@ -196,4 +196,4 @@ REGISTER_DISPATCH(round_stub, &round_kernel_cuda);
 REGISTER_DISPATCH(round_decimals_stub, &round_decimals_kernel_cuda);
 REGISTER_DISPATCH(trunc_stub, &trunc_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

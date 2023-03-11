@@ -8,7 +8,7 @@
 #include <limits>
 #include <functional>
 
-namespace at { namespace native {
+namespace at::native {
 
 void launch_cummax_cuda_kernel(const TensorBase& self, const TensorBase& values, const TensorBase& indices, int64_t dim) {
   AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
@@ -26,4 +26,4 @@ void launch_cummin_cuda_kernel(const TensorBase& self, const TensorBase& values,
   });
 }
 
-}} // namespace at::native
+} // namespace at::native

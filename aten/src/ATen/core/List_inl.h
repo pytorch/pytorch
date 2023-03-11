@@ -135,7 +135,7 @@ ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(
 
 template<class T, class Iterator>
 ListElementReference<T, Iterator>& ListElementReference<T, Iterator>::operator=(const T& new_value) && {
-  *iterator_ = c10::detail::ListElementFrom<T>::from(std::move(new_value));
+  *iterator_ = c10::detail::ListElementFrom<T>::from(new_value);
   return *this;
 }
 

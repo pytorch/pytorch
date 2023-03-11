@@ -6,7 +6,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 struct AbsFunctor {
@@ -15,7 +15,7 @@ struct AbsFunctor {
   }
 };
 
-const char abs_name[] = "abs_kernel";
+CONSTEXPR_EXCEPT_WIN_CUDA char abs_name[] = "abs_kernel";
 void abs_kernel_cuda(TensorIteratorBase& iter) {
   auto dtype = iter.dtype();
   if (at::isComplexType(dtype)) {
@@ -48,4 +48,4 @@ void abs_kernel_cuda(TensorIteratorBase& iter) {
 
   REGISTER_DISPATCH(abs_stub, &abs_kernel_cuda);
 
-}} // namespace at::native
+} // namespace at::native

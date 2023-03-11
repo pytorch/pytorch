@@ -69,3 +69,40 @@ void flag_to_float(const T* src, float* dst, int64_t n) {
     dst_u32[i] = *(src + i) ? 0xFFFFFFFF : 0;
   }
 }
+
+template <typename T, std::enable_if_t<std::is_same<T, bool>::value || std::is_same<T, uint8_t>::value, bool> = true>
+void flag_to_float(T src, float* dst, int64_t n) {
+#pragma unroll
+  for (int64_t i = 0; i < n; i++) {
+    uint32_t* dst_u32 = (uint32_t*)dst;
+    dst_u32[i] = src ? 0xFFFFFFFF : 0;
+  }
+}
+
+#if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
+  assert(
+      at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
+  at::vec::Vectorized<float> res_vec(0);
+  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
+  __at_align__ SRC src_tmp[at::vec::Vectorized<SRC>::size()];
+  src.store(src_tmp);
+
+#pragma unroll
+  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+  }
+
+  return res_vec.loadu(dst_tmp);
+}
+
+template <>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int>& src) {
+#if defined(CPU_CAPABILITY_AVX2)
+  return at::vec::Vectorized<float>(_mm256_cvtepi32_ps(src));
+#else
+  return at::vec::Vectorized<float>(_mm512_cvtepi32_ps(src));
+#endif
+}
+#endif

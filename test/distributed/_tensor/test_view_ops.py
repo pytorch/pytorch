@@ -30,18 +30,18 @@ from torch.utils._pytree import tree_flatten
 
 class TestViewOps(DTensorTestBase):
     def test_view_groups(self):
-        self.assertEquals(
+        self.assertEqual(
             view_groups([2, 3], [3, 2]),
             (
                 Split(Flatten((InputDim(0), InputDim(1))), (3, 2), 0),
                 Split(Flatten((InputDim(0), InputDim(1))), (3, 2), 1),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([3, 4, 5], [12, 5]),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([2, 3, 4, 5, 7], [12, 70]),
             (
                 Split(
@@ -72,7 +72,7 @@ class TestViewOps(DTensorTestBase):
                 ),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([2, 3, 4, 5, 7], [3, 8, 7, 5]),
             (
                 Split(Flatten((InputDim(0), InputDim(1), InputDim(2))), (3, 8), 0),
@@ -81,7 +81,7 @@ class TestViewOps(DTensorTestBase):
                 Split(Flatten((InputDim(3), InputDim(4))), (7, 5), 1),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([3, 4, 8, 3], [12, 4, 2, 3]),
             (
                 Flatten((InputDim(0), InputDim(1))),
@@ -90,7 +90,7 @@ class TestViewOps(DTensorTestBase):
                 InputDim(3),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([3, 24], [1, 3, 2, 4, 1, 3, 1]),
             (
                 Singleton(),
@@ -102,7 +102,7 @@ class TestViewOps(DTensorTestBase):
                 Singleton(),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([1, 1, 3, 2, 1, 1], [6, 1, 1, 1]),
             (
                 Flatten((InputDim(2), InputDim(3))),
@@ -111,7 +111,7 @@ class TestViewOps(DTensorTestBase):
                 Singleton(),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([1, 1, 12, 1, 1, 1, 2, 5, 1], [3, 4, 1, 10]),
             (
                 Split(InputDim(2), (3, 4), 0),
@@ -120,7 +120,7 @@ class TestViewOps(DTensorTestBase):
                 Flatten((InputDim(6), InputDim(7))),
             ),
         )
-        self.assertEquals(
+        self.assertEqual(
             view_groups([2, 3, 4], [2, -1, 4]),
             (InputDim(0), InputDim(1), InputDim(2)),
         )
@@ -180,7 +180,7 @@ class TestViewOps(DTensorTestBase):
 
     def dimmap_test(self, op, args, expected_rule_output):
         rules = ops[op].dim_map(*args)
-        self.assertEquals(rules, expected_rule_output)
+        self.assertEqual(rules, expected_rule_output)
         self.call_dt_test(op, args, {}, self.device_mesh)
 
     @with_comms

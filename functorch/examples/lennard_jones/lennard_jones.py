@@ -5,7 +5,7 @@
 import torch
 from torch import nn
 from torch.nn.functional import mse_loss
-from functorch import jacrev, vmap
+from torch.func import jacrev, vmap
 
 sigma = 0.5
 epsilon = 4.

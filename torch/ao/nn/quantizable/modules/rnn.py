@@ -22,7 +22,7 @@ class LSTMCell(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTMCell(10, 20)
         >>> input = torch.randn(6, 10)
         >>> hx = torch.randn(3, 20)
@@ -83,6 +83,7 @@ class LSTMCell(torch.nn.Module):
         fgate_cx_igate_cgate = self.fgate_cx_igate_cgate.add(fgate_cx, igate_cgate)
         cy = fgate_cx_igate_cgate
 
+        # TODO: make this tanh a member of the module so its qparams can be configured
         tanh_cy = torch.tanh(cy)
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
         return hy, cy
@@ -272,7 +273,7 @@ class LSTM(torch.nn.Module):
 
     Examples::
 
-        >>> import torch.nn.quantizable as nnqa
+        >>> import torch.ao.nn.quantizable as nnqa
         >>> rnn = nnqa.LSTM(10, 20, 2)
         >>> input = torch.randn(5, 3, 10)
         >>> h0 = torch.randn(2, 3, 20)

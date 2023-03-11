@@ -13,8 +13,6 @@
 #include <fmt/format.h>
 #include <stdexcept>
 
-using at::Scalar;
-using at::Tensor;
 namespace dist_autograd = torch::distributed::autograd;
 namespace dist_rpc = torch::distributed::rpc;
 

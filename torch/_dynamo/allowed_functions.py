@@ -10,14 +10,12 @@ import types
 import warnings
 from typing import Dict, Optional, Set
 
-import numpy
-
 import torch
 from torch.fx._symbolic_trace import is_fx_tracing
 
 from . import config
 from .external_utils import is_compiling
-from .utils import is_safe_constant
+from .utils import HAS_NUMPY, is_safe_constant, np
 
 """
 A note on allowed functions:
@@ -98,7 +96,6 @@ def _disallowed_function_ids():
         torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.cuda.current_device,
-        torch.cuda.amp.autocast_mode.autocast,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
@@ -108,7 +105,6 @@ def _disallowed_function_ids():
         torch.set_autocast_cpu_enabled,
         torch.set_autocast_enabled,
         torch.set_autocast_gpu_dtype,
-        torch.autograd.profiler.profile,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
@@ -186,6 +182,12 @@ def _allowed_function_ids():
     _find_torch_objects(torch)
     _find_torch_objects(math)
 
+    # torch.Tensor.{fn}
+    for name in dir(torch.Tensor):
+        method = getattr(torch.Tensor, name)
+        if isinstance(method, types.MethodDescriptorType):
+            torch_object_ids[id(method)] = f"torch.Tensor.{name}"
+
     for idx in _disallowed_function_ids():
         if idx in torch_object_ids:
             del torch_object_ids[idx]
@@ -220,15 +222,16 @@ def _builtin_function_ids():
 @make_function_id_set
 def _numpy_function_ids():
     rv = dict()
-    for mod in (numpy, numpy.random):
-        rv.update(
-            {
-                id(v): f"{mod.__name__}.{k}"
-                for k, v in mod.__dict__.items()
-                if callable(v)
-                and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
-            }
-        )
+    if HAS_NUMPY:
+        for mod in (np, np.random):
+            rv.update(
+                {
+                    id(v): f"{mod.__name__}.{k}"
+                    for k, v in mod.__dict__.items()
+                    if callable(v)
+                    and (getattr(v, "__module__", None) or mod.__name__) == mod.__name__
+                }
+            )
     return rv
 
 
@@ -257,7 +260,7 @@ def is_allowed(obj):
 
 
 def torch_get_name(obj, default):
-    """Convert a torch.* funcion to a string"""
+    """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
 
 
@@ -270,4 +273,7 @@ def is_builtin_constant(obj):
 
 
 def is_numpy(obj):
-    return isinstance(obj, numpy.ndarray) or id(obj) in _numpy_function_ids
+    if HAS_NUMPY:
+        return isinstance(obj, np.ndarray) or id(obj) in _numpy_function_ids
+    else:
+        return False

@@ -14,7 +14,7 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -69,7 +69,7 @@ class Net(nn.Module):
         return self.out(F.relu(self.net(x)))
 
 
-class DummyState(object):
+class DummyState:
 
     __slots__ = ["process_group", "noise"]
 
@@ -78,7 +78,7 @@ class DummyState(object):
         self.noise = noise
 
 
-class DummyHook(object):
+class DummyHook:
     def dummy_hook_for_no_shard_fsdp(self, state: DummyState, grad: torch.Tensor):
         """
         This communication hook is for illustration and testing purpose only.
@@ -434,7 +434,7 @@ class TestCommunicationHooks(FSDPTest):
 
     @requires_nccl()
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for BF16_COMPRESS")
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         not BFLOAT16_AVAILABLE,
         "BFloat16 is only supported by CUDA 11+",
     )

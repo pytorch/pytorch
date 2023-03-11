@@ -155,7 +155,7 @@ struct ConvertTracedAttrReferences {
         for (Value* v : sub_unresolved) {
           n->addInput(v);
         }
-      } else if (n->blocks().size()) {
+      } else if (!n->blocks().empty()) {
         for (Block* sub_block : n->blocks()) {
           auto sub_unresolved =
               convertAttrReferencesToLocalGetAttrs(sub_block, prefix, self);
@@ -326,7 +326,7 @@ void convertReturnsToTuples(Block* b) {
           WithInsertPoint guard(sub_block->return_node());
           Node* return_tup =
               g->insertNode(g->createTuple(sub_block->outputs()));
-          while (sub_block->outputs().size()) {
+          while (!sub_block->outputs().empty()) {
             sub_block->eraseOutput(0);
           }
           sub_block->registerOutput(return_tup->output());
@@ -344,7 +344,7 @@ void convertReturnsToTuples(Block* b) {
           n->output(rev_idx)->replaceAllUsesWith(tup_unpack->output(rev_idx));
           n->eraseOutput(rev_idx);
         }
-      } else if (sub_block->outputs().size() == 0) {
+      } else if (sub_block->outputs().empty()) {
         WithInsertPoint guard(sub_block->return_node());
         sub_block->registerOutput(g->insertNode(g->createNone())->output());
         n->addOutput()->setType(NoneType::get());

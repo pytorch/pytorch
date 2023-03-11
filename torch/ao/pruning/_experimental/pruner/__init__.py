@@ -3,3 +3,5 @@ from .parametrization import (
     FakeStructuredSparsity,
     BiasHook,
 )
+from .saliency_pruner import SaliencyPruner
+from .lstm_saliency_pruner import LSTMSaliencyPruner

@@ -22,6 +22,7 @@ def replicate(
         >>> module = nn.Linear(3, 3)
         >>> replicate(module)
     """
+    torch._C._log_api_usage_once("torch.distributed.replicate")
     _ReplicateState().mark_modules(module, **kwargs)
     return module
 
@@ -79,7 +80,9 @@ class _ReplicateState:
 
         self._ddp = _ddp.DistributedDataParallel(self._param_list, **self.kwargs)
 
-    def forward_pre_hook(self, module: nn.Module, input: Tuple[torch.Tensor]) -> None:
+    def forward_pre_hook(
+        self, module: nn.Module, input: Tuple[torch.Tensor, ...]
+    ) -> None:
         self.init_helper()
         self._ddp.pre_forward()
 

@@ -264,8 +264,8 @@ class TestDatasetOps(TestCase):
         ]
         zipped = zip(expected_fields, schema.field_names(), schema.field_types())
         for (ref_name, ref_type), name, dtype in zipped:
-            self.assertEquals(ref_name, name)
-            self.assertEquals(np.dtype(ref_type), dtype)
+            self.assertEqual(ref_name, name)
+            self.assertEqual(np.dtype(ref_type), dtype)
         """
         2. The contents of our dataset.
 
@@ -447,7 +447,7 @@ class TestDatasetOps(TestCase):
         """
         subschema = Struct(("top_level", schema.int_lists.values))
         int_list_contents = contents.int_lists.values.field_names()
-        self.assertEquals(len(subschema.field_names()), len(int_list_contents))
+        self.assertEqual(len(subschema.field_names()), len(int_list_contents))
         """
         7. Random Access a dataset
 
@@ -474,7 +474,7 @@ class TestDatasetOps(TestCase):
             actual = FetchRecord(batch)
             _assert_records_equal(actual, entry)
         workspace.RunNet(str(read_next_net))
-        self.assertEquals(True, workspace.FetchBlob(should_stop))
+        self.assertEqual(True, workspace.FetchBlob(should_stop))
         """
         8. Random Access a dataset with loop_over = true
 
@@ -496,7 +496,7 @@ class TestDatasetOps(TestCase):
 
         for _ in range(len(entries) * 3):
             workspace.RunNet(str(read_next_net))
-            self.assertEquals(False, workspace.FetchBlob(should_stop))
+            self.assertEqual(False, workspace.FetchBlob(should_stop))
         """
         9. Sort and shuffle a dataset
 
@@ -536,7 +536,7 @@ class TestDatasetOps(TestCase):
         trimmed = FetchRecord(ds.content())
         EXPECTED_SIZES = [2, 2, 3, 3, 2, 2, 2, 6, 2, 3, 3, 4, 4, 2, 2, 2]
         actual_sizes = [d.shape[0] for d in trimmed.field_blobs()]
-        self.assertEquals(EXPECTED_SIZES, actual_sizes)
+        self.assertEqual(EXPECTED_SIZES, actual_sizes)
 
     def test_last_n_window_ops(self):
         collect_net = core.Net("collect_net")

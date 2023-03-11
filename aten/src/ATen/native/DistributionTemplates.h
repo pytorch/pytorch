@@ -312,7 +312,7 @@ Tensor& geometric_impl_(Tensor& self, double p, c10::optional<Generator> gen) {
 
 template<template<typename> class exponential_kernel, typename RNG>
 Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> gen) {
-  TORCH_CHECK(lambda >= 0.0, "exponential_ expects lambda >= 0.0, but found lambda=", lambda);
+  TORCH_CHECK(lambda > 0.0, "exponential_ expects lambda > 0.0, but found lambda=", lambda);
   auto iter = TensorIterator::borrowing_nullary_op(self);
   exponential_kernel<RNG>()(iter, lambda, gen);
   return self;
@@ -322,6 +322,10 @@ Tensor& exponential_impl_(Tensor& self, double lambda, c10::optional<Generator> 
 
 template<template<typename> class cauchy_kernel, typename RNG>
 Tensor& cauchy_impl_(Tensor& self, double median, double sigma, c10::optional<Generator> gen) {
+  // TODO: instead of variable name 'sigma', use 'gamma' or 'scale'
+  // the variance, squared sigma, is undefined for cauchy distribution
+  TORCH_CHECK(sigma > 0.0, "cauchy_ expects sigma > 0.0, but found sigma=", sigma);
+  TORCH_CHECK(at::isFloatingType(self.scalar_type()), "Cauchy distribution is a continuous probability distribution. dtype must be a floating point but you specified ", self.dtype());
   auto iter = TensorIterator::borrowing_nullary_op(self);
   cauchy_kernel<RNG>()(iter, median, sigma, gen);
   return self;

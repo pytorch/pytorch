@@ -119,7 +119,7 @@ c10::optional<c10::Device> compute_target_device(
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the
   // device Barring that, we take the first tensor from a TensorList arg.
-  if (t_args.size() > 0) {
+  if (!t_args.empty()) {
     return t_args[0].device();
   } else {
     // We need to loop through all of the (potentially multiple) TensorList

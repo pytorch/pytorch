@@ -40,7 +40,7 @@ std::string GetCallNodeVariableName(const Node* call_node) {
     return "";
   }
   std::string module_name = module_node->s(attr::name);
-  if (module_node->inputs().size() == 0) {
+  if (module_node->inputs().empty()) {
     return module_name;
   }
   // If module is from container, attr::name in module node only carries
@@ -53,7 +53,7 @@ std::string GetCallNodeVariableName(const Node* call_node) {
             "__torch__.torch.nn.modules.container.ModuleList") {
       auto parent_module_node = parent_module_value->node();
       module_name = parent_module_node->s(attr::name) + "." + module_name;
-      parent_module_value = parent_module_node->inputs().size() > 0
+      parent_module_value = !parent_module_node->inputs().empty()
           ? parent_module_node->input(0)
           : nullptr;
     } else {
@@ -167,7 +167,7 @@ void functionCallSubstitution(Block* block) {
 }
 
 ScopePtr ONNXGraphTopLevelScope(Graph& graph) {
-  if (graph.inputs().size() == 0) {
+  if (graph.inputs().empty()) {
     return graph.current_scope();
   }
   if (auto top_module_type = graph.inputs().at(0)->type()->cast<ClassType>()) {
