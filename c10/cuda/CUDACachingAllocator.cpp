@@ -2558,7 +2558,7 @@ class NativeCachingAllocator : public CUDAAllocator {
    * allocated but which will be not be allocated after the checkpoint is set.
    * For these storages we will remove their deleter function.
    * @return CheckpointDelta - Freed Pointers and DataPtrs that contain deleter
-   * functions for all allocated blocks in the new checkpoinnt state.
+   * functions for all allocated blocks in the new checkpoint state.
    */
   CheckpointDelta setCheckpointPoolState(
       int device,
