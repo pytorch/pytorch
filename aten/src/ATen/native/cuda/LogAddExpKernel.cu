@@ -18,23 +18,25 @@ namespace at::native {
 
 const auto logaddexp_string = jiterator_stringify(
   // custom min and max to be used in logcumsumexp for complex arguments
-  template <typename scalar_t>
-  __host__ __device__ std::pair<c10::complex<scalar_t>, c10::complex<scalar_t>> _logcumsumexp_minmax(
-      const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+  template <typename scalar_t, bool min>
+  c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
     scalar_t xr = std::real(x);
     scalar_t yr = std::real(y);
     if (::isnan(yr) || (::isnan(std::imag(y)))) {
-      return std::make_pair(y, y);
+      return y;
     } else if (::isnan(xr) || (::isnan(std::imag(x)))) {
-      return std::make_pair(x, x);
-    } else {
-      return (xr < yr) ? std::make_pair(x, y) : std::make_pair(y, x);
+      return x;
+    } else if (min) { // min
+      return (xr < yr) ? x : y;
+    } else { // max
+      return (xr >= yr) ? x : y;
     }
   }
 
   template <typename scalar_t>
-  __host__ __device__ c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
-    auto [min, max] = _logcumsumexp_minmax<scalar_t>(x, y);
+  c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+    auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
+    auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
     scalar_t min_real = std::real(min);
     scalar_t max_real = std::real(max);
 
@@ -61,7 +63,7 @@ const auto logaddexp_string = jiterator_stringify(
       return ::log1p(exp_minmax) + max;
     }
   }
-)
+); // logaddexp_string
 CONSTEXPR_EXCEPT_WIN_CUDA char logaddexp_name[] = "logaddexp_kernel";
 #else
 // happy to remove this if I don't need to provide the non-jiterator implementation
