@@ -19,7 +19,7 @@ namespace at::native {
 const auto logaddexp_string = jiterator_stringify(
   // custom min and max to be used in logcumsumexp for complex arguments
   template <typename scalar_t, bool min>
-  c10::complex<scalar_t> _logcumsumexp_minmax(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+  std::complex<scalar_t> _logcumsumexp_minmax(const std::complex<scalar_t>& x, const std::complex<scalar_t>& y) {
     scalar_t xr = std::real(x);
     scalar_t yr = std::real(y);
     if (::isnan(yr) || (::isnan(std::imag(y)))) {
@@ -34,7 +34,7 @@ const auto logaddexp_string = jiterator_stringify(
   }
 
   template <typename scalar_t>
-  c10::complex<scalar_t> _log_add_exp_helper(const c10::complex<scalar_t>& x, const c10::complex<scalar_t>& y) {
+  std::complex<scalar_t> _log_add_exp_helper(const std::complex<scalar_t>& x, const std::complex<scalar_t>& y) {
     auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
     auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
     scalar_t min_real = std::real(min);
