@@ -48,6 +48,7 @@ void initPythonBindings(PyObject* module) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
+      .value("XPU", ActivityType::XPU)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")

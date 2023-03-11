@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -1001,9 +1001,12 @@ class Scheduler:
                 # StarDep doesn't match MemoryDep, different indices don't match
                 # However, broadcasting sometimes strips dimensions, and if that's the case
                 # we still can match unmet dep
+                # if there's indirect indexing, don't match it
                 if (
                     rd.name == cd.name
                     and type(rd) == type(cd)
+                    and not free_symbol_has(rd.index, "tmp")
+                    and not free_symbol_has(cd.index, "tmp")
                     and rd.index == cd.index
                     and len(rd.size) >= len(cd.size)
                     and rd.size[: len(cd.size)] == cd.size
