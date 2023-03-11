@@ -5,7 +5,7 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
 import torch
 import torch.nn as nn
@@ -505,6 +505,24 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
         return ddp_model, ddp_optim, fsdp_model, fsdp_optim
 
+    def _get_fsdp_models_and_optims(
+        self,
+        local_model: nn.Module,
+        **fsdp_kwargs: Dict[str, Any],
+    ):
+        LR = 5e-2
+        ddp_model = FSDP(
+            copy.deepcopy(local_model), use_orig_params=False, **fsdp_kwargs
+        )
+        ddp_optim = torch.optim.Adam(ddp_model.parameters(), foreach=False, lr=LR)
+        fsdp_model = FSDP(
+            copy.deepcopy(local_model),
+            use_orig_params=True,
+            **fsdp_kwargs,
+        )
+        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
+        return ddp_model, ddp_optim, fsdp_model, fsdp_optim
+
     def _get_transformer_with_shared_params_and_policy(
         self,
     ) -> Tuple[nn.Module, Callable]:
@@ -535,15 +553,29 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         auto_wrap_policy = ModuleWrapPolicy({nn.Sequential})
         return model, auto_wrap_policy
 
-    def _check_parameter_parity(self, ddp_model: DDP, fsdp_model: FSDP) -> None:
-        """Checks that a DDP and an FSDP model have the same parameters."""
-        with FSDP.summon_full_params(fsdp_model):
-            for (n1, p1), (n2, p2) in zip(
-                ddp_model.module.named_parameters(),
-                fsdp_model.named_parameters(),
+    def _check_parameter_parity(
+        self, ref_model: Union[DDP, FSDP], fsdp_model: FSDP
+    ) -> None:
+        if isinstance(ref_model, DDP):
+            with FSDP.summon_full_params(fsdp_model):
+                for (n1, p1), (n2, p2) in zip(
+                    ref_model.module.named_parameters(),
+                    fsdp_model.named_parameters(),
+                ):
+                    self.assertEqual(n1, n2)
+                    torch.testing.assert_close(p1, p2)
+        elif isinstance(ref_model, FSDP):
+            with FSDP.summon_full_params(ref_model), FSDP.summon_full_params(
+                fsdp_model
             ):
-                self.assertEqual(n1, n2)
-                torch.testing.assert_close(p1, p2)
+                for (n1, p1), (n2, p2) in zip(
+                    ref_model.named_parameters(),
+                    fsdp_model.named_parameters(),
+                ):
+                    self.assertEqual(n1, n2)
+                    torch.testing.assert_close(p1, p2)
+        else:
+            raise ValueError(f"Unknown reference model type: {type(ref_model)}")
 
     def _get_fsdp_parity_subtest_config(self):
         return {
@@ -558,8 +590,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     @parametrize("offload_params", [False, True])
     def test_multiple_forward(self, offload_params: bool):
         """
-        Tests that ``use_orig_params=True`` has parity with DDP when running
-        multiple forward passes before a backward pass.
+        Tests that ``use_orig_params=True`` has parity with DDP or FSDP when
+        running multiple forward passes before a backward pass.
+
+        NOTE: We must compare with FSDP ``use_orig_params=False`` as reference
+        when CPU offloading since CPU kernels give slightly different results,
+        and DDP does not natively support CPU offloading.
         """
         cpu_offload = CPUOffload(offload_params=offload_params)
         self.run_subtests(
@@ -572,17 +608,13 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         self, sharding_strategy: ShardingStrategy, cpu_offload: CPUOffload
     ):
         # Run with two different models for greater confidence
-        if not cpu_offload.offload_params:
-            # TODO: This model breaks with CPU offloading enabled! Only the
-            # model's biases are incorrect where the same subset of elements
-            # are incorrect across all biases.
-            (
-                model,
-                auto_wrap_policy,
-            ) = self._get_transformer_with_shared_params_and_policy()
-            self._test_multiple_forward_base(
-                model, auto_wrap_policy, sharding_strategy, cpu_offload
-            )
+        (
+            model,
+            auto_wrap_policy,
+        ) = self._get_transformer_with_shared_params_and_policy()
+        self._test_multiple_forward_base(
+            model, auto_wrap_policy, sharding_strategy, cpu_offload
+        )
         model, auto_wrap_policy = self._get_nested_wrapped_module_and_policy()
         self._test_multiple_forward_base(
             model, auto_wrap_policy, sharding_strategy, cpu_offload
@@ -595,7 +627,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
     ):
-        ddp_model, ddp_optim, fsdp_model, fsdp_optim = self._get_dist_models_and_optims(
+        model_and_optim_init_fn = (
+            self._get_fsdp_models_and_optims
+            if cpu_offload.offload_params
+            else self._get_dist_models_and_optims
+        )
+        ref_model, ref_optim, fsdp_model, fsdp_optim = model_and_optim_init_fn(
             model,
             auto_wrap_policy=auto_wrap_policy,
             sharding_strategy=sharding_strategy,
@@ -610,7 +647,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             losses1 = []
             losses2 = []
             losses = []
-            for _model, _optim in ((ddp_model, ddp_optim), (fsdp_model, fsdp_optim)):
+            for _model, _optim in ((ref_model, ref_optim), (fsdp_model, fsdp_optim)):
                 _optim.zero_grad()
                 loss1 = _model(*inp1)
                 losses1.append(loss1)
@@ -623,15 +660,19 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             self.assertEqual(losses1[0], losses1[1])
             self.assertEqual(losses2[0], losses2[1])
             self.assertEqual(losses[0], losses[1])
-        self._check_parameter_parity(ddp_model, fsdp_model)
+        self._check_parameter_parity(ref_model, fsdp_model)
 
     @skip_if_lt_x_gpu(2)
     @parametrize("offload_params", [False, True])
     def test_summon_between_two_forwards(self, offload_params: bool):
         """
-        Tests that ``use_orig_params=True`` has parity with DDP when running a
-        forward pass, :meth:`summon_full_params()`, and another forward pass
-        before a backward pass.
+        Tests that ``use_orig_params=True`` has parity with DDP or FSDP when
+        running a forward pass, :meth:`summon_full_params()`, and another
+        forward pass before a backward pass.
+
+        NOTE: We must compare with FSDP ``use_orig_params=False`` as reference
+        when CPU offloading since CPU kernels give slightly different results,
+        and DDP does not natively support CPU offloading.
         """
         cpu_offload = CPUOffload(offload_params=offload_params)
         self.run_subtests(
@@ -644,15 +685,13 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         self, sharding_strategy: ShardingStrategy, cpu_offload: CPUOffload
     ):
         # Run with two different models for greater confidence
-        if not cpu_offload.offload_params:
-            # TODO: This model breaks with CPU offloading enabled!
-            (
-                model,
-                auto_wrap_policy,
-            ) = self._get_transformer_with_shared_params_and_policy()
-            self._test_summon_between_two_forwards_base(
-                model, auto_wrap_policy, sharding_strategy, cpu_offload
-            )
+        (
+            model,
+            auto_wrap_policy,
+        ) = self._get_transformer_with_shared_params_and_policy()
+        self._test_summon_between_two_forwards_base(
+            model, auto_wrap_policy, sharding_strategy, cpu_offload
+        )
         model, auto_wrap_policy = self._get_nested_wrapped_module_and_policy()
         self._test_summon_between_two_forwards_base(
             model, auto_wrap_policy, sharding_strategy, cpu_offload
@@ -665,7 +704,12 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
     ):
-        ddp_model, ddp_optim, fsdp_model, fsdp_optim = self._get_dist_models_and_optims(
+        model_and_optim_init_fn = (
+            self._get_fsdp_models_and_optims
+            if cpu_offload.offload_params
+            else self._get_dist_models_and_optims
+        )
+        ref_model, ref_optim, fsdp_model, fsdp_optim = model_and_optim_init_fn(
             model,
             auto_wrap_policy=auto_wrap_policy,
             sharding_strategy=sharding_strategy,
@@ -673,19 +717,19 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         )
         device = torch.device("cuda")
         for _ in range(10):
-            ddp_optim.zero_grad()
+            ref_optim.zero_grad()
             fsdp_optim.zero_grad()
 
             inp1 = fsdp_model.get_input(device)
-            ddp_loss1 = ddp_model(*inp1)
+            ddp_loss1 = ref_model(*inp1)
             fsdp_loss1 = fsdp_model(*inp1)
             self.assertEqual(ddp_loss1, fsdp_loss1)
 
             # Calls into `summon_full_params()`
-            self._check_parameter_parity(ddp_model, fsdp_model)
+            self._check_parameter_parity(ref_model, fsdp_model)
 
             inp2 = fsdp_model.get_input(device)
-            ddp_loss2 = ddp_model(*inp2)
+            ddp_loss2 = ref_model(*inp2)
             fsdp_loss2 = fsdp_model(*inp2)
             self.assertEqual(ddp_loss2, fsdp_loss2)
 
@@ -693,9 +737,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
             fsdp_loss = (fsdp_loss1 + fsdp_loss2).sum()
             ddp_loss.backward()
             fsdp_loss.backward()
-            ddp_optim.step()
+            ref_optim.step()
             fsdp_optim.step()
-        self._check_parameter_parity(ddp_model, fsdp_model)
+        self._check_parameter_parity(ref_model, fsdp_model)
 
 
 class TestFSDPUseOrigParamsParamAccess(FSDPTest):

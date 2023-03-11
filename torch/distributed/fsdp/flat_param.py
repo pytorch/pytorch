@@ -1072,6 +1072,12 @@ class FlatParamHandle:
             self._check_sharded(flat_param.grad)
             flat_param._saved_grad_shard = flat_param.grad  # type: ignore[attr-defined]
             sharded_grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
+            if sharded_grad.device != self.device:
+                _p_assert(
+                    sharded_grad.device == torch.device("cpu") and self._offload_params,
+                    f"`flat_param.grad` on unexpected device {sharded_grad.device}",
+                )
+                sharded_grad = sharded_grad.to(self.device)
         dist.all_gather_into_tensor(
             padded_unsharded_grad, sharded_grad, self.process_group
         )

@@ -1032,11 +1032,7 @@ def _grad_alloc_hook(
     ``param`` should be one of ``handle`` 's original parameters.
     """
     if handle._ran_grad_alloc_hook:
-        # if state.rank == 0:
-        #     print(f"already ran grad alloc hook {handle}")
         return
-    # if state.rank == 0:
-    #     print(f"running grad alloc hook {handle}")
     # Track that this is the first invocation of the hook among the handle's
     # parameters in the current backward pass -- the flat gradient should only
     # need to be pre-allocated once per backward
