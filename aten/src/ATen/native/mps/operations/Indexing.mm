@@ -735,8 +735,8 @@ Tensor & masked_fill__mps(Tensor& self, const Tensor & mask, const Scalar& value
   }
   TORCH_CHECK(self.device() == mask.device(), "expected self and mask to be on the same device, but got mask on ",
     mask.device(), " and self on ", self.device());
-  TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
-    "expected mask dtype to be Bool but got ", mask.scalar_type());
+  TORCH_CHECK(mask.scalar_type() == kBool, "masked_fill only supports boolean masks,"
+    "but got dtype ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
