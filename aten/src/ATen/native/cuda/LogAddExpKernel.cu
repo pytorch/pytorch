@@ -34,7 +34,7 @@ const auto logaddexp_string = jiterator_stringify(
   }
 
   template <typename scalar_t>
-  std::complex<scalar_t> _log_add_exp_helper(const std::complex<scalar_t>& x, const std::complex<scalar_t>& y) {
+  std::complex<scalar_t> logaddexp_kernel(const std::complex<scalar_t> x, const std::complex<scalar_t> y) {
     auto min = _logcumsumexp_minmax<scalar_t, true>(x, y);
     auto max = _logcumsumexp_minmax<scalar_t, false>(x, y);
     scalar_t min_real = std::real(min);
