@@ -502,9 +502,9 @@ void nllnd_loss_forward_impl
                                                   to_string(isWeightsArrayValid) + ":" +
                                                   reductionToString(reduction) + ":" +
                                                   [ns_shape_key UTF8String] + ":" +
-                                                  getMPSTypeString(input.scalar_type()) + ":" +
-                                                  getMPSTypeString(target.scalar_type()) + ":" +
-                                                  getMPSTypeString(weight.scalar_type());
+                                                  getMPSTypeString(input) + ":" +
+                                                  getMPSTypeString(target) + ":" +
+                                                  getMPSTypeString(weight);
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
         if(!cachedGraph) {
@@ -516,12 +516,12 @@ void nllnd_loss_forward_impl
                     MPSGraph* mpsGraph = make_mps_graph();
                     newCachedGraph = new CachedGraph(mpsGraph);
 
-                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
-                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()), target_shape);
+                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
+                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), target_shape);
                     MPSGraphTensor* weightTensor = nil;
                     if(isWeightsArrayValid)
-                        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight.scalar_type()), weight_shape);
-                    MPSGraphTensor* mps_batchSizeTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batchSizeTensor.scalar_type()));
+                        weightTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(weight), weight_shape);
+                    MPSGraphTensor* mps_batchSizeTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batchSizeTensor));
 
                     MPSGraphTensor* mpsGraphBatchSizeTensor = mps_batchSizeTensor;
 
@@ -709,8 +709,8 @@ void smooth_l1_loss_impl(
     string key = "smooth_l1_loss_impl:" + reductionToString(reduction) + ":" +
                                           [ns_shape_key UTF8String] + ":" +
                                           to_string(beta) + ":" +
-                                          getMPSTypeString(input.scalar_type()) + ":" +
-                                          getMPSTypeString(target.scalar_type());
+                                          getMPSTypeString(input) + ":" +
+                                          getMPSTypeString(target);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -726,8 +726,8 @@ void smooth_l1_loss_impl(
           MPSGraph *mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor *inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()));
-          MPSGraphTensor *targetTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()));
+          MPSGraphTensor *inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(input));
+          MPSGraphTensor *targetTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(target));
 
           // Setup tensors
           MPSGraphTensor *mpsGraphHalfTensor = [mpsGraph constantWithScalar: 0.5
@@ -1118,8 +1118,8 @@ Tensor& huber_loss_backward_out_mps(
         string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" +
                                             std::to_string(delta) + ":" +
                                             [ns_shape_key UTF8String] + ":" +
-                                            getMPSTypeString(input.scalar_type()) + ":" +
-                                            getMPSTypeString(target.scalar_type());
+                                            getMPSTypeString(input) + ":" +
+                                            getMPSTypeString(target);
         CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
         if(!cachedGraph) {
             cachedGraph = static_cast<CachedGraph*>(cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -1130,13 +1130,13 @@ Tensor& huber_loss_backward_out_mps(
                     // Initialize graph
                     MPSGraph* mpsGraph = make_mps_graph();
                     newCachedGraph = new CachedGraph(mpsGraph);
-                    MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output.scalar_type()), getMPSShape(new_grad_output));
-                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
-                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()), getMPSShape(target));
+                    MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(new_grad_output), getMPSShape(new_grad_output));
+                    MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input), input_shape);
+                    MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target), getMPSShape(target));
                     MPSGraphTensor* isMeanReductionTensor = [mpsGraph constantWithScalar:is_mean_reduction
                                                                                 dataType:MPSDataTypeInt64]; // constant does not support MPSDataTypeBool
                     MPSGraphTensor* inputNumelTensor = [mpsGraph constantWithScalar:input_numel
-                                                                           dataType:getMPSDataType(new_grad_output.scalar_type())];
+                                                                           dataType:getMPSDataType(new_grad_output)];
 
                     MPSGraphTensor* normGradOutputTensor = [mpsGraph selectWithPredicateTensor:isMeanReductionTensor
                                                                truePredicateTensor: [mpsGraph divisionWithPrimaryTensor:gradOutputTensor
@@ -1146,7 +1146,7 @@ Tensor& huber_loss_backward_out_mps(
                                                                               name:nil];
                     MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
                                                                          shape:getMPSShape(target)
-                                                                      dataType:getMPSDataType(target.scalar_type())];
+                                                                      dataType:getMPSDataType(target)];
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                                         secondaryTensor:targetTensor
                                                                                    name:nil];

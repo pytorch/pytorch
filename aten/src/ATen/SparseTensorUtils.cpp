@@ -2,10 +2,19 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace sparse {
+namespace at {
+
+namespace native {
+
+DEFINE_DISPATCH(flatten_indices_stub);
+
+}
+
+namespace sparse {
 
 // NOTE [ Flatten Sparse Indices ]
 // This helper function flattens a sparse indices tensor (a Tensor) into a 1D
@@ -29,25 +38,10 @@ Tensor flatten_indices(const Tensor& indices, IntArrayRef full_size, bool force_
       return indices.squeeze(0);
     }
   } else {
-    std::vector<int64_t> indices_mult_cpu_vec;
-    indices_mult_cpu_vec.resize(sparse_dim);
-    int64_t mult = 1;
-    for (int64_t i = sparse_dim - 1; i >= 0; i--) {
-      indices_mult_cpu_vec[i] = mult;
-      mult *= full_size[i];
+    if (!indices.numel()) {
+      return at::zeros({indices.size(1)}, indices.options().dtype(kLong));
     }
-    Tensor indices_mult_cpu = at::from_blob(
-      indices_mult_cpu_vec.data(),
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      /*size=*/{sparse_dim, 1},
-      indices.options().device(kCPU).dtype(kLong));
-    // NB: must be blocking because this blob may be freed after
-    //     this closure, and non_blocking copy will see
-    //     garbage.
-    Tensor indices_mult = indices_mult_cpu.to(indices.device(), /*non_blocking=*/false);
-    // Ideally we want matmul but matmul is slow on CPU Long and not implemented
-    // on CUDA Long. So mul is faster.
-    return indices.mul(indices_mult).sum(0);
+    return at::native::flatten_indices_stub(indices.device().type(), indices, full_size.slice(0, sparse_dim));
   }
 }
 
