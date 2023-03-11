@@ -648,7 +648,7 @@ build_xla() {
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR $USE_CACHE
+  retry install_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }
@@ -850,7 +850,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
-  install_torchaudio
+  if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+    install_torchaudio cpu
+  else
+    install_torchaudio cuda
+  fi
   install_torchtext
   install_torchvision
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
