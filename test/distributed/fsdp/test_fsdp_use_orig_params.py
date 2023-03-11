@@ -575,8 +575,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     @parametrize("offload_params", [False, True])
     def test_multiple_forward(self, offload_params: bool):
         """
-        Tests that ``use_orig_params=True`` has parity with DDP or FSDP when
-        running multiple forward passes before a backward pass.
+        Tests that ``use_orig_params=True`` has parity with DDP or FSDP 
+        ``use_orig_params=False`` when running multiple forward passes before a
+        backward pass.
 
         NOTE: We must compare with FSDP ``use_orig_params=False`` as reference
         when CPU offloading since CPU kernels give slightly different results,
@@ -647,9 +648,10 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     @parametrize("offload_params", [False, True])
     def test_summon_between_two_forwards(self, offload_params: bool):
         """
-        Tests that ``use_orig_params=True`` has parity with DDP or FSDP when
-        running a forward pass, :meth:`summon_full_params()`, and another
-        forward pass before a backward pass.
+        Tests that ``use_orig_params=True`` has parity with DDP or FSDP
+        ``use_orig_params=False`` when running a forward pass,
+        :meth:`summon_full_params`, and another forward pass before a backward
+        pass.
 
         NOTE: We must compare with FSDP ``use_orig_params=False`` as reference
         when CPU offloading since CPU kernels give slightly different results,
