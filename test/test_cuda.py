@@ -5297,12 +5297,16 @@ class TestBlockStateAbsorption(TestCase):
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
+    def setUp(self):
+        super().setUp()
+        self.segment_length = len(get_all_cudagraph_segments())
+
     def tearDown(self):
         torch.cuda.synchronize()
         gc.collect()
         torch.cuda.empty_cache()
 
-        self.assertEqual(len(get_all_cudagraph_segments()), 0)
+        self.assertEqual(len(get_all_cudagraph_segments()), self.segment_length)
 
         super().tearDown()
 
