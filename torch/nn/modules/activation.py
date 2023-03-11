@@ -123,7 +123,8 @@ class RReLU(Module):
         \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
-    :math:`\mathcal{U}(\text{lower}, \text{upper})`.
+    :math:`\mathcal{U}(\text{lower}, \text{upper})` during training while during
+    evaluation :math:`a` is fixed with :math:`a = \frac{\text{lower} + \text{upper}}{2}`.
 
      See: https://arxiv.org/pdf/1505.00853.pdf
 
