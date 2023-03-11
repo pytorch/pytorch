@@ -507,7 +507,6 @@ class TestFSDPStateDict(FSDPTest):
                 self._get_non_fsdp_root_module,
                 cpu_offload=cpu_offload,
                 use_orig_params=use_orig_params,
-                # sharding_strategy=ShardingStrategy.SHARD_GRAD_OP,
             ),
             partial(
                 self._get_simple_nested_model,
