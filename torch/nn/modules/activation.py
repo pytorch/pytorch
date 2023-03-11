@@ -1088,6 +1088,16 @@ class MultiheadAttention(Module):
             target_type=query.dtype
         )
 
+        attn_mask = F._canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"

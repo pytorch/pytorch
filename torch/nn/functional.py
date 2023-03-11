@@ -5164,6 +5164,15 @@ def multi_head_attention_forward(
 
     if is_causal:
         attn_mask = None
+    else:
+        attn_mask = _canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
 
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
