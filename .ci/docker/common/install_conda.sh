@@ -94,5 +94,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     pip_install scikit-learn==0.20.3
   fi
 
+  # Required to test torch deploy
+  conda_install "libpython-static=${ANACONDA_PYTHON_VERSION}"
+
   popd
 fi
