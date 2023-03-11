@@ -162,7 +162,7 @@ TORCH_IMPL_FUNC(leaky_relu_out_mps) (
 
           MPSGraphTensor* negSlopeTensor = [mpsGraph constantWithScalar:negative_slope.to<double>()
                                                                   shape:@[@1]
-                                                               dataType:getMPSDataType(self.scalar_type())];
+                                                               dataType:getMPSDataType(self)];
           MPSGraphTensor* negSlopeMulXTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                                          secondaryTensor:negSlopeTensor
                                                                                     name:nil];
@@ -237,10 +237,10 @@ TORCH_IMPL_FUNC(leaky_relu_backward_out_mps) (
 
           MPSGraphTensor* negSlopeTensor = [mpsGraph constantWithScalar:negative_slope.to<double>()
                                                                   shape:@[@1]
-                                                               dataType:getMPSScalarType(self.scalar_type())];
+                                                               dataType:getMPSScalarType(self)];
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSScalarType(self.scalar_type())];
+                                                           dataType:getMPSScalarType(self)];
           MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
                                                                    secondaryTensor:zeroTensor
                                                                               name:nil];
@@ -380,7 +380,7 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out) (
   MPSStream* stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "log_softmax_backward_mps_out:" + getMPSTypeString(grad_output.scalar_type()) + ":" + to_string(dim);
+    string key = "log_softmax_backward_mps_out:" + getMPSTypeString(grad_output) + ":" + to_string(dim);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -392,8 +392,8 @@ TORCH_IMPL_FUNC(log_softmax_backward_mps_out) (
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output.scalar_type()));
-          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output.scalar_type()));
+          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output));
+          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output));
 
           MPSGraphTensor* expTensor = [mpsGraph exponentWithTensor:outputTensor
                                                               name:nil];
@@ -672,7 +672,7 @@ TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "sigmoid_backward_out_mps:" + getMPSTypeString(grad_output.scalar_type());
+    string key = "sigmoid_backward_out_mps:" + getMPSTypeString(grad_output);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -683,12 +683,12 @@ TORCH_IMPL_FUNC(sigmoid_backward_out_mps)(
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output.scalar_type()));
-          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output.scalar_type()));
+          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output));
+          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output));
 
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* oneMinusSigmoidTensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
                                                                          secondaryTensor:outputTensor
                                                                                     name:nil];
@@ -751,7 +751,7 @@ TORCH_IMPL_FUNC(tanh_backward_out_mps)(
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "tanh_backward_out_mps:" + getMPSTypeString(grad_output.scalar_type());
+    string key = "tanh_backward_out_mps:" + getMPSTypeString(grad_output);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     if(!cachedGraph) {
       MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
@@ -762,12 +762,12 @@ TORCH_IMPL_FUNC(tanh_backward_out_mps)(
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output.scalar_type()));
-          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output.scalar_type()));
+          MPSGraphTensor* gradOutputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(grad_output));
+          MPSGraphTensor* outputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(output));
 
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* tanh2Tensor = [mpsGraph squareWithTensor:outputTensor
                                                               name:nil];
           MPSGraphTensor* oneMinusTanh2Tensor = [mpsGraph subtractionWithPrimaryTensor:unitTensor
@@ -837,11 +837,11 @@ TORCH_IMPL_FUNC(threshold_out_mps)(
 
           MPSGraphTensor *thresholdTensor = [mpsGraph constantWithScalar: threshold.to<double>()
                                                                    shape: @[@1]
-                                                                dataType: getMPSDataType(self.scalar_type())];
+                                                                dataType: getMPSDataType(self)];
 
           MPSGraphTensor *valueTensor = [mpsGraph constantWithScalar: value.to<double>()
                                                                shape: @[@1]
-                                                            dataType: getMPSDataType(self.scalar_type())];
+                                                            dataType: getMPSDataType(self)];
 
           // x > threshold
           MPSGraphTensor *predicateTensor = [mpsGraph greaterThanWithPrimaryTensor: inputTensor
@@ -918,7 +918,7 @@ TORCH_IMPL_FUNC(threshold_backward_out_mps)(
 
           MPSGraphTensor *thresholdTensor = [mpsGraph constantWithScalar: threshold.to<double>()
                                                                    shape: @[@1]
-                                                                dataType: getMPSDataType(self.scalar_type())];
+                                                                dataType: getMPSDataType(self)];
 
           MPSGraphTensor *zeroTensor = [mpsGraph constantWithScalar: 0.0
                                                            dataType: inputTensor.dataType];
@@ -1068,7 +1068,7 @@ TORCH_IMPL_FUNC(gelu_out_mps) (
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(self.scalar_type()),
+                                                                  getMPSDataType(self),
                                                                   getMPSShape(self));
 
           MPSGraphTensor* outputTensor = nil;
@@ -1135,12 +1135,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps) (
         CachedGraph *newCachedGraph = nil;
 
         @autoreleasepool {
-          auto dataType = getMPSDataType(self.scalar_type());
+          auto dataType = getMPSDataType(self);
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* gradTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(grad.scalar_type()),
+                                                                  getMPSDataType(grad),
                                                                   getMPSShape(grad));
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
                                                                   dataType,
@@ -1333,21 +1333,21 @@ void elu_variants_out_mps (
 
           MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.to<double>()
                                                                shape:@[@1]
-                                                            dataType:getMPSDataType(self.scalar_type())];
+                                                            dataType:getMPSDataType(self)];
 
           MPSGraphTensor* inputScaleTensor = [mpsGraph constantWithScalar:input_scale.to<double>()
                                                                     shape:@[@1]
-                                                                 dataType:getMPSDataType(self.scalar_type())];
+                                                                 dataType:getMPSDataType(self)];
 
           MPSGraphTensor* scaleTensor = [mpsGraph constantWithScalar:scale.to<double>()
                                                                shape:@[@1]
-                                                            dataType:getMPSDataType(self.scalar_type())];
+                                                            dataType:getMPSDataType(self)];
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
 
           MPSGraphTensor* scaledInputTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                                         secondaryTensor:inputScaleTensor
@@ -1467,14 +1467,14 @@ TORCH_IMPL_FUNC(elu_backward_out_mps) (
           if(is_result) {
             MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.to<double>()
                                                                shape:@[@1]
-                                                            dataType:getMPSDataType(grad_output.scalar_type())];
+                                                            dataType:getMPSDataType(grad_output)];
             MPSGraphTensor* resultPlusAlphaTensor = [mpsGraph additionWithPrimaryTensor:selfOrResultTensor
                                                                         secondaryTensor:alphaTensor
                                                                                    name:nil];
             auto constMul = scale.to<double>() * input_scale.to<double>();
             MPSGraphTensor* constMulTensor = [mpsGraph constantWithScalar:constMul
                                                                     shape:@[@1]
-                                                                 dataType:getMPSDataType(grad_output.scalar_type())];
+                                                                 dataType:getMPSDataType(grad_output)];
             lessThanZeroGradTensor = [mpsGraph multiplicationWithPrimaryTensor:resultPlusAlphaTensor
                                                                secondaryTensor:constMulTensor
                                                                           name:nil];
@@ -1482,7 +1482,7 @@ TORCH_IMPL_FUNC(elu_backward_out_mps) (
           else {
             MPSGraphTensor* inputScaleTensor = [mpsGraph constantWithScalar:input_scale.to<double>()
                                                                     shape:@[@1]
-                                                                 dataType:getMPSDataType(grad_output.scalar_type())];
+                                                                 dataType:getMPSDataType(grad_output)];
             MPSGraphTensor* scaledInputTensor = [mpsGraph multiplicationWithPrimaryTensor:selfOrResultTensor
                                                                           secondaryTensor:inputScaleTensor
                                                                                      name:nil];
@@ -1491,7 +1491,7 @@ TORCH_IMPL_FUNC(elu_backward_out_mps) (
             auto constMul = scale.to<double>() * input_scale.to<double>() * alpha.to<double>();
             MPSGraphTensor* constMulTensor = [mpsGraph constantWithScalar:constMul
                                                                     shape:@[@1]
-                                                                 dataType:getMPSDataType(grad_output.scalar_type())];
+                                                                 dataType:getMPSDataType(grad_output)];
             lessThanZeroGradTensor = [mpsGraph multiplicationWithPrimaryTensor:expTensor
                                                                secondaryTensor:constMulTensor
                                                                           name:nil];
@@ -1499,10 +1499,10 @@ TORCH_IMPL_FUNC(elu_backward_out_mps) (
 
           MPSGraphTensor* scaleTensor = [mpsGraph constantWithScalar:scale.to<double>()
                                                                shape:@[@1]
-                                                            dataType:getMPSDataType(grad_output.scalar_type())];
+                                                            dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* predicateTensor = [mpsGraph greaterThanWithPrimaryTensor:selfOrResultTensor
                                                                    secondaryTensor:zeroTensor
                                                                               name:nil];
@@ -1585,7 +1585,7 @@ TORCH_IMPL_FUNC(glu_out_mps) (
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(self.scalar_type()),
+                                                                  getMPSDataType(self),
                                                                   getMPSShape(self));
           NSArray<MPSGraphTensor *> * outputTensorsArray = [mpsGraph splitTensor:inputTensor
                                                                        numSplits:2
@@ -1664,10 +1664,10 @@ Tensor& glu_backward_mps_out (
           newCachedGraph = new CachedGraph(mpsGraph);
 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(self.scalar_type()),
+                                                                  getMPSDataType(self),
                                                                   getMPSShape(self));
           MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
-                                                                  getMPSDataType(grad_output.scalar_type()),
+                                                                  getMPSDataType(grad_output),
                                                                   getMPSShape(grad_output));
           NSArray<MPSGraphTensor *> * inputTensorsArray = [mpsGraph splitTensor:inputTensor
                                                                       numSplits:2
@@ -1684,7 +1684,7 @@ Tensor& glu_backward_mps_out (
           // second half
           MPSGraphTensor* one_val = [mpsGraph constantWithScalar:1.0
                                                            shape:@[@1]
-                                                        dataType:getMPSDataType(self.scalar_type())];
+                                                        dataType:getMPSDataType(self)];
 
           MPSGraphTensor* secondHalfOutputTensor = [mpsGraph subtractionWithPrimaryTensor : one_val
                                                                 secondaryTensor : sigmoidOutputTensor
@@ -1899,7 +1899,7 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
 
               MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                                   shape:@[@1]
-                                                               dataType:getMPSDataType(self.scalar_type())];
+                                                               dataType:getMPSDataType(self)];
               MPSGraphTensor* bxTensor = [mpsGraph multiplicationWithPrimaryTensor:inputTensor
                                                                   secondaryTensor:betaTensor
                                                                   name:nil];
@@ -1991,7 +1991,7 @@ Tensor prelu_mps(const Tensor& self, const Tensor& weight_) {
 
           MPSGraphTensor *zeroTensor = [mpsGraph constantWithScalar:0.0
                                                               shape:@[@1]
-                                                            dataType:getMPSDataType(self.scalar_type())];
+                                                            dataType:getMPSDataType(self)];
           MPSGraphTensor *reluTensor = [mpsGraph reLUWithTensor:inputTensor
                                                             name:nil];
           MPSGraphTensor *predicateTensor = [mpsGraph lessThanWithPrimaryTensor: inputTensor
@@ -2165,7 +2165,7 @@ TORCH_IMPL_FUNC(silu_out_mps) (
 
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* negativeInput = [mpsGraph negativeWithTensor:inputTensor
                                                                   name:nil];
           MPSGraphTensor* expNegativeTensor = [mpsGraph exponentWithTensor:negativeInput
@@ -2244,7 +2244,7 @@ TORCH_IMPL_FUNC(silu_backward_out_mps) (
 
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* negativeInput = [mpsGraph negativeWithTensor:inputTensor
                                                                   name:nil];
           MPSGraphTensor* expNegativeTensor = [mpsGraph exponentWithTensor:negativeInput
@@ -2334,13 +2334,13 @@ TORCH_IMPL_FUNC(hardsigmoid_out_mps) (const Tensor& self, const Tensor& result) 
           MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* threeTensor = [mpsGraph constantWithScalar:3.0
                                                                shape:@[@1]
-                                                            dataType:getMPSDataType(self.scalar_type())];
+                                                            dataType:getMPSDataType(self)];
           MPSGraphTensor* sixTensor = [mpsGraph constantWithScalar:6.0
                                                              shape:@[@1]
-                                                          dataType:getMPSDataType(self.scalar_type())];
+                                                          dataType:getMPSDataType(self)];
           MPSGraphTensor* inputPlusThreeTensor = [mpsGraph additionWithPrimaryTensor:inputTensor
                                                                      secondaryTensor:threeTensor
                                                                                 name:nil];
@@ -2415,16 +2415,16 @@ TORCH_IMPL_FUNC(hardsigmoid_backward_out_mps) (
           MPSGraphTensor *gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* highTensor = [mpsGraph constantWithScalar:3.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* lowTensor = [mpsGraph constantWithScalar:-3.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor* oneSixTensor = [mpsGraph constantWithScalar:1.0/6.0
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(self.scalar_type())];
+                                                           dataType:getMPSDataType(self)];
           MPSGraphTensor *inputLessThanHighPredicateTensor = [mpsGraph lessThanWithPrimaryTensor:inputTensor
                                                                                  secondaryTensor:highTensor
                                                                                             name:nil];
@@ -2537,16 +2537,16 @@ Tensor& hardtanh_backward_out_mps
           // TODO: Compute gradient
           MPSGraphTensor* unitTensor = [mpsGraph constantWithScalar:1.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* zeroTensor = [mpsGraph constantWithScalar:0.0f
                                                               shape:@[@1]
-                                                           dataType:getMPSDataType(grad_output.scalar_type())];
+                                                           dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* minTensor = [mpsGraph constantWithScalar:min.to<double>()
                                                              shape:@[@1]
-                                                          dataType:getMPSDataType(grad_output.scalar_type())];
+                                                          dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* maxTensor = [mpsGraph constantWithScalar:max.to<double>()
                                                              shape:@[@1]
-                                                          dataType:getMPSDataType(grad_output.scalar_type())];
+                                                          dataType:getMPSDataType(grad_output)];
           MPSGraphTensor* greaterThanMaxPredicateTensor = [mpsGraph greaterThanWithPrimaryTensor:inputTensor
                                                                                  secondaryTensor:maxTensor
                                                                                             name:nil];
@@ -2632,22 +2632,22 @@ Tensor& hardswish_out_mps(const Tensor& self, Tensor& output) {
               MPSGraphTensor* zeroTensor = [mpsGraph
                   constantWithScalar:0.0f
                                shape:@[ @1 ]
-                            dataType:getMPSDataType(self.scalar_type())];
+                            dataType:getMPSDataType(self)];
 
               MPSGraphTensor* threeTensor = [mpsGraph
                   constantWithScalar:3.0f
                                shape:@[ @1 ]
-                            dataType:getMPSDataType(self.scalar_type())];
+                            dataType:getMPSDataType(self)];
 
               MPSGraphTensor* negativeThreeTensor = [mpsGraph
                   constantWithScalar:-3.0f
                                shape:@[ @1 ]
-                            dataType:getMPSDataType(self.scalar_type())];
+                            dataType:getMPSDataType(self)];
 
               MPSGraphTensor* sixTensor = [mpsGraph
                   constantWithScalar:6.0f
                                shape:@[ @1 ]
-                            dataType:getMPSDataType(self.scalar_type())];
+                            dataType:getMPSDataType(self)];
 
               MPSGraphTensor* lessThanMinPredicateTensor = [mpsGraph
                   lessThanOrEqualToWithPrimaryTensor:inputTensor
@@ -2761,27 +2761,27 @@ Tensor hardswish_backward_mps(const Tensor& grad_output, const Tensor& self) {
           MPSGraphTensor* zeroTensor = [mpsGraph
               constantWithScalar:0.0f
                            shape:@[ @1 ]
-                        dataType:getMPSDataType(grad_output.scalar_type())];
+                        dataType:getMPSDataType(grad_output)];
 
           MPSGraphTensor* unitTensor = [mpsGraph
               constantWithScalar:1.0f
                            shape:@[ @1 ]
-                        dataType:getMPSDataType(grad_output.scalar_type())];
+                        dataType:getMPSDataType(grad_output)];
 
           MPSGraphTensor* threeTensor = [mpsGraph
               constantWithScalar:3.0f
                            shape:@[ @1 ]
-                        dataType:getMPSDataType(grad_output.scalar_type())];
+                        dataType:getMPSDataType(grad_output)];
 
           MPSGraphTensor* negativeThreeTensor = [mpsGraph
               constantWithScalar:-3.0f
                            shape:@[ @1 ]
-                        dataType:getMPSDataType(grad_output.scalar_type())];
+                        dataType:getMPSDataType(grad_output)];
 
           MPSGraphTensor* halfTensor = [mpsGraph
               constantWithScalar:0.5f
                            shape:@[ @1 ]
-                        dataType:getMPSDataType(grad_output.scalar_type())];
+                        dataType:getMPSDataType(grad_output)];
 
           MPSGraphTensor* tempTensor =
               [mpsGraph divisionWithPrimaryTensor:inputTensor

@@ -73,8 +73,8 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   }
 
   auto stream = at::mps::getCurrentMPSStream();
-  auto inputDataType = getMPSDataType(expanded_tensor.scalar_type());
-  auto outputDataType = getMPSDataType(result.scalar_type());
+  auto inputDataType = getMPSDataType(expanded_tensor);
+  auto outputDataType = getMPSDataType(result);
   if (!is_macos_13_or_newer()) {
      if (expanded_tensor.scalar_type() == kBool) {
       inputDataType = MPSDataTypeInt8;
