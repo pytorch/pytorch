@@ -11,9 +11,8 @@ pip_install beartype==0.10.4 \
   flatbuffers==2.0 \
   mock==5.0.1 \
   networkx==2.0 \
-  ninja \
   numpy==1.22.4 \
-  onnx==1.13.1
+  onnx==1.13.1 \
   onnxruntime==1.14.0 \
   parameterized==0.8.1 \
   pytest-cov==4.0.0 \
