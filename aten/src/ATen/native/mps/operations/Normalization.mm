@@ -137,7 +137,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
                       + [ns_shape_key UTF8String] + ":"
                       + native_mps::getTensorsStringKey({
                         self, weight_opt.value_or(Tensor()), bias_opt.value_or(Tensor()), running_mean_opt.value_or(Tensor()), running_var_opt.value_or(Tensor())});
-    auto input_mps_dtype = native_mps::getMPSDataType(self.scalar_type());
+    auto input_mps_dtype = native_mps::getMPSDataType(self);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     // Dim where channels are located
@@ -166,15 +166,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out
             MPSGraphTensor* weightTensor = nil;
             // Should have shape of mean
             if(has_weight)
-              weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
+              weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value()), new_mean_shape);
             MPSGraphTensor* biasTensor = nil;
             if(has_bias)
-              biasTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(bias_opt.value().scalar_type()), new_mean_shape);
+              biasTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(bias_opt.value()), new_mean_shape);
             MPSGraphTensor* runningMeanTensor = nil;
             MPSGraphTensor* runningVarTensor = nil;
             if(has_running_mean) {
-              runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
-              runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
+              runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value()), new_mean_shape);
+              runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value()), new_mean_shape);
             }
 
             // Mean and inv std tensors to be saved and returned
@@ -609,8 +609,8 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
                       + std::to_string(train) + ":"
                       + std::to_string(has_running_mean) + ":"
                       + std::to_string(has_weight) + ":"
-                      + [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input.scalar_type());
-    auto input_mps_dtype = native_mps::getMPSDataType(input.scalar_type());
+                      + [ns_shape_key UTF8String] + ":" + native_mps::getMPSTypeString(input);
+    auto input_mps_dtype = native_mps::getMPSDataType(input);
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -627,23 +627,23 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps
 
           MPSGraphTensor* inputTensorOriginal = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
           // Shape is the ORIGINAL NCHW shape
-          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(grad_out.scalar_type()), input_shape_readonly);
+          MPSGraphTensor* gradOutputTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(grad_out), input_shape_readonly);
           MPSGraphTensor* weightTensor = nil;
           if(has_weight)
-            weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value().scalar_type()), new_mean_shape);
+            weightTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(weight_opt.value()), new_mean_shape);
           MPSGraphTensor* runningMeanTensor = nil;
           MPSGraphTensor* runningVarTensor = nil;
           if(has_running_mean) {
-            runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value().scalar_type()), new_mean_shape);
-            runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value().scalar_type()), new_mean_shape);
+            runningMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_mean_opt.value()), new_mean_shape);
+            runningVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(running_var_opt.value()), new_mean_shape);
           }
 
           // Mean and inv std tensors to be saved and returned
           MPSGraphTensor* saveMeanTensor = nil;
           MPSGraphTensor* saveVarTensor = nil;
           if(has_save_mean) {
-            saveMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_mean_opt.value().scalar_type()), new_mean_shape);
-            saveVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_var_opt.value().scalar_type()), new_mean_shape);
+            saveMeanTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_mean_opt.value()), new_mean_shape);
+            saveVarTensor = native_mps::mpsGraphRankedPlaceHolder(mpsGraph, native_mps::getMPSDataType(save_var_opt.value()), new_mean_shape);
           }
 
           MPSGraphTensor* gradInputTensor = nil;
@@ -1084,7 +1084,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(
                         + std::to_string(has_weight) + ":"
                         + native_mps::getArrayRefString(normalized_shape) + ":"
                         + native_mps::getArrayRefString((*X).sizes()) + ":"
-                        + native_mps::getMPSTypeString((*X).scalar_type());
+                        + native_mps::getMPSTypeString(*X);
 
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
 
