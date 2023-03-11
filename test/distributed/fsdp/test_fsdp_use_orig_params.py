@@ -486,42 +486,27 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     def world_size(self) -> int:
         return 2
 
-    def _get_dist_models_and_optims(
+    def _get_models_and_optims(
         self,
         local_model: nn.Module,
-        **fsdp_kwargs: Dict[str, Any],
-    ) -> Tuple[DDP, torch.optim.Optimizer, FSDP, torch.optim.Optimizer]:
-        # NOTE: We compare against DDP as baseline instead of against FSDP with
-        # `use_orig_params=False` since for the latter we see slight numeric
-        # differences for some elements (in the range (1e-5, 1e-4)).
-        LR = 5e-2
-        ddp_model = DDP(copy.deepcopy(local_model), device_ids=[self.rank])
-        ddp_optim = torch.optim.Adam(ddp_model.parameters(), foreach=False, lr=LR)
-        fsdp_model = FSDP(
-            copy.deepcopy(local_model),
-            use_orig_params=True,
-            **fsdp_kwargs,
-        )
-        fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
-        return ddp_model, ddp_optim, fsdp_model, fsdp_optim
-
-    def _get_fsdp_models_and_optims(
-        self,
-        local_model: nn.Module,
+        use_ddp_as_ref: bool,
         **fsdp_kwargs: Dict[str, Any],
     ):
         LR = 5e-2
-        ddp_model = FSDP(
-            copy.deepcopy(local_model), use_orig_params=False, **fsdp_kwargs
-        )
-        ddp_optim = torch.optim.Adam(ddp_model.parameters(), foreach=False, lr=LR)
+        if use_ddp_as_ref:
+            ref_model = DDP(copy.deepcopy(local_model), device_ids=[self.rank])
+        else:
+            ref_model = FSDP(
+                copy.deepcopy(local_model), use_orig_params=False, **fsdp_kwargs
+            )
+        ref_optim = torch.optim.Adam(ref_model.parameters(), foreach=False, lr=LR)
         fsdp_model = FSDP(
             copy.deepcopy(local_model),
             use_orig_params=True,
             **fsdp_kwargs,
         )
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters(), foreach=False, lr=LR)
-        return ddp_model, ddp_optim, fsdp_model, fsdp_optim
+        return ref_model, ref_optim, fsdp_model, fsdp_optim
 
     def _get_transformer_with_shared_params_and_policy(
         self,
@@ -627,13 +612,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
     ):
-        model_and_optim_init_fn = (
-            self._get_fsdp_models_and_optims
-            if cpu_offload.offload_params
-            else self._get_dist_models_and_optims
-        )
-        ref_model, ref_optim, fsdp_model, fsdp_optim = model_and_optim_init_fn(
+        ref_model, ref_optim, fsdp_model, fsdp_optim = self._get_models_and_optims(
             model,
+            use_ddp_as_ref=not cpu_offload.offload_params,
             auto_wrap_policy=auto_wrap_policy,
             sharding_strategy=sharding_strategy,
             cpu_offload=cpu_offload,
@@ -704,13 +685,9 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
         sharding_strategy: ShardingStrategy,
         cpu_offload: CPUOffload,
     ):
-        model_and_optim_init_fn = (
-            self._get_fsdp_models_and_optims
-            if cpu_offload.offload_params
-            else self._get_dist_models_and_optims
-        )
-        ref_model, ref_optim, fsdp_model, fsdp_optim = model_and_optim_init_fn(
+        ref_model, ref_optim, fsdp_model, fsdp_optim = self._get_models_and_optims(
             model,
+            use_ddp_as_ref=not cpu_offload.offload_params,
             auto_wrap_policy=auto_wrap_policy,
             sharding_strategy=sharding_strategy,
             cpu_offload=cpu_offload,
