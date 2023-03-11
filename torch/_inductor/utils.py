@@ -594,6 +594,16 @@ def get_num_bytes(*args):
     )
 
 
+def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
+    import colorama
+
+    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
+    if ms > 0.012 and gb_per_s < 650:
+        return colorama.Fore.RED + info_str + colorama.Fore.RESET
+    else:
+        return info_str
+
+
 def get_benchmark_name():
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -644,32 +654,43 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         args = kernel_mod.get_args()
         num_gb = get_num_bytes(*args) / 1e9
 
-        def get_info_str(ms, prefix=""):
-            gb_per_s = num_gb / (ms / 1e3)
-            # follow what we do in DebugAutotuner
-            info_str = f"{prefix}{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
-            import colorama
+        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+            if not any(x is None for x in [n_regs, n_spills, shared]):
+                kernel_detail_str = (
+                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+                )
+            else:
+                kernel_detail_str = ""
 
-            if ms > 0.012 and gb_per_s < 650:
-                info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
-            return info_str
+            gb_per_s = num_gb / (ms / 1e3)
+            return create_bandwidth_info_str(
+                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
+            )
 
         bench_result = []
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
-            bench_result = [
-                (launcher.config, ms) for launcher, ms in bench_result.items()
-            ]
             print(f"{benchmark_name:20} {kernel_key[:10]}")
-            for cfg, ms in bench_result:
-                print(f"  {get_info_str(ms)} @ {cfg}")
+            for launcher, ms in bench_result.items():
+                print(
+                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
+                )
         else:
             ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
             assert (
                 len(kernel_mod.triton_.launchers) == 1
             ), "Autotuner should have selected the best config"
-            print(get_info_str(ms, prefix=f"{benchmark_name:20} {kernel_key[:10]} "))
+            launcher = kernel_mod.triton_.launchers[0]
+            print(
+                get_info_str(
+                    ms,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
+                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                )
+            )
 
         nfound += 1
     if nfound == 0:
