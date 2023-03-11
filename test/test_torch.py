@@ -55,7 +55,7 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types,
+    all_types_and, floating_types, floating_and_complex_types, integral_types_and
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -628,12 +628,6 @@ class TestTorchDeviceType(TestCase):
 
         zero_d_uint8 = torch.tensor(1, dtype=torch.uint8, device=device)
         one_d_uint8 = torch.tensor([1], dtype=torch.uint8, device=device)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.assertEqual((1,), torch.masked_select(zero_d_uint8, zero_d_uint8).shape)
-            self.assertEqual((1,), torch.masked_select(zero_d_uint8, one_d_uint8).shape)
-            self.assertEqual((1,), torch.masked_select(one_d_uint8, zero_d_uint8).shape)
 
         # mode
         self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=True)])
@@ -3688,16 +3682,17 @@ else:
             warn = 'masked_select received a mask with dtype torch.uint8,'
         else:
             warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
-        for maskType in [torch.uint8, torch.bool]:
+        for maskType in integral_types_and(torch.bool):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
 
-            with warnings.catch_warnings(record=True) as w:
+            if maskType is not torch.bool:
+                with self.assertRaisesRegex(RuntimeError, r'expected BoolTensor for mask'):
+                    dst = src.masked_select(mask)
+                continue
+            else:
                 dst = src.masked_select(mask)
-                if maskType is torch.uint8:
-                    self.assertEqual(len(w), 1)
-                    self.assertEqual(str(w[0].message)[0:53], str(warn))
             dst2 = []
             for i in range(num_src):
                 if mask[i]:
