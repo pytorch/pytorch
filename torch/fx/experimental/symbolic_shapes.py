@@ -1925,6 +1925,8 @@ class ShapeEnv:
         return self.simplify(expr)
 
     def _verify_valid_range(self, symbol, valid_range, expr):
+        if symbol not in self.var_to_val:
+            return
         if has_hint(symbol) and self.size_hint(symbol) not in valid_range:
             raise RuntimeError(f"Valid range, {valid_range}, contradicts "
                                f"traced value of {symbol}, {self.size_hint(symbol)}")
