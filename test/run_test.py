@@ -164,6 +164,7 @@ FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 # Tests need to be run with pytest.
 USE_PYTEST_LIST = [
+    "test_copy_on_write",
     "distributed/pipeline/sync/skip/test_api",
     "distributed/pipeline/sync/skip/test_gpipe",
     "distributed/pipeline/sync/skip/test_inspect_skip_layout",

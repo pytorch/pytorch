@@ -7,6 +7,9 @@
 
 #include <c10/util/intrusive_ptr.h>
 
+#include <memory>
+#include <mutex>
+
 namespace c10 {
 
 // A storage represents the underlying backing data buffer for a
@@ -79,6 +82,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
     size_bytes_ = 0;
     size_bytes_is_symbolic_ = false;
+  }
+
+  std::lock_guard<std::mutex> guard_ctx() {
+    return std::lock_guard<std::mutex>(*ctx_mutex_);
   }
 
   template <typename T>
@@ -224,5 +231,19 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool received_cuda_;
   Allocator* allocator_;
   impl::PyObjectSlot pyobj_slot_;
+
+  // Intended to guard any context manipulation.
+  //
+  // In particular, this is to protect the copy-on-write
+  // storage. Copy-on-write storages defy the usual expectation that
+  // two tensors that are not views do not require any synchronization
+  // during modifications. So technically, we need to grab the mutex
+  // any time we need to evaluate if we need to promote a storage to
+  // have its own private copy of the data.
+  //
+  // Note that this mutex is heap allocated in order to support the
+  // default move constructor.
+  std::unique_ptr<std::mutex> ctx_mutex_ = std::make_unique<std::mutex>();
 };
+
 } // namespace c10

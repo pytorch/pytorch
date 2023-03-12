@@ -17,6 +17,7 @@
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/DispatchKeySet.h>
+#include <c10/core/impl/copy_on_write.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 #include <libshm.h>
@@ -1621,6 +1622,17 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 #undef SET_STR_DEFINE
 
+  // Gets the current copy-on-write refcount of the tensor, provided
+  // it has a copy-on-write storage.
+  py_module.def("copy_on_write_refcount", [](const at::Tensor& x) {
+    return c10::impl::copy_on_write_refcount(
+        x.unsafeGetTensorImpl()->unsafe_storage());
+  });
+  // Returns the address of the StorageImpl, useful in tests to verify
+  // that views have the same storage.
+  py_module.def("storage_id", [](const at::Tensor& x) {
+    return reinterpret_cast<std::intptr_t>(x.storage().unsafeGetStorageImpl());
+  });
   py_module.def(
       "_set_conj", [](const at::Tensor& x, bool conj) { x._set_conj(conj); });
   py_module.def(

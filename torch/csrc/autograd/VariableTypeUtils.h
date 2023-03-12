@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/ArrayRef.h>
 #include <c10/util/irange.h>
 
 #include <ATen/core/boxing/KernelFunction.h>
@@ -128,6 +129,10 @@ inline void rebase_history(
     }
   }
 }
+
+// Materialize any tensors that have copy on write storage.
+void materialize_copies_on_write(
+    c10::ArrayRef<std::reference_wrapper<at::TensorBase const>> tensors);
 
 inline void increment_version(const at::Tensor& t) {
   impl::bump_version(t);

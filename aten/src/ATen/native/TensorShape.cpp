@@ -26,6 +26,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <c10/core/impl/copy_on_write.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
@@ -1538,11 +1539,12 @@ Tensor tile(const Tensor& self, IntArrayRef reps){
 //
 // templated for ArrayRef<int64_t> and SmallVector<int64_t> use cases
 //
-template <typename Vec>
+template <typename Sizes, typename Strides>
 Tensor alias_with_sizes_and_strides(
     const Tensor& self,
-    const Vec& sizes,
-    const Vec& strides) {
+    const Sizes& sizes,
+    const Strides& strides,
+    bool copy_on_write) {
   //caller should make sure that sizes and strides are valid for self
   //(storage is sufficient, strides are non-negative, strides and sizes array size is the same)
   Tensor self_;
@@ -1553,8 +1555,29 @@ Tensor alias_with_sizes_and_strides(
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
+    Storage storage;
+    if (copy_on_write) {
+      c10::intrusive_ptr<c10::StorageImpl> storage_impl = c10::impl::make_copy_on_write(self.storage());
+      if (storage_impl == nullptr) {
+        // We can't perform this reshape with a copy-on-write tensor. In
+        // the future, to ensure the desired semantics that reshape always
+        // copies, we will perform an eager copy here because we can't
+        // perform a lazy copy via copy-on-write.
+        TORCH_WARN_ONCE(
+            "You have performed a reshape that is presently being implemented "
+            "with a view. In the future, this specific reshape will become an "
+            "eager copy, but others may become copy-on-write.");
+        // TODO After this warning has been out for a PyTorch release,
+        // replace the above warning with an eager copy.
+      } else {
+        storage = Storage(std::move(storage_impl));
+      }
+    }
+    if (!storage) {
+      storage = Storage(self.storage());
+    }
     self_ = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+      c10::TensorImpl::VIEW, std::move(storage), self.key_set(), self.dtype());
     auto* self_tmp_ = self_.unsafeGetTensorImpl();
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
@@ -1563,13 +1586,27 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
+namespace {
+
+// Reshapes a tensor by creating a copy on write storage of the
+// existing data.
+Tensor reshape_copy_on_write(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
+  c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
+  auto stride = at::detail::computeStride(self.sym_sizes(), self.sym_strides(), shape);
+  assert(stride.has_value());
+  return alias_with_sizes_and_strides(self, shape, *stride, /*copy_on_write=*/true);
+}
+
+} // namespace
+
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
-    return self.view_symint(proposed_shape);
+    // We are able to implement this reshape with a view.
+    return reshape_copy_on_write(self, proposed_shape);
   }
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
@@ -1601,7 +1638,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
       return self._reshape_alias_symint(shape, stride.value());
     } else {
-      return self.view_symint(shape);
+      return reshape_copy_on_write(self, proposed_shape);
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -1670,7 +1707,7 @@ Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides
   // to `view`. This removes the overhead of calling `view` which duplicates some of
   // the work that's already been done (`infer_size_dv` and `computeStride`).
 
-  return alias_with_sizes_and_strides(self, sizes, strides);
+  return alias_with_sizes_and_strides(self, sizes, strides, /*copy_on_write=*/true);
 }
 
 Tensor reshape_as(const Tensor& self, const Tensor& other) {
@@ -3262,7 +3299,7 @@ inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
   TORCH_CHECK(stride.has_value(), "view size is "
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
-  return alias_with_sizes_and_strides(self, inferred_size, *stride);
+  return alias_with_sizes_and_strides(self, inferred_size, *stride, /*copy_on_write=*/false);
 
 }
 
@@ -3648,7 +3685,7 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(self, self.sizes(), self.strides());
+  return alias_with_sizes_and_strides(self, self.sizes(), self.strides(), /*copy_on_write=*/false);
 }
 
 Tensor detach(const Tensor& self) {
