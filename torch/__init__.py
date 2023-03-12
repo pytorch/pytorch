@@ -246,7 +246,7 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        return builtins.bool(self != 0)
 
     def __int__(self):
         return self.node.int_()
@@ -291,8 +291,6 @@ class SymFloat:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -340,14 +338,15 @@ class SymBool:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __int__(self):
+        return builtins.int(self.node.bool_())
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
