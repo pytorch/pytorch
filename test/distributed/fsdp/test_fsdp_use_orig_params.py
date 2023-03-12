@@ -575,7 +575,7 @@ class TestFSDPUseOrigParamsUnshardReshard(FSDPTest):
     @parametrize("offload_params", [False, True])
     def test_multiple_forward(self, offload_params: bool):
         """
-        Tests that ``use_orig_params=True`` has parity with DDP or FSDP 
+        Tests that ``use_orig_params=True`` has parity with DDP or FSDP
         ``use_orig_params=False`` when running multiple forward passes before a
         backward pass.
 
