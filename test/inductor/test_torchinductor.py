@@ -1907,6 +1907,50 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_conv_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, conv_in_channel, conv_out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                res = self.conv(res)
+                return res
+
+        with torch.no_grad():
+            m = M(3, 3).eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(1, 3, 224, 224)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
+    def test_linear_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        with torch.no_grad():
+            m = M(224, 224).bfloat16().eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(224, 224, dtype=torch.bfloat16)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
     @slow()
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
@@ -2482,13 +2526,13 @@ class CommonTemplate:
 
         gemm_opt = torch._dynamo.optimize("inductor", guard_fail_fn=fail)(gemm)
 
-        x0 = torch.randn(1024, 1024, device="cpu:0")
-        y0 = torch.randn(1024, 1024, device="cpu:0")
+        x0 = torch.randn(1024, 1024, device="cuda:0")
+        y0 = torch.randn(1024, 1024, device="cuda:0")
 
         gemm_opt(x0, y0)
 
-        x1 = torch.randn(1024, 1024, device="cpu:1")
-        y1 = torch.randn(1024, 1024, device="cpu:1")
+        x1 = torch.randn(1024, 1024, device="cuda:1")
+        y1 = torch.randn(1024, 1024, device="cuda:1")
 
         gemm_opt(x1, y1)
         self.assertTrue(failed_guard is not None)
@@ -4460,6 +4504,14 @@ class CommonTemplate:
                 True,
             ),
         )
+
+    def test_index_put_index(self):
+        def fn(ind, x, src):
+            y = torch.ops.aten.index_put.default(x, [ind], src)
+            return torch.ops.aten.index.Tensor(y, [ind])
+
+        args = [torch.tensor([1], dtype=torch.int64), torch.randn(8, 4), torch.randn(4)]
+        self.common(fn, args)
 
     @config.patch(fallback_random=True)
     def test_bernoulli1(self):
