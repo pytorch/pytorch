@@ -6249,10 +6249,10 @@ if HAS_CPU:
                     compiled = compile_fx_inner(traced, [x])
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
-                    # assert (
-                    #     metrics.generated_kernel_count
-                    #     - metrics.generated_cpp_vec_kernel_count
-                    # ) == 0
+                    assert (
+                        metrics.generated_kernel_count
+                        - metrics.generated_cpp_vec_kernel_count
+                    ) == 0
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6720,6 +6720,7 @@ if HAS_CPU:
                 )
                 return clone_3
 
+            metrics.reset()
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
