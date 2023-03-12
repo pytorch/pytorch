@@ -1433,8 +1433,6 @@ def known_name(name, source):
     base = name
     # We know about the name, let's find the source where we match by name
     for i in itertools.count():
-        if name not in names_to_sources:
-            breakpoint()
         candidate_source_name = normalize_attr_name(source.name())
         if name == candidate_source_name:
             # Name matches!
