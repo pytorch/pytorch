@@ -22,13 +22,17 @@ from random import randint
 import torch
 import torch.cuda
 import torch.cuda.comm as comm
+from torch.cuda._memory_viz import profile_plot
+from torch.cuda._memory_viz import trace_plot
+from torch.cuda._memory_viz import segment_plot
+
 from torch import inf, nan
 from torch.nn.parallel import scatter_gather
 from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -44,7 +48,7 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
-    TestCase = object  # noqa: F811
+    TestCase = NoTest  # noqa: F811
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
@@ -4970,10 +4974,11 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history(True, record_context_cpp=True)
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -4983,13 +4988,85 @@ class TestCudaComm(TestCase):
                     if 'history' in b:
                         for h in b['history']:
                             if h['real_size'] == 311 * 411 * 4:
-                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                self.assertTrue('::rand' in str(h['frames']))
                                 found_it = True
             self.assertTrue(found_it)
 
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+
+    @skipIfRocm
+    def test_memory_profiler_viz(self):
+        with torch.profiler.profile(
+            with_stack=True,
+            profile_memory=True,
+            record_shapes=True
+        ) as prof:
+            x = torch.rand(128, 128, device='cuda')
+            x * x + x * x
+        plot = profile_plot(prof)
+        self.assertTrue("test_cuda.py" in plot)
+        self.assertTrue("test_memory_profiler_viz" in plot)
+        self.assertTrue('"elements_category": [' in plot)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    def test_memory_plots(self):
+        for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(
+                    True,
+                    record_context=record_context,
+                    trace_alloc_max_entries=1000000,
+                    trace_alloc_record_context=True,
+                    record_context_cpp=cpp)
+
+                def run():
+                    x = torch.rand(128, 128, device='cuda')
+                    x * x + x * x
+
+                run()
+                ss = torch.cuda.memory._snapshot()
+                tplot = trace_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(cpp == ("::rand" in tplot))
+
+                self.assertTrue(str(128 * 128 * 4) in tplot)
+                splot = segment_plot(ss)
+                self.assertTrue(record_context == ("test_memory_plots" in splot))
+                self.assertTrue(str(128 * 128 * 4) in splot)
+                self.assertTrue(cpp == ("::rand" in splot))
+                torch.cuda.memory._record_memory_history(False)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_snapshot_script(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True)
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device='cuda')
+
+            x = foo()
+
+            ss = torch.cuda.memory._snapshot()['segments']
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue(h['frames'][0]['name'] == 'foo')
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):

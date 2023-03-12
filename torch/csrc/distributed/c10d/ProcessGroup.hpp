@@ -226,7 +226,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
-  // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
+  // is interpreted as a contiguous collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
   virtual c10::intrusive_ptr<Work> _allgather_base(
