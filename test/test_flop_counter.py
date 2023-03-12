@@ -1,7 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch.utils.flop_counter
 import torch.nn.functional as F
 import unittest
@@ -24,6 +24,7 @@ def get_total_flops(mode):
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
 
+@skipIfTorchDynamo
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
         mode = FlopCounterMode()
