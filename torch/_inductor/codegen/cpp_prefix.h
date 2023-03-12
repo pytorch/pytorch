@@ -83,25 +83,15 @@ void flag_to_float(T src, float* dst, int64_t n) {
 
 inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
   at::vec::Vectorized<float> res_vec(0);
-  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
-#pragma unroll
-  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    dst_tmp[i] = static_cast<float>(*(bf16_buf + i));
-  }
-
-  return res_vec.loadu(dst_tmp);
+  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
+  return res_vec;
 }
 
 inline void store_float_as_bf16(
     bfloat16* bf16_buf,
     at::vec::Vectorized<float> src_buf) {
-  at::vec::Vectorized<float> res_vec(0);
-  __at_align__ float src_tmp[at::vec::Vectorized<float>::size()];
-  src_buf.store(src_tmp);
-#pragma unroll
-  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    *(bf16_buf + i) = static_cast<bfloat16>(*(src_tmp + i));
-  }
+  auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
+  res.store(bf16_buf, at::vec::Vectorized<float>::size());
 }
 
 template <typename SRC>

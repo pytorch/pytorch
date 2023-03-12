@@ -1873,6 +1873,8 @@ class CppVecKernelChecker(CppVecKernel):
                         "load",
                         "constant",
                     ]:
+                        # Support masked_load for BF16. Because the legalization will
+                        # insert to_dtype to convert the BF16 input to FP32.
                         dtype = (
                             V.graph.get_dtype(input_value.args[1])
                             if input_value.target == "load"
@@ -2047,6 +2049,15 @@ class CppKernelProxy(CppKernel):
                             index,
                             value,
                         )
+                elif _node.target == "to_dtype" and _node.args[-1] in [torch.bfloat16]:
+                    (ops, x, _) = _node.args
+                    from_load = _node.all_input_nodes[-1].target == "load"
+                    to_store = all(usr.target == "store" for usr in _node.users)
+                    # The legalization always loads the BF16 tensor as FP32 for computation and converts
+                    # back to BF16 after the computation. Hence, there should be no computation w/ BF16.
+                    # Therefore, we update the to_dtype by replacing the bf16 dtype with fp32.
+                    if not (from_load or to_store):
+                        _node.args = (ops, x, torch.float)
                 else:
                     pass
 
