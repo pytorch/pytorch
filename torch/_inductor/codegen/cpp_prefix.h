@@ -38,6 +38,17 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
 template <typename T> struct AsIntegerType { typedef T type; };
 template <> struct AsIntegerType<float> { typedef uint32_t type; };
 template <> struct AsIntegerType<double> { typedef uint64_t type; };
+template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
+
+template <typename T>
+inline T fetch_value(volatile T *addr) {
+  return *addr;
+}
+
+template <>
+inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
+  return bfloat16(addr->x);
+}
 
 template <typename T> void atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
@@ -51,7 +62,7 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 
   std::atomic<alt_type> *atomic_addr = (std::atomic<alt_type> *)addr;
   do {
-    T val = *addr;
+    T val = fetch_value(addr);
     reinterpret_cast<T *>(&expected)[0] = val;
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
