@@ -4981,6 +4981,7 @@ class TestCudaComm(TestCase):
         self.assertTrue("combined_traceback.cpp" in str(r))
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -5017,6 +5018,7 @@ class TestCudaComm(TestCase):
         self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
         for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
             try:
