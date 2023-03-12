@@ -23,7 +23,8 @@ hu.assert_deadline_disabled()
 
 from torch.testing._internal.common_utils import TestCase
 from torch.testing._internal.common_utils import IS_PPC, TEST_WITH_UBSAN, IS_MACOS, BUILD_WITH_CAFFE2
-from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN
+from torch.testing._internal.common_quantization import skipIfNoFBGEMM, skipIfNoQNNPACK, skipIfNoONEDNN, \
+    skipIfNoX86
 from torch.testing._internal.common_quantized import _quantize, _dequantize, _calculate_dynamic_qparams, \
     override_quantized_engine, supported_qengines, override_qengines, _snr
 from torch.testing._internal.common_quantized import (
@@ -5135,6 +5136,7 @@ class TestQuantizedConv(TestCase):
         # Return the quantized data for later reuse
         return X_q, W_q, bias_float
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv1d(self):
         batch_size = 3
@@ -5182,6 +5184,7 @@ class TestQuantizedConv(TestCase):
                     Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv2d(self):
         batch_size = 3
@@ -5237,6 +5240,7 @@ class TestQuantizedConv(TestCase):
                     Y_scale, Y_zero_point, use_bias, "none", use_channelwise, False,
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv2d_relu(self):
         batch_size = 3
@@ -5293,6 +5297,7 @@ class TestQuantizedConv(TestCase):
                     Y_scale, Y_zero_point, use_bias, "relu", use_channelwise, False,
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype)
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add(self):
         batch_size = 3
@@ -5351,6 +5356,7 @@ class TestQuantizedConv(TestCase):
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype,
                     X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv2d_add_relu(self):
         batch_size = 3
@@ -5410,6 +5416,7 @@ class TestQuantizedConv(TestCase):
                     input_dtype=X_qdtype, weight_dtype=weight_dtype, output_dtype=X_qdtype,
                     X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
+    @skipIfNoX86
     @skipIfNoONEDNN
     def test_inductor_qconv3d(self):
         batch_size = 3
