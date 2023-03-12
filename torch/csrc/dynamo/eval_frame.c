@@ -646,6 +646,32 @@ static PyObject* _custom_eval_frame(
       frame->f_lasti,
       frame->f_iblock,
       frame->f_executing);
+
+  if (throw_flag) {
+    // When unwinding generators, eval frame is called with throw_flag ==
+    // true.  Frame evaluation is supposed to continue unwinding by propagating
+    // the exception.  Dynamo doesn't really know how to do this, nor does it
+    // really want to do this, because there's unlikely any code to capture
+    // (you're going to immediately quit out of the frame, perhaps running
+    // some unwinding logic along the way).  So we just run the default
+    // handler in this case.
+    //
+    // NB: A previous version of this patch returned NULL.  This is wrong,
+    // because returning NULL is *different* from unwinding an exception.
+    // In particular, you will not execute things like context manager
+    // __exit__ if you just return NULL.
+    //
+    // NB: It's /conceivable/ that you might want to actually still call the
+    // Dynamo callback when throw_flag == TRUE, to give Dynamo a chance to
+    // do any stack unwinding code.  But this is not really useful because
+    // (1) Dynamo doesn't actually know how to do stack unwinding, so it would
+    // immediately skip the frame, and (2) even if it did, this would only
+    // be profitable if there was tensor code in the unwinding code.  Seems
+    // unlikely.
+    DEBUG_TRACE("throw %s", name(frame));
+    return eval_frame_default(tstate, frame, throw_flag);
+  }
+
   CacheEntry* extra = get_extra(frame->f_code);
   if (extra == SKIP_CODE || (callback == Py_False && extra == NULL)) {
     DEBUG_TRACE("skip %s", name(frame));
@@ -715,6 +741,10 @@ static PyObject* _custom_eval_frame(
     // internal exception, returning here will leak the exception into user code
     // this is useful for debugging -- but we dont want it to happen outside of
     // testing
+    // NB: we intentionally DO NOT re-enable custom behavior to prevent
+    // cascading failure from internal exceptions.  The upshot is if
+    // Dynamo barfs, that's it for Dynamo, even if you catch the exception
+    // inside the torch.compile block we won't try to Dynamo anything else.
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", name(frame));

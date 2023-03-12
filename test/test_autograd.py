@@ -9705,6 +9705,23 @@ class TestAutogradDeviceType(TestCase):
 
         torch.autograd.gradcheck(fn, (exponent,))
 
+    def test_resize_version_bump(self, device):
+        x = torch.rand((1,), device=device)
+        y = torch.randn((3,), device=device)
+        x.resize_((1, 2))
+        self.assertEqual(x._version, 1)
+        x.resize_as_(y)
+        self.assertEqual(x._version, 2)
+
+        # In the following cases, `resize` is no-op,
+        # so no version bumps.
+        x.resize_((3,))
+        self.assertEqual(x._version, 2)
+
+        x.resize_as_(y)
+        self.assertEqual(x._version, 2)
+
+
 class TestAllowMutationOnSaved(TestCase):
     def assertClonedLenEqual(self, ctx, n):
         self.assertEqual(len(list(ctx.cloned.items())), n)
