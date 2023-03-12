@@ -36,6 +36,15 @@ def patch_setup_py(path: Path, *, version: str, name: str = "triton") -> None:
         f.write(orig)
 
 
+def patch_init_py(path: Path, *, version: str) -> None:
+    with open(path) as f:
+        orig = f.read()
+    # Replace version
+    orig = check_and_replace(orig, f"__version__='2.0.0',", f"__version__=\"{version}\",")
+    with open(path, "w") as f:
+        f.write(orig)
+
+
 def build_triton(*, version: str, commit_hash: str, build_conda: bool = False, py_version : Optional[str] = None) -> Path:
     with TemporaryDirectory() as tmpdir:
         triton_basedir = Path(tmpdir) / "triton"
@@ -53,6 +62,7 @@ def build_triton(*, version: str, commit_hash: str, build_conda: bool = False, p
                 print("about:\n  home: https://github.com/openai/triton\n  license: MIT\n  summary:"
                       " 'A language and compiler for custom Deep Learning operation'", file=meta)
 
+            patch_init_py(triton_pythondir / "triton" / "__init__.py", version=f"{version}+{commit_hash[:10]}")
             if py_version is None:
                 py_version = f"{sys.version_info.major}.{sys.version_info.minor}"
             check_call(["conda", "build", "--python", py_version,
@@ -62,6 +72,7 @@ def build_triton(*, version: str, commit_hash: str, build_conda: bool = False, p
             return Path.cwd() / conda_path.name
 
         patch_setup_py(triton_pythondir / "setup.py", name="pytorch-triton", version=f"{version}+{commit_hash[:10]}")
+        patch_init_py(triton_pythondir / "triton" / "__init__.py", version=f"{version}+{commit_hash[:10]}")
         check_call([sys.executable, "setup.py", "bdist_wheel"], cwd=triton_pythondir)
         whl_path = list((triton_pythondir / "dist").glob("*.whl"))[0]
         shutil.copy(whl_path, Path.cwd())
