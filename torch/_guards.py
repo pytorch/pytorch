@@ -368,7 +368,6 @@ class ModuleContext(Checkpointable[ModuleCheckpointState]):
 
         name = unique_normalized_attr_name(name)
         if name in self.names_to_sources:
-            breakpoint()
             raise AssertionError("Illegal, unreachable state. ")
         self.names_to_sources[name] = source
         return name
