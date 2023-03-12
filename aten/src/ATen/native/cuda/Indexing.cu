@@ -1397,13 +1397,12 @@ void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_
 }
 
 void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, double scale, int zero_point) {
-  TORCH_CHECK(iter.input_dtype(0) == at::ScalarType::Bool, "masked_fill only supports boolean masks, ",
-    "but got dtype ", iter.input_dtype(0));
+  TORCH_CHECK(iter.input_dtype(1) == at::ScalarType::Bool, "masked_fill only supports boolean masks, ",
+    "but got dtype ", iter.input_dtype(1));
   AT_DISPATCH_QINT_TYPES(
       iter.common_dtype(), "masked_fill_", [&]() {
         float float_val = value.to<float>();
         const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
-        auto mask_dtype = iter.input_dtype(0);
 
         cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
     });
