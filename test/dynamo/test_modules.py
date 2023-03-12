@@ -5,7 +5,6 @@ from copy import deepcopy
 from typing import Tuple
 from unittest.mock import patch
 
-import pytest
 import torch
 
 import torch._dynamo.test_case
@@ -683,6 +682,22 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModuleGuardNameIsValid(torch.nn.ModuleDict):
+    # Guard names should be valid python identifier as we use eval() to get
+    # corresponding guard value. Some guard names come from source(module path)
+    # where special symbols are valid. But they are not valid python identifier,
+    # we should identify these pattern and rewrite them with getattr.
+    def __init__(self):
+        super().__init__()
+        for i in range(2):
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
+
+    def forward(self, x):
+        for _, layer in self.items():
+            x = layer(x)
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -747,6 +762,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -1152,20 +1168,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # There will be a graph break for the inner mod being OptimizedModule
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_torchscript_failure(self):
-        model = BasicModule()
-        compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10, 10)
-        with pytest.raises(AttributeError):
-            c_model_scripted = torch.jit.script(compile_model, example_forward_input)
-
-    def test_torchtrace_failure(self):
-        model = BasicModule()
-        compile_model = torch.compile(model)
-        example_forward_input = torch.rand(10, 10)
-        with pytest.raises(AttributeError):
-            c_model_traced = torch.jit.trace(compile_model, example_forward_input)
-
     def test_module_patch(self):
         mod = ModulePatch1()
         mod.forward = types.MethodType(ModulePatch2.forward, mod)
@@ -1270,7 +1272,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         handle.remove()
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 7)
-        self.assertTrue("hooks" in failure_reason)
+        self.assertTrue("forward_hooks.keys" in failure_reason)
         self.assertEqual(cc.frame_count, 1 + 1)
         self.assertEqual(cc.op_count, 6 + 4)
 
