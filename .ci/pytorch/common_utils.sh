@@ -126,6 +126,12 @@ function get_pinned_commit() {
 }
 
 function install_torchaudio() {
+  if [[ "$1" != "cpu" ]]; then
+    # TODO: This is better to be passed as a parameter from _linux-test workflow
+    # so that it can be consistent with what is set in build
+    export TORCH_CUDA_ARCH_LIST="8.6"
+  fi
+
   local commit
   commit=$(get_pinned_commit audio)
   pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
