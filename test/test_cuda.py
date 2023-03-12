@@ -32,7 +32,7 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -4974,10 +4974,11 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history(True, record_context_cpp=True)
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -4987,7 +4988,7 @@ class TestCudaComm(TestCase):
                     if 'history' in b:
                         for h in b['history']:
                             if h['real_size'] == 311 * 411 * 4:
-                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                self.assertTrue('::rand' in str(h['frames']))
                                 found_it = True
             self.assertTrue(found_it)
 
@@ -5010,15 +5011,17 @@ class TestCudaComm(TestCase):
         self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
-        for record_context in (True, False):
+        for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
             try:
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._record_memory_history(
                     True,
                     record_context=record_context,
                     trace_alloc_max_entries=1000000,
-                    trace_alloc_record_context=True)
+                    trace_alloc_record_context=True,
+                    record_context_cpp=cpp)
 
                 def run():
                     x = torch.rand(128, 128, device='cuda')
@@ -5028,10 +5031,13 @@ class TestCudaComm(TestCase):
                 ss = torch.cuda.memory._snapshot()
                 tplot = trace_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(cpp == ("::rand" in tplot))
+
                 self.assertTrue(str(128 * 128 * 4) in tplot)
                 splot = segment_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in splot))
                 self.assertTrue(str(128 * 128 * 4) in splot)
+                self.assertTrue(cpp == ("::rand" in splot))
                 torch.cuda.memory._record_memory_history(False)
             finally:
                 torch.cuda.memory._record_memory_history(False)
@@ -5040,7 +5046,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history(True)
 
             @torch.jit.script
             def foo():
