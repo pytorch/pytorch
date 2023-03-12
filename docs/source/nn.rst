@@ -120,7 +120,9 @@ Padding Layers
     nn.ReplicationPad1d
     nn.ReplicationPad2d
     nn.ReplicationPad3d
+    nn.ZeroPad1d
     nn.ZeroPad2d
+    nn.ZeroPad3d
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d

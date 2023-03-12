@@ -770,11 +770,15 @@ class BuiltinVariable(VariableTracker):
         )
 
     @staticmethod
-    def call_dict_helper(tx, user_cls, arg):
+    def call_dict_helper(tx, user_cls, arg, **options):
         if arg is None:
-            return ConstDictVariable({}, user_cls, mutable_local=MutableLocal())
+            return ConstDictVariable(
+                {}, user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
-            return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+            return arg.clone(
+                user_cls=user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         elif isinstance(
             arg,
             (
@@ -788,7 +792,9 @@ class BuiltinVariable(VariableTracker):
                 k = x.unpack_var_sequence(tx)[0].as_python_constant()
                 v = x.unpack_var_sequence(tx)[1]
                 items.update({k: v})
-            return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
+            return ConstDictVariable(
+                items, user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 

@@ -796,7 +796,7 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     CreateContextFn context_recorder = context_recorder_.load();
-    std::shared_ptr<Context> context =
+    std::shared_ptr<GatheredContext> context =
         context_recorder ? context_recorder() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
@@ -1966,7 +1966,7 @@ class DeviceCachingAllocator {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
-      std::shared_ptr<Context> context) {
+      std::shared_ptr<GatheredContext> context) {
     auto te = TraceEntry(
         action,
         addr,

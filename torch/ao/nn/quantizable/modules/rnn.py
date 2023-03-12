@@ -83,6 +83,7 @@ class LSTMCell(torch.nn.Module):
         fgate_cx_igate_cgate = self.fgate_cx_igate_cgate.add(fgate_cx, igate_cgate)
         cy = fgate_cx_igate_cgate
 
+        # TODO: make this tanh a member of the module so its qparams can be configured
         tanh_cy = torch.tanh(cy)
         hy = self.ogate_cy.mul(out_gate, tanh_cy)
         return hy, cy
