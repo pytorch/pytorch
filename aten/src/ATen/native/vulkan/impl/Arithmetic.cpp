@@ -14,6 +14,7 @@ api::ShaderInfo get_shader(const OpType type) {
       return VK_KERNEL(sub);
     case OpType::MUL:
       return VK_KERNEL(mul);
+    default: /* Silence error: control reaches end of non-void function [-Werror=return-type] */
     case OpType::DIV:
       return VK_KERNEL(div);
   }
