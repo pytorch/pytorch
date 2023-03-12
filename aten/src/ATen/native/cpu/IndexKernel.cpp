@@ -302,13 +302,13 @@ void index_copy_kernel(
   });
 }
 
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* mask = data[1];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
+      bool mask_value = *reinterpret_cast<bool*>(mask + strides[1] * i);
 
       if (mask_value) {
         *(scalar_t*)(dst + strides[0] * i) = value;
@@ -325,7 +325,7 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       auto mask_dtype = iter.input_dtype(0);
       TORCH_CHECK(mask_dtype == ScalarType::Bool, "masked_fill only supports boolean masks, "
         "but got mask with dtype ", mask_dtype);
-      cpu_masked_fill_kernel<scalar_t, bool>(iter, scalar_val);
+      cpu_masked_fill_kernel<scalar_t>(iter, scalar_val);
     });
 }
 

@@ -4096,13 +4096,13 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
 }
 
 // This function expects quantized_val input to already be quantized
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cpu_masked_fill_kernel_quantized_cpu(TensorIterator& iter, scalar_t quantized_val) {
   auto loop = [&](char** data, const int64_t* strides, int64_t n) {
     char* dst = data[0];
     char* mask = data[1];
     for (const auto i : c10::irange(n)) {
-      mask_t mask_value = *(mask_t*)(mask + strides[1] * i);
+      bool mask_value = *reinterpret_cast<bool*>(mask + strides[1] * i);
 
       if (mask_value) {
         *(scalar_t*)(dst + strides[0] * i) = quantized_val;
@@ -4119,7 +4119,7 @@ void masked_fill_kernel_quantized_cpu(TensorIterator& iter, const Scalar& value,
     auto mask_dtype = iter.input_dtype(0);
     TORCH_CHECK(mask_dtype == ScalarType::Bool, "masked_fill only supports boolean masks, "
       "but got mask with dtype ", mask_dtype);
-    cpu_masked_fill_kernel_quantized_cpu<scalar_t, bool>(iter, quantized_val);
+    cpu_masked_fill_kernel_quantized_cpu<scalar_t>(iter, quantized_val);
   });
 }
 

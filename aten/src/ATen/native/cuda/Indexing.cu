@@ -1370,13 +1370,12 @@ Tensor index_select_quantized_cuda(const Tensor& self, int64_t dim, const Tensor
 
 namespace {
 
-template <typename mask_t>
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kBool, kHalf, kBFloat16, kComplexHalf, iter.common_dtype(), "masked_fill_", [&]() {
         const auto value_ = value.to<scalar_t>();
         gpu_kernel(
-            iter, [value_] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+            iter, [value_] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
               if (mask) {
                 return value_;
               }
@@ -1385,10 +1384,10 @@ void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
       });
 }
 
-template <typename scalar_t, typename mask_t>
+template <typename scalar_t>
 void cuda_masked_fill_kernel_quantized(TensorIterator& iter, scalar_t quantized_val) {
     gpu_kernel(
-        iter, [quantized_val] GPU_LAMBDA(scalar_t self, mask_t mask) -> scalar_t {
+        iter, [quantized_val] GPU_LAMBDA(scalar_t self, bool mask) -> scalar_t {
           if (mask) {
             return quantized_val;
           }
@@ -1404,7 +1403,7 @@ void masked_fill_kernel_quantized(TensorIterator& iter, const Scalar& value, dou
         float float_val = value.to<float>();
         const auto quantized_val = quantize_val<scalar_t>(scale, zero_point, float_val);
 
-        cuda_masked_fill_kernel_quantized<scalar_t, bool>(iter, quantized_val);
+        cuda_masked_fill_kernel_quantized<scalar_t>(iter, quantized_val);
     });
 }
 
@@ -1437,7 +1436,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .add_input(*b_mask)
       .build();
 
-  masked_fill_kernel<bool>(iter, value);
+  masked_fill_kernel(iter, value);
   namedinference::propagate_names_if_nonempty(self, maybe_outnames);
   return self;
 }

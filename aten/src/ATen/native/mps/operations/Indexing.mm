@@ -735,9 +735,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     if (self.scalar_type() == kBool) {
       inputDataType = MPSDataTypeInt8;
     }
-    if (mask.scalar_type() == kBool) {
-      maskDataType = MPSDataTypeInt8;
-    }
+    maskDataType = MPSDataTypeInt8;
   }
 
   MPSStream* stream = getCurrentMPSStream();
