@@ -254,6 +254,16 @@ def mark_dynamic_constrain(
 
 @forbid_in_graph
 def clear_dynamic(t, index):
+    """
+    Marks a given index or list of indices as not dynamic.
+
+    :param t: The tensor object to operate on.
+    :type t: tensor
+    :param index: The index or list of indices to mark as not dynamic.
+    :type index: int or list[int]
+    :raises AssertionError: If the tensor does not have
+        any dynamic dimensions.
+    """
     if isinstance(index, int):
         assert hasattr(
             t, "_dynamo_dynamic_indices"
