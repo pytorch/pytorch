@@ -110,7 +110,6 @@ class TestInductorDynamic(TestCase):
         super(TestCase, self).tearDown()
         torch._dynamo.reset()
 
-    @patch.object(torch._dynamo.config, "specialize_int", False)
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
