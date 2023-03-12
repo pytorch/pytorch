@@ -957,7 +957,9 @@ def same(
             log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        if relax_numpy_equality:
+        if relax_numpy_equality and not (
+            is_numpy_int_type(res) or is_numpy_float_type(res)
+        ):
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
@@ -1009,7 +1011,6 @@ def disable_cache_limit():
     try:
         yield
     finally:
-        pass
         config.cache_size_limit = prior
 
 
@@ -1290,6 +1291,13 @@ def fqn(obj: Any):
 
 def ifdyn(count1, count2):
     if torch._dynamo.config.dynamic_shapes:
+        return count1
+    else:
+        return count2
+
+
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
         return count1
     else:
         return count2

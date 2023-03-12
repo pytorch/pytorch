@@ -344,7 +344,7 @@ void validate_compressed_sparse_indices_kernel(
     const int64_t dim,
     const int64_t nnz) {
   constexpr size_t idx_max_ndims = 8; // up to 7-dim batch.
-  const int64_t idx_ndims = idx.dim();
+  const size_t idx_ndims = static_cast<size_t>(idx.dim());
 
   if (is_crow) {
     if (idx_ndims <= idx_max_ndims) {

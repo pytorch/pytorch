@@ -2,6 +2,7 @@ import dataclasses
 import sys
 import types
 from typing import (
+    Any,
     Callable,
     Dict,
     List,
@@ -67,4 +68,18 @@ class DynamoGuardHook(Protocol):
         f_locals: Dict[str, object],
         last: bool,
     ) -> None:
+        ...
+
+
+class ProfilerStartHook(Protocol):
+    def __call__(
+        self,
+        name: str,
+        # TODO(whc) how do I annotate a _RecordFunction here?
+    ) -> Any:
+        ...
+
+
+class ProfilerEndHook(Protocol):
+    def __call__(self, record: Any) -> None:
         ...

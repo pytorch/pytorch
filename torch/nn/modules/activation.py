@@ -123,7 +123,8 @@ class RReLU(Module):
         \end{cases}
 
     where :math:`a` is randomly sampled from uniform distribution
-    :math:`\mathcal{U}(\text{lower}, \text{upper})`.
+    :math:`\mathcal{U}(\text{lower}, \text{upper})` during training while during
+    evaluation :math:`a` is fixed with :math:`a = \frac{\text{lower} + \text{upper}}{2}`.
 
      See: https://arxiv.org/pdf/1505.00853.pdf
 
@@ -1106,6 +1107,16 @@ class MultiheadAttention(Module):
             target_type=query.dtype
         )
 
+        attn_mask = F._canonical_mask(
+            mask=attn_mask,
+            mask_name="attn_mask",
+            other_type=None,
+            other_name="",
+            target_type=query.dtype,
+            check_other=False,
+        )
+
+
         why_not_fast_path = ''
         if not is_batched:
             why_not_fast_path = f"input not batched; expected query.dim() of 3 but got {query.dim()}"
@@ -1240,15 +1251,6 @@ class MultiheadAttention(Module):
         """
         mask_type: Optional[int] = None
         merged_mask: Optional[Tensor] = None
-
-        attn_mask = F._canonical_mask(
-            mask=attn_mask,
-            mask_name="attn_mask",
-            other_type=F._none_or_dtype(key_padding_mask),
-            other_name="key_padding_mask",
-            target_type=query.dtype,
-            check_other=False,
-        )
 
         if attn_mask is not None:
             mask_type = 0
