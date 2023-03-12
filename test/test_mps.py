@@ -9915,12 +9915,12 @@ class TestRNNMPS(TestCaseMPS):
     ]
 
     def test_lstm_forward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 
