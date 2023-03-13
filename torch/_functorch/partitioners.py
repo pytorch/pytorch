@@ -1,4 +1,4 @@
-from torch.fx.experimental.proxy_tensor import py_sym_types
+from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.symbolic_shapes import hint_int
 import torch
 import torch.fx as fx
@@ -165,7 +165,7 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
-        if is_symint_node(node):
+        if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
