@@ -213,4 +213,5 @@ NestedTensor and any constraints they have.
    :func:`torch.transpose`; "Supports transposing of all dims except ``dim=0``."
    :func:`torch.Tensor.view`; "Rules for the new shape are similar to that of ``reshape``."
    :func:`torch.empty_like`; "Behavior is analogous to that of regular tensors; returns a new empty nested tensor (i.e. with uninitialized values) matching the nested structure of the input."
+   :func:`torch.randn_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with values randomly initialized according to a standard normal distribution matching the nested structure of the input."
    :func:`torch.zeros_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with all zero values matching the nested structure of the input."
