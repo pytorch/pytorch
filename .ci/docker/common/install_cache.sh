@@ -116,5 +116,3 @@ if [ -n "$ROCM_VERSION" ]; then
     exit 1
   fi
 fi
-
-# DEBUG: TO BE REMOVED BEFORE PUSHING
