@@ -69,6 +69,8 @@ def _apply_optim_in_backward_hook(
             bucket.buffer().div_(process_group.size())
             model_params = bucket.parameters()
             grads = bucket.gradients()
+            # TODO (rohan-varma): upcast as needed for DDP mixed precision,
+            # once optimizer in backward + DDP mixed precision is supported.
             for p, g in zip(model_params, grads):
                 if hasattr(p, '_in_backward_optimizers'):
                     # Note: need to set grad to the bucket's grad, because
