@@ -437,6 +437,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Tests if the UCC fallback path is available
   bool isUCCAvailable() const;
 
+  // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
+  // instead of relying on ProcessGroupNCCL destructor.
+  void abort(c10::optional<std::string> abortReason = c10::nullopt);
+
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
   void broadcastUniqueNCCLID(

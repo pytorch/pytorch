@@ -402,6 +402,9 @@ inline Tensor wrap_tensor_node(
     nt_buffer = at::cat(flat_tensors);
 
     // Temporarily disable meta if needed to ensure sizes are built as real tensors.
+    // TODO: This is a hack and should be removed once we have a proper solution for
+    // selectively disabling meta. Most likely, this will come in the form of more
+    // aggressive constant propagation for fake tensors.
     auto disable_meta_keyset = c10::impl::tls_local_dispatch_key_set();
     disable_meta_keyset.included_ = disable_meta_keyset.included_.remove_backend(
       c10::BackendComponent::MetaBit);
