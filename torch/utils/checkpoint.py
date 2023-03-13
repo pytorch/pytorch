@@ -373,7 +373,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # When we start recomputation, we push the saved variable hook meant for
 # recomputation on the stack. See examples in Rule 6 for more context.
 #
-#                                * PART 2 *
+#                                  * * * *
 #
 # Beyond the basic semantics specific to nested checkpoint, we impose several
 # more constraints that may apply to checkpointing in general.
@@ -408,7 +408,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # During recomputation, raise an exception if the number of recomputed tensors
 # matches the number of tensors that we expected to recompute. We wrap the
 # recomputation call with a try-catch to catch this specific exception. See
-# Rule #5 below for some examples.
+# Rule #6 below for some examples.
 #
 # Rule 6. We support doing backward inside checkpoint context
 #
@@ -454,7 +454,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #
 # out = checkpoint(fn)(inp)
 #
-# In the code above fn is computed 4 times in total.
+# In the code above fn is computed (potentially partially) 4 times in total.
 #   1. Don't save x and y since we are inside a checkpoint.
 #   2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
 #   3. If early stop is enabled, stop at (2)
@@ -481,31 +481,12 @@ def set_checkpoint_early_stop(enable):
     finally:
         _enable_checkpoint_early_stop = prev
 
-# See NOTE [ Nestable Checkpoint ] Rule #4
 class _Handle():
     pass
 
 class _Holder():
     def __init__(self):
         self.handles: Dict[int, Optional[_Handle]] = dict()
-
-# Reimplementation of torch.distributed.utils.{_pack,_unpack}_kwargs to avoid a import cycle
-def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
-    kwarg_keys: List[str] = []
-    flat_args: List[Any] = list(args)
-    for k, v in kwargs.items():
-        kwarg_keys.append(k)
-        flat_args.append(v)
-
-    return tuple(flat_args), tuple(kwarg_keys)
-
-def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-    assert len(kwarg_keys) <= len(flat_args), f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
-    if len(kwarg_keys) == 0:
-        return flat_args, {}
-    args = flat_args[: -len(kwarg_keys)]
-    kwargs = {k: v for k, v in zip(kwarg_keys, flat_args[-len(kwarg_keys) :])}
-    return args, kwargs
 
 class _NoopSaveInputs(torch.autograd.Function):
     @staticmethod
@@ -536,6 +517,9 @@ class _CheckpointFrame():
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
+        # We store this as a weakkeydictionary so that in the case of a partial
+        # backward, the entries in the dict are cleared alongside the Holder
+        # which will be removed when the SavedVariable is cleared.
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
         self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
@@ -585,44 +569,36 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            def do_checks(handle: _Handle, wkd: weakref.WeakKeyDictionary) -> None:
-                if handle is None:
-                    raise RuntimeError(
-                        "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
-                        "Otherwise please open an issue with details on your use case."
-                    )
-                if handle not in wkd:
-                    raise RuntimeError(
-                        "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
-                        " recomputation being triggered in between, this is not currently supported. Please"
-                        " open an issue with details on your use case."
-                    )
-
             gid = torch._C._current_graph_task_id()
             if gid == -1:
                 # generate a temporary id if we trigger unpack outside of a backward call
                 gid = int(uuid.uuid4())
 
-            if frame.is_recomputed[gid]:
-                do_checks(holder.handles[gid], frame.recomputed[gid])
-                ret = frame.recomputed[gid][holder.handles[gid]]
-                holder.handles[gid] = None
-                return ret
+            if not frame.is_recomputed[gid]:
+                ctx = frame.input_saver.grad_fn
+                args = ctx.get_args(ctx.saved_tensors)
 
-            ctx = frame.input_saver.grad_fn
-            args = ctx.get_args(ctx.saved_tensors)
+                try:
+                    # pass gid in in case we do reentrant backward
+                    with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
+                        frame.recompute_fn(*args)
+                        if _enable_checkpoint_early_stop:
+                            raise AssertionError("if early stop is enabled, we don't expect to reach here")
+                except _StopRecomputationError as e:
+                    pass
+                frame.is_recomputed[gid] = True
 
-            try:
-                # pass gid in in case we do reentrant backward
-                with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
-                    frame.recompute_fn(*args)
-                    if _enable_checkpoint_early_stop:
-                        raise AssertionError("if early stop is enabled, we don't expect to reach here")
-            except _StopRecomputationError as e:
-                pass
-            frame.is_recomputed[gid] = True
-
-            do_checks(holder.handles[gid], frame.recomputed[gid])
+            if holder.handles[gid] is None:
+                raise RuntimeError(
+                    "If you are calling ctx.saved_tensor in backward, make sure to do so only once. "
+                    "Otherwise please open an issue with details on your use case."
+                )
+            if holder.handles[gid] not in frame.recomputed[gid]:
+                raise RuntimeError(
+                    "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+                    " recomputation being triggered in between, this is not currently supported. Please"
+                    " open an issue with details on your use case."
+                )
             ret = frame.recomputed[gid][holder.handles[gid]]
             holder.handles[gid] = None
             return ret
@@ -660,30 +636,10 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    flat_args, kwarg_keys = _pack_kwargs(*args, **kwargs)
-
-    def new_fn(*inputs):
-        # This function should be called immediately by checkpoint_impl
-        unpacked_args, unpacked_kwargs = _unpack_kwargs(
-            inputs, kwarg_keys
-        )
-        out = fn(*unpacked_args, **unpacked_kwargs)
-        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
-            # Cuda was not initialized before running the forward, so we didn't
-            # stash the CUDA state.
-            raise RuntimeError(
-                "PyTorch's CUDA state was initialized in the forward pass "
-                "of a Checkpoint, which is not allowed. Please open an issue "
-                "if you need this feature.")
-        return out
-
     def recompute_fn(*inputs):
+        kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
-        unpacked_args, unpacked_kwargs = _unpack_kwargs(
-            inputs, kwarg_keys
-        )
-
         rng_devices = []
         if preserve_rng_state and had_cuda_in_fwd:
             rng_devices = fwd_gpu_devices
@@ -695,20 +651,25 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
 
             with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
                  torch.cpu.amp.autocast(**cpu_autocast_kwargs):
-                fn(*unpacked_args, **unpacked_kwargs)
+                fn(*args, **kwargs)
 
-    return _checkpoint_impl(new_fn, recompute_fn, *flat_args)
-
-def _checkpoint_impl(fn, recompute_fn, *args):
     new_frame = _CheckpointFrame(recompute_fn)
-
     dummy = torch.empty((0,), requires_grad=True)
-    new_frame.input_saver = _NoopSaveInputs.apply(dummy, *args)
+    new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
+    # When ambient grad_mode is False
     if new_frame.input_saver.grad_fn is None:
-        return fn(*args)
+        return fn(*args, **kwargs)
 
     with _checkpoint_hook(new_frame):
-        ret = fn(*args)
+        ret = fn(*args, **kwargs)
+
+    if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
+        # Cuda was not initialized before running the forward, so we didn't
+        # stash the CUDA state.
+        raise RuntimeError(
+            "PyTorch's CUDA state was initialized in the forward pass "
+            "of a Checkpoint, which is not allowed. Please open an issue "
+            "if you need this feature.")
 
     return ret
