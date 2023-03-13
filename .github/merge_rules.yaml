@@ -364,6 +364,7 @@
   - docs/source/func**
   - '**vmap**'
   - '**functorch**'
+  - '**pytree**'
   approved_by:
   - kshiteej12345
   - srossross
