@@ -785,7 +785,6 @@ def get_pytest_args(options):
         "--use-pytest",
         "-vv",
         "-rfEX",
-        "-p", "no:xdist",
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -1122,7 +1121,7 @@ def must_serial(file: str) -> bool:
 
 
 def can_run_in_pytest(test):
-    return (test not in PYTEST_BLOCKLIST) and (os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0')
+    return os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0'
 
 
 def get_selected_tests(options):

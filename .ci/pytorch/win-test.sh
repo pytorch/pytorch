@@ -42,6 +42,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
+python -m pip uninstall -y pytest-xdist
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do

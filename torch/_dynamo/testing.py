@@ -35,7 +35,7 @@ def clone_me(x):
 def skip_if_pytest(fn):
     @functools.wraps(fn)
     def wrapped(*args, **kwargs):
-        if "PYTEST_CURRENT_TEST" in os.environ or __name__ == "__main__":
+        if "PYTEST_CURRENT_TEST" in os.environ:
             raise unittest.SkipTest("does not work under pytest")
         return fn(*args, **kwargs)
 
