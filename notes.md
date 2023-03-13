@@ -6,7 +6,7 @@
 
 # Backwards Incompatible changes
 
-### **Set min supported Python version to 3.8 (#93155)**
+### **Drop support for Python versions <= 3.7 (#93155)**
 
 Previously the minimum supported version of Python for PyTorch was 3.7. This PR updates the minimum version to require 3.8 in order to install PyTorch. See [Hardware / Software Support ](https://github.com/pytorch/pytorch/blob/893aa5df3f2a475c91ea8eadb1353812e52fb227/RELEASE.md#python) for more information.
 
@@ -14,9 +14,60 @@ Previously the minimum supported version of Python for PyTorch was 3.7. This PR 
 
 This PR updates the minimum CUDA version to 11.0. See the [getting-started](https://pytorch.org/get-started/locally/) for installation or [building from source](https://github.com/pytorch/pytorch#from-source) for more information.
 
+### **Gradients are now set to `None` instead of zeros by default in `torch.optim.*.zero_grad()` and `torch.nn.Module.zero_grad()` (#92731)**
+
+This changes the default behavior of `zero_grad()` to zero out the grads by setting them to `None` instead of zero tensors. In other words, the `set_to_none` kwarg is now `True` by default instead of `False`. Setting grads to `None` reduces peak memory usage and increases performance. This will break code that directly accesses data or does computation on the grads after calling `zero_grad()` as they will now be `None`. To revert to the old behavior, pass in `zero_grad(set_to_none=False)`.
+
+<table>
+<tr>
+<th>1.13</th>
+<th>2.0</th>
+</tr>
+<tr>
+<td>
+
+```Python
+>>> import torch
+>>> from torch import nn
+>>> module = nn.Linear(2,22)
+>>> i = torch.randn(2, 2, requires_grad=True)
+>>> module(i).sum().backward()
+>>> module.zero_grad()
+>>> module.weight.grad == None
+False
+>>> module.weight.grad.data
+tensor([[0., 0.],
+        [0., 0.]])
+>>> module.weight.grad + 1.0
+tensor([[1., 1.],
+        [1., 1.]])
+```
+
+</td>
+<td>
+
+```Python
+>>> import torch
+>>> from torch import nn
+>>> module = nn.Linear(5, 5)
+>>> i = torch.randn(2, 5, requires_grad=True)
+>>> module(i).sum().backward()
+>>> module.zero_grad()
+>>> module.weight.grad == None
+True
+>>> module.weight.grad.data
+AttributeError: 'NoneType' object has no attribute 'data'
+>>> module.weight.grad + 1.0
+TypeError: unsupported operand type(s) for +: 'NoneType' and 'float'
+```
+
+</td>
+</tr>
+</table>
+
 ### **Update `torch.tensor` and `nn.Parameter` to serialize all their attributes (#88913)**
 
-Any attribute stored on `torch.tensor` and `torch.nn.Parameter` will be serialized. This aligns the serialization behavior of `torch.nn.Parameter`, `torch.Tensor` and other tensor subclasses
+Any attribute stored on `torch.tensor` and `torch.nn.Parameter` will now be serialized. This aligns the serialization behavior of `torch.nn.Parameter`, `torch.Tensor` and other tensor subclasses
 
 <table>
 <tr>
@@ -111,57 +162,6 @@ When applicable, this changes the default behavior of `step()` and anything that
 When these conditions are satisfied, the implementation used will match the implementation used when one passes `foreach=True`. The user defined flag for `foreach` will NOT be overwritten in order to preserve user selections. For more details, check the [documentation](https://pytorch.org/docs/stable/optim.html#algorithms). There should be no significant differences between the results returned by these optimizers. To revert to the old behavior, say, for `adam`, pass in `adam(..., foreach=False, ...)` or initialize `Adam` with `Adam(..., foreach=False, ...)`.
 
 Pull Requests: #92306, #92716, #92723,#92724, #92726, #92727, #92728, #92715, #91896, #92730, #90865, #93184, #92181, #92923, #95415, #95818, #95811
-
-### **Gradients are now set to `None` instead of zeros by default in `torch.optim.*.zero_grad()` and `torch.nn.Module.zero_grad()` (#92731)**
-
-This changes the default behavior of `zero_grad()` to zero out the grads by setting them to `None` instead of zero tensors. In other words, the `set_to_none` kwarg is now `True` by default instead of `False`. Setting grads to `None` reduces peak memory usage and increases performance. This will break code that directly accesses data or does computation on the grads after calling `zero_grad()` as they will now be `None`. To revert to the old behavior, pass in `zero_grad(set_to_none=False)`.
-
-<table>
-<tr>
-<th>1.13</th>
-<th>2.0</th>
-</tr>
-<tr>
-<td>
-
-```Python
->>> import torch
->>> from torch import nn
->>> module = nn.Linear(2,22)
->>> i = torch.randn(2, 2, requires_grad=True)
->>> module(i).sum().backward()
->>> module.zero_grad()
->>> module.weight.grad == None
-False
->>> module.weight.grad.data
-tensor([[0., 0.],
-        [0., 0.]])
->>> module.weight.grad + 1.0
-tensor([[1., 1.],
-        [1., 1.]])
-```
-
-</td>
-<td>
-
-```Python
->>> import torch
->>> from torch import nn
->>> module = nn.Linear(5, 5)
->>> i = torch.randn(2, 5, requires_grad=True)
->>> module(i).sum().backward()
->>> module.zero_grad()
->>> module.weight.grad == None
-True
->>> module.weight.grad.data
-AttributeError: 'NoneType' object has no attribute 'data'
->>> module.weight.grad + 1.0
-TypeError: unsupported operand type(s) for +: 'NoneType' and 'float'
-```
-
-</td>
-</tr>
-</table>
 
 ### **`torch.nn.utils.stateless.functional_call` now respects tied weights (#90477)**
 
@@ -273,6 +273,8 @@ inputs to a complex tensor first before calling `torch.istft`.
 
 ```Python
 >>> t = torch.rand(65, 33, 2)
+>>> _ = torch.istft(t, n_fft=128, length=1024)
+RuntimeError: istft requires a complex-valued input tensor matching the output from stft with return_complex=True.
 >>> t_complex = torch.view_as_complex(t)
 >>> _ = torch.istft(t_complex, n_fft=128, length=1024)
 ```
