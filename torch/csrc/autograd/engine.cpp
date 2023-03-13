@@ -781,19 +781,13 @@ void set_device(int device) {
   if (device != CPU_DEVICE) {
     for (const auto i : c10::irange(static_cast<size_t>(
              c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
-      // skip cudaSetDevice if it is already set
-      if (i == static_cast<size_t>(c10::DeviceType::CUDA)) {
-        if (at::detail::getCUDAHooks().current_device() == device) {
-          continue;
-        }
-      }
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
+      if (impl && device < impl->deviceCount() &&
+          impl->getDevice().index() != device) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
       }
     }
   }
-  worker_device = device;
 }
 
 void validate_outputs(
