@@ -69,7 +69,7 @@ void exp_kernel_cuda(TensorIteratorBase& iter) {
 }
 
 void expm1_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::BFloat16, ScalarType::Half,
       iter.common_dtype(), "expm1_cuda",
       [&]() {
