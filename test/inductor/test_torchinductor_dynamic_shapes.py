@@ -45,6 +45,7 @@ test_skips = {
     "test_kwargs_dynamic_shapes": ("cpu",),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
+    "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu", "cuda"),
 }
 
 
