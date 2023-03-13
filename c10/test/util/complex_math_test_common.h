@@ -74,7 +74,6 @@ C10_DEFINE_TEST(TestExponential, EulerFormula) {
   }
 }
 
-
 C10_DEFINE_TEST(TestExpm1, Normal) {
   // expm1(x) = exp(x) - 1
   {
@@ -93,7 +92,6 @@ C10_DEFINE_TEST(TestExpm1, Normal) {
   }
 }
 
-
 C10_DEFINE_TEST(TestExpm1, Small) {
   // expm1(x) = exp(x) - 1
   // expm1(x) provides greater precision than exp(x) - 1 for small values of x
@@ -110,7 +108,6 @@ C10_DEFINE_TEST(TestExpm1, Small) {
     C10_ASSERT_NEAR(l1.imag(), 1e-30, tol);
   }
 }
-
 
 C10_DEFINE_TEST(TestLog, Definition) {
   // log(x) = log(r) + i*theta
