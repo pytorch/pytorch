@@ -1730,75 +1730,75 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
-                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
-                skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
     ModuleInfo(torch.nn.ReflectionPad2d,
-                module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
+               skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ReflectionPad3d,
-                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
+               skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ReplicationPad1d,
-                module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ReplicationPad2d,
-                module_inputs_func=module_inputs_torch_nn_ReplicationPad2d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad2d,
+               skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ReplicationPad3d,
-                module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
+               skips=(
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ZeroPad1d,
-                module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ZeroPad2d,
-                module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ZeroPad3d,
-                module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ConstantPad1d,
-                module_inputs_func=module_inputs_torch_nn_ConstantPad1d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ConstantPad1d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ConstantPad2d,
-                module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               ),
     ModuleInfo(torch.nn.ConstantPad3d,
-                module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
-                skips=(
+               module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
+               skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                ),
+               )
 ]
