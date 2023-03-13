@@ -1076,62 +1076,60 @@ class DistributedDataParallel(Module, Joinable):
             with self._inside_ddp_forward():
                 return self.module(*inputs, **kwargs)
 
-    def forward(self, *inputs, **kwargs):
-        with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
-                assert self.logger is not None
-                self.logger.set_runtime_stats_and_log()
-                self.num_iterations += 1
-                self.reducer.prepare_for_forward()
+    def _pre_forward(self):
+        if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            assert self.logger is not None
+            self.logger.set_runtime_stats_and_log()
+            self.num_iterations += 1
+            self.reducer.prepare_for_forward()
 
-            # Notify the join context that this process has not joined, if
-            # needed
-            work = Join.notify_join_context(self)
-            if work:
-                self.reducer._set_forward_pass_work_handle(
-                    work, self._divide_by_initial_world_size  # type: ignore[arg-type]
-                )
+        # Notify the join context that this process has not joined, if
+        # needed
+        work = Join.notify_join_context(self)
+        if work:
+            self.reducer._set_forward_pass_work_handle(
+                work, self._divide_by_initial_world_size  # type: ignore[arg-type]
+            )
 
-            # Calling _rebuild_buckets before forward compuation,
-            # It may allocate new buckets before deallocating old buckets
-            # inside _rebuild_buckets. To save peak memory usage,
-            # call _rebuild_buckets before the peak memory usage increases
-            # during forward computation.
-            # This should be called only once during whole training period.
-            if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
-                logger.info("Reducer buckets have been rebuilt in this iteration.")
-                self._has_rebuilt_buckets = True
+        # Calling _rebuild_buckets before forward compuation,
+        # It may allocate new buckets before deallocating old buckets
+        # inside _rebuild_buckets. To save peak memory usage,
+        # call _rebuild_buckets before the peak memory usage increases
+        # during forward computation.
+        # This should be called only once during whole training period.
+        if torch.is_grad_enabled() and self.reducer._rebuild_buckets():
+            logger.info("Reducer buckets have been rebuilt in this iteration.")
+            self._has_rebuilt_buckets = True
 
-            # sync params according to location (before/after forward) user
-            # specified as part of hook, if hook was specified.
-            if self._check_sync_bufs_pre_fwd():
-                self._sync_buffers()
+        # sync params according to location (before/after forward) user
+        # specified as part of hook, if hook was specified.
+        if self._check_sync_bufs_pre_fwd():
+            self._sync_buffers()
 
-            if self._join_config.enable:
-                # Notify joined ranks whether they should sync in backwards pass or not.
-                self._check_global_requires_backward_grad_sync(is_joined_rank=False)
+        if self._join_config.enable:
+            # Notify joined ranks whether they should sync in backwards pass or not.
+            self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
-            output = self._run_ddp_forward(*inputs, **kwargs)
+    def _post_forward(self, output):
+        # sync params according to location (before/after forward) user
+        # specified as part of hook, if hook was specified.
+        if self._check_sync_bufs_post_fwd():
+            self._sync_buffers()
 
-            # sync params according to location (before/after forward) user
-            # specified as part of hook, if hook was specified.
-            if self._check_sync_bufs_post_fwd():
-                self._sync_buffers()
-
-            if torch.is_grad_enabled() and self.require_backward_grad_sync:
-                self.require_forward_param_sync = True
-                # We'll return the output object verbatim since it is a freeform
-                # object. We need to find any tensors in this object, though,
-                # because we need to figure out which parameters were used during
-                # this forward pass, to ensure we short circuit reduction for any
-                # unused parameters. Only if `find_unused_parameters` is set.
-                if self.find_unused_parameters and not self.static_graph:
-                    # Do not need to populate this for static graph.
-                    self.reducer.prepare_for_backward(list(_find_tensors(output)))
-                else:
-                    self.reducer.prepare_for_backward([])
+        if torch.is_grad_enabled() and self.require_backward_grad_sync:
+            self.require_forward_param_sync = True
+            # We'll return the output object verbatim since it is a freeform
+            # object. We need to find any tensors in this object, though,
+            # because we need to figure out which parameters were used during
+            # this forward pass, to ensure we short circuit reduction for any
+            # unused parameters. Only if `find_unused_parameters` is set.
+            if self.find_unused_parameters and not self.static_graph:
+                # Do not need to populate this for static graph.
+                self.reducer.prepare_for_backward(list(_find_tensors(output)))
             else:
-                self.require_forward_param_sync = False
+                self.reducer.prepare_for_backward([])
+        else:
+            self.require_forward_param_sync = False
 
         # TODO: DDPSink is currently enabled for unused parameter detection and
         # static graph training for first iteration.
@@ -1174,6 +1172,12 @@ class DistributedDataParallel(Module, Joinable):
                 output_placeholders, treespec, output_is_rref
             )
         return output
+
+    def forward(self, *inputs, **kwargs):
+        with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
+            self._pre_forward()
+            output = self._run_ddp_forward(*inputs, **kwargs)
+            return self._post_forward(output)
 
     def scatter(self, inputs, kwargs, device_ids):
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
