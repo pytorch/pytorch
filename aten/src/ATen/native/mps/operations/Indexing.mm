@@ -712,9 +712,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
               mask.device(),
               " and self on ",
               self.device());
-  TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
-              "expected mask dtype to be Bool but got ",
-              mask.scalar_type());
+  TORCH_CHECK(mask.scalar_type() == kBool, "expected mask dtype to be Bool but got ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
 
   c10::MaybeOwned<Tensor> b_mask = expand_inplace(self, mask, "masked_fill_");
@@ -737,9 +735,7 @@ Tensor& masked_fill__mps(Tensor& self, const Tensor& mask, const Scalar& value) 
     if (self.scalar_type() == kBool) {
       inputDataType = MPSDataTypeInt8;
     }
-    if (mask.scalar_type() == kBool) {
-      maskDataType = MPSDataTypeInt8;
-    }
+    maskDataType = MPSDataTypeInt8;
   }
 
   MPSStream* stream = getCurrentMPSStream();
