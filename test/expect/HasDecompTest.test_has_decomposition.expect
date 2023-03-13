@@ -890,6 +890,7 @@ aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
+aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward

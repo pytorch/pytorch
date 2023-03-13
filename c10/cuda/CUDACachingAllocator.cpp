@@ -868,7 +868,7 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     CreateContextFn context_recorder = context_recorder_.load();
-    std::shared_ptr<Context> context =
+    std::shared_ptr<GatheredContext> context =
         context_recorder ? context_recorder() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
@@ -1029,7 +1029,7 @@ class DeviceCachingAllocator {
   Block* alloc_found_block(
       AllocParams params,
       size_t orig_size,
-      std::shared_ptr<Context> context,
+      std::shared_ptr<GatheredContext> context,
       bool split_remainder) {
     auto size = params.size();
     auto device = params.device();
@@ -1360,7 +1360,7 @@ class DeviceCachingAllocator {
   void setSegmentStateToCheckpoint(
       Block* block,
       SegmentState& segment,
-      std::shared_ptr<Context> context,
+      std::shared_ptr<GatheredContext> context,
       RestoreResult& rr) {
     Block* curr_block = block;
     Block* last_block = block;
@@ -1488,7 +1488,7 @@ class DeviceCachingAllocator {
     // recorder needs to have...`
 
     CreateContextFn context_recorder = context_recorder_.load();
-    std::shared_ptr<Context> context =
+    std::shared_ptr<GatheredContext> context =
         context_recorder ? context_recorder() : nullptr;
 
     std::lock_guard<std::recursive_mutex> lock(mutex);
@@ -2318,7 +2318,7 @@ class DeviceCachingAllocator {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
-      std::shared_ptr<Context> context) {
+      std::shared_ptr<GatheredContext> context) {
     auto te = TraceEntry(
         action,
         addr,
