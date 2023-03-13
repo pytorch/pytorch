@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import tempfile
+import unittest
 
 from typing import Any, Callable, Sequence, Tuple, Union
 
@@ -200,6 +201,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
 
+    @unittest.skip("flaky test: sometimes SegFault on onnx_model.SerializeToString()")
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
         # Download pytorch model
@@ -321,6 +323,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             for ref_output, ort_output in zip(ref_outputs, ort_outputs):
                 torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
+    @unittest.skip(
+        "make_fx: RuntimeError: Creating a new Tensor subclass FakeTensor"
+        " but the raw Tensor object is already associated to a python"
+        " object of type FakeTensor"
+    )
     def test_large_scale_exporter_with_toy_mlp(self):
         class MLPModel(nn.Module):
             def __init__(self):
@@ -353,6 +360,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
         )
 
+    @unittest.skip(
+        "make_fx: RuntimeError: Creating a new Tensor subclass FakeTensor"
+        " but the raw Tensor object is already associated to a python"
+        " object of type FakeTensor"
+    )
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 

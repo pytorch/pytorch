@@ -57,7 +57,6 @@ def _export(
         )
     # Export TorchScript graph to ONNX ModelProto.
     onnx_model = onnxscript_graph.to_model_proto(export_options.opset_version)
-
     if export_options.use_binary_format:
         # Return ModelProto in binary format.
         return onnx_model.SerializeToString()

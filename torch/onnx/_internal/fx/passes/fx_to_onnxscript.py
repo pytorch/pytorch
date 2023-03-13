@@ -127,18 +127,23 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
         #    torch.jit.Value, fx_name_to_onnxscipt_value[fx_node_arg.name],
         #    in TorchScript graph.
         return fx_name_to_onnxscipt_value[onnx_tensor.name]
-    if isinstance(onnx_tensor, (tuple, list)) and all(
-        isinstance(x, torch.fx.Node) for x in onnx_tensor
+    if isinstance(onnx_tensor, (tuple, list)) and any(
+        isinstance(ele, torch.Value) for ele in onnx_tensor
     ):
         # This intends to solve dynamic axes. for example, if the size input of op.Expand
         # is dynamic, each of dim would be originated from other tensors.
         new_tensor = []
         for tensor in onnx_tensor:
-            new_tensor.append(fx_name_to_onnxscipt_value[tensor.name])
+            if isinstance(tensor, torch.fx.Node):
+                new_tensor.append(fx_name_to_onnxscipt_value[tensor.name])
+            else:
+                new_tensor.append(tensor)
         return new_tensor
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
-        return onnx_tensor
+
+    # all other cases, we does nothing.
+    return onnx_tensor
 
 
 def _filter_incompatible_and_dtype_convert_kwargs(kwargs):
@@ -181,22 +186,19 @@ def _fill_tensor_meta(
     if isinstance(expected_values, (list, tuple)) and not isinstance(
         onnxscript_values, (list, tuple)
     ):
-        # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
-        # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
+        # TODO(titaiwang): How to annotate type from sequence_type of ONNX?
         # eg: aten_split
-        # Pick the first tensor as the representative of the list of tensors.
-        expected_value = expected_values[0]
+        return
 
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # Only set shape for now as we don't need type information.
-        onnxscript_value.shape = tuple(expected_value.size())
+        onnxscript_value.shape = tuple(len(expected_value.size()) * [None])
         # FIXME(titaiwang): type promotion is not supported yet,
         # so set dtype will break onnx shape inference.
-        # onnxscript_value.dtype = expected_value.dtype
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
@@ -235,7 +237,6 @@ def _wrap_fx_args_as_onnxscript_args(
                 else:
                     # Get default from schema.
                     complete_kwargs[expected_arg.name] = expected_arg.default_value
-
     onnxscript_args = tuple(
         _retrieve_or_adapt_input_to_graph_set(arg, fx_name_to_onnxscipt_value)
         for arg in complete_args
@@ -353,11 +354,14 @@ def _export_fx_node_to_onnxscript(
             ]
         elif (
             isinstance(node.target, types.BuiltinFunctionType)
-            and node.name in function_dispatcher._BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE
+            and node.name.split("_")[0]
+            in function_dispatcher._BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE
         ):
+            # This function expects built-in functions to have name like mul, mul_1, ...
+
             # symbolic fx.graph contains built-in functions to calculate python values.
             exporter_key = function_dispatcher._BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.name
+                node.name.split("_")[0]
             ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")

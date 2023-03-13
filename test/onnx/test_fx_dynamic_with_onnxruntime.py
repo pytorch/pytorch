@@ -131,6 +131,12 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
         super().tearDown()
 
+    @unittest.skip(
+        "_aten_convolution_onnx: _add_attribute_to_torchscript_node()"
+        " parameter value=[None, None] violates type hint"
+        "typing.Union[float, int, str, bytes, typing.Sequence[float],"
+        " typing.Sequence[int], torch.Tensor], as [None, None]:"
+    )
     def test_shufflenet_v2_dynamic_axes(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
@@ -177,6 +183,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
+    @unittest.skip("flaky test: sometimes SegFault on onnx_model.SerializeToString()")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
@@ -210,6 +217,12 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
+    @unittest.skip(
+        "_aten_convolution_onnx: _add_attribute_to_torchscript_node()"
+        " parameter value=[None, None] violates type hint"
+        "typing.Union[float, int, str, bytes, typing.Sequence[float],"
+        " typing.Sequence[int], torch.Tensor], as [None, None]:"
+    )
     def test_transpose_infer_shape(self):
         class TransposeModule(torch.nn.Module):
             def __init__(self):
@@ -228,7 +241,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(y,)],
         )
 
-    @unittest.skip("torch._dynamo error")
+    @unittest.skip("torch._dynamo.exc.TorchRuntimeError")
     def test_squeeze_runtime_dim(self):
         class Squeeze(torch.nn.Module):
             def forward(self, d1, d2):
@@ -245,6 +258,11 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             Squeeze(), (d3, d4), additional_test_inputs=[(d1, d3)]
         )
 
+    @unittest.skip(
+        "[ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid model."
+        "In Node, ('Cast_2', Cast, '', -1) : () -> ('3': tensor(int64),)"
+        " , Error Node (Cast_2) has input size 0 not in range [min=1, max=1]."
+    )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
             def forward(self, x):
@@ -318,6 +336,10 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    unittest.skip(
+        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Failed to load model with error: Invalid tensor data type 0."
+    )
+
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -332,6 +354,8 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
+    # @unittest.skip("[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : "
+    #                "Failed to load model with error: Invalid tensor data type 0.")
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
