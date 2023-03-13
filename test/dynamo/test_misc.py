@@ -7,6 +7,7 @@ import dis
 import enum
 import logging
 import math
+import operator
 import os
 import sys
 import typing
@@ -565,7 +566,8 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(v, v.size())[0, 0], -10)
         self.assertEqual(opt_fn(v, (10, 20))[0, 0], -10)
         self.assertEqual(opt_fn(v, [10, 20])[0, 0], -10)
-        self.assertEqual(cnts.op_count, 2)
+        # One recompile per differing input type
+        self.assertEqual(cnts.frame_count, 3)
 
     def test_cell_output1(self):
         out = None
@@ -3288,10 +3290,51 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(exported.device.index, 0)
         self.assertEqual(exported.dtype, torch.bfloat16)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    def test_cuda_amp_autocast(self):
+        class MyModule(torch.nn.Module):
+            def forward(self, x):
+                a_float32 = torch.rand((8, 8), device="cuda")
+                b_float32 = torch.rand((8, 8), device="cuda")
+
+                with torch.cuda.amp.autocast(dtype=torch.torch.float64):
+                    c_float64 = torch.mm(a_float32, b_float32)
+                return c_float64
+
+        module = MyModule()
+        real = module(torch.tensor([0.5]))
+        real_device = real.device
+        real_dtype = real.dtype
+
+        graph, _ = torch._dynamo.export(module, torch.tensor([[0.0, 0], [0, 0]]))
+        exported = graph(torch.tensor([0.5]))
+        self.assertEqual(exported.device, real_device)
+        self.assertEqual(exported.dtype, real_dtype)
+
+        self.assertEqual(exported.device.type, "cuda")
+        self.assertEqual(exported.device.index, 0)
+        self.assertEqual(exported.dtype, torch.float64)
+
+    def test_is_autocast_cpu_enabled(self):
+        def fn(a_float32, b_float32):
+            with torch.cpu.amp.autocast(dtype=torch.bfloat16):
+                c_float16 = torch.mm(a_float32, b_float32)
+                if torch.is_autocast_cpu_enabled():
+                    c_float16 = c_float16 + 1
+            return c_float16
+
+        a = torch.rand((8, 8))
+        b = torch.rand((8, 8))
+        ref = fn(a, b)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        res = opt_fn(a, b)
+        self.assertTrue(same(ref, res))
+
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_SDPA or not SM80OrLater,
         "Can't run fused SDPA on this platform",
     )
+    @patch.object(torch._dynamo.config, "dynamic_shapes", False)
     def test_autocast_sdpa(self):
         class MyModule(torch.nn.Module):
             def forward(self, query, key, value):
@@ -3340,6 +3383,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             def forward(self, query, key, value):
                 out = F.scaled_dot_product_attention(query, key, value, None, 0, True)
                 out = F.scaled_dot_product_attention(
+                    query, key, value, None, 0, True, scale=8
+                )
+                out = F.scaled_dot_product_attention(
                     query=query,
                     key=key,
                     value=value,
@@ -3358,6 +3404,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 out = F.scaled_dot_product_attention(
                     query, key, value, None, dropout_p=0, is_causal=True
                 )
+                out = F.scaled_dot_product_attention(query, key, value, None, scale=8)
                 return out
 
         device = "cuda"
@@ -3709,25 +3756,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ref, res))
 
     def test_user_function_variable_supports_function_argument(self):
+        # Test user defined function default arguments can be:
+        # 1, user defined functions (e.g, add1)
+        # 2, torch functions (e.g, torch.sin)
+        # 3, python builtin functions (e.g, operator.neg)
         def add1(x):
             return x + 1
 
-        def add2(x):
-            return x + 2
+        def gn(x, f1=add1, f2=torch.sin, f3=operator.neg):
+            return f3(f2(f1(x)))
 
-        def gn(x, f=add1):
-            if f is add1:
-                return x + 1
-            else:
-                return x + 2
-
-        def fn(x, f):
-            return gn(x, f)
+        def fn(x):
+            return gn(x)
 
         x = torch.randn(2, 3)
-        ref = fn(x, add2)
+        ref = fn(x)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        res = opt_fn(x, add2)
+        res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
     def test_typing_variable_isinstance(self):
