@@ -15,7 +15,6 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros.h>
-#include <ATen/ops/_triton_bsr_dense_mm.h>
 #endif
 
 namespace at {
