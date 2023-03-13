@@ -771,6 +771,70 @@ void gemm_and_bias(
       scaleType);
 }
 
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<double> alpha_val,
+    const double* mat1_ptr,
+    int64_t mat1_ld,
+    const double* mat2_ptr,
+    int64_t mat2_ld,
+    const double* bias,
+    double* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<float> alpha_val,
+    const float* mat1_ptr,
+    int64_t mat1_ld,
+    const float* mat2_ptr,
+    int64_t mat2_ld,
+    const float* bias,
+    float* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::Half> alpha_val,
+    const at::Half* mat1_ptr,
+    int64_t mat1_ld,
+    const at::Half* mat2_ptr,
+    int64_t mat2_ld,
+    const at::Half* bias,
+    at::Half* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
+template void gemm_and_bias(
+    bool transpose_mat1,
+    bool transpose_mat2,
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    at::opmath_type<at::BFloat16> alpha_val,
+    const at::BFloat16* mat1_ptr,
+    int64_t mat1_ld,
+    const at::BFloat16* mat2_ptr,
+    int64_t mat2_ld,
+    const at::BFloat16* bias,
+    at::BFloat16* result_ptr,
+    int64_t result_ld,
+    GEMMAndBiasActivationEpilogue activation);
+
 void int8_gemm(
     bool transpose_mat1,
     bool transpose_mat2,
@@ -865,70 +929,6 @@ void int8_gemm(
       " scaleType ",
       scaleType);
 }
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<double> alpha_val,
-    const double* mat1_ptr,
-    int64_t mat1_ld,
-    const double* mat2_ptr,
-    int64_t mat2_ld,
-    const double* bias,
-    double* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<float> alpha_val,
-    const float* mat1_ptr,
-    int64_t mat1_ld,
-    const float* mat2_ptr,
-    int64_t mat2_ld,
-    const float* bias,
-    float* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<at::Half> alpha_val,
-    const at::Half* mat1_ptr,
-    int64_t mat1_ld,
-    const at::Half* mat2_ptr,
-    int64_t mat2_ld,
-    const at::Half* bias,
-    at::Half* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
-
-template void gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<at::BFloat16> alpha_val,
-    const at::BFloat16* mat1_ptr,
-    int64_t mat1_ld,
-    const at::BFloat16* mat2_ptr,
-    int64_t mat2_ld,
-    const at::BFloat16* bias,
-    at::BFloat16* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
 #endif // !defined(USE_ROCM) && !defined(_MSC_VER)
 
 template <>
