@@ -335,7 +335,6 @@ C10_HOST_DEVICE inline c10::complex<T> expm1(const c10::complex<T>& z) {
   return {er, ei};
 }
 
-
 } // namespace c10_complex_math
 
 using c10_complex_math::acos;
