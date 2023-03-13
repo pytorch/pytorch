@@ -241,19 +241,12 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
     # torchbench
-    "drq",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
-    "soft_actor_critic",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    # huggingface
-    "PegasusForCausalLM",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "PegasusForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "T5ForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "T5Small",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "XLNetLMHeadModel",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     # timm_models
     "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "dla102",  # Accuracy failed for key name base_layer.1.bias.grad
     "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
@@ -1934,7 +1927,11 @@ def run(runner, args, original_dir=None):
     if args.unspecialize_int:
         torch._dynamo.config.specialize_int = False
     if args.ci:
-        args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
+        if args.accuracy:
+            # Run fewer iterations when checking accuracy
+            args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -1987,9 +1984,13 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
             "pytorch_CycleGAN_and_pix2pix",
             "pytorch_unet",
             "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
