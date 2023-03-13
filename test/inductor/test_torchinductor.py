@@ -6141,6 +6141,48 @@ if HAS_CPU:
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
 
+        def test_atomic_add_bf16(self):
+            def fn(test_args):
+                res = torch.gather(**test_args)
+                return res
+
+            input_tensor_for_ref = torch.tensor(
+                [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
+            )
+            input_tensor_for_opt = torch.tensor(
+                [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
+            )
+
+            test_args_for_ref = {
+                "input": input_tensor_for_ref,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
+            test_args_for_opt = {
+                "input": input_tensor_for_opt,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
+
+            opt_fn = torch.compile(fn)
+
+            ref_fwd = fn(test_args_for_ref)
+            res_fwd = opt_fn(test_args_for_opt)
+            self.assertEqual(res_fwd, ref_fwd)
+
+            torch.manual_seed(1)
+            bwd_tensor_for_ref = torch.randn(ref_fwd.shape, dtype=torch.bfloat16)
+            torch.manual_seed(1)
+            bwd_tensor_for_opt = torch.randn(res_fwd.shape, dtype=torch.bfloat16)
+            self.assertEqual(bwd_tensor_for_ref, bwd_tensor_for_opt)
+
+            ref_fwd.backward(bwd_tensor_for_ref)
+            res_fwd.backward(bwd_tensor_for_opt)
+
+            ref_grad = test_args_for_ref["input"].grad
+            res_grad = test_args_for_opt["input"].grad
+            self.assertEqual(ref_grad, res_grad)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
