@@ -6103,7 +6103,7 @@ if HAS_CPU:
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
 
-        def test_atomic_add(self):
+        def test_atomic_add_bf16(self):
             def fn(test_args):
                 res = torch.gather(**test_args)
                 return res
