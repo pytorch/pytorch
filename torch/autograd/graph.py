@@ -345,7 +345,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     def get_grad_fn(t):
         # or grad accumulator
         if t.requires_grad and t.grad_fn is None:
-            return t.clone().grad_fn.next_functions[0][0]
+            return t.expand_as(t).grad_fn.next_functions[0][0]
         else:
             return t.grad_fn
 

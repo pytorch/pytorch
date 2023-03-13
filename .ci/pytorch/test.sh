@@ -312,7 +312,7 @@ test_single_dynamo_benchmark() {
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
+      --base-sha="$BASE_SHA" "${partition_flags[@]}" \
       --no-graphs --no-update-archive --no-gh-comment "$@"
   else
     python "benchmarks/dynamo/$suite.py" \
@@ -327,6 +327,7 @@ test_single_dynamo_benchmark() {
 
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
 
   local suite="$1"
   shift
@@ -337,8 +338,8 @@ test_dynamo_benchmark() {
     test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # Performance test training only, for float32 and amp
-    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
-    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 "$@"
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp --output-dir="$TEST_REPORTS_DIR"/amp "$@"
+    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 --output-dir="$TEST_REPORTS_DIR"/float32 "$@"
   else
     # Check inference with --float32
     test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
@@ -649,7 +650,7 @@ build_xla() {
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR $USE_CACHE
+  retry install_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }

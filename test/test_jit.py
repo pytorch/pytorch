@@ -15945,34 +15945,6 @@ dedent """
             with torch.jit.fuser(fuser_name):
                 self.checkModule(MyModule(), (x, y))
 
-    def test_scriptmodule_update_has_hooks(self):
-
-        class SimpleModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self):
-                pass
-
-        def forward_hook(self, input: Tuple[()], output: None):
-            pass
-
-        m = SimpleModule()
-        hook = m.register_forward_hook(forward_hook)
-        sm = torch.jit.script(m)
-        self.assertTrue(sm._has_hooks)
-
-        # Todo this is bad: ideally the handle would update the scriptmodule too,
-        # but this is a pre-existing bug
-        hook.remove()
-        self.assertTrue(sm._has_hooks)
-        self.assertFalse(m._has_hooks)
-
-        # at least manual use of the update function works
-        del sm._forward_hooks[0]
-        sm._update_has_hooks()
-        self.assertFalse(sm._has_hooks)
-
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.
