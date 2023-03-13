@@ -277,22 +277,28 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, code)
             return
 
-        # Add type check to prevent equality check between tensor and non-tensor.
         code = list()
+
+        # If matching equality against list/tuple, we must also check that
+        # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
+            # NB: LIST_LENGTH takes care of the outer __check_type_id test
             self.LIST_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
-
-        elif not istype(val, torch.Size):
+        else:
+            # Add type check to prevent equality check between tensor and non-tensor.
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # TODO: It feels like it would be better to just implement our own
+        # equality test in C that handles all of the necessary type checking
+        # and NaN tests
         code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
 
@@ -421,7 +427,9 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            [a.dynamic_ranges for a in fs],
             source_ref=self.source_ref,
+            strict_mark_dyn=output_graph.export,
         )
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
@@ -505,7 +513,7 @@ class GuardBuilder(GuardBuilderBase):
             # compiled with that same
             # tensor + more onerous user directives.
             #
-            # There is finer grain control available within _dynamo_dynamic_indices - and that is for ranges.
+            # There is finer grain control available within _dynamo_dynamic_ranges - and that is for ranges.
             # To fully understand that, please see the mark_dynamic_constrain api docs first.
             # The way we guard on user directive ranges specified via mark_dynamic_constrain is by the same logic as
             # above. Specifically, when X is a strict subset of Y notion around which dimensions can be valid, the same
@@ -515,8 +523,8 @@ class GuardBuilder(GuardBuilderBase):
                 value, guard.source, is_tensor=True
             )
             if not static:
-                if hasattr(value, "_dynamo_dynamic_indices"):
-                    dims_check = str(dict(value._dynamo_dynamic_indices))
+                if hasattr(value, "_dynamo_dynamic_ranges"):
+                    dims_check = str(dict(value._dynamo_dynamic_ranges))
                     dims_check = dims_check.replace("-oo", "None")
                     dims_check = dims_check.replace("oo", "None")
                     code.append(f"___dynamic_dims_check({tensor_name}, {dims_check})")
@@ -524,11 +532,11 @@ class GuardBuilder(GuardBuilderBase):
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
                     code.append(
-                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_ranges') == False"
                     )
             else:
                 assert not hasattr(
-                    value, "_dynamo_dynamic_indices"
+                    value, "_dynamo_dynamic_ranges"
                 ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:

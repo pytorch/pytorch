@@ -742,15 +742,15 @@ tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
 # See Note - [On Dynamic Dim Guards]
-def dynamic_dims_check(tensor, prior_dynamo_dynamic_indices):
-    if not hasattr(tensor, "_dynamo_dynamic_indices"):
+def dynamic_dims_check(tensor, prior_dynamo_dynamic_ranges):
+    if not hasattr(tensor, "_dynamo_dynamic_ranges"):
         return True
-    if not set(tensor._dynamo_dynamic_indices.keys()).issubset(
-        set(prior_dynamo_dynamic_indices.keys())
+    if not set(tensor._dynamo_dynamic_ranges.keys()).issubset(
+        set(prior_dynamo_dynamic_ranges.keys())
     ):
         return False
-    for key, vr in tensor._dynamo_dynamic_indices.items():
-        prior_vr = prior_dynamo_dynamic_indices[key]
+    for key, vr in tensor._dynamo_dynamic_ranges.items():
+        prior_vr = prior_dynamo_dynamic_ranges[key]
         # Below, None means not set, aka (pos/neg) infinity
         # If a prior value is None, and a new value is not, we reject
         if prior_vr[1] is None and vr.max is not None:

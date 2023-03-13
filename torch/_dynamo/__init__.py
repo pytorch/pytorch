@@ -236,15 +236,15 @@ def mark_dynamic_constrain(
     This API behaves identically for eager and export.
     """
     if isinstance(index, int):
-        if not hasattr(t, "_dynamo_dynamic_indices"):
-            t._dynamo_dynamic_indices = defaultdict(MinMaxConstraint.NONE)
+        if not hasattr(t, "_dynamo_dynamic_ranges"):
+            t._dynamo_dynamic_ranges = defaultdict(MinMaxConstraint.NONE)
         # TODO(voz): Should we bounds check?
         new_range = MinMaxConstraint(min=min, max=max)
-        if index in t._dynamo_dynamic_indices:
+        if index in t._dynamo_dynamic_ranges:
             raise RuntimeError(
                 f"Attempt to constrain already constrained index {index}"
             )
-        t._dynamo_dynamic_indices[index] = new_range
+        t._dynamo_dynamic_ranges[index] = new_range
         return
 
     assert isinstance(index, (list, tuple))
@@ -266,11 +266,22 @@ def clear_dynamic(t, index):
     """
     if isinstance(index, int):
         assert hasattr(
-            t, "_dynamo_dynamic_indices"
+            t, "_dynamo_dynamic_ranges"
         ), "Illegal call to clear without dynamic dims"
-        del t._dynamo_dynamic_indices[index]
+        del t._dynamo_dynamic_ranges[index]
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
         clear_dynamic(t, i)
+
+
+@forbid_in_graph
+def has_dynamic_dims(t):
+    return hasattr(t, "_dynamo_dynamic_ranges")
+
+
+@forbid_in_graph
+def clear_dynamic_dims(t):
+    assert has_dynamic_dims(t)
+    delattr(t, "_dynamo_dynamic_ranges")
