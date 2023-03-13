@@ -207,7 +207,7 @@ NestedTensor and any constraints they have.
    :func:`torch.unbind`; "Supports unbinding along ``dim=0`` only."
    :func:`torch.reshape`; "Supports reshaping with size of ``dim=0`` preserved (i.e. number of tensors nested cannot be changed).
    Unlike regular tensors, a size of ``-1`` here means that the existing size is inherited.
-   In particular, the only valid size for a ragged dimension is ``-1``.
+   In particular, the only valid size for a irregular dimension is ``-1``.
    Size inference is not implemented yet and hence for new dimensions the size cannot be ``-1``."
    :func:`torch.Tensor.reshape_as`; "Similar constraint as for ``reshape``."
    :func:`torch.transpose`; "Supports transposing of all dims except ``dim=0``."
@@ -215,3 +215,4 @@ NestedTensor and any constraints they have.
    :func:`torch.empty_like`; "Behavior is analogous to that of regular tensors; returns a new empty nested tensor (i.e. with uninitialized values) matching the nested structure of the input."
    :func:`torch.randn_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with values randomly initialized according to a standard normal distribution matching the nested structure of the input."
    :func:`torch.zeros_like`; "Behavior is analogous to that of regular tensors; returns a new nested tensor with all zero values matching the nested structure of the input."
+   :func:`torch.nn.LayerNorm`; "The ``normalized_shape`` argument is restricted to not extend into the irregular dimensions of the NestedTensor."
