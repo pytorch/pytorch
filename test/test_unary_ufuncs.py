@@ -1149,6 +1149,16 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(res_tens.real, out_tens.real, atol=0.0, rtol=1e-6)
         self.assertEqual(res_tens.imag, out_tens.imag, atol=0.0, rtol=1e-6)
 
+    @dtypes(torch.complex64, torch.complex128)
+    def test_expm1_complex(self, device, dtype):
+        inp = torch.randn(size=(100,), device=device, dtype=dtype)
+        actual = torch.expm1(inp)
+
+        expected = np.expm1(inp.numpy())
+        expected = torch.from_numpy(expected).to(dtype)
+
+        self.assertEqual(actual, expected)
+
     # do ops like threshold need a test_unary(_nonufunc) test suite?
     @onlyCPU
     @dtypes(*get_all_math_dtypes("cpu"))
