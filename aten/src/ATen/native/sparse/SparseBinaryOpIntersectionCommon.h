@@ -5,7 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

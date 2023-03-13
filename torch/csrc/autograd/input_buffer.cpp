@@ -2,7 +2,7 @@
 
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
