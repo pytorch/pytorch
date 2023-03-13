@@ -199,7 +199,7 @@ allow_rnn = False
 base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # trace through numpy ndarray as tensor and try to translate numpy function to torch function.
-trace_numpy = False
+numpy_ndarray_as_tensor = False
 
 
 def is_fbcode():

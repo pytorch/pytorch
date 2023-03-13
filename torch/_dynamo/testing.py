@@ -254,11 +254,11 @@ def requires_static_shapes(fn):
 
 @contextlib.contextmanager
 def trace_numpy() -> None:
-    config.trace_numpy, prev = True, config.trace_numpy
+    config.numpy_ndarray_as_tensor, prev = True, config.numpy_ndarray_as_tensor
     try:
         yield
     finally:
-        config.trace_numpy = prev
+        config.numpy_ndarray_as_tensor = prev
 
 
 def requires_numpy_pytorch_interop(fn):

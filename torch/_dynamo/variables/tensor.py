@@ -2,11 +2,14 @@ import inspect
 import itertools
 import operator
 import types
+
+import torch_np
 from typing import Dict, List
 
 import torch.fx
 import torch.random
 from torch.fx.experimental.symbolic_shapes import guard_scalar
+from .builder import wrap_fx_proxy
 
 from .. import config, variables
 from ..exc import unimplemented
@@ -338,8 +341,8 @@ class TensorVariable(VariableTracker):
         ):
             unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
-            if not config.trace_numpy:
-                unimplemented(f"Tensor.{name}")
+            if not config.numpy_ndarray_as_tensor:
+                unimplemented(f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy().")
             from .builder import wrap_fx_proxy_cls
 
             assert not args, "Tensor.numpy() doesn't take args."
@@ -633,25 +636,61 @@ class NumpyTensorVariable(TensorVariable):
         self,
         proxy: torch.fx.Proxy,
         dtype=None,
+        device=None,
+        layout=None,
         ndim=None,
-        class_type=None,
-        shape=None,
+        size=None,
+        stride=None,
+        requires_grad=None,
+        is_quantized=None,
+        is_contiguous=None,
+        is_sparse=None,
+        class_type=torch.Tensor,
+        specialized_value=None,
         **kwargs,
     ):
-        self.shape = shape
-        super().__init__(proxy, dtype=dtype, ndim=ndim, class_type=class_type, **kwargs)
+        super().__init__(proxy, dtype, device, layout, ndim, size, stride, requires_grad, is_quantized, is_contiguous, is_sparse, class_type, specialized_value, **kwargs)
 
     def var_getattr(self, tx, name):
-        try:
-            super().var_getattr(tx, name)
-        except NotImplementedError:
-            unimplemented(f"numpy_ndarray.{name}")
-
-    def call_isinstance(self, tensor_type):
-        return False
-
+        result = None
+        options = VariableTracker.propagate(self)
+        if name == "shape" and self.size is not None:
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            result = ShapeVariable(sizes, **options)
+        elif name == "ndim" and self.ndim is not None:
+            result = ConstantVariable(self.ndim, **options)
+        elif name == "dtype" and self.dtype is not None:
+            result = ConstantVariable(torch_np.dtype(self.dtype), **options)
+        elif name == "T":
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "transpose",
+                    *proxy_args_kwargs([self], {}),
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name == "real" or name == "imag":
+            func = getattr(torch, name)
+            result = wrap_fx_proxy(
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    func,
+                    *proxy_args_kwargs([self], {}),
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name in ["size", "strides", "itemsize", "base", "flags"]:
+            unimplemented(f"TODO: add support for ndarray.{name}")
+        if result is None:
+            unimplemented(f"ndarray.{name} not supported")
+        return result
     @staticmethod
-    def specialize(value: "torch_np._ndarray.ndarray"):
+    def specialize(value: "torch_np.ndarray"):
         props = {
             "dtype": value.dtype,
             "ndim": int(value.ndim),

@@ -860,35 +860,32 @@ class NumpyVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        if not config.trace_numpy:
-            unimplemented("numpy")
-        import numpy as np
+        if not config.numpy_ndarray_as_tensor or not HAS_NUMPY_TORCH_INTEROP:
+            unimplemented(f"numpy.{self.value}()")
+        import torch_np._detail.implementations
 
         from .builder import wrap_fx_proxy_cls
         from .tensor import NumpyTensorVariable
 
         options = VariableTracker.propagate([[self]], [args], [list(kwargs.values())])
-        if self.value is np.meshgrid:
-            if HAS_NUMPY_TORCH_INTEROP:
-                import torch_np._detail.implementations
+        # lookup method name in torch_np
+        if self.value.__name__ in torch_np._detail.implementations.__dict__:
 
-                meshgrid = torch_np._detail.implementations.meshgrid
-            else:
-                # should we give a warning since torch.meshgrid is having a different semantics than np?
-                meshgrid = torch.meshgrid
+            func = getattr(torch_np._detail.implementations, self.value.__name__)
+
             return wrap_fx_proxy_cls(
                 target_cls=NumpyTensorVariable,
                 tx=tx,
                 proxy=tx.output.create_proxy(
                     "call_function",
-                    meshgrid,
+                    func,
                     *proxy_args_kwargs(args, kwargs),
                 ),
                 example_value=None,
                 **options,
             )
         else:
-            unimplemented(f"numpy function {self.value}")
+            unimplemented(f"Can't find numpy function {self.value} in torch_np")
 
     def call_method(
         self,

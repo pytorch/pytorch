@@ -290,8 +290,9 @@ class TorchVariable(VariableTracker):
                 **options,
             )
         elif self.value is torch.from_numpy:
-            if not config.trace_numpy:
-                unimplemented("numpy")
+            if not config.numpy_ndarray_as_tensor:
+                unimplemented("torch.from_numpy(). Turn on config.numpy_ndarray_as_tensor to support "
+                              "torch.from_numpy().")
             assert len(args) == 1, f"Got arguments {args}"
             assert not kwargs
             t = args[0]
