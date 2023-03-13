@@ -6606,7 +6606,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 return x.masked_fill(mask, 2)
 
         x = torch.zeros(4, 2, 3, requires_grad=True)
@@ -6624,7 +6624,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class MaskedFillModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 x.masked_fill_(mask, 2)
                 return x
 

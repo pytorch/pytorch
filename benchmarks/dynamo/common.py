@@ -1927,6 +1927,8 @@ def run(runner, args, original_dir=None):
     if args.unspecialize_int:
         torch._dynamo.config.specialize_int = False
     if args.ci:
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
@@ -1982,9 +1984,13 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
             "pytorch_CycleGAN_and_pix2pix",
             "pytorch_unet",
             "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
