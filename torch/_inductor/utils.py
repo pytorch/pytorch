@@ -414,8 +414,8 @@ class IndentedBuffer:
             buf.write("\n")
         return buf.getvalue(), linemap
 
-    def getvalue(self, max_lines=None):
-        v, _ = self.getvaluewithlinemap(max_lines)
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
         return v
 
     def getrawvalue(self):

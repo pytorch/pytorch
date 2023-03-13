@@ -2,7 +2,7 @@
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
-#include <torch/csrc/profiler/unwind/unwind.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 
 namespace torch {
 namespace cuda {
@@ -36,128 +36,65 @@ c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
 
-struct StackContext : public c10::GatheredContext {
-  std::vector<void*> cpp_frames;
-  std::vector<jit::StackEntry> script_frames;
-
-  static std::shared_ptr<StackContext> _gather(bool script, bool cpp) {
-    auto r = std::make_shared<StackContext>();
-    if (script) {
-      r->script_frames = torch::jit::currentCallstack();
+std::vector<IValue> ivalue_symbolize(
+    std::vector<CapturedTraceback*>& to_symbolize) {
+  // we dedup repeated to_symbolize objects to prevent
+  // creating a bunch of duplicated frame objects
+  std::unordered_map<CapturedTraceback*, uint64_t> cached_frames;
+  std::vector<CapturedTraceback*> unique_frames;
+  for (const auto& sc : to_symbolize) {
+    auto it = cached_frames.find(sc);
+    if (it == cached_frames.end()) {
+      cached_frames.insert({sc, unique_frames.size()});
+      unique_frames.push_back(sc);
     }
-    if (cpp) {
-      r->cpp_frames = unwind::unwind();
-    }
-    return r;
   }
-  static std::shared_ptr<c10::GatheredContext> gather() {
-    return _gather(true, false);
-  }
-  static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
-    return _gather(true, true);
-  }
-};
+  auto s = symbolize(unique_frames);
 
-StackContext* getFromContext(const std::shared_ptr<c10::GatheredContext>& x) {
-  if (StackContext* sc = dynamic_cast<StackContext*>(x.get())) {
+  IValue line_s = "line";
+  IValue name_s = "name";
+  IValue filename_s = "filename";
+  std::vector<IValue> all_frames;
+  for (const auto& f : s.all_frames) {
+    auto d = new_dict();
+    d.insert(name_s, f.funcname);
+    d.insert(filename_s, f.filename);
+    d.insert(line_s, int64_t(f.lineno));
+    all_frames.emplace_back(std::move(d));
+  }
+
+  std::vector<IValue> py_unique_frames;
+  for (const auto& t : s.tracebacks) {
+    auto l = new_list();
+    for (const auto& e : t) {
+      l.push_back(all_frames.at(e));
+    }
+    py_unique_frames.push_back(std::move(l));
+  }
+
+  std::vector<IValue> result;
+  for (const auto& sc : to_symbolize) {
+    result.push_back(py_unique_frames.at(cached_frames.at(sc)));
+  }
+  return result;
+}
+
+std::shared_ptr<c10::GatheredContext> gather() {
+  return CapturedTraceback::gather(true, true, false);
+}
+
+std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
+  return CapturedTraceback::gather(true, true, true);
+}
+
+CapturedTraceback* getFromContext(
+    const std::shared_ptr<c10::GatheredContext>& x) {
+  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
     return sc;
   }
   TORCH_CHECK(
       false,
       "attempting to gather stack context from the wrong StackContext type.");
-}
-
-void gatherFrames(
-    const std::vector<std::pair<StackContext*, Dict<IValue, IValue>>>&
-        to_gather) {
-  IValue frames_s = "frames";
-  IValue filename_s = "filename";
-  IValue name_s = "name";
-  IValue line_s = "line";
-
-  std::unordered_map<void*, size_t> ip_to_frame_offset; // in all_cpp_frames
-  std::vector<void*> all_cpp_ips;
-  struct CPPFrame {
-    enum Kind { JIT, REPORT } kind;
-    Dict<IValue, IValue> frame;
-  };
-  std::vector<CPPFrame> all_cpp_frames;
-
-  // dedup and collect any C++ frames that need symbols for
-  for (const auto& e : to_gather) {
-    for (void* f : e.first->cpp_frames) {
-      if (!ip_to_frame_offset.count(f)) {
-        ip_to_frame_offset[f] = all_cpp_ips.size();
-        all_cpp_ips.push_back(f);
-      }
-    }
-  }
-
-  // gather symbol names for C++ frames
-  if (all_cpp_ips.size() > 0) {
-    auto all_frames = unwind::symbolize(all_cpp_ips);
-    for (auto& f : all_frames) {
-      auto frame = new_dict();
-      frame.insert(filename_s, f.filename);
-      frame.insert(name_s, f.funcname);
-      frame.insert(line_s, IValue(int64_t(f.lineno)));
-      CPPFrame::Kind kind = CPPFrame::REPORT;
-      if (f.funcname.rfind("torch::jit::InterpreterStateImpl::run", 0) !=
-          std::string::npos) {
-        kind = CPPFrame::JIT;
-      }
-      all_cpp_frames.emplace_back(CPPFrame{kind, frame});
-    }
-  }
-
-  std::unordered_map<StackContext*, c10::List<IValue>> cached_frames;
-  for (const auto& e : to_gather) {
-    auto sc = e.first;
-    auto it = cached_frames.find(sc);
-    if (it == cached_frames.end()) {
-      auto frames = new_list();
-
-      bool jit_appended = false;
-
-      auto append_jit = [&]() {
-        if (jit_appended) {
-          return;
-        }
-        jit_appended = true;
-        for (const auto& f : sc->script_frames) {
-          auto frame = new_dict();
-          frame.insert(name_s, f.filename);
-          auto flc = f.range.file_line_col();
-          if (flc) {
-            std::string filename;
-            size_t line;
-            size_t col;
-            std::tie(filename, line, col) = *flc;
-            frame.insert(filename_s, filename);
-            frame.insert(line_s, int64_t(line));
-          } else {
-            frame.insert(filename_s, "??");
-            frame.insert(line_s, 0);
-          }
-          frames.push_back(std::move(frame));
-        }
-      };
-
-      for (void* f : sc->cpp_frames) {
-        const CPPFrame& wf = all_cpp_frames.at(ip_to_frame_offset.at(f));
-        if (wf.kind == CPPFrame::JIT) {
-          append_jit();
-        }
-        frames.push_back(wf.frame);
-      }
-
-      // add frames if we otherwise haven't seen the C++ frame indicating where
-      // it should go
-      append_jit();
-      it = cached_frames.insert({sc, frames}).first;
-    }
-    e.second.insert(frames_s, it->second);
-  }
 }
 
 } // namespace
@@ -171,9 +108,9 @@ void _record_memory_history(
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = nullptr;
   if (record_context) {
     if (record_cpp_context) {
-      recorder = StackContext::gather_with_cpp;
+      recorder = gather_with_cpp;
     } else {
-      recorder = StackContext::gather;
+      recorder = gather;
     }
   }
   c10::cuda::CUDACachingAllocator::recordHistory(
@@ -207,7 +144,8 @@ std::string _memory_snapshot_pickled() {
 
   auto empty_frames = new_list();
 
-  std::vector<std::pair<StackContext*, Dict<IValue, IValue>>> frames_to_gather;
+  std::vector<CapturedTraceback*> frame_tracebacks;
+  std::vector<Dict<IValue, IValue>> frame_dict;
 
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
@@ -238,8 +176,8 @@ std::string _memory_snapshot_pickled() {
           history_entry.insert(addr_s, (int64_t)h.addr);
           history_entry.insert(real_size_s, (int64_t)h.real_size);
           if (h.context) {
-            frames_to_gather.emplace_back(
-                getFromContext(h.context), history_entry);
+            frame_tracebacks.push_back(getFromContext(h.context));
+            frame_dict.push_back(history_entry);
           }
           history.push_back(std::move(history_entry));
         }
@@ -303,7 +241,8 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(stream_s, int64_t(te.stream_));
       if (te.context_) {
         auto sc = getFromContext(te.context_);
-        frames_to_gather.emplace_back(sc, trace_entry);
+        frame_tracebacks.push_back(sc);
+        frame_dict.push_back(trace_entry);
       }
       trace.push_back(trace_entry);
     }
@@ -314,7 +253,10 @@ std::string _memory_snapshot_pickled() {
   result.insert("segments", segments);
   result.insert("device_traces", traces);
 
-  gatherFrames(frames_to_gather);
+  auto frames = ivalue_symbolize(frame_tracebacks);
+  for (auto i : c10::irange(frames.size())) {
+    frame_dict.at(i).insert(frames_s, frames.at(i));
+  }
 
   return write_pickle(result);
 }

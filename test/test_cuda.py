@@ -4973,6 +4973,13 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        c = gather_traceback(True, True, True)
+        r, = symbolize_tracebacks([c])
+        self.assertTrue("combined_traceback.cpp" in str(r))
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
@@ -5191,8 +5198,12 @@ class TestCudaComm(TestCase):
                             if history and history[0]['real_size'] == 311 * 411 * 4:
                                 if ctx:
                                     frame_text = str(history[0]['frames'])
+                                    # C++ frame
                                     self.assertTrue('::rand' in frame_text)
+                                    # script frame
                                     self.assertTrue('the_script_fn' in frame_text)
+                                    # python frame
+                                    self.assertTrue('case.py' in frame_text)
                                 found = True
                 last_action = mem['device_traces'][0][-1]
                 self.assertTrue(last_action['action'] == 'alloc')
