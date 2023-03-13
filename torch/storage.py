@@ -3,7 +3,7 @@ import io
 import torch
 from ._utils import _type, _cuda
 from torch.types import Storage
-from typing import Any, TypeVar, Type, Union, cast, Dict
+from typing import Any, TypeVar, Type, Union, cast, Dict as _Dict
 import copy
 import collections
 from functools import lru_cache
@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 _share_memory_lock = threading.Lock()
-_share_memory_map: Dict[int, threading.Lock] = {}
+_share_memory_map: _Dict[int, threading.Lock] = {}
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase:
