@@ -490,14 +490,25 @@ class TestNestedTensor(TestCase):
             t.fill_(11.)
             self.assertEqual(nt_ub, t)
 
-    def test_ones_like(self):
+    def test_zero_(self):
         ntensors = 4
         nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        ones_nt = torch.ones_like(nt)
-
-        for nt_ub in ones_nt.unbind():
-            t = torch.ones_like(nt_ub)
+        nt.zero_()
+        for nt_ub in nt.unbind():
+            t = torch.empty_like(nt_ub)
+            t.fill_(0.)
             self.assertEqual(nt_ub, t)
+
+    @parametrize("func", [torch.ones_like, torch.zeros_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_functions(self, func):
+        ntensors = 4
+        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
+        nt_like = func(nt)
+
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
 
 
 class TestNestedTensorDeviceType(TestCase):
