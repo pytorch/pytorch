@@ -2233,7 +2233,7 @@ class ComputedBuffer(Buffer):
             reduce_vars, reduce_size
         )
 
-        # remember the reordering if not have loop collapsed.
+        # remember the reordering if not have loop collapse.
         if len(iter_ranges) == len(index_vars):
             self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
