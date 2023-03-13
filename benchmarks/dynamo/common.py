@@ -201,6 +201,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -245,7 +246,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # timm_models
     "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
