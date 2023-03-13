@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 _share_memory_lock = threading.Lock()
-_share_memory_map = {}
+_share_memory_map: Dict[int, threading.Lock] = {}
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase:
