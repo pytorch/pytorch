@@ -73,7 +73,7 @@ jobs:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            sh scripts/buck_setup.sh
+            bash scripts/buck_setup.sh
 
       - name: Build tools
         run: |
