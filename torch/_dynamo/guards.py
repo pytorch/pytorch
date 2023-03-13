@@ -425,6 +425,7 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            [a.dynamic_indices for a in fs],
             source_ref=self.source_ref,
         )
         for shape_guard in guards:
