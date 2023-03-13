@@ -23,10 +23,14 @@ jobs:
           pip3 install boto3==1.19.12
 
       - name: Upload external contribution stats
+        uses: nick-fields/retry@v2.8.2
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-        run: |
-          echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
-          python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
+        with:
+          timeout_minutes: 10
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            echo "Uploading external contribution stats for" "$(date -d yesterday '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d yesterday '+%Y-%m-%d')"
