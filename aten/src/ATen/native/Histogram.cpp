@@ -200,7 +200,7 @@ select_outer_bin_edges(const Tensor& input, c10::optional<c10::ArrayRef<double>>
                 // aminmax has not been implemented on mps.
                 Tensor min = at::amin(input, 0);
                 Tensor max = at::amax(input, 0);
-                
+
                 for (const auto i : c10::irange(N)) {
                     leftmost_edges[i] = min[i].item().to<scalar_t>();
                     rightmost_edges[i] = max[i].item().to<scalar_t>();
@@ -244,7 +244,7 @@ std::pair<double, double> histc_select_outer_bin_edges(const Tensor& input,
             // aminmax has not been implemented on mps.
             Tensor min = at::amin(input);
             Tensor max = at::amax(input);
-            
+
             leftmost_edge = min.item<double>();
             rightmost_edge = max.item<double>();
         } else {
@@ -316,6 +316,10 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
     TensorList bin_edges_out_tl(bin_edges_out);
 
     const int64_t N = self.size(-1);
+
+    TORCH_CHECK(static_cast<int64_t>(bin_ct.size()) == N, "torch.histogramdd: expected ", N, " sequences of bin edges for a ", N,
+                "-dimensional histogram but got ", bin_ct.size());
+
     const int64_t M = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
             (int64_t)1, std::multiplies<int64_t>());
     Tensor reshaped_self = self.reshape({ M, N });

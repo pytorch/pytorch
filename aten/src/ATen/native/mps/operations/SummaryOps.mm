@@ -47,7 +47,7 @@ int64_t upper_bound(constant T * arr, int64_t first, int64_t len, T val) {
 // The implementation here is mostly taken from the CPU's implementation with some modifications.
 // Please see `aten/src/ATen/native/cpu/HistogramKernel.cpp` for more details.
 template<typename T>
-kernel void histogramdd(constant void     * input_      [[buffer(0)]],
+kernel void histogramdd(constant T  * input_            [[buffer(0)]],
                   constant T        * weight            [[buffer(1)]],
                   device   T        * local_out         [[buffer(2)]],
                   constant uint     * offsets           [[buffer(3)]],
@@ -67,12 +67,12 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
   int64_t bin_seq_offset = 0;
 
   for (size_t dim = 0; dim < num_dims; dim++) {
-    T element = ((constant T*)input_)[tid * num_dims + dim];
+    T element = input_[(size_t)offsets[tid * num_dims + dim]];
 
     // Skips elements which fall outside the specified bins and NaN elements
     // Adding an eps to the edges to eliminate precision issues that cause elements accidentally skipped,
     // this is likely due to the minuscule implementation differences between the CPU and MPS's linspace.
-    if (!(element >= (leftmost_edge[dim] - eps) && element <= (rightmost_edge[dim] + eps) )) {
+    if (!(element >= (leftmost_edge[dim] - eps) && element <= (rightmost_edge[dim] + eps))) {
         skip_element = true;
         break;
     }
@@ -120,7 +120,7 @@ kernel void histogramdd(constant void     * input_      [[buffer(0)]],
 template                                                      \
 [[host_name("histogramdd_" #DTYPE)]]                          \
 kernel void histogramdd<DTYPE>(                               \
-  constant void     * input_                  [[buffer(0)]],  \
+  constant DTYPE    * input_                  [[buffer(0)]],  \
   constant DTYPE    * weight                  [[buffer(1)]],  \
   device   DTYPE    * local_out               [[buffer(2)]],  \
   constant uint     * offsets                 [[buffer(3)]],  \
@@ -199,7 +199,7 @@ void histogramdd_kernel_impl(
   }
 
   const int64_t D = input.size(1);
-  int64_t bin_edges_numel = 0;
+  size_t bin_edges_numel = 0;
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
       bin_edges_numel += bin_edges[dim].numel();
@@ -243,6 +243,7 @@ void histogramdd_kernel_impl(
     kMPS,
     c10::nullopt /* pin_memory */
   );
+  TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
@@ -250,7 +251,6 @@ void histogramdd_kernel_impl(
   id<MTLBuffer> weightBuffer = has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength: 0
                                                              options: 0] autorelease];
   size_t weightOffset =  has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
-
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
   
@@ -262,36 +262,31 @@ void histogramdd_kernel_impl(
       MTLSize gridSize = MTLSizeMake(kernelOffsetNumThreads, 1, 1);
       const IntArrayRef& iterShape = input.sizes();
       std::vector<uint32_t> iterShapeData(iterShape.size());
-      std::vector<uint32_t> strides(nDim);
+      std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
 
       for (const auto i: c10::irange(iterShape.size())) {
         TORCH_CHECK(i <= UINT32_MAX);
         iterShapeData[i] = (uint32_t)(iterShape[i]);
       }
 
-      for (const auto i: c10::irange(nDim)) {
-        strides[i] = input.stride(i);
-      }
-
-      id<MTLFunction> kernelDataOffsetFunction = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offset", nil);
-      id<MTLComputePipelineState> kernelDataOffsetPSO = [[device newComputePipelineStateWithFunction: kernelDataOffsetFunction
+      id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
+                                                            options: 0] autorelease];
+      id<MTLFunction> stridedIndicesFunction = MPSDevice::getInstance()->metalIndexingFunction("get_strided_indices_2", nil);
+      id<MTLComputePipelineState> stridedIndicesPSO = [[device newComputePipelineStateWithFunction: stridedIndicesFunction
                                                                                                 error: &error] autorelease];
-      id<MTLBuffer> kernelDataOffset = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
-                                                             options: 0] autorelease];
-      TORCH_CHECK(kernelDataOffsetPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
-      [computeEncoder setComputePipelineState:kernelDataOffsetPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim  atIndex:0];
-      [computeEncoder setBuffer:kernelDataOffset offset:0 atIndex:1];
+      TORCH_CHECK(stridedIndicesPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
+      [computeEncoder setComputePipelineState:stridedIndicesPSO];
+      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
+      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
       [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
 
-      NSUInteger kernelOffsetTGSize = kernelDataOffsetPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetTGSize > kernelOffsetNumThreads)
-          kernelOffsetTGSize = kernelOffsetNumThreads;
+      NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
+      if (stridedIndicesTGSize > kernelOffsetNumThreads)
+          stridedIndicesTGSize = kernelOffsetNumThreads;
 
-      MTLSize kernelOffsetThreadGroupSize = MTLSizeMake(kernelOffsetTGSize, 1, 1);
+      MTLSize stridedIndicesThreadGroupSize = MTLSizeMake(stridedIndicesTGSize, 1, 1);
       [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: kernelOffsetThreadGroupSize];
+                threadsPerThreadgroup: stridedIndicesThreadGroupSize];
 
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> summaryPSO = summaryPipelineState(device, kernel);
@@ -299,7 +294,7 @@ void histogramdd_kernel_impl(
       [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
       [computeEncoder setBuffer:weightBuffer  offset:weightOffset atIndex:1];
       [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:2];
-      [computeEncoder setBuffer:kernelDataOffset offset:0 atIndex:3];
+      [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
       [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:5];
       [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];

@@ -102,18 +102,16 @@ kernel void kernel_index_offsets(constant packed_uint3 * strides         [[buffe
     }
 }
 
-kernel void kernel_index_offset(constant uint         * strides         [[buffer(0)]],
-                                device uint           * data_offset     [[buffer(1)]],
-                                constant uint         * iter_shape      [[buffer(2)]],
-                                constant uint         & num_dimensions  [[buffer(3)]],
-                                uint thread_index [[thread_position_in_grid]]) {
-    uint32_t idx = thread_index;
-    for (uint32_t dim = 0; dim < num_dimensions; dim++) {
-        uint32_t remainder = idx % iter_shape[dim];
-        idx /= iter_shape[dim];
+kernel void get_strided_indices_2(constant uint * stride          [[buffer(0)]],
+                                  device   uint * strided_indices [[buffer(1)]],
+                                  constant uint * size            [[buffer(2)]],
+                                           uint thread_index      [[thread_position_in_grid]]) {
 
-        data_offset[thread_index] += remainder * strides[dim];
-    }
+    packed_uint2 strided_index;
+    strided_index.x = (thread_index / size[1] % size[0]) * stride[0];
+    strided_index.y = (thread_index % size[1]) * stride[1];
+    strided_indices[thread_index] = strided_index.x + strided_index.y;
+
 }
 
 template<typename T, typename E>
