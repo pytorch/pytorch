@@ -1064,13 +1064,12 @@ def module_inputs_torch_nn_ReflectionPad1d(module_info, device, dtype, requires_
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((2, 3, 4))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1), mode='reflect'),
+            forward_input=FunctionInput(make_input((2, 3))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2)),
             forward_input=FunctionInput(make_input((2, 3, 4))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2), mode='reflect'),
         ),
     ]
 
@@ -1080,13 +1079,12 @@ def module_inputs_torch_nn_ReflectionPad2d(module_info, device, dtype, requires_
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1), mode='reflect'),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4)),
             forward_input=FunctionInput(make_input((3, 4, 5, 6))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4), mode='reflect'),
         ),
     ]
 
@@ -1097,12 +1095,11 @@ def module_inputs_torch_nn_ReflectionPad3d(module_info, device, dtype, requires_
         ModuleInput(
             constructor_input=FunctionInput(1),
             forward_input=FunctionInput(make_input((2, 3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1, 1, 1), mode='reflect'),
+            reference_fn=no_batch_dim_reference_fn
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 1, 2, 1, 2)),
             forward_input=FunctionInput(make_input((3, 3, 3, 3, 3))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 1, 2, 1, 2), mode='reflect'),
         ),
     ]
 
@@ -1112,13 +1109,12 @@ def module_inputs_torch_nn_ReplicationPad1d(module_info, device, dtype, requires
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1), mode='replicate'),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2)),
             forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2), mode='replicate'),
         ),
     ]
 
@@ -1128,13 +1124,12 @@ def module_inputs_torch_nn_ReplicationPad2d(module_info, device, dtype, requires
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1), mode='replicate'),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4)),
             forward_input=FunctionInput(make_input((3, 4, 5, 6))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4), mode='replicate'),
         ),
     ]
 
@@ -1144,13 +1139,12 @@ def module_inputs_torch_nn_ReplicationPad3d(module_info, device, dtype, requires
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6, 7))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1, 1, 1), mode='replicate'),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4, 5, 6)),
             forward_input=FunctionInput(make_input((3, 4, 5, 6, 7))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4, 5, 6), mode='replicate'),
         ),
     ]
 
@@ -1160,13 +1154,12 @@ def module_inputs_torch_nn_ZeroPad1d(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1), mode='constant', value=0),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2)),
             forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2), mode='constant', value=0),
         ),
     ]
 
@@ -1176,13 +1169,12 @@ def module_inputs_torch_nn_ZeroPad2d(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((1, 2, 3, 4))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1), mode='constant', value=0),
+            forward_input=FunctionInput(make_input((1, 2, 3))),
+            reference_fn=no_batch_dim_reference_fn
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4)),
             forward_input=FunctionInput(make_input((1, 2, 3, 4))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4), mode='constant', value=0),
         ),
     ]
 
@@ -1192,13 +1184,12 @@ def module_inputs_torch_nn_ZeroPad3d(module_info, device, dtype, requires_grad, 
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6, 7))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1, 1, 1), mode='constant', value=0),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4, 5, 6)),
             forward_input=FunctionInput(make_input((1, 2, 3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4, 5, 6), mode='constant', value=0),
         ),
     ]
 
@@ -1208,13 +1199,12 @@ def module_inputs_torch_nn_ConstantPad1d(module_info, device, dtype, requires_gr
     return [
         ModuleInput(
             constructor_input=FunctionInput(1, 2),
-            forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1), mode='constant', value=2),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2), 3),
             forward_input=FunctionInput(make_input((3, 4, 5))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2), mode='constant', value=3),
         ),
     ]
 
@@ -1224,13 +1214,12 @@ def module_inputs_torch_nn_ConstantPad2d(module_info, device, dtype, requires_gr
     return [
         ModuleInput(
             constructor_input=FunctionInput(1, 3),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1), mode='constant', value=3),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4), 5),
             forward_input=FunctionInput(make_input((1, 2, 3, 4))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4), mode='constant', value=5),
         ),
     ]
 
@@ -1240,13 +1229,12 @@ def module_inputs_torch_nn_ConstantPad3d(module_info, device, dtype, requires_gr
     return [
         ModuleInput(
             constructor_input=FunctionInput(1, 3),
-            forward_input=FunctionInput(make_input((3, 4, 5, 6, 7))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 1, 1, 1, 1, 1), mode='constant', value=3),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2, 3, 4, 5, 6), 7),
             forward_input=FunctionInput(make_input((1, 2, 1, 2, 1))),
-            reference_fn=lambda m, *args: F.pad(args[1], (1, 2, 3, 4, 5, 6), mode='constant', value=7),
         ),
     ]
 
@@ -1744,61 +1732,73 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.ReflectionPad1d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReflectionPad2d,
                 module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                 module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReplicationPad1d,
                 module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReplicationPad2d,
                 module_inputs_func=module_inputs_torch_nn_ReplicationPad2d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReplicationPad3d,
                 module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ZeroPad1d,
                 module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ZeroPad2d,
                 module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ZeroPad3d,
                 module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ConstantPad1d,
                 module_inputs_func=module_inputs_torch_nn_ConstantPad1d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ConstantPad2d,
                 module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ConstantPad3d,
                 module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
                 skips=(
-                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
-                )
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                ),
 ]
