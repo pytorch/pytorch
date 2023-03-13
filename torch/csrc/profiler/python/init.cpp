@@ -6,7 +6,7 @@
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
-#include <torch/csrc/profiler/combined_traceback.h>
+#include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_graph_observer.h>
 #include <torch/csrc/utils/pybind.h>
 
@@ -49,6 +49,7 @@ void initPythonBindings(PyObject* module) {
 
   py::enum_<ActivityType>(m, "ProfilerActivity")
       .value("CPU", ActivityType::CPU)
+      .value("XPU", ActivityType::XPU)
       .value("CUDA", ActivityType::CUDA);
 
   py::class_<ExperimentalConfig>(m, "_ExperimentalConfig")
@@ -297,6 +298,7 @@ void initPythonBindings(PyObject* module) {
       m, "CapturedTraceback");
   m.def("gather_traceback", CapturedTraceback::gather);
   m.def("symbolize_tracebacks", py_symbolize);
+  installCapturedTracebackPython();
 }
 
 } // namespace profiler

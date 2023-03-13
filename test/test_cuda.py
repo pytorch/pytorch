@@ -5198,8 +5198,12 @@ class TestCudaComm(TestCase):
                             if history and history[0]['real_size'] == 311 * 411 * 4:
                                 if ctx:
                                     frame_text = str(history[0]['frames'])
+                                    # C++ frame
                                     self.assertTrue('::rand' in frame_text)
+                                    # script frame
                                     self.assertTrue('the_script_fn' in frame_text)
+                                    # python frame
+                                    self.assertTrue('case.py' in frame_text)
                                 found = True
                 last_action = mem['device_traces'][0][-1]
                 self.assertTrue(last_action['action'] == 'alloc')
