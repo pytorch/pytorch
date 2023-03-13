@@ -126,7 +126,7 @@ void sparse_mask_intersection_out_cpu_kernel(
     const Tensor& y) {
   using CPUValueRhsProjKernel = CPUValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CPUKernelLauncher, CPUValueRhsProjKernel>(
-      result, x, y, true
+      result, x, y
   );
 }
 
