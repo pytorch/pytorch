@@ -149,6 +149,7 @@ class TestDoBench(TestCase):
         """
 
         def mm(a, b):
+            a = torch.sin(a)
             return a @ b
 
         a = torch.randn(100, 10).cuda()

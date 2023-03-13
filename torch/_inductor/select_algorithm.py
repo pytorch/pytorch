@@ -584,12 +584,33 @@ class ExternKernelChoice:
         )
 
 
+def simplify_ir_nodes_for_pickling(ir_nodes):
+    """
+    Basically convert a ComputedBuffer to Buffer since we don't care about
+    computation function calculating the inputs for the benchmark.
+    The inputs for benchmark are randomly generated instead.
+
+    The computation function in ComputedBuffer can not be handled by pickle.
+    """
+    for storage_box in ir_nodes:
+        if not isinstance(storage_box, ir.StorageBox):
+            continue
+        buf = storage_box.data
+        if isinstance(buf, ir.ComputedBuffer):
+            storage_box.data = ir.Buffer(
+                buf.name,
+                buf.layout,
+            )
+
+    return ir_nodes
+
+
 class ChoiceCaller:
     def __init__(self, name, input_nodes, layout):
         super().__init__()
         self.name = name
         self.layout = layout
-        self.input_nodes = input_nodes
+        self.input_nodes = simplify_ir_nodes_for_pickling(input_nodes)
 
     def benchmark(self, *args, out):
         algo = self.to_callable()
@@ -888,7 +909,10 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
-        sys.stderr.write(f"AUTOTUNE takes {elapse} seconds\n")
+        autotune_type_str = (
+            "SubProcess" if config.autotune_in_subproc else "SingleProcess"
+        )
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):
