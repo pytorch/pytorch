@@ -1664,7 +1664,7 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
-        "--unspecialize-int", action="store_true", help="Run with specialize_int=False."
+        "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
         "--use-eval-mode",
@@ -1923,8 +1923,8 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-    if args.unspecialize_int:
-        torch._dynamo.config.specialize_int = False
+    if args.specialize_int:
+        torch._dynamo.config.specialize_int = True
     if args.ci:
         if args.inductor and args.accuracy:
             torch._inductor.config.compile_threads = 1
