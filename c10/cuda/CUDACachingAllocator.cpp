@@ -2518,6 +2518,18 @@ class NativeCachingAllocator : public CUDAAllocator {
     return device_allocator[device]->getCheckpointState(id);
   }
 
+  /**
+   * @brief Checkpoint the private pool state identified in `as` to its prior
+   * state
+   *
+   * @param device - device of the pool to manipulate
+   * @param as - allocator state
+   * @param stale_live_storages - storages of tensors which are currently
+   * allocated but which will be not be allocated after the checkpoint is set.
+   * For these storages we will remove their deleter function.
+   * @return CheckpointDelta - Freed Pointers and DataPtrs that contain deleter
+   * functions for all allocated blocks in the new checkpoint state.
+   */
   CheckpointDelta setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> as) override {
@@ -2535,7 +2547,11 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
     for (Block* block : rr.allocations_created) {
       add_allocated_block(block);
-      cpd.ptrs_allocated.push_back(block->ptr);
+      cpd.dataptrs_allocd.emplace_back(
+          block->ptr,
+          block->ptr,
+          &local_raw_delete,
+          Device(DeviceType::CUDA, device));
     }
 
     return cpd;
