@@ -720,16 +720,12 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
       m,
       n,
       k,
-      1.0,
       mat1_->data_ptr<int8_t>(),
       mat1_ld,
       mat2_->data_ptr<int8_t>(),
       mat2_ld,
-      nullptr,
       result_->data_ptr<int32_t>(),
-      result_ld,
-      cuda::blas::GEMMAndBiasActivationEpilogue::NONE,
-      false /* use_heuristic */);
+      result_ld);
 
   if (!result.is_same(*result_)) {
     result.copy_(*result_);

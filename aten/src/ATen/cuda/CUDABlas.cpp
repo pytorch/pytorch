@@ -771,54 +771,24 @@ void gemm_and_bias(
       scaleType);
 }
 
-template <typename Dtype, typename RDtype, typename BDtype>
 void int8_gemm(
     bool transpose_mat1,
     bool transpose_mat2,
     int64_t m,
     int64_t n,
     int64_t k,
-    at::opmath_type<int8_t> alpha_val,
     const int8_t* mat1_ptr,
     int64_t mat1_ld,
     const int8_t* mat2_ptr,
     int64_t mat2_ld,
-    const float* bias,
     int32_t* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation,
-    bool use_heuristic) {
+    int64_t result_ld) {
 
-  cudaDataType_t abcType = CUDA_R_32F;
-  cublasComputeType_t computeType = CUBLAS_COMPUTE_32F;
-  cudaDataType_t scaleType = CUDA_R_32F;
-  if (std::is_same<Dtype, double>::value) {
-    abcType = CUDA_R_64F;
-    computeType = CUBLAS_COMPUTE_64F;
-    scaleType = CUDA_R_64F;
-  } else if (std::is_same<Dtype, float>::value) {
-    if (at::globalContext().allowTF32CuBLAS()) {
-      computeType = CUBLAS_COMPUTE_32F_FAST_TF32;
-    }
-    abcType = CUDA_R_32F;
-  } else if (std::is_same<Dtype, at::Half>::value) {
-    abcType = CUDA_R_16F;
-  } else if (std::is_same<Dtype, at::BFloat16>::value) {
-    abcType = CUDA_R_16BF;
-  }
-  cudaDataType_t abType = abcType;
-  cudaDataType_t cType = abcType;
-  if (std::is_same<Dtype, int8_t>::value) {
-    abType = CUDA_R_8I;
-    cType = CUDA_R_32I;
-    computeType = CUBLAS_COMPUTE_32I;
-    scaleType = CUDA_R_32I;
-    bool valid_rdtype = std::is_same<RDtype, int32_t>::value;
-    TORCH_CHECK(valid_rdtype, "Expected int32_t for result Tensor if given int8_t mat1, mat2.");
-  } else {
-    bool valid_rdtype = std::is_same<RDtype, Dtype>::value;
-    TORCH_CHECK(valid_rdtype, "Expected result and input dtypes to match.");
-  }
+  cublasComputeType_t computeType = CUBLAS_COMPUTE_32I;
+  cudaDataType_t scaleType = CUDA_R_32I;
+
+  cudaDataType_t abType = CUDA_R_8I;
+  cudaDataType_t cType = CUDA_R_32I;
 
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   cublasOperation_t transa = transpose_mat1 ? CUBLAS_OP_T : CUBLAS_OP_N;
@@ -834,34 +804,6 @@ void int8_gemm(
       &transb,
       sizeof(transb)));
 
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_DEFAULT;
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS) {
-    epilogue = CUBLASLT_EPILOGUE_BIAS;
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS_RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::BIAS_GELU) {
-#if CUDA_VERSION >= 11040
-      epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
-#else
-      TORCH_CHECK(false, "CUBLASLT_EPILOGUE_GELU_BIAS is an unsupported feature for CUDA version ", CUDA_VERSION);
-#endif
-  }
-  if (activation == GEMMAndBiasActivationEpilogue::NONE) {
-    TORCH_CHECK(bias == nullptr, "Expected bias to be a nullptr.");
-  } else {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-        computeDesc.descriptor(),
-        CUBLASLT_MATMUL_DESC_EPILOGUE,
-        &epilogue,
-        sizeof(epilogue)));
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulDescSetAttribute(
-        computeDesc.descriptor(),
-        CUBLASLT_MATMUL_DESC_BIAS_POINTER,
-        &bias,
-        sizeof(Dtype*)));
-  }
 
   CuBlasLtMatrixLayout Adesc(
       abType, transpose_mat1 ? k : m, transpose_mat1 ? m : k, mat1_ld);
@@ -872,48 +814,11 @@ void int8_gemm(
   CuBlasLtMatmulPreference preference;
   // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
   // setting this to 1M.
-  size_t workspaceSize = 1024 * 1024;
-  void* workspace_data_ptr;
 
-  if (std::is_same<Dtype, int8_t>::value) {
-    workspaceSize = 0;
-  }
-  if (workspaceSize > 0) {
-    TORCH_CUDABLAS_CHECK(cublasLtMatmulPreferenceSetAttribute(
-        preference.descriptor(),
-        CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
-        &workspaceSize,
-        sizeof(workspaceSize)));
-
-    auto workspace = at::empty(
-        {static_cast<int64_t>(workspaceSize)},
-        at::device({at::kCUDA, at::cuda::current_device()}).dtype(at::kByte));
-    workspace_data_ptr = workspace.data_ptr();
-  }
-
-  cublasLtMatmulHeuristicResult_t heuristicResult = {};
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
-  if (use_heuristic) {
-    int returnedResult = 0;
-    auto heuristic_return_value = cublasLtMatmulAlgoGetHeuristic(
-        ltHandle,
-        computeDesc.descriptor(),
-        Adesc.descriptor(),
-        Bdesc.descriptor(),
-        Cdesc.descriptor(),
-        Cdesc.descriptor(),
-        preference.descriptor(),
-        1,
-        &heuristicResult,
-        &returnedResult);
-    TORCH_CUDABLAS_CHECK(heuristic_return_value);
-    if (returnedResult == 0) {
-      TORCH_CUDABLAS_CHECK(CUBLAS_STATUS_NOT_SUPPORTED);
-    }
-  }
 
-  std::conditional_t<std::is_same<BDtype, std::nullptr_t>::value, float, at::opmath_type<Dtype>> beta_val = 0;
+  at::opmath_type<int8_t> alpha_val = 1.0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -922,14 +827,14 @@ void int8_gemm(
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      &beta_val,
+      0,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,
       Cdesc.descriptor(),
-      use_heuristic ? &heuristicResult.algo : nullptr,
-      workspaceSize > 0 ? workspace_data_ptr : nullptr,
-      workspaceSize,
+      nullptr, // Heuristics don't seem to work for int8
+      nullptr, // Non-zero workspace doesn't seem to work.
+      0,
       at::cuda::getCurrentCUDAStream());
   TORCH_CHECK(
       cublasStatus == CUBLAS_STATUS_SUCCESS,
