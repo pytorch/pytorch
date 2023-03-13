@@ -90,16 +90,29 @@ def is_fbcode():
 # warnings intended for PyTorch developers, disable for point releases
 developer_warnings = is_fbcode() or "+" in torch.__version__
 
-compile_threads = (
-    1
-    if sys.platform == "win32" or is_fbcode()
-    else min(
-        32,
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count(),
-    )
-)
+
+def decide_compile_threads():
+    """
+    Here are the precedence to decide compile_threads
+    1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
+       setting this to 1 to make pdb happy.
+    2. Set to 1 if it's win32 platform or it's a fbcode build
+    3. decide by the number of CPU cores
+    """
+    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
+        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+    elif sys.platform == "win32" or is_fbcode():
+        return 1
+    else:
+        return min(
+            32,
+            len(os.sched_getaffinity(0))
+            if hasattr(os, "sched_getaffinity")
+            else os.cpu_count(),
+        )
+
+
+compile_threads = decide_compile_threads()
 
 # autotuning global cache path
 if is_fbcode():
@@ -186,10 +199,16 @@ class triton:
     tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
-    ordered_kernel_names = False
+    # Note: This is orthogonal to descriptive_names - this is deciding whether
+    # our triton kernel names should all be `triton_` (to maximize caching) or
+    # whether they should be unique.
+    unique_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    # False: No special names (just triton__1, triton__2, etc.)
+    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
+    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    descriptive_names = "aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
@@ -234,6 +253,12 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+_save_config_ignore = {
+    # workaround: "Can't pickle <function ...>"
+    "trace.upload_tar",
+}
 
 
 from .._dynamo.config_utils import install_config_module
