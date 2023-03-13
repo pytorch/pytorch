@@ -1154,7 +1154,7 @@ class TestUnaryUfuncs(TestCase):
         inp = torch.randn(size=(100,), device=device, dtype=dtype)
         actual = torch.expm1(inp)
 
-        expected = np.expm1(inp.numpy())
+        expected = np.expm1(inp.cpu().numpy())
         expected = torch.from_numpy(expected).to(dtype)
 
         self.assertEqual(actual, expected)
