@@ -234,23 +234,31 @@ def cache_on_self(fn):
 
 
 def get_fused_kernel_name(node_schedule):
-    return "_".join(
-        ["fused"]
-        + sorted(
-            [
-                str(origin.name)
-                for origin in functools.reduce(
-                    operator.or_,
-                    [
-                        node.node.origins
-                        for node in node_schedule
-                        if hasattr(node, "node")
-                    ],
-                )
-                if origin.op == "call_function"
-            ]
-        )[0 : config.kernel_name_max_ops]
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
+    if config.triton.descriptive_names == "aten":
+        # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
+        sources = [
+            origin.meta["original_aten"]._overloadpacket.__name__
+            for origin in all_origins
+            if origin.op == "call_function" and "original_aten" in origin.meta
+        ]
+    elif config.triton.descriptive_names == "torch":
+        # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
+        sources = []
+        for origin in all_origins:
+            if origin.op == "call_function" and "source_fn" in origin.meta:
+                if isinstance(origin.meta["source_fn"], str):
+                    sources.append(origin.meta["source_fn"])
+                else:
+                    sources.append(origin.meta["source_fn"].__name__)
+    else:
+        raise NotImplementedError
+    sources = set(sources)
+    sources = sorted(sources)[: config.kernel_name_max_ops]
+    return "_".join(["fused"] + sources)
 
 
 def gather_origins(args, kwargs):
@@ -314,6 +322,10 @@ def sympy_subs(expr: sympy.Expr, replacements: Dict[Any, Any]):
 
 def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
+
+
+def free_symbol_has(index: sympy.Expr, pattern: str):
+    return any(pattern in v.name for v in index.free_symbols)
 
 
 def has_incompatible_cudagraph_ops(gm):
@@ -436,8 +448,10 @@ class IndentedBuffer:
         @contextlib.contextmanager
         def ctx():
             self._indent += offset
-            yield
-            self._indent -= offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
 
         return ctx()
 
@@ -580,6 +594,16 @@ def get_num_bytes(*args):
     )
 
 
+def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
+    import colorama
+
+    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
+    if ms > 0.012 and gb_per_s < 650:
+        return colorama.Fore.RED + info_str + colorama.Fore.RESET
+    else:
+        return info_str
+
+
 def get_benchmark_name():
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -611,7 +635,7 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def benchmark_all_kernels(benchmark_name):
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -628,18 +652,45 @@ def benchmark_all_kernels(benchmark_name):
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
         args = kernel_mod.get_args()
-        ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
         num_gb = get_num_bytes(*args) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
 
-        # follow what we do in DebugAutotuner
-        info_str = f"{benchmark_name:20} {kernel_key[:10]} {ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
-        import colorama
+        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+            if not any(x is None for x in [n_regs, n_spills, shared]):
+                kernel_detail_str = (
+                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+                )
+            else:
+                kernel_detail_str = ""
 
-        if ms > 0.012 and gb_per_s < 650:
-            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+            gb_per_s = num_gb / (ms / 1e3)
+            return create_bandwidth_info_str(
+                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
+            )
+
+        bench_result = []
+        if benchmark_all_configs:
+            assert hasattr(kernel_mod, "benchmark_all_configs")
+            bench_result = kernel_mod.benchmark_all_configs(args)
+            print(f"{benchmark_name:20} {kernel_key[:10]}")
+            for launcher, ms in bench_result.items():
+                print(
+                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
+                )
         else:
-            print(info_str)
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            assert (
+                len(kernel_mod.triton_.launchers) == 1
+            ), "Autotuner should have selected the best config"
+            launcher = kernel_mod.triton_.launchers[0]
+            print(
+                get_info_str(
+                    ms,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
+                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                )
+            )
 
         nfound += 1
     if nfound == 0:
