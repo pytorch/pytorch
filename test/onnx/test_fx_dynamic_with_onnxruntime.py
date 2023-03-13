@@ -106,6 +106,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         *input_args,
         opset_version=opset_version,
         use_binary_format=True,
+        dynamic_axes=True,  # export models with dynamic shapes
         **input_kwargs,
     )
 
