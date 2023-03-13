@@ -7485,6 +7485,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 x = x.sin()
                 x = x.relu()
                 return x
+
             inp = torch.randn(4, 4, device="cuda")
             code = run_and_get_triton_code(fn, inp)
             fn(inp)

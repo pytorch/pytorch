@@ -1676,7 +1676,9 @@ class TritonScheduling:
 
             metadata_comment = f"# kernel path: {kernel_path}"
             metadata_comment += "\n" + get_kernel_metadata(node_schedule)
-            wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), metadata_comment)
+            wrapper.define_kernel(
+                kernel_name, compile_wrapper.getvalue(), metadata_comment
+            )
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):
