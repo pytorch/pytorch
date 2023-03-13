@@ -128,7 +128,7 @@ def _retrieve_or_adapt_input_to_graph_set(fx_node_arg, fx_name_to_onnxscipt_valu
         #    in TorchScript graph.
         return fx_name_to_onnxscipt_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(ele, torch.Value) for ele in onnx_tensor
+        isinstance(ele, torch.fx.Node) for ele in onnx_tensor
     ):
         # This intends to solve dynamic axes. for example, if the size input of op.Expand
         # is dynamic, each of dim would be originated from other tensors.
