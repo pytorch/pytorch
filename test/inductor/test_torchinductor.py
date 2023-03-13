@@ -97,6 +97,7 @@ slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
+vec_dtypes = [torch.float, torch.bfloat16]
 
 
 # For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
@@ -6091,18 +6092,19 @@ if HAS_CPU:
                 x = torch.masked_fill(value, mask, -33.0)
                 return torch.softmax(x, -1)
 
-            value = torch.randn((2, 17))
-            mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                opt_fn = torch._dynamo.optimize("inductor")(fn)
-                opt_fn(value, mask)
+            for dtype in vec_dtypes:
+                value = torch.randn((2, 17), dtype=dtype)
+                mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    opt_fn = torch._dynamo.optimize("inductor")(fn)
+                    opt_fn(value, mask)
 
-                real_out = fn(value, mask)
-                compiled_out = opt_fn(value, mask)
-                assert same(real_out, compiled_out, equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count >= 1
+                    real_out = fn(value, mask)
+                    compiled_out = opt_fn(value, mask)
+                    assert same(real_out, compiled_out, equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count >= 1
 
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
@@ -6147,17 +6149,21 @@ if HAS_CPU:
             def fn(x):
                 return (torch.log1p(torch.expm1(torch.erf(x))),)
 
-            x = torch.randn((2, 9))
-            x[0, 0] = torch.nan
-            x[1, -1] = torch.nan
+            for dtype in vec_dtypes:
+                torch.manual_seed(0)
+                x = torch.randn((2, 9), dtype=dtype)
+                x[0, 0] = torch.nan
+                x[1, -1] = torch.nan
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x)
-                compiled = compile_fx_inner(traced, [x])
-                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
+
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6199,10 +6205,12 @@ if HAS_CPU:
             iw = ih
             oh = ih
             ow = ih
-            for _ih, _iw, _oh, _ow, _simd_len in itertools.product(
-                ih, iw, oh, ow, bit_widths
+            for _ih, _iw, _oh, _ow, _simd_len, dtype in itertools.product(
+                ih, iw, oh, ow, bit_widths, vec_dtypes
             ):
-                x = torch.randn(2, 3, _ih, _iw).to(memory_format=torch.channels_last)
+                x = torch.randn(2, 3, _ih, _iw, dtype=dtype).to(
+                    memory_format=torch.channels_last
+                )
                 _fn = wrap_fn(_oh, _ow)
                 with config.patch({"cpp.simdlen": _simd_len}):
                     torch._dynamo.reset()
@@ -6223,18 +6231,19 @@ if HAS_CPU:
 
                 return fn
 
-            x = torch.randn(64)
-            y = torch.randn(64)
-            logical_fns = [torch.logical_and, torch.logical_or]
-            for logical_fn in logical_fns:
-                _fn = wrap_fn(logical_fn)
-                torch._dynamo.reset()
-                metrics.reset()
-                compiled = torch.compile(_fn)
+            for dtype in vec_dtypes:
+                x = torch.randn(64, dtype=dtype)
+                y = torch.randn(64, dtype=dtype)
+                logical_fns = [torch.logical_and, torch.logical_or]
+                for logical_fn in logical_fns:
+                    _fn = wrap_fn(logical_fn)
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    compiled = torch.compile(_fn)
 
-                compiled(x, y)
-                assert same(_fn(x, y), compiled(x, y), equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                    compiled(x, y)
+                    assert same(_fn(x, y), compiled(x, y), equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6268,19 +6277,20 @@ if HAS_CPU:
                 x = torch.where(y12, x, x + 1.0)
                 return (x,)
 
-            x = torch.randn((2, 9))
+            for dtype in vec_dtypes:
+                x = torch.randn((2, 9), dtype=dtype)
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x)
-                compiled = compile_fx_inner(traced, [x])
-                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
-                assert (
-                    metrics.generated_kernel_count
-                    - metrics.generated_cpp_vec_kernel_count
-                ) == 0
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    assert (
+                        metrics.generated_kernel_count
+                        - metrics.generated_cpp_vec_kernel_count
+                    ) == 0
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6480,19 +6490,22 @@ if HAS_CPU:
         )
         @patch("torch.cuda.is_available", lambda: False)
         def test_maxpool2d_cpu_only(self):
-            input = torch.randn(10, 32, 20, 20).to(memory_format=torch.channels_last)
-            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+            for dtype in vec_dtypes:
+                input = torch.randn(10, 32, 20, 20, dtype=dtype).to(
+                    memory_format=torch.channels_last
+                )
+                maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
 
-            def func(x):
-                return maxpool(x)
+                def func(x):
+                    return maxpool(x)
 
-            with patch.object(config.cpp, "simdlen", None):
-                torch._dynamo.reset()
-                metrics.reset()
-                graph = torch.compile(func, backend="inductor")
-                graph(input)
-                assert same(graph(input), func(input), equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                with patch.object(config.cpp, "simdlen", None):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    graph = torch.compile(func, backend="inductor")
+                    graph(input)
+                    assert same(graph(input), func(input), equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6502,17 +6515,18 @@ if HAS_CPU:
             def fn(x):
                 return (torch.sign(x),)
 
-            x = torch.randn((2, 9))
-            x[0, 0] = torch.nan
-            x[1, -1] = torch.nan
+            for dtype in vec_dtypes:
+                x = torch.randn((2, 9), dtype=dtype)
+                x[0, 0] = torch.nan
+                x[1, -1] = torch.nan
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x)
-                compiled = compile_fx_inner(traced, [x])
-                assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
         # supported, the vectorization will not work and skip this test case. For ARM or
@@ -6555,28 +6569,34 @@ if HAS_CPU:
                 res = x + x2
                 return (res,)
 
-            x1 = torch.randn((10, 20))
-            x2 = torch.randn((10, 20))
+            for dtype in vec_dtypes:
+                torch.manual_seed(0)
+                x1 = torch.randn((5, 20), dtype=dtype)
+                x2 = torch.randn((5, 20), dtype=dtype)
 
-            with config.patch({"cpp.simdlen": 1}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x1, x2)
-                compiled = compile_fx_inner(traced, [x1, x2])
-                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 0
+                tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
+                with config.patch({"cpp.simdlen": 1}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x1, x2)
+                    compiled = compile_fx_inner(traced, [x1, x2])
+                    assert same(
+                        fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True, tol=tol
+                    )
+                    assert metrics.generated_cpp_vec_kernel_count == 0
+
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x1, x2)
+                    compiled = compile_fx_inner(traced, [x1, x2])
+                    assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                traced = make_fx(fn)(x1, x2)
-                compiled = compile_fx_inner(traced, [x1, x2])
-                assert same(fn(x1, x2)[0], compiled([x1, x2])[0], equal_nan=True)
-                assert metrics.generated_cpp_vec_kernel_count == 1
-
-                torch._dynamo.reset()
-                metrics.reset()
-                x1 = x1.permute(1, 0)
+                x1 = torch.randn(10, 20).permute(1, 0)
                 x2 = torch.randn((20, 10))
                 traced = make_fx(fn)(x1, x2)
                 compiled = compile_fx_inner(traced, [x1, x2])
