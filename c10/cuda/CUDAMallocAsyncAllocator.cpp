@@ -620,6 +620,22 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
         "If you need it, please file an issue describing your use case.");
   }
 
+  std::shared_ptr<AllocatorState> getCheckpointState(int device, MempoolId_t id)
+      override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support getCheckpointState. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
+  void setCheckpointPoolState(int device, std::shared_ptr<AllocatorState> pps)
+      override {
+    TORCH_CHECK(
+        false,
+        "cudaMallocAsync does not yet support setCheckpointPoolState. "
+        "If you need it, please file an issue describing your use case.");
+  }
+
   // Collects stats for device.
   // If device hasn't been used yet, returns 0s without creating a context.
   DeviceStats getDeviceStats(int device) override {

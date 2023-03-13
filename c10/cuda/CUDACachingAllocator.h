@@ -125,7 +125,12 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+};
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
 };
 
 struct TraceEntry {
@@ -208,6 +213,12 @@ class CUDAAllocator : public Allocator {
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual bool needsPoolSpecificPeerAccess() = 0;
+  virtual std::shared_ptr<AllocatorState> getCheckpointState(
+      int device,
+      MempoolId_t id) = 0;
+  virtual void setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
 
@@ -273,6 +284,18 @@ inline void resetPeakStats(int device) {
 
 inline SnapshotInfo snapshot() {
   return get()->snapshot();
+}
+
+inline std::shared_ptr<AllocatorState> getCheckpointState(
+    int device,
+    MempoolId_t id) {
+  return get()->getCheckpointState(device, id);
+}
+
+inline void setCheckpointPoolState(
+    int device,
+    std::shared_ptr<AllocatorState> pps) {
+  return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions
