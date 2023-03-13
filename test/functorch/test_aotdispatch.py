@@ -380,6 +380,20 @@ class TestAOTAutograd(AOTTestCase):
         inp = [torch.randn(3, 1, requires_grad=False)]
         self.verify_aot_autograd(f, inp, dynamic=True)
 
+    def test_complex_linear(self):
+        # https://github.com/pytorch/pytorch/issues/93424
+        inp = [torch.randn(1, 10, 10, dtype=torch.complex64)]
+
+        class F(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(10, 10, dtype=torch.complex64)
+
+            def forward(self, x):
+                return self.linear(x).sum().abs()
+
+        self.verify_aot_autograd(F(), inp)
+
     def test_embedding_bag_view(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
@@ -2456,7 +2470,6 @@ symbolic_aot_autograd_failures = {
     xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
     xfail('amax', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('amin', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('block_diag', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cdist', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('cholesky_inverse', ''),  # could not find kernel
@@ -2545,7 +2558,6 @@ symbolic_aot_autograd_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decompos...
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decompo...
     xfail('median', ''),  # could not find kernel
-    xfail('min', 'reduction_with_dim'),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('mode', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail('nn.functional.adaptive_avg_pool3d', ''),  # aten._adaptive_avg_pool3d_backward.default - couldn't ...
     xfail('nn.functional.adaptive_max_pool1d', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
@@ -2792,7 +2804,6 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.GaussianNLLLoss,  # NotImplementedError: local_scalar_dense/item NYI for torch.bool
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
-    torch.nn.MultiheadAttention,  # baddbmm - Cannot call sizes() on tensor with symbolic ...
 }
 
 
