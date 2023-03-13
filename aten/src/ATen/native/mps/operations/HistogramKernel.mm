@@ -225,7 +225,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
     bin_seq_offset += num_bin_edges[dim];
   }
 
-  const uint32_t kernelOffsetNumThreads = input.numel();
+  const uint32_t stridedIndicesNumThreads = input.numel();
   const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
 
@@ -251,17 +251,17 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
       id<MTLComputeCommandEncoder> computeEncoder = [commandBuffer computeCommandEncoder];
-      MTLSize gridSize = MTLSizeMake(kernelOffsetNumThreads, 1, 1);
-      const IntArrayRef& iterShape = input.sizes();
-      std::vector<uint32_t> iterShapeData(iterShape.size());
+      MTLSize gridSize = MTLSizeMake(stridedIndicesNumThreads, 1, 1);
+      const IntArrayRef& inputShape = input.sizes();
+      std::vector<uint32_t> inputShapeData(inputShape.size());
       std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
 
-      for (const auto i : c10::irange(iterShape.size())) {
+      for (const auto i : c10::irange(inputShape.size())) {
         TORCH_CHECK(i <= UINT32_MAX);
-        iterShapeData[i] = (uint32_t)(iterShape[i]);
+        inputShapeData[i] = (uint32_t)(inputShape[i]);
       }
 
-      id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:kernelOffsetNumThreads * sizeof(uint)
+      id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
       id<MTLFunction> stridedIndicesFunction =
           MPSDevice::getInstance()->metalIndexingFunction("get_strided_indices_2", nil);
@@ -272,11 +272,11 @@ void histogramdd_kernel_impl(Tensor& hist_output,
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
-      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
+      [computeEncoder setBytes:inputShapeData.data() length:sizeof(uint32_t) * inputShape.size() atIndex:2];
 
       NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
-      if (stridedIndicesTGSize > kernelOffsetNumThreads)
-        stridedIndicesTGSize = kernelOffsetNumThreads;
+      if (stridedIndicesTGSize > stridedIndicesNumThreads)
+        stridedIndicesTGSize = stridedIndicesNumThreads;
 
       MTLSize stridedIndicesThreadGroupSize = MTLSizeMake(stridedIndicesTGSize, 1, 1);
       [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:stridedIndicesThreadGroupSize];
