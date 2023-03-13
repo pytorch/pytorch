@@ -438,6 +438,7 @@ class TritonTemplate:
         epilogue_fn=identity,
         **kwargs,
     ):
+        input_nodes = simplify_ir_nodes_for_pickling(input_nodes)
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -592,15 +593,22 @@ def simplify_ir_nodes_for_pickling(ir_nodes):
 
     The computation function in ComputedBuffer can not be handled by pickle.
     """
-    for storage_box in ir_nodes:
+    if isinstance(ir_nodes, tuple):
+        ir_nodes = list(ir_nodes)  # make it mutable
+
+    for i, storage_box in enumerate(ir_nodes):
         if not isinstance(storage_box, ir.StorageBox):
             continue
         buf = storage_box.data
         if isinstance(buf, ir.ComputedBuffer):
-            storage_box.data = ir.Buffer(
-                buf.name,
-                buf.layout,
-            )
+            # don't change the orignal storage_box since they are still
+            # used in other places
+            ir_nodes[i] = ir.TensorBox.create(
+                ir.Buffer(
+                    buf.name,
+                    buf.layout,
+                )
+            ).data
 
     return ir_nodes
 
