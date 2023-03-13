@@ -1199,6 +1199,40 @@ class MpsMemoryLeakCheck:
 
             raise RuntimeError(msg)
 
+class TestAutocastMPS(TestCase):
+    # Compares no scaling + no autocasting against scaling + autocasting.
+    def _grad_scaling_autocast_test(self, *, atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
+        try_pickle = False
+
+        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
+            for i, (input, target) in enumerate(data):
+                optimizer.zero_grad()
+                with torch.autocast('mps', enabled=try_scaling_api):
+                    output = model(input)
+                    loss = loss_fn(output, target)
+                if try_scaling_api:
+                    scaler.scale(loss).backward()
+                    if i == skip_iter and scaler.is_enabled():
+                        with torch.no_grad():
+                            model[1].weight.grad.fill_(float('inf'))
+                    scaler.step(optimizer)
+                    scaler.update()
+                    if try_pickle:
+                        scaler = pickle.loads(pickle.dumps(scaler))
+                else:
+                    loss.backward()
+                    if (not scaler.is_enabled()) or (i != skip_iter):
+                        optimizer.step()
+            return scaler
+
+    def test_grad_scaling_autocast(self):
+        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
+
+    def test_grad_scaling_autocast_fused(self):
+        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
+
 # Expand TestCase class with Memory Leak Detection on MPS device
 class TestCaseMPS(TestCase):
     _do_mps_memory_leak_check = True
