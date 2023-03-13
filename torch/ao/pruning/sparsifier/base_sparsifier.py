@@ -314,13 +314,15 @@ class BaseSparsifier(abc.ABC):
             raise NotImplementedError("Need to auto generate mapping ")
         if not inplace:
             module = copy.deepcopy(module)
-        
+
         reassign = {}
         for name, mod in module.named_children():
-            if type_before_parametrizations(mod) in mapping and module_contains_param(mod, parameterization):
-                print(mod)
-                print("swapping module after squashing mask")
+            # leaf node
+            if module_contains_param(mod, parameterization) and type_before_parametrizations(mod) in mapping:
                 reassign[name] = swap_module(mod, mapping)
+            else:
+                # recurse
+                reassign[name] = self.convert(mod, mapping=mapping, inplace=True, parameterization=parameterization)
 
 
         for key, value in reassign.items():

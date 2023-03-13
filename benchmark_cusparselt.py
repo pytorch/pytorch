@@ -64,7 +64,7 @@ if __name__ == "__main__":
         # label and sub_label are the rows
         # description is the column
         # label = "cusparselt vs linear"
-        label = f'm, k, n: {m:5d}, {k:5d}, {n:5d} ]   [ cuSPARSELtLinear vs nn.Linear'
+        label = f'cuSPARSELtLinear vs nn.Linear | m, k, n: {m:5d}, {k:5d}, {n:5d}'
         sub_label = f'batch_size: {batch_size:4d}'
 
         model = Model(m, k)
@@ -76,9 +76,11 @@ if __name__ == "__main__":
         pruner.prepare(model, [{"tensor_fqn": "linear.weight"}])
         pruner.step()
         sparse_linear = pruner.convert(model, mapping={nn.Linear: cuSPARSELtLinear})
+        print(sparse_linear)
 
         pruner.squash_mask()
         dense_linear = model
+        print(dense_linear)
 
         for i in range(5):
             input_tensor = torch.randn(batch_size, n, k, device=device, dtype=dtype)
