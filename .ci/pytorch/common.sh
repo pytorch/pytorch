@@ -17,6 +17,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export HSAKMT_DEBUG_LEVEL=4
   # improve rccl performance for distributed tests
   export HSA_FORCE_FINE_GRAIN_PCIE=1
+  # CI=1 is required for test infra code to dump the XML files
+  # and for few test files having custom test hander
+  # https://ontrack-internal.amd.com/browse/SWDEV-386400
+  export CI=1
 fi
 
 # This token is used by a parser on Jenkins logs for determining
