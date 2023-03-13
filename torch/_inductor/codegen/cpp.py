@@ -553,27 +553,29 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.is_masked_load
 
         code = BracesBuffer()
-
         var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity());"
-            )
-        elif other == float("inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());"
-            )
-        else:
-            code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
-
+        code.writeline(f"auto {var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            zero_val = "at::vec::Vectorized<float>(0)"
-            float_mask = f"to_float_mask({mask})"
-            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
-            code.writeline(f"{var} = {blendv};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        if other == float("-inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
+            )
+        elif other == float("inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
+            )
+        else:
+            other_code = f"at::vec::Vectorized<float>({other!r})"
+
+        type = f"decltype({var}())"
+        zero_val = "at::vec::Vectorized<float>(0)"
+        float_mask = f"to_float_mask({mask})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -818,7 +820,7 @@ class CppOverrides(OpOverrides):
         if other == float("-inf"):
             other_code = f"-std::numeric_limits<{type}>::infinity()"
         elif other == float("inf"):
-            other_code = "std::numeric_limits<{type}>::infinity()"
+            other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
         else:
