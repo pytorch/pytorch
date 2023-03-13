@@ -451,8 +451,12 @@ def cat_mm(match, inputs, dim):
     ),
 )
 def cat_addmm(match, inputs, dim):
+    def shape_of(bias, a, b):
+        m, _ = a.get_size()
+        _, n = b.get_size()
+        return [m, n]
 
-    return cat_tuned_op(match, inputs, dim, op=L[aten.addmm], shape_of=shape_of_mm)
+    return cat_tuned_op(match, inputs, dim, op=L[aten.addmm], shape_of=shape_of)
 
 
 def cat_tuned_op(match, inputs, dim, *, op, shape_of):
