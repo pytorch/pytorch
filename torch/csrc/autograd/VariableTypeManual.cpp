@@ -46,6 +46,10 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
 }
 
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
+  return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
+}
+
 namespace {
 const Variable& checked_cast_variable(
     const Tensor& t,
