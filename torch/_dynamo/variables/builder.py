@@ -6,7 +6,7 @@ import inspect
 import operator
 import re
 import types
-from typing import Any, NamedTuple, Optional, Union
+from typing import Any, NamedTuple, Optional, Set, Union
 
 import torch
 
@@ -801,7 +801,7 @@ class VariableBuilder:
                     shape_env.create_symbol(value, source=self.source), hint=value
                 )
                 self.tx.output.tracked_fakes.append(
-                    TrackedFake(wrapped_value, self.source)
+                    TrackedFake(wrapped_value, self.source, None)
                 )
             else:
                 wrapped_value = torch.tensor(value)
@@ -1049,11 +1049,14 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
+    dynamic_indices: Set[int]
 
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
+    from torch.fx.experimental.symbolic_shapes import DIM_DYNAMISM_STATE
+
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
@@ -1064,17 +1067,31 @@ def wrap_to_fake_tensor_and_record(
             dynamic_indices = e._dynamo_dynamic_indices
             assert not static_shapes, tensor_static_reason_to_message(reason)
 
+        if not static_shapes:
+            dynamic_dims: List[DIM_DYNAMISM_STATE] = []
+            for i, _ in enumerate(e.size()):
+                if dynamic_indices and i in dynamic_indices:
+                    dynamic_dims.append(DIM_DYNAMISM_STATE.DYNAMIC)
+                else:
+                    dynamic_dims.append(
+                        DIM_DYNAMISM_STATE.STATIC
+                        if config.assume_static_by_default
+                        else DIM_DYNAMISM_STATE.DUCK
+                    )
+        else:
+            dynamic_dims = None
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
-                dynamic_indices=dynamic_indices,
+                dynamic_dims=dynamic_dims,
             )
         )
         if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
+            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, dynamic_indices))
         return fake_e
     else:
         return e
