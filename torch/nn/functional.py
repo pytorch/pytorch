@@ -4846,7 +4846,7 @@ def _in_projection(
 
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention, r"""
-scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False) -> Tensor:
+scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> Tensor:
 
 Computes scaled dot product attention on query, key and value tensors, using
 an optional attention mask if passed, and applying dropout if a probability
@@ -4855,9 +4855,10 @@ greater than 0.0 is specified.
 .. code-block:: python
 
     # Efficient implementation equivalent to the following:
+    scale_factor = 1 / math.sqrt(Q.size(-1)) if scale is None else scale
     attn_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0) if is_causal else attn_mask
     attn_mask = attn_mask.masked_fill(not attn_mask, -float('inf')) if attn_mask.dtype==torch.bool else attn_mask
-    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) / math.sqrt(Q.size(-1))) + attn_mask, dim=-1)
+    attn_weight = torch.softmax((Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p)
     return attn_weight @ V
 
@@ -4909,6 +4910,8 @@ Args:
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
     is_causal (bool): If true, assumes causal attention masking and errors if both attn_mask and is_causal
         are set.
+    scale (optional float): Scaling factor applied prior to softmax. If None, the default value is set
+        to :math:`\frac{1}{\sqrt{E}}`.
 
 
 Returns:

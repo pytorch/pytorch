@@ -928,7 +928,7 @@ class DistributedDataParallel(Module, Joinable):
                         # this issue.
                         if param.grad is not None:
                             param.grad.data = param.grad.to(
-                                self.mixed_precision.param_dtype  # type: ignore[var-annotated]
+                                self.mixed_precision.param_dtype  # type: ignore[union-attr]
                             )
                     param.data = param._mp_param
                 copy_event = torch.cuda.Event()
