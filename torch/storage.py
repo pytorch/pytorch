@@ -3,7 +3,7 @@ import io
 import torch
 from ._utils import _type, _cuda
 from torch.types import Storage
-from typing import Any, TypeVar, Type, Union, cast
+from typing import Any, TypeVar, Type, Union, cast, Dict
 import copy
 import collections
 from functools import lru_cache
@@ -246,7 +246,7 @@ def _share_memory_lock_protected(fn):
         # moving to shared), this is a no-op so skip any locking logic
         if not self.is_shared():
             with _share_memory_lock:
-                key = self.data_ptr()
+                key = self._cdata
                 if key in _share_memory_map:
                     to_wait = _share_memory_map[key]
                 else:
@@ -266,6 +266,9 @@ def _share_memory_lock_protected(fn):
             # If we acquired the storage lock here and we're done working on it
             # we can now release it and free the entry.
             if to_free is not None:
+                # Ensure that the cdata from the storage didn't change and only
+                # the data_ptr did.
+                assert self._cdata == to_free
                 with _share_memory_lock:
                     _share_memory_map[to_free].release()
                     del _share_memory_map[to_free]
