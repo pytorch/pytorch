@@ -20,6 +20,9 @@ REGISTER_MPS_ALLOCATOR_CALLBACK("ReplayBufferCleaner", replay::ReplayBufferClean
 }
 
 TEST(MPSAllocator, MPSAllocatorCallbacks) {
+    // fail if mps isn't available
+    ASSERT_TRUE(torch::mps::is_available());
+
     std::vector<torch::Tensor> replay_buffer;
     replay::callback_action = [&]() {
         if (!replay_buffer.empty()) {
@@ -35,5 +38,6 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
         }
         replay_buffer.push_back(new_value);
     }
+    torch::mps::synchronize();
     ASSERT_TRUE(replay_buffer.size() < max_iter);
 }
