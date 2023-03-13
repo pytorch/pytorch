@@ -14,7 +14,6 @@ Usage:
 
 Known limitations:
 - doesn't handle 'retry' jobs in CI, if the same hash has more than one set of artifacts, gets the first one
-- needs rocks API key (plan to use a public endpoint and remove this limitation)
 """
 
 import argparse
@@ -25,24 +24,28 @@ from urllib.request import urlopen
 from zipfile import ZipFile
 
 import pandas as pd
+import requests
 
-from rockset import RocksetClient
+
+ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/d7052c1e-b96c-44f3-b6cf-bc8fd5c4b7e4"
 
 
-def query_job_sha(repo, sha, api_key):
-    rs = RocksetClient(api_key=api_key, host="https://api.usw2a1.rockset.com")
+def query_job_sha(repo, sha):
 
-    params = list()
-    params.append({"name": "repo", "type": "string", "value": repo})
-    params.append({"name": "sha", "type": "string", "value": sha})
+    params = {
+        "parameters": [
+            {
+                "name": "sha",
+                "type": "string",
+                "value": sha,
+            },
+            {"name": "repo", "type": "string", "value": repo},
+        ]
+    }
 
-    response = rs.QueryLambdas.execute_query_lambda(
-        query_lambda="commit_jobs_query",
-        version="cc524c5036e78794",
-        workspace="commons",
-        parameters=params,
-    )
-    return response.results
+    r = requests.post(url=ARTIFACTS_QUERY_URL, json=params)
+    data = r.json()
+    return data["results"]
 
 
 def parse_job_name(job_str):
@@ -50,7 +53,7 @@ def parse_job_name(job_str):
 
 
 def parse_test_str(test_str):
-    return (part.strip() for part in test_str[6:].strip(")k").split(","))
+    return (part.strip() for part in test_str[6:].strip(")").split(","))
 
 
 S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
@@ -59,7 +62,7 @@ S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 def get_artifacts_urls(results, suites):
     urls = {}
     for r in results:
-        if "inductor" == r["workflowName"] and f"test" in r["jobName"]:
+        if "inductor" == r["workflowName"] and "test" in r["jobName"]:
             config_str, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine = parse_test_str(test_str)
             workflowId = r["workflowId"]
@@ -130,11 +133,8 @@ if __name__ == "__main__":
     # TODO check path and warn to run from pytorch root
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
 
-    # TODO open public rocksdb endpoint, no apikey
-    with open(os.path.join(os.path.expanduser("~"), "rocks_api_key"), "r") as f:
-        api_key = f.read()
-
-    results = query_job_sha(repo, args.sha, api_key)
+    results = query_job_sha(repo, args.sha)
     urls = get_artifacts_urls(results, suites)
     dataframes = download_artifacts_and_extract_csvs(urls)
     write_filtered_csvs(root_path, dataframes)
+    print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")

@@ -60,7 +60,7 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
         from pytorch/pytorch root, run
         `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <sha>`
         where <sha> points to a commit that has run inductor benchmark CI jobs (e.g. inductor_huggingface...)
-        and then include the resulting local changes to expected graph break CSVs to your commit.
+        and then `git add` the resulting local changes to expected graph break CSVs to your commit.
         """
         )
     return failed or improved, msg
