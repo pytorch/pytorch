@@ -639,12 +639,5 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
   return result;
 }
 
-Tensor triton_bsr_dense_mm(
-    const Tensor& bsr,
-    const Tensor& dense) {
-  TORCH_CHECK(false, "_triton_bsr_dense_mm: Triton kernel should be overwritten in Python.");
-  return Tensor {};
-}
-
 } // namespace native
 } // namespace at

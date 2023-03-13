@@ -82,11 +82,9 @@ TORCH_API extern mutexType currentStateStackEntryMutex;
 class StateStackEntry {
  public:
   StateStackEntry(
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<StateStackEntry> prevPtr,
-      // NOLINTNEXTLINE(modernize-pass-by-value)
       std::shared_ptr<State> statePtr)
-      : prevPtr_(prevPtr), statePtr_(statePtr) {}
+      : prevPtr_(std::move(prevPtr)), statePtr_(std::move(statePtr)) {}
 
   static void pushRange(std::shared_ptr<State> profilerProcessGlobalStatePtr);
   static std::shared_ptr<State> popRange();

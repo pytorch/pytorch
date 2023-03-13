@@ -1480,13 +1480,14 @@ class TestSparseCSR(TestCase):
 
         kernel_invoked = [False]
 
-        lib = torch.library.Library("aten", "IMPL")
+        lib = torch.library.Library("triton", "DEF")
+        lib.define("_triton_bsr_dense_mm_out(Tensor bsr, Tensor dense, *, Tensor(a!) out) -> Tensor(a!)")
 
         def impl(*args, **kwargs):
             kernel_invoked[0] = True
             return bsr_dense_mm(*args, skip_checks=True, **kwargs)
 
-        lib.impl("aten::_triton_bsr_dense_mm", impl, "SparseCsrCUDA")
+        lib.impl("triton::_triton_bsr_dense_mm_out", impl, "SparseCsrCUDA")
 
         # Note that each value in a non-zero block is in range block_size * [low^2, high^2).
         tensor = partial(make_tensor, device=device, dtype=dtype, low=0.5, high=1.5)
@@ -1521,8 +1522,10 @@ class TestSparseCSR(TestCase):
             else:
                 # Otherwise check correctness against bmm
                 # since nn.linear does not support bsr.dim() > 2.
-                res_tri = torch._triton_bsr_dense_mm(bsr, dense.transpose(-2, -1))
                 res_dense = bsr.to_dense() @ dense.transpose(-2, -1)
+                res_tri_out = torch.empty_like(res_dense)
+                res_tri = torch.ops.triton._triton_bsr_dense_mm_out(bsr, dense.transpose(-2, -1), out=res_tri_out)
+                self.assertTrue(res_tri is res_tri_out)
             self.assertEqual(res_tri, res_dense)
 
             res_dense = bsr.to_dense() @ dense.transpose(-2, -1)

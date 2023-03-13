@@ -90,10 +90,19 @@ Tensor& _compressed_row_strided_mm_out(const Tensor& compressed, const Tensor& s
    // so the result is tiled to (b0, b0) and we need to make
    // sure that dense.size(-1) is divisible by b0.
    && n % blocksize[0] == 0) {
-    const auto triton_kernel = c10::Dispatcher::singleton().findSchemaOrThrow("aten::_triton_bsr_dense_mm", "");
-    // Call Triton only if dispatch key was overwritten.
-    if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
-      return at::_triton_bsr_dense_mm_out(result, compressed, strided);
+    try {
+      const auto triton_kernel = c10::Dispatcher::singleton()
+        .findSchemaOrThrow("triton::_triton_bsr_dense_mm_out", "")
+        .typed<Tensor&(const Tensor&, const Tensor&, Tensor&)>();
+      // Call Triton only if dispatch key was overwritten.
+      // This is not strictly necessary since the definition is done in Python,
+      // but we leave it here for extra safety.
+      if (triton_kernel.hasKernelForDispatchKey(c10::DispatchKey::SparseCsrCUDA)) {
+        return triton_kernel.call(compressed, strided, result);
+      }
+    } catch (const std::exception& e) {
+      // The schema is not defined and/or the key is not overwritten,
+      // so skip and execute the code below.
     }
   }
 #endif
