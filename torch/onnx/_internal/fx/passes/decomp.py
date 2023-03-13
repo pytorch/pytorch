@@ -45,10 +45,11 @@ def decompose(
 
     # Apply decomposition table to the input graph.
     # Make sure the feed-in "module" is stateless.
+    # symbolic mode generates aten::sym_size to dynamically trace the size of tensors.
     decomposed_module = proxy_tensor.make_fx(
         graph_with_interpreter,
         decomposition_table=decomposition_table,
-        tracing_mode="fake",
+        tracing_mode="symbolic",
         _allow_non_fake_inputs=True,
     )(*args)
     # Rename placeholder targets to match the original module's signature since
