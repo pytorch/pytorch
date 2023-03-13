@@ -126,14 +126,14 @@ enum class Activation {
 cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activation a) {
   switch (a) {
     case Activation::None:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
     case Activation::RELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_RELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::RELU;
     case Activation::GELU:
-      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS_GELU;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::GELU;
     default:
       TORCH_CHECK(false);
-      return cuda::blas::GEMMAndBiasActivationEpilogue::BIAS;
+      return cuda::blas::GEMMAndBiasActivationEpilogue::None;
   }
 }
 #endif
@@ -158,15 +158,7 @@ uint8_t getAlignment(const Tensor &t) {
   return alignment;
 }
 
-Tensor& addmm_out_cuda_impl(
-    Tensor& result,
-    const Tensor& self,
-    const Tensor& mat1,
-    const Tensor& mat2,
-    const Scalar& beta,
-    const Scalar& alpha,
-    Activation activation = Activation::None,
-    bool allow_extended = false) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
   // expand().
@@ -325,7 +317,7 @@ Tensor& addmm_out_cuda_impl(
               // path until we confirm which version it's working in.
               activation != Activation::GELU
               ? activation_to_gemm_and_blas_arg(activation)
-              : cuda::blas::GEMMAndBiasActivationEpilogue::BIAS
+              : cuda::blas::GEMMAndBiasActivationEpilogue::None
 #endif
           );
         });
@@ -679,7 +671,6 @@ TORCH_IMPL_FUNC(addmv_out_cuda)(const Tensor &self, const Tensor &mat, const Ten
     }
   }
 }
-
 
 Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result) {
   // NOTE: cuBLAS is currently broken for some combination of transposed inputs.
