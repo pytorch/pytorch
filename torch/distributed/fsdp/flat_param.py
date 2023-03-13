@@ -1931,9 +1931,9 @@ class FlatParamHandle:
             grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
         else:
             # If in IDLE or in FORWARD states, then there may be an
-            # (accumulated) gradient. If accessed in IDLE, then should should
-            # be due re-registering the original parameters (e.g. in state dict
-            # load).
+            # (accumulated) gradient. If accessed in IDLE, then this should
+            # be due to re-registering the original parameters (e.g. in state
+            # dict load).
             _p_assert(
                 flat_param.grad is None
                 or not self.uses_sharded_strategy
