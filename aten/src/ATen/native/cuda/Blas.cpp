@@ -714,7 +714,7 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   int64_t mat2_ld = mat2_->stride((transpose_mat2 == transpose_result) ? 1 : 0);
   int64_t result_ld = result_->stride(transpose_result ? 0 : 1);
 
-  at::cuda::blas::gemm_and_bias<int8_t, int32_t, std::nullptr_t>(
+  at::cuda::blas::int8_gemm(
       transpose_mat1,
       transpose_mat2,
       m,
