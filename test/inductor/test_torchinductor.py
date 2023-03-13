@@ -1907,6 +1907,50 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_conv_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, conv_in_channel, conv_out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                res = self.conv(res)
+                return res
+
+        with torch.no_grad():
+            m = M(3, 3).eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(1, 3, 224, 224)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
+    def test_linear_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        with torch.no_grad():
+            m = M(224, 224).bfloat16().eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(224, 224, dtype=torch.bfloat16)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
     @slow()
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
