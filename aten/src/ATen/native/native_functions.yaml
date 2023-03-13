@@ -4439,7 +4439,7 @@
   dispatch:
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randn_like
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -9645,6 +9645,7 @@
     MPS: normal_mps_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: normal_nested_
   autogen: normal.out
 
 # Only used by the functionalization pass.
