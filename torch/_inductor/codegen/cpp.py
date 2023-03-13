@@ -553,27 +553,29 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.is_masked_load
 
         code = BracesBuffer()
-
         var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity());"
-            )
-        elif other == float("inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());"
-            )
-        else:
-            code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
-
+        code.writeline(f"auto {var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            zero_val = "at::vec::Vectorized<float>(0)"
-            float_mask = f"to_float_mask({mask})"
-            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
-            code.writeline(f"{var} = {blendv};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        if other == float("-inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
+            )
+        elif other == float("inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
+            )
+        else:
+            other_code = f"at::vec::Vectorized<float>({other!r})"
+
+        type = f"decltype({var}())"
+        zero_val = "at::vec::Vectorized<float>(0)"
+        float_mask = f"to_float_mask({mask})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -818,7 +820,7 @@ class CppOverrides(OpOverrides):
         if other == float("-inf"):
             other_code = f"-std::numeric_limits<{type}>::infinity()"
         elif other == float("inf"):
-            other_code = "std::numeric_limits<{type}>::infinity()"
+            other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
         else:
@@ -2050,12 +2052,7 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
-
-        if not V.graph.aot_mode or self.count == 1:
-            code.writeline(cpp_prefix())
-
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -2070,12 +2067,9 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        if V.graph.aot_mode:
-            codecache_def.splice(code)
-        else:
-            codecache_def.writeline("async_compile.cpp('''")
-            codecache_def.splice(code)
-            codecache_def.writeline("''')")
+        codecache_def.writeline("async_compile.cpp('''")
+        codecache_def.splice(code)
+        codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
