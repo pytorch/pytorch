@@ -875,10 +875,6 @@ void int8_gemm(
       abType, transpose_mat2 ? n : k, transpose_mat2 ? k : n, mat2_ld);
   CuBlasLtMatrixLayout Cdesc(cType, m, n, result_ld);
 
-  CuBlasLtMatmulPreference preference;
-  // See https://github.com/pytorch/pytorch/issues/73328 for reasoning behind
-  // setting this to 1M.
-
   cublasLtHandle_t ltHandle =
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
 
