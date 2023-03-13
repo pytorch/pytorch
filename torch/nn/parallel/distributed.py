@@ -11,7 +11,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type, Tuple, Optional
+from typing import Callable, Any, Type, Tuple, Optional, List
 
 import torch
 import torch.distributed as dist
@@ -788,7 +788,7 @@ class DistributedDataParallel(Module, Joinable):
 
         # Initialize gradient buffers and register all reduce hook
         self._delay_grad_buffer = None
-        self._delay_grad_views = []
+        self._delay_grad_views: List[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
             self._register_delay_all_reduce_hook(
