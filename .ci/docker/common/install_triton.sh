@@ -52,5 +52,3 @@ if [ -n "${CONDA_CMAKE}" ]; then
   conda_reinstall cmake="${CMAKE_VERSION}"
   conda_reinstall numpy="${NUMPY_VERSION}"
 fi
-
-# DEBUG - TO BE REMOVED BEFORE PUSH
