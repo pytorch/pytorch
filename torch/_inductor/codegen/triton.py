@@ -696,11 +696,13 @@ class TritonKernel(Kernel):
                 # and write out a reduction loop
                 self.codegen_body()
             self.inside_reduction = False
-            yield
-            if not self.persistent_reduction:
-                # flush out any code before opening the next loop
-                self.codegen_body()
-            self.inside_reduction = True
+            try:
+                yield
+                if not self.persistent_reduction:
+                    # flush out any code before opening the next loop
+                    self.codegen_body()
+            finally:
+                self.inside_reduction = True
 
         return ctx()
 
@@ -957,10 +959,12 @@ class TritonKernel(Kernel):
             mask = self.cse.generate(self.compute, f"{mask} & {prior}")
 
         self._load_mask = mask
-        with self.swap_buffers(self.compute, self.compute):
-            # TODO(jansel): do we need a reshape here?
-            yield mask
-        self._load_mask = prior
+        try:
+            with self.swap_buffers(self.compute, self.compute):
+                # TODO(jansel): do we need a reshape here?
+                yield mask
+        finally:
+            self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1201,8 +1205,9 @@ class TritonKernel(Kernel):
         result.writelines(["\n", "\n", "def call(args):"])
         grid = []
         extra_args = []
+        extra_args_str = None
+        index = V.graph.scheduler.current_device.index
         with result.indent():
-            index = V.graph.scheduler.current_device.index
             result.writeline(f"with torch.cuda._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
@@ -1220,6 +1225,18 @@ class TritonKernel(Kernel):
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
                     f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                )
+
+        # benchmark all configs
+        result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
+        with result.indent():
+            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            with result.indent():
+                result.writeline(
+                    f"torch.cuda.set_device({index})"
+                )  # no-op to ensure context
+                result.writeline(
+                    f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
