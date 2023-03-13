@@ -27,8 +27,6 @@ test_classes = {}
 ALL_DYNAMIC_XFAILS = {
     "MiscTests": [
         "test_parsing_sdpa",
-        # NotImplementedError: SymNodeVariable() is not a constant
-        "test_slice_input",
     ],
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
@@ -88,7 +86,14 @@ for test in tests:
     make_dynamic_cls(test)
     make_dynamic_cls(test, static_default=True)
 
-assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
+
+# Single config failures
+
+unittest.expectedFailure(
+    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
+    # NotImplementedError: SymNodeVariable() is not a constant
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

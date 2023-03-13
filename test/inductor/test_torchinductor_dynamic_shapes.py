@@ -5,7 +5,6 @@ import os
 import sys
 import unittest
 from functools import partial
-from unittest.mock import patch
 
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
