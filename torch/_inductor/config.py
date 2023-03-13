@@ -212,9 +212,10 @@ class triton:
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
-    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
-    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
-    descriptive_names = "aten"
+    # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
+    # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    # "inductor_node": Maps to the node name in the FX graph passed to Inductor
+    descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
