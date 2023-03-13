@@ -348,7 +348,6 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
 
     for (const auto dim : c10::irange(bins.size())) {
         bin_edges[dim].copy_(bins[dim]);
-        std::cout << "bins:" << bins[dim] << std::endl;
     }
 
     histogramdd_linear_stub(self.device().type(), self, weight, density, hist, bin_edges, true);

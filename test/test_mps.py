@@ -10224,10 +10224,7 @@ class TestConsistency(TestCaseMPS):
             else:
                 atol = None
                 rtol = None
-            print("input", cpu_args, mps_args, mps_kwargs)
-            if mps_kwargs["weight"] is not None:
-                print(mps_kwargs["weight"].is_contiguous())
-            print(cpu_out, mps_out)
+
             self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
 
