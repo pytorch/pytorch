@@ -1064,12 +1064,12 @@ def module_inputs_torch_nn_ReflectionPad1d(module_info, device, dtype, requires_
     return [
         ModuleInput(
             constructor_input=FunctionInput(1),
-            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 4))),
             reference_fn=lambda m, *args: F.pad(args[1], (1, 1), mode='reflect'),
         ),
         ModuleInput(
             constructor_input=FunctionInput((1, 2)),
-            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+            forward_input=FunctionInput(make_input((2, 3, 4))),
             reference_fn=lambda m, *args: F.pad(args[1], (1, 2), mode='reflect'),
         ),
     ]
