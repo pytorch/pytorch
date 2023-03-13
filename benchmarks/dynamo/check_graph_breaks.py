@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 import textwrap
 
@@ -54,12 +55,12 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
 
             """
             )
+        sha = os.getenv("SHA1", "{your CI commit sha}")
         msg += textwrap.dedent(
             f"""
         If this change is expected, you can update `{expected_filename}` to reflect the new baseline.
         from pytorch/pytorch root, run
-        `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <sha>`
-        where <sha> points to a commit that has run inductor benchmark CI jobs (e.g. inductor_huggingface...)
+        `python benchmarks/dynamo/ci_expected_accuracy/update_expected.py {sha}`
         and then `git add` the resulting local changes to expected graph break CSVs to your commit.
         """
         )

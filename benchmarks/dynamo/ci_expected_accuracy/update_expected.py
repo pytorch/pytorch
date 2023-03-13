@@ -9,8 +9,7 @@ downloading artifact zips, extracting CSVs and filtering them.
 
 Usage:
 
-1) get a rocksdp API key and save it in ~/rocks_api_key
-2) python benchmarks/dynamo/ci_expected_accuracy.py <sha of pytorch commit that has completed inductor benchmark jobs>
+python benchmarks/dynamo/ci_expected_accuracy.py <sha of pytorch commit that has completed inductor benchmark jobs>
 
 Known limitations:
 - doesn't handle 'retry' jobs in CI, if the same hash has more than one set of artifacts, gets the first one
@@ -26,7 +25,8 @@ from zipfile import ZipFile
 import pandas as pd
 import requests
 
-
+# Note: the public query url targets this rockset lambda:
+# https://console.rockset.com/lambdas/details/commons.artifacts
 ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/d7052c1e-b96c-44f3-b6cf-bc8fd5c4b7e4"
 
 
@@ -34,11 +34,7 @@ def query_job_sha(repo, sha):
 
     params = {
         "parameters": [
-            {
-                "name": "sha",
-                "type": "string",
-                "value": sha,
-            },
+            {"name": "sha", "type": "string", "value": sha},
             {"name": "repo", "type": "string", "value": repo},
         ]
     }
@@ -67,11 +63,12 @@ def get_artifacts_urls(results, suites):
             suite, shard_id, num_shards, machine = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]
-            runattempt = 1  # ? guessing here
+            # TODO(whc) .get( ,1) only needed until new query URL is available
+            runAttempt = r.get("runAttempt", 1)
 
             if suite in suites:
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
-                s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runattempt}/artifact/{artifact_filename}"
+                s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runAttempt}/artifact/{artifact_filename}"
                 urls[(suite, int(shard_id))] = s3_url
                 print(f"{suite} {shard_id}, {num_shards}: {s3_url}")
     return urls
@@ -125,13 +122,10 @@ if __name__ == "__main__":
         "inductor_huggingface",
         "inductor_timm",
         "inductor_torchbench",
-        # "inductor_huggingface_dynamic",
-        # "inductor_timm_dynamic",
-        # "inductor_torchbench_dynamic",
     }
 
-    # TODO check path and warn to run from pytorch root
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
+    assert os.path.exists(root_path), f"cd <pytorch root> and ensure {root_path} exists"
 
     results = query_job_sha(repo, args.sha)
     urls = get_artifacts_urls(results, suites)
