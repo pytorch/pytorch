@@ -1048,7 +1048,7 @@ void no_op_delete(void* ptr){};
 // when we set the pool to its checkpoint. For those blocks, we need
 // to swap out the deleter function of their corresponding blocks
 // so that a deallocation is not triggered when they die.
-void swapLiveStorageDeleterFns(
+void removeStorageDeleterFns(
     const std::vector<c10::StorageImpl*>& stale_live_storages,
     std::unordered_set<void*> definitely_stale_pointers) {
   for (c10::StorageImpl* stale_storage : stale_live_storages) {
@@ -1062,6 +1062,29 @@ void swapLiveStorageDeleterFns(
     TORCH_CHECK(
         succeeded,
         "Unexpected deleter function on storage, could not swap function");
+  }
+}
+
+void addStorageDeleterFns(
+    std::vector<at::Tensor>& tensors_to_add_deleters_to,
+    c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
+  std::unordered_map<void*, c10::StorageImpl*> storages;
+  for (auto& tensor : tensors_to_add_deleters_to) {
+    storages[tensor.storage().data_ptr().get()] =
+        tensor.storage().unsafeGetStorageImpl();
+  }
+
+  for (auto& data_ptr : delta.dataptrs_allocd) {
+    auto storage_pair = storages.find(data_ptr.get());
+    if (storage_pair != storages.end()) {
+      auto ctx = storage_pair->second->data_ptr().get_context();
+      TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
+
+      auto curr_deleter = storage_pair->second->data_ptr().get_deleter();
+      storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
+    } else {
+      data_ptr.release_context();
+    }
   }
 }
 
@@ -1194,7 +1217,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<at::Tensor> stale_tensors) {
+         std::vector<at::Tensor> stale_tensors,
+         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
         // Could pass in Storage Pointers instead
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
@@ -1209,11 +1233,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
             device, pps);
         auto& freed_pointers = delta.ptrs_freed;
-        auto& allocd_pointers = delta.ptrs_allocated;
+        auto& allocd_pointers = delta.dataptrs_allocd;
 
-        std::unordered_set<void*> allocd_set(
-            allocd_pointers.begin(), allocd_pointers.end());
-
+        std::unordered_set<void*> allocd_set;
+        for (auto& data_ptr : delta.dataptrs_allocd) {
+          allocd_set.insert(data_ptr.get());
+        }
         std::unordered_set<void*> freed_pointer_set;
         size_t definite_freed_count = 0;
         for (void* ptr : freed_pointers) {
@@ -1231,7 +1256,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             "Any stale tensors which are being manually freed"
             " must be passed to set checkpoint");
 
-        swapLiveStorageDeleterFns(ptrs, freed_pointer_set);
+        removeStorageDeleterFns(ptrs, freed_pointer_set);
+
+        addStorageDeleterFns(tensors_to_add_deleters_to, delta);
       });
 }
 

@@ -178,7 +178,7 @@ struct SnapshotInfo {
 // may appear in both freed and allocated
 struct CheckpointDelta {
   std::vector<void*> ptrs_freed;
-  std::vector<void*> ptrs_allocated;
+  std::vector<at::DataPtr> dataptrs_allocd;
 };
 
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
