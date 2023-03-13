@@ -34,3 +34,7 @@ jobs:
         uses: ./.github/actions/calculate-docker-image
         with:
           docker-image-name: ${{ inputs.docker-image-name }}
+          # This two flags are needed to make the Docker image available on ECR
+          # to avoid "Requested image not found" error for linter workflow
+          skip_push: false
+          force_push: true
