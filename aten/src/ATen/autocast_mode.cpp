@@ -69,7 +69,7 @@ thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
         at::ScalarType::Undefined, // Vulkan
         at::ScalarType::Undefined, // Metal
         at::kHalf, // XPU
-        at::ScalarType::Undefined, // MPS
+        at::ScalarType::kHalf, // MPS
         at::ScalarType::Undefined, // Meta (tensors with no data)
         at::kBFloat16, // HPU / HABANA
         at::ScalarType::Undefined, // SX-Aurora / NEC
@@ -204,6 +204,117 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
 
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
+TORCH_LIBRARY_IMPL(_, AutocastMPS, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastMPS, m) {
+  // lower_precision_fp
+  KERNEL_MPS2(_convolution, deprecated, lower_precision_fp)
+  KERNEL_MPS(_convolution, lower_precision_fp)
+  KERNEL_MPS(conv1d, lower_precision_fp)
+  KERNEL_MPS(conv2d, lower_precision_fp)
+  KERNEL_MPS(conv_tbc, lower_precision_fp)
+  KERNEL_MPS(conv_transpose1d, lower_precision_fp)
+  KERNEL_MPS2(conv_transpose2d, input, lower_precision_fp)
+  KERNEL_MPS(convolution, lower_precision_fp)
+  KERNEL_MPS(_mps_convolution, lower_precision_fp)
+  KERNEL_MPS(prelu, lower_precision_fp)
+  KERNEL_MPS(addmm, lower_precision_fp)
+  KERNEL_MPS(addmv, lower_precision_fp)
+  KERNEL_MPS(addr, lower_precision_fp)
+  KERNEL_MPS(matmul, lower_precision_fp)
+  KERNEL_MPS(einsum, lower_precision_fp)
+  KERNEL_MPS(mm, lower_precision_fp)
+  KERNEL_MPS(mv, lower_precision_fp)
+  KERNEL_MPS(linear, lower_precision_fp)
+  KERNEL_MPS(addbmm, lower_precision_fp)
+  KERNEL_MPS(baddbmm, lower_precision_fp)
+  KERNEL_MPS(bmm, lower_precision_fp)
+  KERNEL_MPS(chain_matmul, lower_precision_fp)
+  KERNEL_MPS(linalg_multi_dot, lower_precision_fp)
+  KERNEL_MPS(lstm_cell, lower_precision_fp)
+
+  // fp32
+  KERNEL_MPS(acos, fp32)
+  KERNEL_MPS(asin, fp32)
+  KERNEL_MPS(cosh, fp32)
+  KERNEL_MPS(erfinv, fp32)
+  KERNEL_MPS(exp, fp32)
+  KERNEL_MPS(expm1, fp32)
+  KERNEL_MPS(log, fp32)
+  KERNEL_MPS(log10, fp32)
+  KERNEL_MPS(log2, fp32)
+  KERNEL_MPS(log1p, fp32)
+  KERNEL_MPS(reciprocal, fp32)
+  KERNEL_MPS(rsqrt, fp32)
+  KERNEL_MPS(sinh, fp32)
+  KERNEL_MPS(tan, fp32)
+  KERNEL_MPS2(pow, Tensor_Scalar, fp32)
+  KERNEL_MPS2(pow, Tensor_Tensor, fp32)
+  KERNEL_MPS2(pow, Scalar, fp32)
+  KERNEL_MPS(softplus, fp32)
+  KERNEL_MPS(layer_norm, fp32)
+  KERNEL_MPS(native_layer_norm, fp32)
+  KERNEL_MPS(group_norm, fp32)
+  KERNEL_MPS2(frobenius_norm, dim, fp32)
+  KERNEL_MPS(nuclear_norm, fp32)
+  KERNEL_MPS2(nuclear_norm, dim, fp32)
+  KERNEL_MPS(cosine_similarity, fp32)
+  KERNEL_MPS(poisson_nll_loss, fp32)
+  KERNEL_MPS(cosine_embedding_loss, fp32)
+  KERNEL_MPS(nll_loss, fp32)
+  KERNEL_MPS(nll_loss2d, fp32)
+  KERNEL_MPS(hinge_embedding_loss, fp32)
+  KERNEL_MPS(kl_div, fp32)
+  KERNEL_MPS(l1_loss, fp32)
+  KERNEL_MPS(smooth_l1_loss, fp32)
+  KERNEL_MPS(huber_loss, fp32)
+  KERNEL_MPS(mse_loss, fp32)
+  KERNEL_MPS(margin_ranking_loss, fp32)
+  KERNEL_MPS(multilabel_margin_loss, fp32)
+  KERNEL_MPS(soft_margin_loss, fp32)
+  KERNEL_MPS(triplet_margin_loss, fp32)
+  KERNEL_MPS(multi_margin_loss, fp32)
+  KERNEL_MPS(binary_cross_entropy_with_logits, fp32)
+  KERNEL_MPS(dist, fp32)
+  KERNEL_MPS(pdist, fp32)
+  KERNEL_MPS(cdist, fp32)
+  KERNEL_MPS(renorm, fp32)
+  KERNEL_MPS(logsumexp, fp32)
+
+  // fp32_set_opt_dtype
+  KERNEL_MPS(prod, fp32)
+  KERNEL_MPS2(prod, dim_int, fp32)
+  KERNEL_MPS2(prod, dim_Dimname, fp32)
+  KERNEL_MPS2(softmax, int, fp32)
+  KERNEL_MPS2(softmax, Dimname, fp32)
+  KERNEL_MPS2(log_softmax, int, fp32)
+  KERNEL_MPS2(log_softmax, Dimname, fp32)
+  KERNEL_MPS(cumprod, fp32)
+  KERNEL_MPS2(cumprod, dimname, fp32)
+  KERNEL_MPS(cumsum, fp32)
+  KERNEL_MPS2(cumsum, dimname, fp32)
+  KERNEL_MPS(linalg_vector_norm, fp32)
+  KERNEL_MPS(linalg_matrix_norm, fp32)
+  KERNEL_MPS2(linalg_matrix_norm, str_ord, fp32)
+  KERNEL_MPS(sum, fp32)
+  KERNEL_MPS2(sum, dim_IntList, fp32)
+  KERNEL_MPS2(sum, dim_DimnameList, fp32)
+  //
+  // promote
+  KERNEL_MPS(addcdiv, promote)
+  KERNEL_MPS(addcmul, promote)
+  KERNEL_MPS(atan2, promote)
+  KERNEL_MPS(bilinear, promote)
+  KERNEL_MPS(cross, promote)
+  KERNEL_MPS(dot, promote)
+  KERNEL_MPS(grid_sampler, promote)
+  KERNEL_MPS(index_put, promote)
+  KERNEL_MPS(tensordot, promote)
+  KERNEL_MPS(scatter_add, promote)
 }
 
 TORCH_LIBRARY_IMPL(_, AutocastCPU, m) {
