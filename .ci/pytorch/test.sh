@@ -237,7 +237,7 @@ test_dynamo_shard() {
       test_package \
       test_legacy_vmap \
       functorch/test_dims \
-      functorch/test_aot_dispatch \
+      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
