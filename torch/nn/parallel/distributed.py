@@ -1,4 +1,6 @@
 import copy
+import functools
+from collections import defaultdict, deque
 import inspect
 import itertools
 import logging
@@ -9,7 +11,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type
+from typing import Callable, Any, Type, Tuple, Optional
 
 import torch
 import torch.distributed as dist
@@ -28,6 +30,9 @@ if dist.is_available():
         _verify_param_shape_across_processes,
         _sync_module_states,
         _to_kwargs,
+        _apply_to_tensors,
+        _alloc_storage,
+        _free_storage,
     )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
@@ -43,6 +48,97 @@ __all__ = ["DistributedDataParallel"]
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class _MixedPrecision:
+    """
+    This configures DDP-native mixed precision training.
+
+    Attributes:
+        param_dtype (torch.dtype): This specifies the dtype for model
+            parameters, inputs (when ``cast_forward_inputs`` is set to
+            ``True``), and therefore the dtype for computation.
+            However, outside the forward and backward passes, parameters are in
+            full precision. Model checkpointing always happens in full
+            precision.
+        reduce_dtype (torch.dtype): This specifies the dtype for gradient
+            reduction, which is permitted to differ from ``param_dtype``.
+        buffer_dtype (torch.dtype): This specifies the dtype for buffers.
+
+    .. note:: This API is experimental and subject to change.
+
+    .. note:: Only floating point tensors are cast to their specified dtypes.
+
+    .. note:: ``state_dict`` checkpoints parameters and buffers in full
+        precision.
+
+    .. note:: Each low precision dtype must be specified explicitly. For
+        example, ``_MixedPrecision(reduce_dtype=torch.float16)`` only specifies
+        the reduction dtype to be low precision, and DDP will not cast
+        parameters or buffers.
+
+    .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
+        happens in ``param_dtype`` if specified or the original parameter dtype
+        otherwise. For example, ``_MixedPrecision(param_dtype=torch.float16)``
+        would result in communication ocurring in fp16.
+    """
+
+    param_dtype: Optional[torch.dtype] = None
+    reduce_dtype: Optional[torch.dtype] = None
+    buffer_dtype: Optional[torch.dtype] = None
+    # TODO (rohan-varma): keep_low_precision_grads: bool = False
+    # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
+    # in full precision. For DDP, this can be implemented by not performing the
+    # parameter cast for BN and LN units.
+
+def _cast_buffers(mixed_precision_config, root_module):
+    """
+    Casts buffers to the given ``buffer_dtype``.
+    """
+    for buf in root_module.buffers():
+        if hasattr(buf, '_ddp_ignored') and buf._ddp_ignored:
+            continue
+
+        buf.data = buf.to(dtype=mixed_precision_config.buffer_dtype)
+
+def _setup_mixed_precision_params(mixed_precision_config, root_module):
+    """
+    Creates and frees storage for the mixed precision parameters.
+    """
+    for param in root_module.parameters():
+        # Do not setup mixed precision for DDP ignored parameters.
+        if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+            continue
+
+        if not hasattr(param, '_mp_param'):
+            param._mp_param = torch.zeros_like(
+                param,
+                device=param.device,
+                dtype=mixed_precision_config.param_dtype,
+                requires_grad=param.requires_grad,
+            )
+            _free_storage(param._mp_param)
+            # _fp_param will point to the full precision param so it can be switched
+            # back to at the end of forward / backward.
+            param._fp_param = param.data
+
+def _cast_forward_inputs(
+    input_dtype: Optional[torch.dtype],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Casts input args and kwargs to the given input_dtype. Note that only
+    floating point tensors are cast.
+    """
+    def cast_fn(x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_floating_point(x) or x.dtype == input_dtype:
+            return x
+        return x.to(input_dtype)
+
+    return (
+        _apply_to_tensors(cast_fn, args),
+        _apply_to_tensors(cast_fn, kwargs)
+    )
 
 def _tree_flatten_with_rref(output):
     output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
@@ -556,6 +652,7 @@ class DistributedDataParallel(Module, Joinable):
         check_reduction=False,
         gradient_as_bucket_view=False,
         static_graph=False,
+        mixed_precision: Optional[_MixedPrecision] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -633,6 +730,9 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.mixed_precision = mixed_precision
+        if self.mixed_precision is not None:
+            logger.warning(f"Received mixed precision config {self.mixed_precision}")
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -677,6 +777,7 @@ class DistributedDataParallel(Module, Joinable):
         param_to_name_mapping = self._build_debug_param_to_name_mapping(
             parameters
         )
+
         # Builds reducer.
         self._ddp_init_helper(
             parameters,
@@ -684,6 +785,44 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
+        if self.mixed_precision is not None:
+            _setup_mixed_precision_params(self.mixed_precision, self.module)
+            _cast_buffers(self.mixed_precision, self.module)
+            # Stream used for async low precision copies.
+            self._mp_stream = torch.cuda.Stream()
+            self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
+            # Add forward pre-hook to root module to kick off copies to lower
+            # precision.
+            self.module.register_forward_pre_hook(
+                self._root_copy_hook, prepend=False, with_kwargs=True
+            )
+            # Add forward pre hook to all submodules to wait for copy events
+            # before running computation.
+            for module in self.module.modules():
+                module.register_forward_pre_hook(
+                    self._module_wait_for_copy_hook, prepend=False, with_kwargs=True,
+                )
+            # Set up callbacks in backward to upcast and use full precision
+            # params. TODO (rohan-varma): Make this compose with general
+            # comm hooks and apply_optimizer_in_backward. Importing inline to
+            # avoid circular import issue.
+            from torch.distributed.algorithms.ddp_comm_hooks.mixed_precision_hooks import (
+                _reducer_allreduce_and_upcast_hook, _AllreduceUpcastHookState
+            )
+            upcast_hook_state = _AllreduceUpcastHookState(
+                ddp_weakref=weakref.ref(self),
+                upcast_stream=torch.cuda.Stream(),
+            )
+            self.register_comm_hook(
+                upcast_hook_state,
+                _reducer_allreduce_and_upcast_hook,
+            )
+            # Inform reducer of reduced precision param dtype for correctness
+            # of type checks between gradient and bucket.
+            self.reducer._set_mixed_precision_param_dtype(  # type: ignore[attr-defined]
+                self.mixed_precision.param_dtype
+            )
+
         self._has_rebuilt_buckets = False
 
         if static_graph:
@@ -745,6 +884,92 @@ class DistributedDataParallel(Module, Joinable):
                 )
                 self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
 
+    def _fire_reducer_autograd_hook(self, idx, *unused):
+        """
+        Fires the reducer's autograd hook to allreduce params in a Reducer bucket.
+        Note that this is only used during mixed precision training as the
+        Reducer's hooks installed during construction time would not be called
+        as we're working in the low precision parameter setting.
+        """
+        self.reducer._autograd_hook(idx)  # type: ignore[attr-defined]
+
+    def _root_copy_hook(
+        self,
+        *args: Any,
+        **kwargs: Any
+    ) -> None:
+        """
+        When training with DDP mixed precision, this root pre-forward hook kicks
+        off low precision copies on a separate stream and creates respective
+        events to wait for them.
+        """
+        # Clear out previous iteration submodule to event. This is because we
+        # may have populated some events for modules that didn't end up being
+        # used.
+        self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
+        with torch.cuda.stream(self._mp_stream):
+            for submodule in self.module.modules():
+                for param in submodule.parameters(recurse=False):
+                    # Do not cast DDP ignored parameters.
+                    if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+                        continue
+                    _alloc_storage(param._mp_param, param.size())
+                    # copy() implicitly casts to low precision
+                    with torch.no_grad():
+                        param._mp_param.copy_(param.data)
+                        # TODO: when zero_grad(set_to_none=False) or in grad
+                        # accumulation case, accumulated grads can be in fp32
+                        # which can cause errors when running DDP backwards due
+                        # to mismatched incoming and accumulated gradient types.
+                        # So we manually cast the accumulated grad down for now,
+                        # in the future we may shift to FSDP style gradient
+                        # accumulation management where the accumulated gradient
+                        # is saved and .grad field is set to None, bypassing
+                        # this issue.
+                        if param.grad is not None:
+                            param.grad.data = param.grad.to(
+                                self.mixed_precision.param_dtype  # type: ignore[union-attr]
+                            )
+                    param.data = param._mp_param
+                copy_event = torch.cuda.Event()
+                copy_event.record()
+                self._submodule_to_event[submodule].append(copy_event)
+
+    def _module_wait_for_copy_hook(
+        self,
+        module,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Before carrying out computation, wait on the appropriate event to ensure
+        low precision copies have finished.
+        """
+        try:
+            event = self._submodule_to_event[module].popleft()
+        except IndexError:
+            # copy event has already been waited on
+            return
+
+        event.wait(stream=torch.cuda.current_stream())
+        for p in module.parameters(recurse=False):
+            # Don't register hooks if param does not require grad
+            if (
+                not p.requires_grad
+                or (hasattr(p, '_ddp_ignored') and p._ddp_ignored)
+            ):
+                continue
+            # We need to register autograd hook here instead of DDP's ctor
+            # since we're working with the low precision param. Register them
+            # via obtaining the gradient accumulator.
+            tmp = p.expand_as(p)
+            grad_acc = tmp.grad_fn.next_functions[0][0]
+
+            hook = grad_acc.register_hook(
+                functools.partial(self._fire_reducer_autograd_hook, p._idx)
+            )
+            p._ddp_mp_hook_state = (grad_acc, hook)
+
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
             self.logger.set_error_and_log(f"{str(err_type)}: {err_msg}")
@@ -800,6 +1025,12 @@ class DistributedDataParallel(Module, Joinable):
             bucket_size_limits,
             expect_sparse_gradient,
         )
+
+        # Remember index for parameters if we are in mixed precision, as we
+        # need to pass in index to Reducer's autograd hook via python.
+        if self.mixed_precision is not None:
+            for i, p in enumerate(parameters):
+                p._idx = i
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
@@ -1079,9 +1310,29 @@ class DistributedDataParallel(Module, Joinable):
                 self.device_ids[0],
                 self.use_side_stream_for_tensor_copies,
             )
+            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
+            # Cast inputs to reduced precision if needed.
+            if (
+                self.mixed_precision is not None
+            ):
+                args, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *args,
+                    **kwargs,
+                )
             with self._inside_ddp_forward():
-                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
+                return self.module(*args, **kwargs)  # type: ignore[index]
         else:
+            # Cast inputs to reduced precision if needed.
+            # TODO (rohan-varma) test this codepath.
+            if (
+                self.mixed_precision is not None
+            ):
+                inputs, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *inputs,
+                    **kwargs,
+                )
             with self._inside_ddp_forward():
                 return self.module(*inputs, **kwargs)
 
