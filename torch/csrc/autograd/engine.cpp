@@ -788,6 +788,7 @@ void set_device(int device) {
       }
     }
   }
+  worker_device = device;
 }
 
 void validate_outputs(
