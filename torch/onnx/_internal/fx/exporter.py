@@ -45,7 +45,7 @@ def _export(
     decomposed_module = passes.shape_inference_with_fake_tensor(
         decomposed_module, *args
     )
-
+    print("decomposed_module.graph", decomposed_module.print_readable())
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based

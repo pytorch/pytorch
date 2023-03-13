@@ -259,9 +259,9 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @unittest.skip(
-        "[ONNXRuntimeError] : 10 : INVALID_GRAPH : This is an invalid model."
-        "In Node, ('Cast_2', Cast, '', -1) : () -> ('3': tensor(int64),)"
-        " , Error Node (Cast_2) has input size 0 not in range [min=1, max=1]."
+        "AssertionError: The values for attribute 'shape' do not match:"
+        " torch.Size([5, 6, 2]) != torch.Size([4, 4, 2]). Even symbolic "
+        "fx.graph can't get dynamic arguments from this Module."
     )
     def test_slice(self):
         class DynamicSliceExportMod(torch.nn.Module):
@@ -336,10 +336,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    unittest.skip(
-        "[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : Failed to load model with error: Invalid tensor data type 0."
-    )
-
     def test_expand_as_fill_seperate_tensor(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -354,8 +350,6 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[(x2,)],
         )
 
-    # @unittest.skip("[ONNXRuntimeError] : 2 : INVALID_ARGUMENT : "
-    #                "Failed to load model with error: Invalid tensor data type 0.")
     def test_view_dynamic_zero_dim(self):
         class ViewModel(torch.nn.Module):
             def forward(self, input):
