@@ -4322,10 +4322,9 @@
   autogen: rand.generator_with_names_out
 
 - func: rand(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: rand
-  tags: core
 
 - func: rand.generator(SymInt[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
@@ -4405,10 +4404,9 @@
   autogen: randint_like.low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: randn
-  tags: core
 
 - func: randn.generator(SymInt[] size, *, Generator? generator, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   tags: nondeterministic_seeded
