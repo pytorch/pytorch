@@ -2400,7 +2400,7 @@ def upsample_nearest2d_backward(
 
     return grad_output.new_empty(input_size).to(
         memory_format=utils.suggest_memory_format(grad_output)
-    )
+    )  # type: ignore[call-overload]
 
 
 @register_meta(aten.upsample_nearest3d.default)
