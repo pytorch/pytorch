@@ -353,6 +353,30 @@
   - Lint
   - pull
 
+- name: functorch
+  patterns:
+  - functorch/**
+  - test/functorch/**
+  - torch/_C/__init__.pyi.in
+  - torch/__init__.py
+  - torch/csrc/functorch/**
+  - torch/_functorch/**
+  - torch/func/**
+  - aten/src/ATen/functorch/**
+  - docs/source/func**
+  - '**vmap**'
+  - '**functorch**'
+  - '**pytree**'
+  approved_by:
+  - kshiteej12345
+  - srossross
+  - chillee
+  - zou3519
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: ROCm
   patterns:
   - '**rocm**'
