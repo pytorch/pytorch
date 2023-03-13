@@ -57,7 +57,7 @@ kernel void histogramdd(constant T  * input_            [[buffer(0)]],
                   constant uint8_t  & algorithm         [[buffer(10)]],
                   constant uint8_t  & has_weight        [[buffer(11)]],
                   uint tid [[thread_position_in_grid]]) {
-  
+
   constexpr T eps = 8e-7;
   bool skip_element = false;
   int64_t hist_index = 0;
@@ -74,7 +74,7 @@ kernel void histogramdd(constant T  * input_            [[buffer(0)]],
         break;
     }
     int64_t pos = -1;
-    
+
     if (algorithm == BIN_SELECTION_ALGORITHM::BINARY_SEARCH) {
       pos = upper_bound(
         bin_seq,
@@ -250,7 +250,7 @@ void histogramdd_kernel_impl(
   size_t weightOffset =  has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
-  
+
   dispatch_sync(mpsStream->queue(), ^(){
     @autoreleasepool {
       NSError* error = nil;

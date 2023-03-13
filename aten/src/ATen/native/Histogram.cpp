@@ -282,7 +282,7 @@ std::vector<Tensor> allocate_bin_edges_tensors(const Tensor& self) {
 
 /* Versions of histogramdd in which bins is a Tensor[] defining the sequences of bin edges.
  */
-Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
+Tensor& histogramdd_out(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
     histogramdd_check_inputs(self, bins, weight);
@@ -296,13 +296,13 @@ Tensor& histogramdd_out_cpu(const Tensor& self, TensorList bins,
     return hist;
 }
 
-Tensor histogramdd_cpu(const Tensor& self, TensorList bins,
+Tensor _histogramdd(const Tensor& self, TensorList bins,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
     TensorList bin_edges_out_tl(bin_edges_out);
 
-    histogramdd_out_cpu(self, bins, weight, density, hist, bin_edges_out_tl);
+    histogramdd_out(self, bins, weight, density, hist, bin_edges_out_tl);
     return hist;
 }
 
@@ -334,18 +334,18 @@ std::vector<Tensor>& histogramdd_bin_edges_out_cpu(const Tensor& self, IntArrayR
     return bin_edges_out;
 }
 
-std::vector<Tensor> histogramdd_bin_edges_cpu(const Tensor& self, IntArrayRef bin_ct,
+std::vector<Tensor> histogramdd_bin_edges(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
     std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
     return histogramdd_bin_edges_out_cpu(self, bin_ct, range, weight, density, bin_edges_out);
 }
 
-Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
+Tensor& histogramdd_out(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, TensorList& bin_edges) {
-    std::vector<Tensor> bins = histogramdd_bin_edges_cpu(self, bin_ct, range, weight, density);
+    std::vector<Tensor> bins = histogramdd_bin_edges(self, bin_ct, range, weight, density);
 
     histogramdd_check_inputs(self, bins, weight);
     histogramdd_prepare_out(self, bins, hist, bin_edges);
@@ -358,21 +358,21 @@ Tensor& histogramdd_out_cpu(const Tensor& self, IntArrayRef bin_ct,
     return hist;
 }
 
-Tensor histogramdd_cpu(const Tensor& self, IntArrayRef bin_ct,
+Tensor _histogramdd(const Tensor& self, IntArrayRef bin_ct,
         c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     std::vector<Tensor> bin_edges_out = allocate_bin_edges_tensors(self);
     TensorList bin_edges_out_tl(bin_edges_out);
 
-    histogramdd_out_cpu(self, bin_ct, range, weight, density, hist, bin_edges_out_tl);
+    histogramdd_out(self, bin_ct, range, weight, density, hist, bin_edges_out_tl);
     return hist;
 }
 
 /* Versions of histogram in which bins is a Tensor defining the sequence of bin edges.
  */
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, const Tensor& bins,
+histogram_out(const Tensor& self, const Tensor& bins,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, Tensor& bin_edges) {
     Tensor reshaped_self = self.reshape({ self.numel(), 1 });
@@ -381,23 +381,23 @@ histogram_out_cpu(const Tensor& self, const Tensor& bins,
     TensorList bins_in = bins;
     TensorList bins_out = bin_edges;
 
-    histogramdd_out_cpu(reshaped_self, bins_in, reshaped_weight, density, hist, bins_out);
+    histogramdd_out(reshaped_self, bins_in, reshaped_weight, density, hist, bins_out);
 
     return std::forward_as_tuple(hist, bin_edges);
 }
 
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, const Tensor& bins,
+histogram(const Tensor& self, const Tensor& bins,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges = at::empty({0}, bins.options(), MemoryFormat::Contiguous);
-    return histogram_out_cpu(self, bins, weight, density, hist, bin_edges);
+    return histogram_out(self, bins, weight, density, hist, bin_edges);
 }
 
 /* Versions of histogram in which bins is an integer specifying the number of equal-width bins.
  */
 std::tuple<Tensor&, Tensor&>
-histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
+histogram_out(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density,
         Tensor& hist, Tensor& bin_edges) {
     Tensor reshaped_self = self.reshape({ self.numel(), 1 });
@@ -417,16 +417,16 @@ histogram_out_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRe
 }
 
 std::tuple<Tensor, Tensor>
-histogram_cpu(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
+histogram(const Tensor& self, int64_t bin_ct, c10::optional<c10::ArrayRef<double>> range,
         const c10::optional<Tensor>& weight, bool density) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
     Tensor bin_edges_out = at::empty({0}, self.options());
-    return histogram_out_cpu(self, bin_ct, range, weight, density, hist, bin_edges_out);
+    return histogram_out(self, bin_ct, range, weight, density, hist, bin_edges_out);
 }
 
 /* Narrowed interface for the legacy torch.histc function.
  */
-Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
+Tensor& histogram_histc_out(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max, Tensor& hist) {
     Tensor bin_edges = at::empty({0}, self.options());
 
@@ -446,10 +446,10 @@ Tensor& histogram_histc_cpu_out(const Tensor& self, int64_t bin_ct,
     return hist;
 }
 
-Tensor histogram_histc_cpu(const Tensor& self, int64_t bin_ct,
+Tensor histogram_histc(const Tensor& self, int64_t bin_ct,
         const Scalar& min, const Scalar& max) {
     Tensor hist = at::empty({0}, self.options(), MemoryFormat::Contiguous);
-    return histogram_histc_cpu_out(self, bin_ct, min, max, hist);
+    return histogram_histc_out(self, bin_ct, min, max, hist);
 }
 
 std::tuple<Tensor, std::vector<Tensor>> histogramdd(
