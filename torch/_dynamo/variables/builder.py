@@ -4,7 +4,6 @@ import enum
 import functools
 import inspect
 import operator
-import re
 import types
 from typing import Any, NamedTuple, Optional, Union
 
@@ -28,7 +27,6 @@ from ..source import (
     GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -37,6 +35,7 @@ from ..source import (
 from ..utils import (
     clone_input,
     get_fake_value,
+    get_or_make_known_name,
     getfile,
     global_key_name,
     HAS_NUMPY,
@@ -109,6 +108,7 @@ class _missing:
 
 @dataclasses.dataclass
 class GraphArg:
+    name: str
     source: Source
     example: Any
     is_unspecialized: bool
@@ -125,11 +125,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -568,11 +563,11 @@ class VariableBuilder:
 
     def wrap_sym(self, value: Union[torch.SymInt, torch.SymFloat]):
         if not is_constant_source(self.get_source()):
-            self.tx.output.add_grapharg(GraphArg(self.get_source(), value, False, None))
+            self.tx.output.add_grapharg(get_or_make_known_name(self.get_source()), GraphArg(self.get_source(), value, False, None))
         elif is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                get_or_make_known_name(self.get_source()),
                 source=None,
                 sym_num=value
                 # shape Guards live their own rich life via shape_env
@@ -580,7 +575,7 @@ class VariableBuilder:
         return SymNodeVariable.create(
             tx=self.tx,
             proxy=self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+                get_or_make_known_name(self.get_source()), type(value)
             ),
             sym_num=value
             # shape Guards live their own rich life via shape_env
@@ -714,7 +709,7 @@ class VariableBuilder:
         if is_constant_source(self.get_source()):
             return self.tx.output.register_attr_or_module(
                 value,
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                get_or_make_known_name(self.get_source()),
                 source=self.get_source(),
                 # Guards are added inside register_attr_or_module
             )
@@ -743,7 +738,7 @@ class VariableBuilder:
             ignore_subclass = False
 
         tensor_proxy = self.tx.output.create_graph_input(
-            re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
+            get_or_make_known_name(self.get_source()), type(value)
         )
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
@@ -765,7 +760,7 @@ class VariableBuilder:
             fake_tensor_value = example_value
 
         self.tx.output.add_grapharg(
-            GraphArg(self.get_source(), value, False, fake_tensor_value)
+            GraphArg(get_or_make_known_name(self.get_source()), self.get_source(), value, False, fake_tensor_value)
         )
 
         if type(value) in config.traceable_tensor_subclasses:
@@ -815,7 +810,8 @@ class VariableBuilder:
                 options.update({"raw_value": value})
 
             proxy = self.tx.output.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(wrapped_value)
+                get_or_make_known_name(self.get_source()),
+                type(wrapped_value),
             )
 
             unspec_var = wrap_fx_proxy_cls(
@@ -833,6 +829,7 @@ class VariableBuilder:
                     fake_tensor_value = example_value
                 self.tx.output.add_grapharg(
                     GraphArg(
+                        get_or_make_known_name(self.get_source()),
                         self.get_source(),
                         wrapped_value,
                         isinstance(wrapped_value, torch.Tensor),

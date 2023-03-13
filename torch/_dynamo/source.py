@@ -58,6 +58,9 @@ class LocalSource(Source):
     def name(self):
         return rename_implicit(self.local_name)
 
+    def flat_name(self):
+        return self.name()
+
 
 @dataclasses.dataclass
 class LocalInputSource(LocalSource):
@@ -139,6 +142,25 @@ class AttrSource(Source):
         if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
+
+    def flat_name(self):
+        """
+        Flat name is a name devoid of eval-able identifiers for the purpose of normalization.
+
+        When we have param names in non dynamo code, we have no way of building something like
+        foo.bar[0].baz into the same change of getattrs.
+
+        This, instead, bypasses that in favor of a simple dot access name.
+
+        Not safe for eval, use name() instead.
+        """
+        return f"{self.base.flat_name()}.{self.member}"
+
+
+@dataclasses.dataclass
+class ParamBufferSource(AttrSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 class TensorProperty(enum.Enum):
@@ -268,6 +290,9 @@ class GetItemSource(Source):
                 return f"{self.base.name()}[{enum_repr(self.index)}]"
             else:
                 return f"{self.base.name()}[{self.index!r}]"
+    
+    def flat_name(self):
+        return self.name()
 
 
 @dataclasses.dataclass
@@ -365,6 +390,9 @@ class NNModuleSource(Source):
 
     def name(self):
         return self.inner.name()
+
+    def flat_name(self):
+        return self.inner.flat_name()
 
 
 class NotNNModuleSource(NNModuleSource):
