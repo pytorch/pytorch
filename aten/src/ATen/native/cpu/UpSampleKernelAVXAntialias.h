@@ -106,24 +106,26 @@ void ImagingResampleHorizontalConvolution8u4x(
     int kmax,
     unsigned int coefs_precision,
     int64_t num_channels,
-    bool is_last_input_line);
+    bool is_last_line);
 
 void ImagingResampleHorizontalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
-    const uint8_t* C10_RESTRICT lineIn,
     int64_t out_xsize,
+    const uint8_t* C10_RESTRICT lineIn,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
     int64_t num_channels,
-    bool is_last_input_line);
+    bool is_last_line);
 
 void ImagingResampleVerticalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
     const uint8_t* C10_RESTRICT lineIn,
     int64_t xsize,
+    int64_t in_ysize,
     int64_t ymin,
     int64_t ymax,
     const int16_t* k,
@@ -181,8 +183,9 @@ void ImagingResampleHorizontal(
   for (; yy < yout; yy++) {
     ImagingResampleHorizontalConvolution8u(
         unpacked_output_p + yy * xout_stride,
-        unpacked_input_p + yy * xin_stride,
         xout,
+        unpacked_input_p + yy * xin_stride,
+        xin,
         idx_ptr_xmin,
         idx_ptr_size,
         kk,
@@ -212,6 +215,7 @@ void ImagingResampleVertical(
   uint8_t* unpacked_output_p = unpacked_output.data_ptr<uint8_t>();
   const uint8_t* unpacked_input_p = unpacked_input.data_ptr<uint8_t>();
 
+  auto yin = unpacked_input.size(1);
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
   TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
@@ -226,6 +230,7 @@ void ImagingResampleVertical(
         unpacked_output_p + yy * xout_stride,
         unpacked_input_p,
         xout,
+        yin,
         ymin,
         ymax,
         k,
@@ -391,7 +396,7 @@ void ImagingResampleHorizontalConvolution8u4x(
     int kmax,
     unsigned int coefs_precision,
     int64_t num_channels,
-    bool is_last_input_line) {
+    bool is_last_line) {
 
   // Define shuffling masks (low/high) for num_channels 4 and 3
   const __m256i masks_low_high_c4[2] = {
@@ -425,16 +430,32 @@ void ImagingResampleHorizontalConvolution8u4x(
   // Precompute xmax limits for block 4 and block 2
   // lineIn0 + stride * (x + xmin) + 16 <= lineIn0 + stride * (xmax + xmin)
   // --> x <= xmax - 16.0 / stride
-  // --> x < xmax + 1 - int(16.0 / stride)
-  const auto b4_delta = int(16.0 / stride) - 1;
+  // Strict boundary:
+  // --> x < xmax + 1 - int(ceil(16.0 / stride)) = xmax - b4_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> x < xmax + 1 - int(16.0 / stride) = xmax - b4_delta_soft
+  // RGBA: b4_delta = b4_delta_soft = 3
+  // RGB : b4_delta = 5
+  // RGB : b4_delta_soft = 4
+  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
 
   // lineIn0 + stride * (x + xmin) + 8 <= lineIn0 + stride * (xmax + xmin)
   // --> x <= xmax - 8.0 / stride
-  // --> x < xmax + 1 - int(8.0 / stride)
-  const auto b2_delta = int(8.0 / stride) - 1;
+  // Strict boundary:
+  // --> x < xmax + 1 - int(ceil(8.0 / stride)) = xmax - b2_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> x < xmax + 1 - int(8.0 / stride) = xmax - b2_delta_soft
+  // RGBA: b2_delta = b2_delta_soft = 1
+  // RGB : b2_delta = 2
+  // RGB : b2_delta_soft = 1
+  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+
   // out_xsize = output width, out_x = output x index
   // xmax = interpolation size, x = interpolation index (horizontal <-> x dimension)
   // xmin = input x start index corresponding to output x index (out_x)
+
+  const auto max_out_x_strided = out_xsize * stride;
+  const auto max_in_x_strided = in_xsize * stride;
 
   const auto zero = _mm256_setzero_si256();
   const auto initial = _mm256_set1_epi32(1 << (coefs_precision - 1));
@@ -461,7 +482,6 @@ void ImagingResampleHorizontalConvolution8u4x(
       auto pix2 = _mm256_shuffle_epi8(source, mask_high);
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix2, mmk1));
 
-      // TODO: Possible read of out of mem bounds:
       auto source2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si128((__m128i *) (lineIn2 + stride * (x + xmin)))),
           _mm_loadu_si128((__m128i *) (lineIn3 + stride * (x + xmin))), 1);
@@ -480,9 +500,6 @@ void ImagingResampleHorizontalConvolution8u4x(
       pix1 = _mm256_shuffle_epi8(pix1, mask_low);
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
-      // TODO: Possible read of out of mem bounds:
-      // - out_x= 223, xmax= 2, b4_delta= 4, b2_delta= 1
-      // _mm_loadu_si64(lineIn3 + stride * (x + xmin)) will read 8 bytes of 6 bytes possible.
       auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
           _mm_loadu_si64(lineIn2 + stride * (x + xmin))),
           _mm_loadu_si64(lineIn3 + stride * (x + xmin)), 1);
@@ -515,7 +532,7 @@ void ImagingResampleHorizontalConvolution8u4x(
 
       auto p0 = mm_cvtepu8_epi32(lineIn2 + stride * (x + xmin));
       __m128i p1;
-      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line && stride * (x + xmin) + 4 >= stride * in_xsize)) {
+      if (num_channels == 3 && C10_UNLIKELY(is_last_line && stride * (x + xmin) + 4 >= max_in_x_strided)) {
         uint8_t output1[4];
         std::memcpy(output1, lineIn3 + stride * (x + xmin), 3);
         p1 = mm_cvtepu8_epi32(output1);
@@ -538,46 +555,49 @@ void ImagingResampleHorizontalConvolution8u4x(
     auto o2 = _mm_cvtsi128_si32(_mm256_castsi256_si128(sss1));
     auto o3 = _mm_cvtsi128_si32(_mm256_extracti128_si256(sss1, 1));
 
-    if (num_channels == 3 && C10_UNLIKELY(stride * out_x + 4 >= out_xsize * stride)) {
-      auto n0 = *(uint32_t *)(lineOut0 + stride * (out_x + 1));
-      *(uint32_t *)(lineOut0 + stride * out_x) = o0;
-      *(uint32_t *)(lineOut0 + stride * (out_x + 1)) = n0;
+    const auto out_x_strided = stride * out_x;
 
-      auto n1 = *(uint32_t *)(lineOut1 + stride * (out_x + 1));
-      *(uint32_t *)(lineOut1 + stride * out_x) = o1;
-      *(uint32_t *)(lineOut1 + stride * (out_x + 1)) = n1;
+    if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
+      auto n0 = *(uint32_t *)(lineOut0 + out_x_strided + stride);
+      *(uint32_t *)(lineOut0 + out_x_strided) = o0;
+      *(uint32_t *)(lineOut0 + out_x_strided + stride) = n0;
 
-      auto n2 = *(uint32_t *)(lineOut2 + stride * (out_x + 1));
-      *(uint32_t *)(lineOut2 + stride * out_x) = o2;
-      *(uint32_t *)(lineOut2 + stride * (out_x + 1)) = n2;
+      auto n1 = *(uint32_t *)(lineOut1 + out_x_strided + stride);
+      *(uint32_t *)(lineOut1 + out_x_strided) = o1;
+      *(uint32_t *)(lineOut1 + out_x_strided + stride) = n1;
 
-      if (C10_UNLIKELY(is_last_input_line)) {
-        std::memcpy(lineOut3 + stride * out_x, (unsigned char *) &o3, num_channels);
+      auto n2 = *(uint32_t *)(lineOut2 + out_x_strided + stride);
+      *(uint32_t *)(lineOut2 + out_x_strided) = o2;
+      *(uint32_t *)(lineOut2 + out_x_strided + stride) = n2;
+
+      if (C10_UNLIKELY(is_last_line)) {
+        std::memcpy(lineOut3 + out_x_strided, (unsigned char *) &o3, num_channels);
       } else {
-        auto n3 = *(uint32_t *)(lineOut3 + stride * (out_x + 1));
-        *(uint32_t *)(lineOut3 + stride * out_x) = o3;
-        *(uint32_t *)(lineOut3 + stride * (out_x + 1)) = n3;
+        auto n3 = *(uint32_t *)(lineOut3 + out_x_strided + stride);
+        *(uint32_t *)(lineOut3 + out_x_strided) = o3;
+        *(uint32_t *)(lineOut3 + out_x_strided + stride) = n3;
       }
     } else {
-      *(uint32_t *)(lineOut0 + stride * out_x) = o0;
-      *(uint32_t *)(lineOut1 + stride * out_x) = o1;
-      *(uint32_t *)(lineOut2 + stride * out_x) = o2;
-      *(uint32_t *)(lineOut3 + stride * out_x) = o3;
+      *(uint32_t *)(lineOut0 + out_x_strided) = o0;
+      *(uint32_t *)(lineOut1 + out_x_strided) = o1;
+      *(uint32_t *)(lineOut2 + out_x_strided) = o2;
+      *(uint32_t *)(lineOut3 + out_x_strided) = o3;
     }
   }
 }
 
 void ImagingResampleHorizontalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
-    const uint8_t* C10_RESTRICT lineIn,
     int64_t out_xsize,
+    const uint8_t* C10_RESTRICT lineIn,
+    int64_t in_xsize,
     const int64_t* idx_ptr_xmin,
     const int64_t* idx_ptr_size,
     const int16_t* kk,
     int kmax,
     unsigned int coefs_precision,
     int64_t num_channels,
-    bool is_last_input_line) {
+    bool is_last_line) {
 
   // Define various shuffling masks
   const auto kmask_low = _mm256_set_epi8(
@@ -647,18 +667,39 @@ void ImagingResampleHorizontalConvolution8u(
   // Precompute xmax limits for block 8, block 4 and block 2
   // lineIn + stride * (x + xmin) + 32 <= lineIn + stride * (xmax + xmin)
   // --> x <= xmax - 32.0 / stride
-  // --> x < xmax + 1 - int(32.0 / stride)
-  const auto b8_delta = int(32.0 / stride) - 1;
+  // Strict boundary:
+  // --> x < xmax + 1 - int(ceil(32.0 / stride)) = xmax - b8_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> x < xmax + 1 - int(32.0 / stride) = xmax - b8_delta_soft
+  // RGBA: b8_delta = b8_delta_soft = 7
+  // RGB : b8_delta = 10
+  // RGB : b8_delta_soft = 9
+  const auto b8_delta = (stride == 4) ? 7 : ((is_last_line) ? 10 : 9);
 
   // lineIn + stride * (x + xmin) + 16 <= lineIn0 + stride * (xmax + xmin)
   // --> x <= xmax - 16.0 / stride
-  // --> x < xmax + 1 - int(16.0 / stride)
-  const auto b4_delta = int(16.0 / stride) - 1;
+  // Strict boundary:
+  // --> x < xmax + 1 - int(ceil(16.0 / stride)) = xmax - b4_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> x < xmax + 1 - int(16.0 / stride) = xmax - b4_delta_soft
+  // RGBA: b4_delta = b4_delta_soft = 3
+  // RGB : b4_delta = 5
+  // RGB : b4_delta_soft = 4
+  const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
 
   // lineIn0 + stride * (x + xmin) + 8 <= lineIn0 + stride * (xmax + xmin)
   // --> x <= xmax - 8.0 / stride
-  // --> x < xmax + 1 - int(8.0 / stride)
-  const auto b2_delta = int(8.0 / stride) - 1;
+  // Strict boundary:
+  // --> x < xmax + 1 - int(ceil(8.0 / stride)) = xmax - b2_delta
+  // Soft boundary for reading inside the buffer except its boundaries:
+  // --> x < xmax + 1 - int(8.0 / stride) = xmax - b2_delta_soft
+  // RGBA: b2_delta = b2_delta_soft = 1
+  // RGB : b2_delta = 2
+  // RGB : b2_delta_soft = 1
+  const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
+
+  const auto max_out_x_strided = out_xsize * stride;
+  const auto max_in_x_strided = in_xsize * stride;
 
   for (const auto out_x : c10::irange(out_xsize)) {
     __m128i sss;
@@ -725,7 +766,7 @@ void ImagingResampleHorizontalConvolution8u(
       auto mmk = _mm_set1_epi32(k[x]);
       __m128i pix;
       auto p = lineIn + stride * (x + xmin);
-      if (num_channels == 3 && C10_UNLIKELY(is_last_input_line)) {
+      if (num_channels == 3 && C10_UNLIKELY(is_last_line && stride * (x + xmin) + 4 >= max_in_x_strided)) {
         unsigned char output[4];
         std::memcpy(output, p, 3);
         pix = mm_cvtepu8_epi32(output);
@@ -739,10 +780,18 @@ void ImagingResampleHorizontalConvolution8u(
     sss = _mm_packus_epi16(sss, zero);
 
     auto o = _mm_cvtsi128_si32(sss);
-    if (num_channels == 3 && C10_UNLIKELY(stride * out_x + 4 >= out_xsize * stride)) {
-      std::memcpy(lineOut + stride * out_x, (unsigned char *) &o, num_channels);
+    const auto out_x_strided = stride * out_x;
+    // TODO: Rerun explicitly measurement on this trick
+    if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
+      if (C10_UNLIKELY(is_last_line)) {
+        std::memcpy(lineOut + out_x_strided, (unsigned char *) &o, num_channels);
+      } else {
+        auto n = *(uint32_t *)(lineOut + out_x_strided + stride);
+        *(uint32_t *)(lineOut + out_x_strided) = o;
+        *(uint32_t *)(lineOut + out_x_strided + stride) = n;
+      }
     } else {
-      *(uint32_t *)(lineOut + stride * out_x) = o;
+      *(uint32_t *)(lineOut + out_x_strided) = o;
     }
   }
 }
@@ -751,6 +800,7 @@ void ImagingResampleVerticalConvolution8u(
     uint8_t* C10_RESTRICT lineOut,
     const uint8_t* C10_RESTRICT lineIn,
     int64_t xsize,
+    int64_t in_ysize,
     int64_t ymin,
     int64_t ymax,
     const int16_t* k,
@@ -768,6 +818,8 @@ void ImagingResampleVerticalConvolution8u(
   const int64_t data_size = xsize * stride;
   const int64_t data_stride = stride;
   constexpr auto vec_size = 256 / 8;
+
+  const int64_t in_max_size = data_size * in_ysize;
 
   const auto initial = _mm_set1_epi32(1 << (coefs_precision - 1));
   const auto initial_256 = _mm256_set1_epi32(1 << (coefs_precision - 1));
@@ -910,12 +962,15 @@ void ImagingResampleVerticalConvolution8u(
   for (; i < data_size; i += data_stride) {
     auto sss = initial;
     int64_t y = 0;
-    for (; y < ymax - 1; y += 2) {
+    // For RGBA we can use (ymax - 1) as tighter limit but for RGB we can read outside memory boundary
+    // for the last remaining line
+    for (; y < ymax - 2; y += 2) {
       // Load two coefficients at once
       auto mmk = _mm_set1_epi32(*(int32_t*)&k[y]);
 
       // Load 2 lines
       auto source1 = _mm_cvtsi32_si128(*(int32_t*)(lineIn + i + data_size * (y + ymin)));
+      // TODO: THIS IS UNSAFE READING
       auto source2 = _mm_cvtsi32_si128(*(int32_t*)(lineIn + i + data_size * (y + 1 + ymin)));
 
       auto source = _mm_unpacklo_epi8(source1, source2);
@@ -928,8 +983,9 @@ void ImagingResampleVerticalConvolution8u(
 
       const uint8_t * p = lineIn + i + data_size * (y + ymin);
       __m128i pix;
-      // TODO: Update condition to apply on the last pixel only
-      if (num_channels == 3) {
+      if (num_channels == 3 && i + data_size * (y + ymin) + 4 >= in_max_size) {
+      // There is no much perf gain using more detailed condition
+      // if (num_channels == 3) {
         uint8_t output[4];
         std::memcpy(output, p, 3);
         pix = mm_cvtepu8_epi32(output);
@@ -944,6 +1000,7 @@ void ImagingResampleVerticalConvolution8u(
     sss = _mm_packus_epi16(sss, zero);
 
     auto o = _mm_cvtsi128_si32(sss);
+    // TODO: Is this expensive to memcpy vs write uint32 ?
     if (num_channels == 3 && C10_UNLIKELY(i + 4 >= data_size)) {
       std::memcpy(lineOut + i, (unsigned char *) &o, num_channels);
     } else {
