@@ -38,7 +38,9 @@ Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tensor& out
           if (has_weights) {
             updatesTensor = mpsGraphRankedPlaceHolder(mpsGraph, weights);
           } else {
-            updatesTensor = [mpsGraph constantWithScalar:1.0f shape:getMPSShape(self) dataType:getMPSDataType(output.scalar_type())];
+            updatesTensor = [mpsGraph constantWithScalar:1.0f
+                                                   shape:getMPSShape(self)
+                                                dataType:getMPSDataType(output.scalar_type())];
           }
 
           MPSGraphTensor* castedInputTensor = inputTensor;

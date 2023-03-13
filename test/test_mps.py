@@ -422,9 +422,6 @@ def mps_ops_modifier(ops):
         'geqrf': None,
         'nn.functional.grid_sample': None,  # Unsupported Border padding mode
         'heaviside': None,
-        #'histc': None,
-        #'histogram': None,
-        #'histogramdd': None,
         'i0': None,
         'igamma': None,
         'igammac': None,
@@ -9997,11 +9994,11 @@ class TestFallbackWarning(TestCase):
         self.assertEqual(out, "")
 
     def _get_not_implemented_op(self):
-        # This can be changed once we actually implement `torch.histc`
+        # This can be changed once we actually implement `torch.lgamma`
         # Should return fn, args, kwargs, string_version
-        return (torch.histc,
+        return (torch.lgamma,
                 torch.tensor([100], device='mps'), {},
-                "torch.histc(torch.tensor([4], device='mps', dtype=torch.float))")
+                "torch.lgamma(torch.tensor([4], device='mps', dtype=torch.float))")
 
     def test_error_on_not_implemented(self):
         fn, args, kwargs, _ = self._get_not_implemented_op()
@@ -10286,7 +10283,6 @@ class TestConsistency(TestCaseMPS):
                     atol = None
                     rtol = None
 
-                print(cpu_out, mps_out, cpu_args, cpu_kwargs)
                 self.assertEqual(cpu_out, mps_out, atol=atol, rtol=rtol)
 
             except Exception as e:

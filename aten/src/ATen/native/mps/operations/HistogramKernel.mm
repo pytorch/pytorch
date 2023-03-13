@@ -1,13 +1,13 @@
-#include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/Histogram.h>
+#include <ATen/native/mps/OperationUtils.h>
 
 namespace at::native {
 namespace mps {
 
 enum BIN_SELECTION_ALGORITHM {
-    LINEAR_INTERPOLATION,
-    LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
-    BINARY_SEARCH,
+  LINEAR_INTERPOLATION,
+  LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH,
+  BINARY_SEARCH,
 };
 
 static const char* METAL_HISTOGRAM = R"HISTOGRAM_METAL(
@@ -148,12 +148,13 @@ static id<MTLLibrary> compileHistogramOpLibrary(id<MTLDevice> device) {
     return histogramLibrary;
   }
 
-  NSError *error = nil;
-  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion: MTLLanguageVersion2_3];
-  histogramLibrary  = [device newLibraryWithSource:[NSString stringWithCString: METAL_HISTOGRAM encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  histogramLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_HISTOGRAM
+                                                                     encoding:NSASCIIStringEncoding]
+                                          options:options
+                                            error:&error];
   TORCH_CHECK(histogramLibrary, "Failed to create metal histogram library, error: ", [[error description] UTF8String]);
   return histogramLibrary;
 }
@@ -177,11 +178,10 @@ static id<MTLComputePipelineState> histogramPipelineState(id<MTLDevice> device, 
 }
 
 template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
-void histogramdd_kernel_impl(
-    Tensor& hist_output,
-    const TensorList& bin_edges,
-    const Tensor& input,
-    const c10::optional<Tensor>& weight) {
+void histogramdd_kernel_impl(Tensor& hist_output,
+                             const TensorList& bin_edges,
+                             const Tensor& input,
+                             const c10::optional<Tensor>& weight) {
   TORCH_CHECK(input.dtype() != at::kDouble, "float64 is not supported on MPS");
   TORCH_INTERNAL_ASSERT(input.dim() == 2);
 
@@ -190,23 +190,23 @@ void histogramdd_kernel_impl(
   const bool has_weight = weight.has_value();
 
   if (has_weight) {
-      TORCH_CHECK(weight.value().is_contiguous(), "histogramdd(): weight should be contiguous on MPS");
-      TORCH_INTERNAL_ASSERT(weight.value().dim() == 1 && weight.value().numel() == N);
-      TORCH_INTERNAL_ASSERT(weight.value().scalar_type() == input.scalar_type());
+    TORCH_CHECK(weight.value().is_contiguous(), "histogramdd(): weight should be contiguous on MPS");
+    TORCH_INTERNAL_ASSERT(weight.value().dim() == 1 && weight.value().numel() == N);
+    TORCH_INTERNAL_ASSERT(weight.value().scalar_type() == input.scalar_type());
   }
 
   const int64_t D = input.size(1);
   size_t bin_edges_numel = 0;
   TORCH_INTERNAL_ASSERT(int64_t(bin_edges.size()) == D);
   for (const auto dim : c10::irange(D)) {
-      bin_edges_numel += bin_edges[dim].numel();
-      TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
-      TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
+    bin_edges_numel += bin_edges[dim].numel();
+    TORCH_INTERNAL_ASSERT(bin_edges[dim].is_contiguous());
+    TORCH_INTERNAL_ASSERT(hist_output.size(dim) + 1 == bin_edges[dim].numel());
   }
 
   if (D == 0) {
-      // hist is an empty tensor in this case; nothing to do here
-      return;
+    // hist is an empty tensor in this case; nothing to do here
+    return;
   }
 
   std::vector<input_t> bin_seq(bin_edges_numel);
@@ -225,7 +225,6 @@ void histogramdd_kernel_impl(
     bin_seq_offset += num_bin_edges[dim];
   }
 
-
   const uint32_t kernelOffsetNumThreads = input.numel();
   const uint32_t numThreads = N;
   const auto hist_sizes = hist_output.sizes();
@@ -234,24 +233,20 @@ void histogramdd_kernel_impl(
   thread_hist_sizes[0] = numThreads;
   std::copy(hist_sizes.begin(), hist_sizes.end(), thread_hist_sizes.begin() + 1);
   Tensor thread_histograms = at::zeros(
-    thread_hist_sizes,
-    hist_output.scalar_type(),
-    c10::nullopt /* layout */,
-    kMPS,
-    c10::nullopt /* pin_memory */
+      thread_hist_sizes, hist_output.scalar_type(), c10::nullopt /* layout */, kMPS, c10::nullopt /* pin_memory */
   );
   TORCH_INTERNAL_ASSERT(thread_histograms.is_contiguous());
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  id<MTLBuffer> inputBuffer  = getMTLBufferStorage(input);
+  id<MTLBuffer> inputBuffer = getMTLBufferStorage(input);
   id<MTLBuffer> outputBuffer = getMTLBufferStorage(thread_histograms);
-  id<MTLBuffer> weightBuffer = has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength: 0
-                                                             options: 0] autorelease];
-  size_t weightOffset =  has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
+  id<MTLBuffer> weightBuffer =
+      has_weight ? getMTLBufferStorage(weight.value()) : [[device newBufferWithLength:0 options:0] autorelease];
+  size_t weightOffset = has_weight ? weight.value().storage_offset() * weight.value().element_size() : 0;
   MPSStream* mpsStream = getCurrentMPSStream();
   const uint32_t nDim = input.sizes().size();
 
-  dispatch_sync(mpsStream->queue(), ^(){
+  dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       NSError* error = nil;
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
@@ -261,17 +256,19 @@ void histogramdd_kernel_impl(
       std::vector<uint32_t> iterShapeData(iterShape.size());
       std::vector<uint32_t> strides(input.strides().begin(), input.strides().end());
 
-      for (const auto i: c10::irange(iterShape.size())) {
+      for (const auto i : c10::irange(iterShape.size())) {
         TORCH_CHECK(i <= UINT32_MAX);
         iterShapeData[i] = (uint32_t)(iterShape[i]);
       }
 
-      id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength: kernelOffsetNumThreads * sizeof(uint)
-                                                            options: 0] autorelease];
-      id<MTLFunction> stridedIndicesFunction = MPSDevice::getInstance()->metalIndexingFunction("get_strided_indices_2", nil);
-      id<MTLComputePipelineState> stridedIndicesPSO = [[device newComputePipelineStateWithFunction: stridedIndicesFunction
-                                                                                                error: &error] autorelease];
-      TORCH_CHECK(stridedIndicesPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
+      id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:kernelOffsetNumThreads * sizeof(uint)
+                                                                options:0] autorelease];
+      id<MTLFunction> stridedIndicesFunction =
+          MPSDevice::getInstance()->metalIndexingFunction("get_strided_indices_2", nil);
+      id<MTLComputePipelineState> stridedIndicesPSO =
+          [[device newComputePipelineStateWithFunction:stridedIndicesFunction error:&error] autorelease];
+      TORCH_CHECK(
+          stridedIndicesPSO, "Failed to create pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:1];
@@ -279,36 +276,38 @@ void histogramdd_kernel_impl(
 
       NSUInteger stridedIndicesTGSize = stridedIndicesPSO.maxTotalThreadsPerThreadgroup;
       if (stridedIndicesTGSize > kernelOffsetNumThreads)
-          stridedIndicesTGSize = kernelOffsetNumThreads;
+        stridedIndicesTGSize = kernelOffsetNumThreads;
 
       MTLSize stridedIndicesThreadGroupSize = MTLSizeMake(stridedIndicesTGSize, 1, 1);
-      [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: stridedIndicesThreadGroupSize];
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:stridedIndicesThreadGroupSize];
 
       const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
       id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);
       [computeEncoder setComputePipelineState:histogramPSO];
-      [computeEncoder setBuffer:inputBuffer  offset:input.storage_offset() * input.element_size() atIndex:0];
-      [computeEncoder setBuffer:weightBuffer  offset:weightOffset atIndex:1];
-      [computeEncoder setBuffer:outputBuffer offset:thread_histograms.storage_offset() * thread_histograms.element_size() atIndex:2];
+      [computeEncoder setBuffer:inputBuffer offset:input.storage_offset() * input.element_size() atIndex:0];
+      [computeEncoder setBuffer:weightBuffer offset:weightOffset atIndex:1];
+      [computeEncoder setBuffer:outputBuffer
+                         offset:thread_histograms.storage_offset() * thread_histograms.element_size()
+                        atIndex:2];
       [computeEncoder setBuffer:stridedIndicesBuffer offset:0 atIndex:3];
       [computeEncoder setBytes:&D length:sizeof(int64_t) atIndex:4];
-      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset  atIndex:5];
+      [computeEncoder setBytes:bin_seq.data() length:sizeof(input_t) * bin_seq_offset atIndex:5];
       [computeEncoder setBytes:num_bin_edges.data() length:sizeof(int64_t) * D atIndex:6];
       [computeEncoder setBytes:leftmost_edge.data() length:sizeof(input_t) * D atIndex:7];
       [computeEncoder setBytes:rightmost_edge.data() length:sizeof(input_t) * D atIndex:8];
-      [computeEncoder setBytes:thread_histograms.strides().data() length:sizeof(int64_t) * thread_hist_sizes.size() atIndex:9];
+      [computeEncoder setBytes:thread_histograms.strides().data()
+                        length:sizeof(int64_t) * thread_hist_sizes.size()
+                       atIndex:9];
       [computeEncoder setBytes:&bin_selection_algorithm length:sizeof(uint8_t) atIndex:10];
       [computeEncoder setBytes:&has_weight length:sizeof(uint8_t) atIndex:11];
 
       NSUInteger tgSize = histogramPSO.maxTotalThreadsPerThreadgroup;
       if (tgSize > numThreads) {
-          tgSize = numThreads;
+        tgSize = numThreads;
       }
       gridSize = MTLSizeMake(numThreads, 1, 1);
       MTLSize threadGroupSize = MTLSizeMake(tgSize, 1, 1);
-      [computeEncoder dispatchThreads: gridSize
-                threadsPerThreadgroup: threadGroupSize];
+      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
 
       [computeEncoder endEncoding];
       mpsStream->commit(true);
@@ -317,85 +316,77 @@ void histogramdd_kernel_impl(
   at::sum_out(hist_output, thread_histograms, /*dim=*/{0});
 }
 
-template<BIN_SELECTION_ALGORITHM bin_algorithm>
-static void histogramdd_out_mps_template(
-  const Tensor& self,
-  const c10::optional<Tensor>& weight,
-  bool density,
-  Tensor& hist,
-  const TensorList& bin_edges)
-{
+template <BIN_SELECTION_ALGORITHM bin_algorithm>
+static void histogramdd_out_mps_template(const Tensor& self,
+                                         const c10::optional<Tensor>& weight,
+                                         bool density,
+                                         Tensor& hist,
+                                         const TensorList& bin_edges) {
   hist.fill_(0);
 
   const int64_t N = self.size(-1);
-  const int64_t M = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
-          (int64_t)1, std::multiplies<int64_t>());
+  const int64_t M =
+      std::accumulate(self.sizes().begin(), self.sizes().end() - 1, (int64_t)1, std::multiplies<int64_t>());
 
   const Tensor reshaped_input = self.reshape({M, N});
 
-  const auto reshaped_weight = weight.has_value()
-          ? c10::optional<Tensor>(weight.value().reshape({M}))
-          : c10::optional<Tensor>();
+  const auto reshaped_weight =
+      weight.has_value() ? c10::optional<Tensor>(weight.value().reshape({M})) : c10::optional<Tensor>();
 
   std::vector<Tensor> bin_edges_contig(bin_edges.size());
   for (const auto dim : c10::irange(bin_edges_contig.size())) {
-      bin_edges_contig[dim] = bin_edges[dim].contiguous();
+    bin_edges_contig[dim] = bin_edges[dim].contiguous();
   }
 
   AT_DISPATCH_FLOATING_TYPES(self.scalar_type(), "histogram_mps", [&]() {
-    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(
-      hist,
-      bin_edges_contig,
-      reshaped_input,
-      reshaped_weight
-    );
+    mps::histogramdd_kernel_impl<scalar_t, bin_algorithm>(hist, bin_edges_contig, reshaped_input, reshaped_weight);
   });
 
   /* Divides each bin's value by the total count/weight in all bins,
-    * and by the bin's volume.
-    */
+   * and by the bin's volume.
+   */
   if (density) {
-      const auto hist_sum = hist.sum().item();
-      hist.div_(hist_sum);
+    const auto hist_sum = hist.sum().item();
+    hist.div_(hist_sum);
 
-        /* For each dimension, divides each bin's value
-        * by the bin's length in that dimension.
-        */
-      for (const auto dim : c10::irange(N)) {
-          const auto bin_lengths = bin_edges[dim].diff();
+    /* For each dimension, divides each bin's value
+     * by the bin's length in that dimension.
+     */
+    for (const auto dim : c10::irange(N)) {
+      const auto bin_lengths = bin_edges[dim].diff();
 
-          // Used to reshape bin_lengths to align with the corresponding dimension of hist.
-          std::vector<int64_t> shape(N, 1);
-          shape[dim] = bin_lengths.numel();
+      // Used to reshape bin_lengths to align with the corresponding dimension of hist.
+      std::vector<int64_t> shape(N, 1);
+      shape[dim] = bin_lengths.numel();
 
-          hist.div_(bin_lengths.reshape(shape));
-      }
+      hist.div_(bin_lengths.reshape(shape));
+    }
   }
 }
 } // namespace mps
 
-static void histogramdd_kernel(
-  const Tensor& self,
-  const c10::optional<Tensor>& weight,
-  bool density,
-  Tensor& hist,
-  const TensorList& bin_edges)
-{
+static void histogramdd_kernel(const Tensor& self,
+                               const c10::optional<Tensor>& weight,
+                               bool density,
+                               Tensor& hist,
+                               const TensorList& bin_edges) {
   mps::histogramdd_out_mps_template<mps::BINARY_SEARCH>(self, weight, density, hist, bin_edges);
 }
 
-static void histogramdd_linear_kernel(const Tensor& self, const c10::optional<Tensor>& weight,
-        bool density, Tensor& hist, const TensorList& bin_edges, bool local_search) {
-
+static void histogramdd_linear_kernel(const Tensor& self,
+                                      const c10::optional<Tensor>& weight,
+                                      bool density,
+                                      Tensor& hist,
+                                      const TensorList& bin_edges,
+                                      bool local_search) {
   if (local_search) {
     // histogramdd codepath: both hist and bin_edges are eventually returned as output,
     // so we'll keep them consistent
     mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION_WITH_LOCAL_SEARCH>(
-      self, weight, density, hist, bin_edges);
+        self, weight, density, hist, bin_edges);
   } else {
     // histc codepath: bin_edges are not returned to the caller
-    mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION>(
-      self, weight, density, hist, bin_edges);
+    mps::histogramdd_out_mps_template<mps::LINEAR_INTERPOLATION>(self, weight, density, hist, bin_edges);
   }
 }
 
