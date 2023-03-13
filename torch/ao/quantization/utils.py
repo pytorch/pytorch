@@ -179,6 +179,11 @@ def get_qparam_dict(observer_or_fake_quant):
     qparams["scale"] = scale
     qparams["zero_point"] = zero_point
 
+    if hasattr(observer_or_fake_quant, "quant_min"):
+        qparams["quant_min"] = observer_or_fake_quant.quant_min
+    if hasattr(observer_or_fake_quant, "quant_max"):
+        qparams["quant_max"] = observer_or_fake_quant.quant_max
+
     return qparams
 
 
