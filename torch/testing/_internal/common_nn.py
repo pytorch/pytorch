@@ -2564,6 +2564,36 @@ new_module_tests = [
         desc='complex'
     ),
     dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_size=(3, 4),
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_fn=lambda: torch.rand(2, 3, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((1, 2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({1, 2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ZeroPad1d',
+        constructor_args=((-1, -2),),
+        cpp_constructor_args='torch::nn::ZeroPad1dOptions({-1, -2})',
+        input_size=(3, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='negative_dims',
+    ),
+    dict(
         module_name='ZeroPad2d',
         constructor_args=((1, 2, 3, 4),),
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({1, 2, 3, 4})',
@@ -2591,6 +2621,28 @@ new_module_tests = [
         cpp_constructor_args='torch::nn::ZeroPad2dOptions({-1, -1, -1, -2})',
         input_size=(2, 3, 4, 4),
         desc='negative_dims'
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_size=(2, 3, 4, 4, 4),
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_size=(3, 4, 4, 4),
+        reference_fn=single_batch_reference_fn,
+        desc='no_batch_dim',
+    ),
+    dict(
+        module_name='ZeroPad3d',
+        constructor_args=((1, 2, 3, 4, 5, 6),),
+        cpp_constructor_args='torch::nn::ZeroPad3dOptions({1, 2, 3, 4, 5, 6})',
+        input_fn=lambda: torch.rand(2, 3, 4, 4, 4, dtype=torch.complex128, requires_grad=True),
+        skip_half=True,
+        desc='complex'
     ),
     dict(
         module_name='ConstantPad1d',
