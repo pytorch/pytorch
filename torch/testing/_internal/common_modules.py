@@ -14,7 +14,7 @@ from torch.testing._internal.common_device_type import (
     _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta, skipCUDAVersionIn)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_nn import nllloss_reference, get_reduction, single_batch_reference_fn
+from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
     freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
 from types import ModuleType
@@ -1730,9 +1730,9 @@ module_db: List[ModuleInfo] = [
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
                decorators=rnn_gru_lstm_module_info_decorators),
     ModuleInfo(torch.nn.ReflectionPad1d,
-               module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
+                module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
                 skips=(
-                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
                 ),
     ModuleInfo(torch.nn.ReflectionPad2d,
                 module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
