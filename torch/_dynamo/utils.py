@@ -741,6 +741,31 @@ tuple_iterator = type(iter(tuple()))
 tuple_iterator_len = tuple_iterator.__length_hint__
 object_new = object.__new__
 
+# See Note - [On Dynamic Dim Guards]
+def dynamic_dims_check(tensor, prior_dynamo_dynamic_ranges):
+    if not hasattr(tensor, "_dynamo_dynamic_ranges"):
+        return True
+    if not set(tensor._dynamo_dynamic_ranges.keys()).issubset(
+        set(prior_dynamo_dynamic_ranges.keys())
+    ):
+        return False
+    for key, vr in tensor._dynamo_dynamic_ranges.items():
+        prior_vr = prior_dynamo_dynamic_ranges[key]
+        # Below, None means not set, aka (pos/neg) infinity
+        # If a prior value is None, and a new value is not, we reject
+        if prior_vr[1] is None and vr.max is not None:
+            return False
+        if prior_vr[0] is None and vr.min is not None:
+            return False
+
+        # If the new range min is lower, we must reject
+        if vr.min < prior_vr[0]:
+            return False
+        # If the new range min is higher, we must reject
+        if vr.max > prior_vr[1]:
+            return False
+    return True
+
 
 def product(it):
     return functools.reduce(operator.mul, it, 1)

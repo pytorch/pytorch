@@ -30,6 +30,7 @@ from .utils import (
     dict_const_keys,
     dict_const_keys_repr,
     dict_param_key_ids,
+    dynamic_dims_check,
     guard_failures,
     HAS_NUMPY,
     istype,
@@ -58,6 +59,7 @@ CLOSURE_VARS = collections.OrderedDict(
         ("___dict_const_keys", dict_const_keys),
         ("___tuple_iterator_len", tuple_iterator_len),
         ("___tuple_iterator_getitem", tuple_iterator_getitem),
+        ("___dynamic_dims_check", dynamic_dims_check),
         ("__math_isnan", math.isnan),
         ("inf", float("inf")),
     ]
@@ -425,7 +427,9 @@ class GuardBuilder(GuardBuilderBase):
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            [a.dynamic_ranges for a in fs],
             source_ref=self.source_ref,
+            strict_mark_dyn=output_graph.export,
         )
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
@@ -480,6 +484,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
 
+            # Note - [On Dynamic Dim Guards]
             # A frame is valid for reuse with dynamic dimensions if the new dynamic dimensions are a
             # strict subset of the old.
             #
@@ -507,23 +512,31 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
+            #
+            # There is finer grain control available within _dynamo_dynamic_ranges - and that is for ranges.
+            # To fully understand that, please see the mark_dynamic_constrain api docs first.
+            # The way we guard on user directive ranges specified via mark_dynamic_constrain is by the same logic as
+            # above. Specifically, when X is a strict subset of Y notion around which dimensions can be valid, the same
+            # goes for the value ranges WITHIN a dimension. We specialize to the user directive range. Ranges within
+            # that range can safely reuse the same compiled frame, but wider ranges must recompile.
             static, reason = tensor_always_has_static_shape(
                 value, guard.source, is_tensor=True
             )
             if not static:
-                if hasattr(value, "_dynamo_dynamic_indices"):
-                    code.append(
-                        f"({tensor_name}._dynamo_dynamic_indices.issubset({value._dynamo_dynamic_indices})) if hasattr({tensor_name}, '_dynamo_dynamic_indices') else True"  # noqa: B950
-                    )
+                if hasattr(value, "_dynamo_dynamic_ranges"):
+                    dims_check = str(dict(value._dynamo_dynamic_ranges))
+                    dims_check = dims_check.replace("-oo", "None")
+                    dims_check = dims_check.replace("oo", "None")
+                    code.append(f"___dynamic_dims_check({tensor_name}, {dims_check})")
                 # In the case of us not having any dynamic dimension indices, we compiled the frame with no chance of
                 # raising for this specific tensor - and any inputs with more dynamic user directives specified must be recompiled.
                 else:
                     code.append(
-                        f"hasattr({tensor_name}, '_dynamo_dynamic_indices') == False"
+                        f"hasattr({tensor_name}, '_dynamo_dynamic_ranges') == False"
                     )
             else:
                 assert not hasattr(
-                    value, "_dynamo_dynamic_indices"
+                    value, "_dynamo_dynamic_ranges"
                 ), f"Illegal Unreachable state, guard accumulation for dynamic tensor that should have been static. Initial static message: {tensor_static_reason_to_message(reason)}"  # noqa: B950
 
             if len(code) > 0:

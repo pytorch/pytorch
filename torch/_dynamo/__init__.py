@@ -1,3 +1,7 @@
+from collections import defaultdict
+from typing import Optional
+
+from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 from . import allowed_functions, convert_frame, eval_frame, resume_execution
 from .backends.registry import list_backends, register_backend
 from .convert_frame import replay
@@ -37,6 +41,8 @@ __all__ = [
     "is_compiling",
     "register_backend",
     "list_backends",
+    "mark_dynamic_constrain",
+    "clear_dynamic",
 ]
 
 
@@ -157,13 +163,125 @@ def mark_dynamic(t, index):
     before torch.compile.
 
     """
+    mark_dynamic_constrain(t, index, min=None, max=None)
+
+
+@forbid_in_graph
+def mark_dynamic_constrain(
+    t, index, *, min: Optional[int] = None, max: Optional[int] = None
+):
+    """
+    To fully understand this API, please read the documentation for mark_dynamic first,
+    as this API is an enrichment over that API.
+
+    In its current state, ``mark_dynamic_constrain`` fully subsumes ``mark_dynamic``.
+
+    ``mark_dynamic_constrain`` allows users to provide a directive that the dimension will fall
+    within a given range. A range can be unbounded on either ``min``, or ``max``. Multiple calls to this API for
+    the same dimension will fail. At guard accumulation time, we verify that the dimension fell within the
+    specified range, and raise if it does not.
+
+    Example usage is as follow:
+
+    ::
+
+        x = torch.randn([7, 7, 7])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 5:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    We will get a new guard, ``4 <= a.size()[0] <= 10``.
+
+    If we run it again, with a wider constraint, by adding these 2 lines:
+
+    ::
+
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    Nothing happens - ``mark_dynamic_constrain`` is sticky unless reset, so the range is still
+    at the narrowest intersection (4, 10).
+
+    If we delete the field first:
+
+    ::
+
+        torch._dynamo.clear_dynamic(x, 0)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=12)
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+
+    We will recompile, and get a new guard, ``3 <= a.size()[0] <= 12``.
+
+    Alternatively, if our directive had been counter to the guards:
+
+    ::
+
+        x = torch.randn([7, 7, 7])
+
+        def my_dyn_fn(a):
+            if a.shape[0] > 5:
+                return a.cos()
+            return a.sin()
+
+        torch._dynamo.optimize("eager")(my_dyn_fn)(x)
+        torch._dynamo.mark_dynamic_constrain(x, 0, min=2, max=4)
+
+    We would raise.
+
+    This API behaves identically for eager and export.
+    """
     if isinstance(index, int):
-        if not hasattr(t, "_dynamo_dynamic_indices"):
-            t._dynamo_dynamic_indices = set()
+        if not hasattr(t, "_dynamo_dynamic_ranges"):
+            t._dynamo_dynamic_ranges = defaultdict(MinMaxConstraint.NONE)
         # TODO(voz): Should we bounds check?
-        t._dynamo_dynamic_indices.add(index)
+        new_range = MinMaxConstraint(min=min, max=max)
+        if index in t._dynamo_dynamic_ranges:
+            raise RuntimeError(
+                f"Attempt to constrain already constrained index {index}"
+            )
+        t._dynamo_dynamic_ranges[index] = new_range
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i)
+        mark_dynamic_constrain(t, i, min=min, max=max)
+
+
+@forbid_in_graph
+def clear_dynamic(t, index):
+    """
+    Marks a given index or list of indices as not dynamic.
+
+    :param t: The tensor object to operate on.
+    :type t: tensor
+    :param index: The index or list of indices to mark as not dynamic.
+    :type index: int or list[int]
+    :raises AssertionError: If the tensor does not have
+        any dynamic dimensions.
+    """
+    if isinstance(index, int):
+        assert hasattr(
+            t, "_dynamo_dynamic_ranges"
+        ), "Illegal call to clear without dynamic dims"
+        del t._dynamo_dynamic_ranges[index]
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        clear_dynamic(t, i)
+
+
+@forbid_in_graph
+def has_dynamic_dims(t):
+    return hasattr(t, "_dynamo_dynamic_ranges")
+
+
+@forbid_in_graph
+def clear_dynamic_dims(t):
+    assert has_dynamic_dims(t)
+    delattr(t, "_dynamo_dynamic_ranges")
