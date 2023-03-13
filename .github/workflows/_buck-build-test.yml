@@ -103,6 +103,10 @@ jobs:
         run: |
           buck build :aten_cpu
 
+      - name: Build aten_cpu@shared
+        run: |
+          buck build :aten_cpu#linux-x86_64,shared
+
       - name: Build torch_mobile_core
         run: |
           buck build :torch_mobile_core
