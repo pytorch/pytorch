@@ -427,6 +427,12 @@ def run_test(
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+    if test_module in UNITTEST_SKIP_RETRIES:
+        if options.pytest:
+            raise RuntimeError("A test running with pytest cannot skip retries using "
+                               "the UNITTEST_SKIP_RETRIES set.")
+        env = env or {}
+        env['PYTORCH_RETRY_TEST_CASES'] = '0'
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(options)
@@ -861,13 +867,18 @@ CUSTOM_HANDLERS = {
 }
 
 
-PYTEST_BLOCKLIST = [
-    "test_public_bindings", # We don't want rerun here.
+PYTEST_BLOCKLIST = {
+    "test_public_bindings",  # We don't want rerun here.
     "profiler/test_profiler",
     "dynamo/test_repros",  # skip_if_pytest
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
-]
+}
+
+
+UNITTEST_SKIP_RETRIES = {
+    'test_public_bindings'
+}
 
 
 def parse_test_module(test):
