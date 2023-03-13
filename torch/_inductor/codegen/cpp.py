@@ -2062,9 +2062,33 @@ class CppKernelProxy(CppKernel):
                     pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
-                # TODO(Eikan) Remove redundant to_dtype like load_bf16 + to_fp32 + to_bf16 + store_bf16
-                # => load_bf16 + store_bf16
-                pass
+                def _eliminate_redudant_to_node(sub_graph: torch.fx.Graph):
+                    # Eliminate the redudant to_dtype node. Let's consider a pattern as follows:
+                    #   graph():
+                    #     %to_dtype1 = call_method[target=to_dtype](args = (%ops, %input, torch.float), kwargs = {})
+                    #     %to_dtype2 = call_method[target=to_dtype](args = (%ops, %to_dtype1, torch.float), kwargs = {})
+                    # Regarding the first to_dtype, it is redudant because the second to_type also converts to the
+                    # torch.float. Hence, we remove the first to_type
+                    def _used_by_to(to_node: torch.fx.Node):
+                        return all(usr.target == "to_dtype" for usr in to_node.users)
+
+                    all_to_nodes = [
+                        node for node in sub_graph.nodes if node.target == "to_dtype"
+                    ]
+                    all_to_nodes = [
+                        {node: node.users} for node in all_to_nodes if _used_by_to(node)
+                    ]
+                    for node, users in all_to_nodes:
+                        if all(usr.args[-1] == node.args[-1] for usr in users):
+                            val_node = node.all_input_nodes[-1]
+                            node.replace_all_uses_with(val_node)
+                            sub_graph.eliminate_dead_code()
+
+                def _eliminate_to_node_mem_copy(sub_grah: torch.fx.Graph):
+                    pass
+
+                _eliminate_redudant_to_node()
+                _eliminate_to_node_mem_copy()
 
             eliminate_to_dtype(sub_graph)
 
