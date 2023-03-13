@@ -96,16 +96,12 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-struct Context {
-  virtual ~Context() = default;
-};
-
-typedef std::shared_ptr<Context> (*CreateContextFn)(void);
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
 struct History {
   void* addr;
   size_t real_size; // unrounded, actually requested size
-  std::shared_ptr<Context> context; // per-watcher context
+  std::shared_ptr<GatheredContext> context; // per-watcher context
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
@@ -152,15 +148,15 @@ struct TraceEntry {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
-      std::shared_ptr<Context> context = nullptr)
+      std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         addr_(addr),
-        context_(context),
+        context_(std::move(context)),
         stream_(stream),
         size_(size) {}
   Action action_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
-  std::shared_ptr<Context> context_;
+  std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
   int64_t size_;
 };

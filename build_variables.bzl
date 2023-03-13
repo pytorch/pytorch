@@ -715,6 +715,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/enum.cpp",
     "torch/csrc/api/src/imethod.cpp",
     "torch/csrc/api/src/jit.cpp",
+    "torch/csrc/api/src/mps.cpp",
     "torch/csrc/api/src/serialize.cpp",
     "torch/csrc/api/src/nn/init.cpp",
     "torch/csrc/api/src/nn/module.cpp",
@@ -768,6 +769,7 @@ torch_cpp_srcs = [
 
 libtorch_python_cuda_core_sources = [
     "torch/csrc/cuda/Event.cpp",
+    "torch/csrc/profiler/unwind/unwind.cpp",
     "torch/csrc/cuda/Module.cpp",
     "torch/csrc/cuda/python_comm.cpp",
     "torch/csrc/cuda/Stream.cpp",
