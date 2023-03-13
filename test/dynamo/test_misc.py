@@ -7,6 +7,7 @@ import dis
 import enum
 import logging
 import math
+import operator
 import os
 import sys
 import typing
@@ -3755,25 +3756,23 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(ref, res))
 
     def test_user_function_variable_supports_function_argument(self):
+        # Test user defined function default arguments can be:
+        # 1, user defined functions (e.g, add1)
+        # 2, torch functions (e.g, torch.sin)
+        # 3, python builtin functions (e.g, operator.neg)
         def add1(x):
             return x + 1
 
-        def add2(x):
-            return x + 2
+        def gn(x, f1=add1, f2=torch.sin, f3=operator.neg):
+            return f3(f2(f1(x)))
 
-        def gn(x, f=add1):
-            if f is add1:
-                return x + 1
-            else:
-                return x + 2
-
-        def fn(x, f):
-            return gn(x, f)
+        def fn(x):
+            return gn(x)
 
         x = torch.randn(2, 3)
-        ref = fn(x, add2)
+        ref = fn(x)
         opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
-        res = opt_fn(x, add2)
+        res = opt_fn(x)
         self.assertTrue(torch.allclose(ref, res))
 
     def test_typing_variable_isinstance(self):
