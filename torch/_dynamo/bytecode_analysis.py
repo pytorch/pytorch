@@ -2,6 +2,7 @@ import bisect
 import dataclasses
 import dis
 import sys
+from collections import deque
 from numbers import Real
 
 TERMINAL_OPCODES = {
@@ -165,11 +166,6 @@ def livevars_analysis(instructions, instruction):
 
 
 @dataclasses.dataclass
-class FixedPointBox:
-    value: bool = True
-
-
-@dataclasses.dataclass
 class StackSize:
     low: Real
     high: Real
@@ -178,20 +174,19 @@ class StackSize:
         self.low = 0
         self.high = 0
 
-    def offset_of(self, other, n, fixed_point):
+    def offset_of(self, other, n):
         prior = (self.low, self.high)
         self.low = min(self.low, other.low + n)
         self.high = max(self.high, other.high + n)
         if (self.low, self.high) != prior:
-            fixed_point.value = False
+            return True
         else:
-            fixed_point.value = True
+            return False
 
 
 def stacksize_analysis(instructions):
     assert instructions
 
-    fixed_point = FixedPointBox()
     stack_sizes = {
         inst: StackSize(float("inf"), float("-inf")) for inst in instructions
     }
@@ -199,25 +194,25 @@ def stacksize_analysis(instructions):
 
     indexof = {id(inst): i for i, inst in enumerate(instructions)}
 
-    worklist = list()
+    worklist = deque()
     worklist.append(0)
 
     while len(worklist) != 0:
-        index = worklist.pop(0)
+        index = worklist.popleft()
         inst = instructions[index]
         stack_size = stack_sizes[inst]
         if inst.opcode not in TERMINAL_OPCODES:
             assert index + 1 < len(instructions), f"missing next inst: {inst}"
-            stack_sizes[instructions[index + 1]].offset_of(
-                stack_size, stack_effect(inst.opcode, inst.arg, jump=False), fixed_point
+            changed = stack_sizes[instructions[index + 1]].offset_of(
+                stack_size, stack_effect(inst.opcode, inst.arg, jump=False)
             )
-            if not fixed_point.value:
+            if changed:
                 worklist.append(index + 1)
         if inst.opcode in JUMP_OPCODES:
-            stack_sizes[inst.target].offset_of(
-                stack_size, stack_effect(inst.opcode, inst.arg, jump=True), fixed_point
+            changed = stack_sizes[inst.target].offset_of(
+                stack_size, stack_effect(inst.opcode, inst.arg, jump=True)
             )
-            if not fixed_point.value:
+            if changed:
                 worklist.append(indexof[id(inst.target)])
 
     if False:
@@ -228,6 +223,5 @@ def stacksize_analysis(instructions):
     low = min([x.low for x in stack_sizes.values()])
     high = max([x.high for x in stack_sizes.values()])
 
-    fixed_point.value = True
     assert low >= 0
     return high
