@@ -5,7 +5,6 @@ import os
 import sys
 import unittest
 from functools import partial
-from unittest.mock import patch
 
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
@@ -109,7 +108,6 @@ class TestInductorDynamic(TestCase):
         super(TestCase, self).tearDown()
         torch._dynamo.reset()
 
-    @patch.object(torch._dynamo.config, "specialize_int", False)
     def test_arange_dynamic(self, device):
         def fn(a):
             batch_size = a.numel()
