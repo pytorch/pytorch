@@ -54,7 +54,7 @@ static const char* backend_to_string(const at::Backend& backend) {
   }
 }
 
-std::string options_to_string(const at::TensorOptions options) {
+std::string options_to_string(const at::TensorOptions& options) {
   std::ostringstream ss;
   ss << backend_to_string(options.backend()) << "."
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";

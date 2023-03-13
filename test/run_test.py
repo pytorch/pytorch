@@ -230,7 +230,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -239,12 +238,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -256,7 +253,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -265,12 +261,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -673,6 +667,7 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
+    exclude_module_list = []
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests
@@ -687,6 +682,7 @@ def run_doctests(test_module, test_directory, options):
         'autograd_profiler': 0,
         'cpp_ext': 0,
         'monitor': 0,
+        "onnx": "auto",
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -710,6 +706,17 @@ def run_doctests(test_module, test_directory, options):
         else:
             enabled['qengine'] = True
 
+    if enabled["onnx"] == "auto":
+        try:
+            import onnx  # NOQA
+            import onnxscript  # NOQA
+            import onnxruntime  # NOQA
+        except ImportError:
+            exclude_module_list.append("torch.onnx._internal.fx.*")
+            enabled["onnx"] = False
+        else:
+            enabled["onnx"] = True
+
     # Set doctest environment variables
     if enabled['cuda']:
         os.environ['TORCH_DOCTEST_CUDA'] = '1'
@@ -732,6 +739,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['monitor']:
         os.environ['TORCH_DOCTEST_MONITOR'] = '1'
 
+    if enabled["onnx"]:
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+
     if 0:
         # TODO: could try to enable some of these
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
@@ -739,7 +749,6 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
         os.environ['TORCH_DOCTEST_HUB'] = '1'
         os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
-        os.environ['TORCH_DOCTEST_ONNX'] = '1'
         os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
@@ -757,7 +766,8 @@ def run_doctests(test_module, test_directory, options):
     xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
-        command=options.xdoctest_command, argv=[])
+        command=options.xdoctest_command, argv=[],
+        exclude=exclude_module_list)
     result = 1 if run_summary.get('n_failed', 0) else 0
     return result
 
@@ -886,27 +896,11 @@ CUSTOM_HANDLERS = {
 
 
 PYTEST_BLOCKLIST = [
-    "test_package",
-    "test_nccl",
-    "inductor/test_torchinductor",
-    "test_cuda",
-    "test_quantization",
-    "test_cuda_nvml_based_avail",
-    "test_cuda_primary_ctx",
-    "test_cuda_sanitizer",
-    "test_cuda_trace",
-    "test_fx",
-    "test_jiterator",
-    "test_mps",
-    "test_cuda_trace",
     "profiler/test_profiler",
-    "test_jit",
-    "test_jit_legacy",
     "dynamo/test_repros",  # skip_if_pytest
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
-    "dynamo/test_unspec",  # imports repros
-] + list(CUSTOM_HANDLERS.keys())
+]
 
 
 def parse_test_module(test):
@@ -1157,6 +1151,10 @@ def must_serial(file: str) -> bool:
     )
 
 
+def can_run_in_pytest(test):
+    return (test not in PYTEST_BLOCKLIST) and (os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0')
+
+
 def get_selected_tests(options):
     selected_tests = options.include
 
@@ -1367,7 +1365,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test not in PYTEST_BLOCKLIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1385,7 +1383,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test not in PYTEST_BLOCKLIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
