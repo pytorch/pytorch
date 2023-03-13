@@ -38,6 +38,9 @@ TEST(MPSAllocator, MPSAllocatorCallbacks) {
         }
         replay_buffer.push_back(new_value);
     }
+    // call synchronize() explicitly to wait for all MPS streams to
+    // finish the Metal completionHandlers in MPSAllocator. Note that MPSAllocator
+    // does this implicitly, but we call this for testing purposes.
     torch::mps::synchronize();
     ASSERT_TRUE(replay_buffer.size() < max_iter);
 }
