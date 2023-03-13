@@ -1059,17 +1059,20 @@ def wrap_to_fake_tensor_and_record(
     ):
         static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
+        dynamic_indices = None
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            dynamic_indices = e._dynamo_dynamic_indices
+            assert not static_shapes, tensor_static_reason_to_message(reason)
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
                 static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
+                dynamic_indices=dynamic_indices,
             )
         )
-        if hasattr(e, "_dynamo_dynamic_indices"):
-            fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert not static_shapes, tensor_static_reason_to_message(reason)
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

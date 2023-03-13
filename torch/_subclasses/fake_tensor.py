@@ -6,7 +6,7 @@ import os
 import weakref
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, TypeVar, Union, Set
 from weakref import ReferenceType
 
 import torch
@@ -242,6 +242,7 @@ class FakeTensorConverter:
         ignore_subclass=False,
         *,
         source=None,
+        dynamic_dims=None,
     ):
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
@@ -275,6 +276,7 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
@@ -310,6 +312,7 @@ class FakeTensorConverter:
         shape_env=None,
         ignore_subclass=False,
         source=None,
+        dynamic_dims=None
     ):
         return self.from_real_tensor(
             fake_mode,
@@ -318,6 +321,7 @@ class FakeTensorConverter:
             shape_env=shape_env,
             ignore_subclass=ignore_subclass,
             source=source,
+            dynamic_dims=dynamic_dims,
         )
 
 
@@ -1390,8 +1394,11 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
+        dynamic_indices: Optional[Set[int]] = None,
     ):
         if static_shapes:
+            # Unreachable state if using dynamo, but good to double check anyway
+            assert dynamic_indices is None
             return self.fake_tensor_converter(
                 self, tensor, ignore_subclass=ignore_subclass, source=source
             )

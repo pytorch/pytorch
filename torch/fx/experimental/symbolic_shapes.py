@@ -1226,6 +1226,8 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {}
+        # Tensor id to dynamic dims
+        self.id_to_dynamic_dims: Dict[int, Set[int]] = {} 
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1253,11 +1255,12 @@ class ShapeEnv:
         """
         return (len(self.replacements), len(self.divisible))
 
-    def _produce_dyn_sizes(self, ex: torch.Tensor, source: Source) -> List[sympy.Expr]:
+    def _produce_dyn_sizes(self, ex: torch.Tensor, source: Source, dynamic_dims:Optional[Set[int]]) -> List[sympy.Expr]:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
+        self.id_to_dynamic_dims[id(ex)] = dynamic_dims
         for i, val in enumerate(ex.size()):
-            is_dynamic = _is_dim_dynamic(ex, i)
+            is_dynamic = dynamic_dims and i in dynamic_dims
             if _should_allocate(is_dynamic, self.assume_static_by_default):
                 size.append(self.create_symbol(
                     val, TensorPropertySource(source, TensorProperty.SIZE, i), is_dynamic
@@ -1266,14 +1269,14 @@ class ShapeEnv:
                 size.append(sympy.Integer(val))
         return size
 
-    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source):
+    def create_symbolic_sizes_strides_storage_offset(self, ex: torch.Tensor, source: Source, dynamic_dims:Optional[Set[int]]):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source)
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -1530,7 +1533,7 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss)
-                if _is_dim_dynamic(t, i):
+                if id(t) in self.id_to_dynamic_dims and i in self.id_to_dynamic_dims[id(t)]:
                     # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                     # constrained to an integer.
                     if _is_int(ss):
@@ -1951,9 +1954,6 @@ def _should_allocate(user_marked_dynamic, assume_static_by_default):
     # If we got here, the user did *NOT* mark this dim as dynamic,
     # but BC behavior is to allocate a symbol anyway.
     return not assume_static_by_default
-
-def _is_dim_dynamic(t, d):
-    return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
 
 def _is_int(expr):
     if not isinstance(expr, SymInt):
