@@ -716,9 +716,9 @@ def error():
     raise AssertionError("shouldn't be hit")
 
 
-def get_debugging_stack():
-    # cut this frame and the caller's frame
-    return ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
+def get_debugging_stack(num_frames_to_cut=2):
+    # cut this frame and the caller's frame by default
+    return ''.join(traceback.format_list(traceback.extract_stack()[:-num_frames_to_cut]))
 
 
 def floor_ceil_helper(a, fn):
@@ -1833,7 +1833,7 @@ class ShapeEnv:
             if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
                 # specializing to a constant, which is likely unexpected
                 torch._dynamo.guards.log.warning(f"Specializing {self.var_to_sources[a][0].name()} to {expr}")
-                torch._dynamo.guards.log.debug(f"Stack trace:\n{get_debugging_stack()}")
+                torch._dynamo.guards.log.debug("SPECIALIZATION", stack_info=True)
             self.replacements[a] = expr
 
     @_lru_cache
@@ -1921,20 +1921,18 @@ class ShapeEnv:
     def _add_guard(self, expr: "sympy.Expr") -> None:
         stack = get_debugging_stack()
         guard = ShapeGuard(expr, stack)
-        if os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1":
+        if torch._dynamo.config.print_guards:
             # reusing flag that prints guards
             frame_summaries = TracingContext.get().frame_summary_stack
             # frame_summaries describes a stack of functions
             # TODO(avik): It would be better to describe a stack of function calls instead
             current_loc = TracingContext.get().loc_in_frame
             # current_loc describes a line in the current frame
+            # TODO: optimize this; avoid formatting traces until we need them
             user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
-            try:
-                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
-            except Exception:
-                pass
+            expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
             torch._dynamo.guards.log.warning(f"Adding shape guard {expr} at \n{user_stack}")
-            torch._dynamo.guards.log.debug(f"Stack trace:\n{stack}")
+            torch._dynamo.guards.log.debug("SHAPE GUARD", stack_info=True)
         self.guards.append(guard)
 
     @lru_cache(256)
