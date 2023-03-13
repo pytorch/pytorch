@@ -88,9 +88,11 @@ def validate_ir(node_or_nodes):
         assert isinstance(
             node,
             (
+                DynamicScalar,
                 TensorBox,
                 RandSeedBuffer,
                 sympy.Symbol,
+                sympy.core.relational.Relational,
                 Expr,
             ),
         ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -325,8 +327,10 @@ class IRNode:
     def current_origins(origins: Set[torch.fx.Node]):
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
-        yield
-        IRNode._current_origins = old
+        try:
+            yield
+        finally:
+            IRNode._current_origins = old
 
     def __post_init__(self):
         self.origins = set(self._current_origins)
