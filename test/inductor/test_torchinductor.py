@@ -5843,6 +5843,21 @@ if HAS_CPU:
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
 
+        def test_cat_mul(self):
+            # https://github.com/pytorch/pytorch/issues/93365
+            def fn(p0, p1):
+                y1 = torch.cat([p0, p1], dim=0)
+                y2 = torch.mul(y1, y1)
+                return y1, y2
+
+            p0 = torch.randn(3, 4)
+            p1 = torch.randn(3, 4)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(p0, p1)
+            real_out = fn(p0, p1)
+            compiled_out = opt_fn(p0, p1)
+            assert same(real_out, compiled_out)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
