@@ -347,8 +347,8 @@ def try_ann_to_type(ann, loc):
         else:
             contained = ann.__args__[1]
         valid_type = try_ann_to_type(contained, loc)
-        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
-        assert valid_type, msg.format(repr(ann), repr(contained))
+        msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
+        assert valid_type, msg.format(repr(ann), repr(contained), repr(loc))
         return OptionalType(valid_type)
     if is_union(ann):
         # TODO: this is hack to recognize NumberType
@@ -362,8 +362,8 @@ def try_ann_to_type(ann, loc):
             if a is None:
                 inner.append(NoneType.get())
             maybe_type = try_ann_to_type(a, loc)
-            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved."
-            assert maybe_type, msg.format(repr(ann), repr(maybe_type))
+            msg = "Unsupported annotation {} could not be resolved because {} could not be resolved. At\n{}"
+            assert maybe_type, msg.format(repr(ann), repr(maybe_type), repr(loc))
             inner.append(maybe_type)
         return UnionType(inner)    # type: ignore[arg-type]
     if torch.distributed.rpc.is_available() and is_rref(ann):
