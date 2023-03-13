@@ -9298,12 +9298,11 @@
     MPS: min_mps
     QuantizedCPU: min_quantized_cpu
 
-# Not to be confused with binary op `min.out`. Commented because of failed CI
-# FIXME: enable this
-#- func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: min_unary_out
+- func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: min_unary_out
+    QuantizedCPU: min_quantized_unary_out
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmin.out

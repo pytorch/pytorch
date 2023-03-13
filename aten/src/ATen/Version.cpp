@@ -195,6 +195,10 @@ std::string show_config() {
     ss << detail::getORTHooks().showConfig();
   }
 
+  if (hasXPU()) {
+    ss << detail::getXPUHooks().showConfig();
+  }
+
   ss << "  - Build settings: ";
   for (const auto& pair : caffe2::GetBuildOptions()) {
     if (!pair.second.empty()) {
