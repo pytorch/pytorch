@@ -91,12 +91,6 @@ def map_fake_tensor_mode(f, xs, *args):
     outs = [f(x, *args) for x in xs]
     return outs[0].new_empty([xs.shape[0], *outs[0].shape])
 
-# We cannot directly call fallthrough here due to issue #89037.
-@map.py_impl(DispatchKey.PythonDispatcher)
-def map_python_dispatcher(*args):
-    _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
-    return map(*args)
-
 @map.py_impl(torch._C._functorch.TransformType.Functionalize)
 def map_functionalize(interpreter, f, xs, *args):
     """
@@ -128,6 +122,7 @@ def map_functionalize(interpreter, f, xs, *args):
         return _wrap_all_tensors_to_functional(map_return, level=interpreter.level())
 
 # TODO(voz) Make this automatic for keys, this is very ugly atm
+map.fallthrough(DispatchKey.PythonDispatcher)
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
 map.fallthrough(DispatchKey.ADInplaceOrView)
 map.fallthrough(DispatchKey.BackendSelect)
