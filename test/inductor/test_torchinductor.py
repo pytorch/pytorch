@@ -5858,6 +5858,21 @@ if HAS_CPU:
             compiled_out = opt_fn(p0, p1)
             assert same(real_out, compiled_out)
 
+        def test_reduce_with_masked(self):
+            # https://github.com/pytorch/pytorch/issues/96484
+            def fn(a, b):
+                a = torch.nn.functional.pad(a, (0, -1))
+                c = a + b
+                return c.min(0).values
+
+            a = torch.randn([2])
+            b = torch.randn([2])
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b)
+            real_out = fn(a, b)
+            compiled_out = opt_fn(a, b)
+            assert same(real_out, compiled_out)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
