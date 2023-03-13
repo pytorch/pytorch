@@ -5,7 +5,8 @@ set -ex
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
 # A bunch of custom pip dependencies for ONNX
-pip_install beartype==0.10.4 \
+pip_install \
+  beartype==0.10.4 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \

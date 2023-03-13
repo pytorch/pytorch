@@ -145,8 +145,7 @@ RUN rm install_triton.sh common_utils.sh triton.txt
 
 ARG ONNX
 # Install ONNX dependencies
-COPY ./common/install_onnx.sh install_onnx.sh
-COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_onnx.sh ./common/common_utils.sh ./
 RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
 RUN rm install_onnx.sh common_utils.sh
 
