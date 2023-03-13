@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -8,6 +9,7 @@
 
 #include <array>
 #include <mutex>
+#include <set>
 
 namespace c10 {
 
@@ -171,6 +173,14 @@ struct SnapshotInfo {
   std::vector<std::vector<TraceEntry>> device_traces;
 };
 
+// returns the pointers freed in the pool
+// and the pointers allocated. Note: a pointer
+// may appear in both freed and allocated
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<void*> ptrs_allocated;
+};
+
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
 
 // Size pretty-printer
@@ -216,7 +226,7 @@ class CUDAAllocator : public Allocator {
   virtual std::shared_ptr<AllocatorState> getCheckpointState(
       int device,
       MempoolId_t id) = 0;
-  virtual void setCheckpointPoolState(
+  virtual CheckpointDelta setCheckpointPoolState(
       int device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
@@ -292,7 +302,7 @@ inline std::shared_ptr<AllocatorState> getCheckpointState(
   return get()->getCheckpointState(device, id);
 }
 
-inline void setCheckpointPoolState(
+inline CheckpointDelta setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, pps);
