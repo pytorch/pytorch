@@ -126,16 +126,15 @@ function get_pinned_commit() {
 }
 
 function install_torchaudio() {
-  # Somehow installing torchaudio with a commit id doesn't work
-  local nightly_version
-  nightly_version=$(get_pinned_commit audio)
-  local device
-  if [[ "$1" == "cpu" ]]; then
-    device="cpu"
-  else
-    device="cu118"
+  if [[ "$1" != "cpu" ]]; then
+    # TODO: This is better to be passed as a parameter from _linux-test workflow
+    # so that it can be consistent with what is set in build
+    export TORCH_CUDA_ARCH_LIST="8.0;8.6"
   fi
-  pip_install --pre torchaudio=="$nightly_version"+"$device" -f https://download.pytorch.org/whl/nightly/"$device"/torch_nightly.html
+
+  local commit
+  commit=$(get_pinned_commit audio)
+  pip_install --no-use-pep517 --user "git+https://github.com/pytorch/audio.git@${commit}"
 }
 
 function install_torchtext() {
