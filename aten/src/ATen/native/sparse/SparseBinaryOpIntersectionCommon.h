@@ -133,8 +133,7 @@ void _sparse_binary_op_intersection_kernel_impl(
     Tensor& res,
     const Tensor& x_,
     const Tensor& y_,
-    const std::vector<int64_t>& broadcasted_shape,
-    const bool restrict_indices_to_rhs = false,
+    const std::vector<int64_t> broadcasted_shape,
     const bool distributive_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
@@ -148,32 +147,9 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   using KernelLauncher = KernelLauncher<kernel_t>;
 
-  // If the op and sum are distributive, coalesce is required.
-  // If restrict_indices_to_rhs is true, x needs to be coalesced so that
-  // (x.coalesce() intersection y union y).indices().counts() == y.indices().counts().
-  const Tensor x = (!distributive_with_sum || restrict_indices_to_rhs) ? x_.coalesce() : x_;
-  const Tensor y = [&]() -> Tensor {
-    auto rhs = distributive_with_sum ? y_ : y_.coalesce();
-    if (restrict_indices_to_rhs) {
-      // x is coalesced and y is marked as uncoalesced so that the intersection result
-      // respects the order of indices in y.
-      if (!rhs.is_same(y_)) {
-        // Safe to modify in-place, no side effects for y.
-        return rhs._coalesced_(false);
-      } else {
-        // No copy-constructor for sparse, hence a temporary sparse tensor is created
-        // with the fields taken from y. Ensures no side effects for y.
-        auto rhs_copy = at::empty({0}, rhs.options());
-        auto* rhs_copy_sparse_impl = get_sparse_impl(rhs_copy);
-        rhs_copy_sparse_impl->raw_resize_(rhs.sparse_dim(), rhs.dense_dim(), rhs.sizes());
-        rhs_copy_sparse_impl->set_indices_and_values_unsafe(rhs._indices(), rhs._values());
-        rhs_copy_sparse_impl->set_nnz_and_narrow(rhs._nnz());
-        rhs_copy._coalesced_(false);
-        return rhs_copy;
-      }
-    }
-    return rhs;
-  }();
+  // If the op and sum are not distributive, coalesce is required.
+  const Tensor x = distributive_with_sum ? x_ : x_.coalesce();
+  const Tensor y = distributive_with_sum ? y_ : y_.coalesce();
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
@@ -414,12 +390,6 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
-    // If true, the result's indices are the same as that of the rhs'.
-    // This behavior is useful when implementing operations
-    // with the symantics similar to that of sparse_mask,
-    // and it also requires less kernel calls compared to
-    // a generic intersection.
-    const bool restrict_indices_to_rhs = false,
     // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
     const bool distributive_with_sum = true
@@ -447,11 +417,11 @@ void _sparse_binary_op_intersection_kernel_out(
       // For some reason MSVC complaints about passing constexpr max_sparse_dims
       // as a template parameter claiming as if it is not know at compile time.
       kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
-        res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
+        res, x, y, broadcasted_shape, distributive_with_sum);
   } else {
     _sparse_binary_op_intersection_kernel_impl<
       kernel_t, value_selection_intersection_kernel_t, index_t>(
-        res, x, y, broadcasted_shape, restrict_indices_to_rhs, distributive_with_sum);
+        res, x, y, broadcasted_shape, distributive_with_sum);
   }
 }
 
