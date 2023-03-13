@@ -64,7 +64,6 @@ inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
         SDPBackend::flash_attention,
         SDPBackend::math};
   }
-  // const auto sizes = params.query.sizes();
   if (params.query.dim() != 4) {
     return default_order;
   }
@@ -74,8 +73,6 @@ inline std::array<SDPBackend, num_backends> priority_order(sdp_params params) {
       head_dim{params.query.sym_size(3)};
   if (batch_size > 0) {
     const auto threads_flash = batch_size * num_heads;
-    // const int64_t threads_cutlass =
-    //     threads_flash * (int64_t)std::floor(query_lengths / 64);
     const auto threads_cutlass =
         threads_flash * (query_lengths / c10::SymInt(64));
     bool more_threads_cutlass = (threads_cutlass / 2) >= threads_flash;
