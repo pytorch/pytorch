@@ -38,7 +38,7 @@ torch.backends.cuda
 
     A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
 
-.. attribute::  torch.backends.cuda.cufft_plan_cache[i]
+.. attribute::  torch.backends.cuda.cufft_plan_cache
 
     ``cufft_plan_cache`` contains the cuFFT plan caches for each CUDA device.
     Query a specific device `i`'s cache via `torch.backends.cuda.cufft_plan_cache[i]`.
