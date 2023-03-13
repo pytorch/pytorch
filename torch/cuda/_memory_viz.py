@@ -19,6 +19,39 @@ def _frame_fmt(f, full_filename=False):
     func = f['name']
     return f'{fname}:{i}:{func}'
 
+def _frame_filter(f):
+    omit_functions = [
+        "unwind::unwind",
+        "StackContext::gather",
+        "StackContext::_gather",
+        "_start",
+        "__libc_start_main"
+    ]
+    omit_filenames = [
+        "core/boxing",
+        "/Register",
+        "/Redispatch",
+        "pythonrun.c",
+        "Modules/main.c",
+        "Objects/call.c",
+        "Objects/methodobject.c",
+        "pycore_ceval.h",
+        "ceval.c",
+        "cpython/abstract.h",
+    ]
+    for of in omit_functions:
+        if of in f['name']:
+            return False
+    for of in omit_filenames:
+        if of in f['filename']:
+            return False
+    return True
+
+def _frames_fmt(frames, full_filename=False, reverse=False):
+    if reverse:
+        frames = reversed(frames)
+    return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f)]
+
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
         flamegraph_script = f'/tmp/{os.getuid()}_flamegraph.pl'
@@ -52,7 +85,7 @@ def _write_blocks(f, prefix, blocks):
             if 'frames' in h:
                 frames = h['frames']
                 if frames:
-                    frame_s = ';'.join([_frame_fmt(f) for f in reversed(frames)])
+                    frame_s = ';'.join(_frames_fmt(frames, reverse=True))
                 else:
                     frame_s = "<non-python>"
                 f.write(f'{prefix};{b["state"]};{frame_s} {sz}\n')
@@ -431,7 +464,7 @@ def trace_plot(data, device=None, plot_segments=False):
         next_version = addr_versions[addr] = addr_versions.get(addr, 0) + 1
         frames = [f"{addr_prefix}{addr:x}_{next_version - 1} {_format_size(size)} allocation ({size} bytes)",
                   *extra,
-                  *(_frame_fmt(f, full_filename=True) for f in frames)]
+                  *_frames_fmt(frames, full_filename=True)]
         return w.add_element(size, frames)
 
     for i, e in enumerate(trace):
@@ -864,7 +897,7 @@ def segment_plot(data: Any, device=None):
         return next_id
 
     def format_frames(frames):
-        return intern_stack([_frame_fmt(f, full_filename=True) for f in frames])
+        return intern_stack(_frames_fmt(frames, full_filename=True))
 
     result: Any = {
         'string_table': string_table,
