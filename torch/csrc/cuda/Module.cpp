@@ -793,6 +793,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str requested_size_s = "requested_size";
   py::str stream_s = "stream";
   py::str segment_type_s = "segment_type";
+  py::str segment_pool_id = "segment_pool_id";
   py::str large_s = "large";
   py::str small_s = "small";
   py::str size_s = "size";
@@ -820,6 +821,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     // represent the stream rather than a torch.cuda.stream object
     segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
+    segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -1152,6 +1154,23 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+
+  py::class_<
+      c10::cuda::CUDACachingAllocator::AllocatorState,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>>(
+      m, "_cuda_CUDAAllocator_AllocatorState");
+
+  m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
+    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
+  });
+
+  m.def(
+      "_cuda_setCheckpointPoolState",
+      [](int device,
+         std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
+        return c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
+            device, pps);
+      });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {
