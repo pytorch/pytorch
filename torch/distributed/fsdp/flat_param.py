@@ -1849,10 +1849,10 @@ class FlatParamHandle:
             flat_param.grad = None
 
     def _deregister_orig_params(self):
-        for (param_name, module, _) in self.flat_param._param_infos:
+        for param_name, module, _ in self.flat_param._param_infos:
             if hasattr(module, param_name):
                 delattr(module, param_name)
-        for (param_name, module, _, _, _, _) in self.flat_param._shared_param_infos:
+        for param_name, module, _, _, _, _ in self.flat_param._shared_param_infos:
             if hasattr(module, param_name):
                 delattr(module, param_name)
 
