@@ -16,9 +16,9 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     has_triton,
+    LineContext,
     sympy_dot,
     sympy_product,
-    LineContext
 )
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter

@@ -615,6 +615,7 @@ class PyCodeCache:
         return cls.cache[key]
 
     @classmethod
+    @functools.lru_cache(None)
     def stack_frames_for_code(cls, path, lineno):
         if path not in cls.linemaps:
             return None
@@ -631,7 +632,10 @@ class PyCodeCache:
             # but this is not along a performance critical path
             regex = r'File "(.+)", line (\d+), in (.+)\n'
             matches = re.findall(regex, stack_trace)
-            return [{"filename": f, "line": int(l), "name": n} for f, l, n in matches]
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
 
         return parse_stack_trace(entry.stack_trace)
 
