@@ -1,5 +1,5 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import hint_int, magic_methods, method_to_operator
 import torch
 import torch.fx as fx
 import operator
@@ -72,6 +72,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
+            assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -339,7 +340,8 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+        required_bw_nodes.update(bwd_outputs)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -385,6 +387,15 @@ def min_cut_rematerialization_partition(
     default_recomputable_ops += view_ops
 
     default_recomputable_ops += pointwise_ops()
+
+    default_recomputable_ops += [
+        aten.zeros_like,
+    ]
+
+    default_recomputable_ops += [
+        method_to_operator(m)
+        for m in magic_methods
+    ]
 
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
@@ -497,7 +508,7 @@ def min_cut_rematerialization_partition(
         if is_symint_node(node):
             weight = 1
         elif is_sym_node(node):
-            weight = 999999
+            weight = math.inf
         elif is_non_tensor_node:
             weight = math.inf
         else:
