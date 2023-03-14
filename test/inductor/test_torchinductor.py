@@ -6446,6 +6446,27 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
+            x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True)
+
+            def func(x1, x2):
+                y = x1 + x2
+                return maxpool(y)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(x1, x2)
+                assert same(graph(x1, x2), func(x1, x2), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 2
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -7504,6 +7525,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             patch.object(config.triton, "descriptive_names", "torch")(test_funcs)(
                 func_and_kernel_torch
             )
+
+        @patch.object(config, "profile_bandwidth", True)
+        def test_bandwidth_profiler(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(x):
+                x = x.cos()
+                x = x.cos()
+                x = torch.mm(x, x)
+                x = x.sin()
+                x = x.relu()
+                return x
+
+            inp = torch.randn(4, 4, device="cuda")
+            code = run_and_get_triton_code(fn, inp)
+            fn(inp)
+            self.assertTrue("start_graph" in code)
+            self.assertTrue("end_graph" in code)
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

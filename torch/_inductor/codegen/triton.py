@@ -19,6 +19,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
+    get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
     sympy_product,
@@ -1673,7 +1674,11 @@ class TritonScheduling:
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 
-            wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), kernel_path)
+            metadata_comment = f"# kernel path: {kernel_path}"
+            metadata_comment += "\n" + get_kernel_metadata(node_schedule)
+            wrapper.define_kernel(
+                kernel_name, compile_wrapper.getvalue(), metadata_comment
+            )
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):
