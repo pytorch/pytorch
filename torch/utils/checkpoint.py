@@ -10,7 +10,7 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "_set_checkpoint_early_stop"
+    "set_device_states",
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -599,12 +599,11 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 args = ctx.get_args(ctx.saved_tensors)
 
                 try:
-                    # pass gid in in case we do reentrant backward
                     with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
                         frame.recompute_fn(*args)
                         if _enable_checkpoint_early_stop:
                             raise AssertionError("if early stop is enabled, we don't expect to reach here")
-                except _StopRecomputationError as e:
+                except _StopRecomputationError:
                     pass
                 frame.is_recomputed[gid] = True
 
