@@ -2704,7 +2704,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             return op.op(*c_args, **c_kwargs)
 
-        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic)
+        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
         try:
             _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
         except GuardOnDataDependentSymNode:
