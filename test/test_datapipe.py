@@ -30,6 +30,7 @@ from unittest import skipIf
 import numpy as np
 
 import torch
+import torch.nn as nn
 import torch.utils.data.datapipes as dp
 import torch.utils.data.graph
 import torch.utils.data.graph_settings
@@ -658,9 +659,23 @@ def _mod_3_test(x):
     return x % 3 == 1
 
 
+def _to_list(x):
+    return [x]
+
+
 lambda_fn1 = lambda x: x  # noqa: E731
 lambda_fn2 = lambda x: x % 2  # noqa: E731
 lambda_fn3 = lambda x: x >= 5  # noqa: E731
+
+
+class Add1Module(nn.Module):
+    def forward(self, x):
+        return x + 1
+
+
+class Add1Callable:
+    def __call__(self, x):
+        return x + 1
 
 
 class TestFunctionalIterDataPipe(TestCase):
@@ -729,6 +744,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, None, (_fake_filter_fn,), {}),
             (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
             (dp.iter.Forker, None, (2,), {}),
+            (dp.iter.Forker, None, (2,), {"copy": "shallow"}),
             (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
             (dp.iter.IterableWrapper, range(10), (), {}),
             (dp.iter.Mapper, None, (_fake_fn,), {}),
@@ -932,6 +948,22 @@ class TestFunctionalIterDataPipe(TestCase):
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
         self.assertEqual([(i, i) for i in range(10)], output)
+
+        # Functional Test: two child DataPipes yield shallow copies with copy equals shallow
+        dp1, dp2 = input_dp.map(_to_list).fork(num_instances=2, copy="shallow")
+        for n1, n2 in zip(dp1, dp2):
+            self.assertIsNot(n1, n2)
+            self.assertEqual(n1, n2)
+
+        # Functional Test: two child DataPipes yield deep copies with copy equals deep
+        dp1, dp2 = input_dp.map(_to_list).map(_to_list).fork(num_instances=2, copy="deep")
+        for n1, n2 in zip(dp1, dp2):
+            self.assertIsNot(n1[0], n2[0])
+            self.assertEqual(n1, n2)
+
+        # Functional Test: fork DataPipe raises error for unknown copy method
+        with self.assertRaises(ValueError):
+            input_dp.fork(num_instances=2, copy="unknown")
 
         # Functional Test: make sure logic related to slowest_ptr is working properly
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
@@ -1325,6 +1357,10 @@ class TestFunctionalIterDataPipe(TestCase):
         # Handling built-in functions (e.g. `dict`, `iter`, `int`, `str`) whose signatures cannot be inspected
         _helper(lambda data: (str(data[0]), data[1], data[2]), str, 0)
         _helper(lambda data: (data[0], data[1], int(data[2])), int, 2)
+
+        # Handle nn.Module and Callable (without __name__ implemented)
+        _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Module(), 0)
+        _helper(lambda data: (data[0] + 1, data[1], data[2]), Add1Callable(), 0)
 
     @suppress_warnings  # Suppress warning for lambda fn
     def test_map_dict_with_col_iterdatapipe(self):

@@ -203,12 +203,12 @@ def _prod(x):
 
 def _tensor_nbytes(numel, dtype):
     sizes = {
-        torch.float: 4,
+        torch.complex64: 8,
+        torch.complex128: 16,
         torch.float16: 2,
         torch.bfloat16: 2,
         torch.float32: 4,
         torch.float64: 8,
-        torch.int: 4,
         torch.int8: 1,
         torch.int16: 2,
         torch.int32: 4,
