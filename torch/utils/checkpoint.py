@@ -10,7 +10,7 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "set_checkpoint_early_stop"
+    "set_device_states", "_set_checkpoint_early_stop"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -424,6 +424,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #   return gx, z
 #
 # out = checkpoint(fn)(inp)
+# out.backward()
 #
 # Because z is saved by cos while checkpoint is enabled, it would not be
 # actually saved, and so the .grad() call inside must trigger a recomputation.
@@ -431,10 +432,18 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # During recomputation the "inner pack hook" has two responsibilities:
 #
 # 1) As usual, populating the WeakKeyDictionary storing recomputed tensors
-# 2) Pack the tensor as-is so that one may perform backward on the recomputed
-#    graph. The tensors saved to this graph will live until the end of
-#    recomputation, or earlier if someone performs backward with
-#    retain_graph=False or something.
+# 2) Pack the actual tensor (detached) so that one may perform backward on the
+#    recomputed graph. The tensors saved to this graph will live until the end
+#    of recomputation, or die earlier if someone performs backward with
+#    retain_graph=False.
+#
+# More generally performing backward on the recomputed graph occurs in the
+# following cases:
+# - If backward is performed inside forward,
+#   - During the original forward IF early-stop is disabled
+#   - During the original backward
+# - If there are multiple .grad()/.backward() calls, we would perform backward
+#   on the recomputed graph even if early-stop is enabled (see the example below)
 #
 # [ Multiple backwards ]
 #
@@ -472,7 +481,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 _enable_checkpoint_early_stop = False
 
 @contextlib.contextmanager
-def set_checkpoint_early_stop(enable):
+def _set_checkpoint_early_stop(enable):
     global _enable_checkpoint_early_stop
     try:
         prev = _enable_checkpoint_early_stop
@@ -499,10 +508,17 @@ class _NoopSaveInputs(torch.autograd.Function):
         # is captured by get_args, which is saved directly on ctx
         tensor_indices, tensors = zip(*[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)])
         idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
+        # args but with tensors replaced with None as placeholders
         args = [None if isinstance(o, torch.Tensor) else o for o in inputs]
 
         def get_args(saved_tensors):
+            # restore the placeholders with the original tensors grabbed from
+            # ctx.saved_tensors (which may be saved on a parent checkpoint if
+            # this checkpoint is nested, and that would trigger a recursive
+            # unpack!)
             ret = [saved_tensors[idx2saved_idx[i]] if i in tensor_indices else o for i, o in enumerate(args)]
+            # grab the tail since we also saved the dummy to avoid having to explicitly
+            # handle the case where there are no tensor inputs
             return ret[1:]
 
         ctx.get_args = get_args
@@ -522,6 +538,8 @@ class _CheckpointFrame():
         # which will be removed when the SavedVariable is cleared.
         self.recomputed: DefaultDict[int, weakref.WeakKeyDictionary[_Handle, torch.Tensor]] = \
             defaultdict(weakref.WeakKeyDictionary)
+        # We need both recomp_counter and recomputed since they can diverge
+        # https://github.com/pytorch/pytorch/pull/90105#discussion_r1135889885
         self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
         self.is_recomputed: DefaultDict[int, bool] = defaultdict(bool)
 
@@ -556,6 +574,8 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             return x.detach()
 
         def unpack_hook(x):
+            # See Rule 6: [ Basic case ] above for an example of when the graph
+            # created during recomputation could be backwarded.
             return x
 
         super().__init__(pack_hook, unpack_hook)

@@ -10643,7 +10643,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint(self, early_stop):
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             x = torch.randn((), requires_grad=True)
 
             def f(x):
@@ -10669,7 +10669,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_two_children(self, early_stop):
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             grad, sum, c = self.grad, self.sum, self.checkpoint
 
             def f(x):
@@ -10708,7 +10708,7 @@ class TestNestedCheckpoint(TestCase):
         def f(x):
             return x.sin()
 
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             out, _unused1, _unused2 = checkpoint(fn, k, a, b, f, use_reentrant=False)
         actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10728,7 +10728,7 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(2., requires_grad=True)
         b = torch.tensor(3., requires_grad=True)
 
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, blah=b, use_reentrant=False)
             actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10749,7 +10749,7 @@ class TestNestedCheckpoint(TestCase):
 
         a = torch.tensor(1., requires_grad=True)
 
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, use_reentrant=False)
         # The hook is registered on the original graph
         out.grad_fn.next_functions[0][0].register_hook(hook)
@@ -10771,7 +10771,7 @@ class TestNestedCheckpoint(TestCase):
             x.backward(retain_graph=True)
 
         a = torch.tensor(1., requires_grad=True)
-        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
             x, out = checkpoint(fn, a, use_reentrant=False)
         out.grad_fn.register_hook(hook)
         out.backward(retain_graph=True)
