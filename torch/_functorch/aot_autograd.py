@@ -7,7 +7,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
 
 from functorch import make_fx
 
@@ -379,7 +379,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
 
 
 # This class stores info about every user output.
-@dataclass(frozen=True, eq=False)
+@dataclass(frozen=True)
 class OutputAliasInfo:
     # Tells us if this output is:
     # (1) a regular (non-aliased) output
@@ -404,13 +404,6 @@ class OutputAliasInfo:
     # - Tells us that the base of this alias is output_user_fwds[base_idx]
     #   here, this refers to the index of the *direct* traced
     base_idx: Optional[int]
-
-    def __eq__(self, other):
-        if not isinstance(other, OutputAliasInfo):
-            return NotImplemented
-        return (self.output_type == other.output_type and
-                self.base_idx == other.base_idx and
-                (issubclass(self.raw_type, other.raw_type) or issubclass(other.raw_type, self.raw_type)))
 
 
 # This class tells us info about user inputs.
@@ -449,6 +442,8 @@ class ViewAndMutationMeta:
     # For inference only: instructs us to keep data-only input mutations directly in the graph
     keep_input_mutations: int
 
+    # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
+    #        + (# intermediate bases)
     # These are the FakeTensor (or potential SymInt) outputs that we traced from our
     # metadata pass of the user's forward function.
     # Their only use today is to pass them as a best-guess for tangents when tracing the joint.
@@ -1172,10 +1167,12 @@ def track_graph_compiling(aot_config, graph_name):
     global graph_being_compiled
     # TODO: Don't shove the aot_id in here; set it in the context
     graph_being_compiled = [f"{aot_config.aot_id}_{graph_name}"]
-    yield
-    global nth_graph
-    nth_graph += 1
-    graph_being_compiled = []
+    try:
+        yield
+    finally:
+        global nth_graph
+        nth_graph += 1
+        graph_being_compiled = []
 
 
 def make_boxed_func(f):
@@ -1586,63 +1583,67 @@ def create_synthetic_base_metadata(
     # Maps each outer argument idx to its inner idx (or, if this outer arg is generated from a
     # synthetic base, you get a tuple of (i, TensorMeta), telling you the base tensor idx, and view metadata)
     synthetic_base_info: List[Union[int, Tuple[int, torch.Tensor]]],
-    flat_args: List[Any],
-    flat_args_with_synthetic_bases: List[Any],
+    outer_args: List[Any],
+    inner_args: List[Any],
 ) -> Tuple[ViewAndMutationMeta, List[int]]:
 
-    # For each arg in the inner calling convention, map it to its idx in the outer calling convention
-    # (there might be multiple indices, if the inner arg is a synthetic base)
-    synthetic_base_to_indices: List[List[int]] = []
-    for idx in range(len(flat_args_with_synthetic_bases)):
+    S_Outer = NewType('S_Outer', int)
+    S_Inner = NewType('S_Inner', int)
+    synthetic_base_to_indices: Dict[S_Inner, List[S_Outer]] = {}
+    for inner_idx in range(len(inner_args)):
         outer_aliased_indices_of_current_base_arg = [
-            i for i, outer_idx_or_tuple in enumerate(synthetic_base_info)
-            if (isinstance(outer_idx_or_tuple, int) and outer_idx_or_tuple == idx)
-            or (isinstance(outer_idx_or_tuple, tuple) and outer_idx_or_tuple[0] == idx)
+            outer_idx for outer_idx, inner_idx_or_tuple in enumerate(synthetic_base_info)
+            if (isinstance(inner_idx_or_tuple, int) and inner_idx_or_tuple == inner_idx)
+            or (isinstance(inner_idx_or_tuple, tuple) and inner_idx_or_tuple[0] == inner_idx)
         ]
-        synthetic_base_to_indices.append(outer_aliased_indices_of_current_base_arg)
+        synthetic_base_to_indices[inner_idx] = outer_aliased_indices_of_current_base_arg
 
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
     input_infos = []
     mutated_inp_require_grad_info = []
-    for i, indices in enumerate(synthetic_base_to_indices):
+    for _, outer_indices in synthetic_base_to_indices.items():
+        # leaf-ness should be all-or-nothing for aliased tensor.
+        # (aka if "a" and "b" are views, then a.is_leaf == b.is_leaf)
+        any_leaf = any(m.input_info[x].is_leaf for x in outer_indices)
+        all_leaf = all(m.input_info[x].is_leaf for x in outer_indices)
+        assert any_leaf == all_leaf
         inpt_info = InputAliasInfo(
-            # If len(indices) > 1, then this input is a synthetic base.
+            # If len(outer_indices) > 1, then this input is a synthetic base.
             # The invariant is that to the rest of aot autograd, synthetic bases only show up if
             # one of their aliases gets a data mutation. And if any of their aliases get metadata
             # mutations, they will be hidden from the rest of aot autograd.
-            mutates_data=True if len(indices) > 1 else m.input_info[indices[0]].mutates_data,
-            mutates_metadata=False if len(indices) > 1 else m.input_info[indices[0]].mutates_metadata,
-            # leaf-ness should be all-or-nothing for aliased tensor.
-            is_leaf=any(m.input_info[x].is_leaf for x in indices),
+            mutates_data=True if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_data,
+            mutates_metadata=False if len(outer_indices) > 1 else m.input_info[outer_indices[0]].mutates_metadata,
+            is_leaf=any_leaf,
         )
         input_infos.append(inpt_info)
         # requires_grad_info consists of (mutated_inputs, forward_outputs).
         # For any mutated inputs that correspond to aliased inputs,
         # Need to replace them with their mutated synthetic base
         if inpt_info.mutates_data or inpt_info.mutates_metadata:
-            mutated_inp_require_grad_info.append(any(m.requires_grad_info[x] for x in indices))
+            mutated_inp_require_grad_info.append(any(m.requires_grad_info[x] for x in outer_indices))
 
     # Find any inputs that fulfill the following criteria:
     # (1) They are part of a synthetic base (because they alias another input,
     #      and at least one input experiences a data mutation)
     # (2) They experience a metadata mutation
-    aliased_arg_idx_with_metadata_mutations = [
-        i for i, inpt_info in enumerate(m.input_info)
-        if inpt_info.mutates_metadata and not isinstance(synthetic_base_info[i], int)
+    outer_aliased_arg_idx_with_metadata_mutations = [
+        outer_idx for outer_idx, inpt_info in enumerate(m.input_info)
+        if inpt_info.mutates_metadata and not isinstance(synthetic_base_info[outer_idx], int)
     ]
 
     # grab the original requires grad info on the outputs, except the ones from the mutated inputs
     num_original_input_data_mutations = len([x for x in m.input_info if x.mutates_data or x.mutates_metadata])
     output_grad_info = m.requires_grad_info[num_original_input_data_mutations:]
     input_metadata_mutation_grad_info = [
-        flat_args[i].requires_grad for i in aliased_arg_idx_with_metadata_mutations]
+        outer_args[outer_idx].requires_grad for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     input_metadata_output_info = [
         OutputAliasInfo(
             output_type=OutputType.alias_of_input,
             raw_type=torch.Tensor,
-            base_idx=synthetic_base_info[i][0],
-        ) for i in aliased_arg_idx_with_metadata_mutations]
+            base_idx=synthetic_base_info[outer_idx][0],
+        ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
     existing_output_infos = [
         OutputAliasInfo(
             output_type=o.output_type,
@@ -1655,7 +1656,7 @@ def create_synthetic_base_metadata(
         for o in m.output_info]
 
     num_outer_mutated_data_inps = len([x for x in m.input_info if x.mutates_data])
-    inner_mutated_data_inps = [x for i, x in enumerate(flat_args_with_synthetic_bases) if input_infos[i].mutates_data]
+    inner_mutated_data_inps = [x for inner_idx, x in enumerate(inner_args) if input_infos[inner_idx].mutates_data]
 
     requires_grad_info = mutated_inp_require_grad_info + output_grad_info + input_metadata_mutation_grad_info
     output_info = existing_output_infos + input_metadata_output_info
@@ -1669,7 +1670,7 @@ def create_synthetic_base_metadata(
         num_intermediate_bases=m.num_intermediate_bases,
         keep_input_mutations=m.keep_input_mutations,
         traced_tangents=traced_tangents,
-    ), aliased_arg_idx_with_metadata_mutations
+    ), outer_aliased_arg_idx_with_metadata_mutations
 
 # MOTIVATION:
 #
@@ -1967,14 +1968,14 @@ def aot_wrapper_synthetic_base(
 
     def unpack_synthetic_bases(primals: List[Any]) -> List[Any]:
         f_args_inner = []
-        for outer_idx_or_tuple in synthetic_base_info:
-            if isinstance(outer_idx_or_tuple, int):
-                f_args_inner.append(primals[outer_idx_or_tuple])
+        for inner_idx_or_tuple in synthetic_base_info:
+            if isinstance(inner_idx_or_tuple, int):
+                f_args_inner.append(primals[inner_idx_or_tuple])
             else:
-                outer_base_idx, view_tensor = outer_idx_or_tuple
-                outer_base = primals[outer_base_idx]
+                inner_base_idx, view_tensor = inner_idx_or_tuple
+                base = primals[inner_base_idx]
                 view_arg = gen_alias_from_base(
-                    outer_base, view_tensor, view_tensor.requires_grad
+                    base, view_tensor, view_tensor.requires_grad
                 )
                 f_args_inner.append(view_arg)
         return f_args_inner
@@ -1984,7 +1985,7 @@ def aot_wrapper_synthetic_base(
         unpacked_args = unpack_synthetic_bases(args)
         # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
         # is to relieve the downstream logic from having to reason about mutations on inputs that alias
-        # each other, by relacing aliased inputs with a synthetic base.
+        # each other, by replacing aliased inputs with a synthetic base.
         # One area where this breaks down a bit however is if one of those aliased inputs
         # experienced a metadata mutation.
         # We are now obligated to reapply the metadata mutation directly to the user's input;
@@ -2480,6 +2481,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
+                    assert all(a is not None for a in all_args)
                     if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
