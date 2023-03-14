@@ -4367,7 +4367,7 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = bool(xstep > 0) - bool(xstep < 0)
+        sgn = (xstep > 0) - (xstep < 0)
         length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
