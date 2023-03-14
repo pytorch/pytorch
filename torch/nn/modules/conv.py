@@ -1169,10 +1169,22 @@ class _LazyConvXdMixin(LazyModuleMixin):
             else:
                 self.weight.materialize((
                     self.out_channels, self.in_channels // self.groups, *self.kernel_size))
+            self.weight = torch.nn.Parameter(self.weight.to(memory_format=self._get_in_memory_format(input)))
             if self.bias is not None:
                 assert isinstance(self.bias, UninitializedParameter)
                 self.bias.materialize((self.out_channels,))
             self.reset_parameters()
+
+    # Function to extract memory format from first input.
+    def _get_in_memory_format(self, input: Tensor) -> torch.memory_format:
+        memory_format = torch.contiguous_format
+        if self._get_num_spatial_dims() == 2:
+            if input.is_contiguous(memory_format=torch.channels_last):
+                memory_format = torch.channels_last
+        elif self._get_num_spatial_dims() == 3:
+            if input.is_contiguous(memory_format=torch.channels_last_3d):
+                memory_format = torch.channels_last_3d
+        return memory_format
 
     # Function to extract in_channels from first input.
     def _get_in_channels(self, input: Tensor) -> int:
