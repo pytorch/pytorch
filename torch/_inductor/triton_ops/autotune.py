@@ -21,6 +21,7 @@ from ..ir import ReductionHint, TileHint
 from ..utils import (
     ceildiv,
     conditional_product,
+    create_bandwidth_info_str,
     do_bench,
     get_num_bytes,
     has_triton,
@@ -135,6 +136,11 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
+
+        binary._init_handles()
+        launcher.n_regs = getattr(binary, "n_regs", None)
+        launcher.n_spills = getattr(binary, "n_spills", None)
+        launcher.shared = getattr(binary, "shared", None)
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -227,8 +233,8 @@ def start_graph():
 def end_graph():
     if len(collected_calls) == 0:
         return
-    overall_time = sum(call[1] for call in collected_calls)
-    overall_gb = sum(call[2] for call in collected_calls)
+    overall_time = sum(call[0] for call in collected_calls)
+    overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
     print(f"SUMMARY ({cur_file})")
     print(
@@ -255,15 +261,9 @@ class DebugAutotuner(CachingAutotuner):
         gb_per_s = num_gb / (ms / 1e3)
 
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
-        import colorama
-
-        info_str = (
-            f"{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s \t {kernel_name}"
+        print(
+            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
         )
-        if ms > 0.012 and gb_per_s < 650:
-            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
-        else:
-            print(info_str)
 
 
 def hash_configs(configs: List[Config]):
@@ -515,7 +515,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
-        ) and not config.max_autotune:
+        ) and not (config.max_autotune or config.max_autotune_pointwise):
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
@@ -560,7 +560,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)

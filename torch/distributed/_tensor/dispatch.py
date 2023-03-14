@@ -212,14 +212,14 @@ def operator_dispatch(
                     and_op: Callable[[bool, bool], bool] = lambda x, y: x and y
                     return functools.reduce(and_op, obj_list, True)
                 elif type_str == "int":
-                    add_op: Callable[[int, int], int] = lambda x, y: x + y
-                    return functools.reduce(add_op, obj_list, 0)
-                elif type_str == "float":
-                    add_op: Callable[[float, float], float] = lambda x, y: x + y
-                    return functools.reduce(add_op, obj_list, 0.0)
-                elif type_str == "double":
-                    add_op: Callable[[double, double], double] = lambda x, y: x + y
-                    return functools.reduce(add_op, obj_list, 0.0)
+                    add_op_int: Callable[[int, int], int] = lambda x, y: x + y
+                    return functools.reduce(add_op_int, obj_list, 0)
+                elif (
+                    (type_str == "float")
+                    or (type_str == "double")
+                ):
+                    add_op_float: Callable[[float, float], float] = lambda x, y: x + y
+                    return functools.reduce(add_op_float, obj_list, 0.0)
                 else:
                     raise NotImplementedError(
                         f"Unsupported primitive type {type_str}."
