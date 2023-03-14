@@ -2,7 +2,7 @@ Frequently Asked Questions
 ==========================
 **Author**: `Mark Saroufim <https://github.com/msaroufim>`_
 
-At a high level, the TorchDynamo stack consists of a graph capture from
+At a high level, the PyTorch 2.0 stack consists of a graph capture from
 Python code using dynamo and a backend compiler. In this example the
 backend compiler consists of backward graph tracing using AOTAutograd
 and graph lowering using TorchInductor. There are of course many more

@@ -1,9 +1,9 @@
-TorchDynamo Troubleshooting
+PyTorch 2.0 Troubleshooting
 ===========================
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
-TorchDynamo is still in active development, and many of the reasons for
+`torch.compile` is still in active development, and many of the reasons for
 graph breaks and excessive recompilation will be fixed with upcoming
 support for `tracing dynamic tensor
 shapes <https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing>`__,
