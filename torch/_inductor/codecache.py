@@ -590,7 +590,7 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
-    linemaps = dict()  # [(starting_line, {<fx nodes>}), ...]
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
@@ -619,6 +619,7 @@ class PyCodeCache:
     def stack_frames_for_code(cls, path, lineno):
         if path not in cls.linemaps:
             return None
+        # [(starting_line, <fx node>), ...]
         linemap = cls.linemaps[path]
         p = bisect_right(linemap, lineno, key=lambda x: x[0])
         if p == 0:
