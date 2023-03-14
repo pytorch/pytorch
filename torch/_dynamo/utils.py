@@ -1401,6 +1401,7 @@ def unique_normalized_attr_name(name):
     from torch._guards import TracingContext
 
     # Normalize the attr name
+    original = name
     name = normalize_attr_name(name)
     base = name
     # Iterate until we have a new, unique name.
@@ -1410,8 +1411,9 @@ def unique_normalized_attr_name(name):
         name = f"{base}_{i}"
 
 
-def get_or_make_known_name(name, source):
+def get_or_make_known_name(source):
     # Try to get the known name
+    name = source.flat_name()
     known = known_name(name, source)
     if known:
         return known

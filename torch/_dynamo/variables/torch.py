@@ -20,6 +20,7 @@ from ..source import GetItemSource, NNModuleSource
 from ..utils import (
     check_constant_args,
     check_unspec_python_args,
+    get_or_make_known_name,
     HAS_NUMPY,
     istype,
     np,
@@ -800,20 +801,12 @@ class TorchPyOperator(VariableTracker):
             return node
 
         def add_subgraph(name, gm):
-            next_name = None
-            i = 0
-            while not next_name:
-                candidate = f"cond_{name}_{i}"
-                if candidate in tx.output.nn_modules:
-                    i += 1
-                else:
-                    next_name = candidate
-
+            next_name = f"cond_{name}"
             gm.__name__ = next_name
             src = NNModuleSource(GetItemSource(self.source, next_name))
             gm.torchdynamo_force_dynamic = False
             tx.output.register_attr_or_module(gm, next_name, source=src)
-            return next_name
+            return get_or_make_known_name(src)
 
         def get_comparable_state(state):
             # Nub out bits of state that we don't require to be
