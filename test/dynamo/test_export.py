@@ -1873,6 +1873,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         inp = torch.randn(6, 7)
         self.assertEqual(gm(inp), f(inp))
 
+    # FIXME: Flakey fail https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3736
+    @skipIfRocm 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_export_cond_in_aten_symbolic(self):
@@ -2253,6 +2255,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.export(my_dyn_fn, y, y, y)
         torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
+    # FIXME: Flakey fail https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3736
+    @skipIfRocm
     @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_safe_relationship(self):
         x = torch.randn([3, 3, 3])

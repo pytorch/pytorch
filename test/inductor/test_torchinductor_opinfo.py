@@ -152,19 +152,14 @@ inductor_skips["cuda"] = {
 
 inductor_skips_rocm["cuda"] = {
     # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3817
-    "cumulative_trapezoid": {f16, f32, f64, c64, b8, i32, i64},
-    "trapezoid": {f16, f32, f64, c64, b8, i32, i64},
-    "trapz": {f16, f32, f64, c64, b8, i32, i64},
+    "cumulative_trapezoid": {f16, f32, f64, b8, i32, i64},
+    "trapezoid": {f16, f32, f64, b8, i32, i64},
+    "trapz": {f16, f32, f64, b8, i32, i64},
     # FIXME: LAPACK support - can skip like this https://github.com/ROCmSoftwarePlatform/pytorch/pull/1177 - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3598
-    "linalg.pinv.hermitian": {f16, f32, f64, c64, b8, i32, i64},
-    "linalg.matrix_rank.hermitian": {f16, f32, f64, c64, b8, i32, i64},
+    ("linalg.pinv", "hermitian"): {f16, f32, f64, b8, i32, i64},
+    ("linalg.matrix_rank", "hermitian"): {f16, f32, f64, b8, i32, i64},
     # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
     "logcumsumexp": {f32},
-    # FIXME: Unexpected success - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3481
-    "tanh": {f16}, 
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    "norm.nuc": {f32, f64},
     # FIXME: MIOpen batch norm failure
     "nn.functional.batch_norm": {f32},
     "nn.functional.instance_norm": {f32},
@@ -269,7 +264,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "complex": {f16, f32, f64},
 }
 
-
 inductor_expected_failures_single_sample["cuda"] = {
     "__getitem__": {b8, f16, f32, f64, i32, i64},
     "__rdiv__": {b8, f16, f32, f64, i32, i64},
@@ -336,13 +330,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "unique_consecutive": {b8, f16, f32, f64, i32, i64},
     # AssertionError: Tensor-likes are not close!
     "nn.functional.triplet_margin_loss": {f16},
-    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
-    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
-    # In test_meta.py there is a mechanism to skipping strides checks for some ops
-    # (including _linalg_svd), possibly we should have something similar here
-    "linalg.cond": {f32, f64},
-    "linalg.svdvals": {f32, f64},
-    ("norm", "nuc"): {f32, f64},
     # AssertionError: Scalars are not close!
     "nn.functional.soft_margin_loss": {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
@@ -370,6 +357,15 @@ inductor_expected_failures_single_sample["cuda"] = {
     "complex": {f16, f32, f64},
 }
 
+if not TEST_WITH_ROCM:
+    # The following 3 tests fail on CUDA with AssertionError: expected size 5==5, stride 5==1 at dim=0
+    # linalg._svd's return value has different strides on CUDA vs CPU which causes this
+    # In test_meta.py there is a mechanism to skipping strides checks for some ops
+    # (including _linalg_svd), possibly we should have something similar here
+    inductor_expected_failures_single_sample["cuda"]["linalg.cond"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["linalg.svdvals"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"]["norm.nuc"] = {f32, f64}
+
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
@@ -388,8 +384,10 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
     "nn.functional.local_response_norm": {f16},
     "outer": {f16},
     "quantile": {f32, f64},
-    "tanh": {f16},
 }
+
+if not TEST_WITH_ROCM:
+    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
@@ -419,14 +417,23 @@ def get_skips_and_xfails(from_dict, xfails=True):
 # Note: if you get a "AssertionError: Couldn't find OpInfo for ..." error for an OpInfo you are sure
 # exists, you might be trying to use a test variant and you need to replace, for example,
 # "max.reduction_no_dim" with ("max", "reduction_no_dim") as the key of one of these dictionaries
-test_skips_or_fails = (
-    get_skips_and_xfails(inductor_skips, xfails=False)
-    | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
-    | get_skips_and_xfails(
-        inductor_gradient_expected_failures_single_sample, xfails=True
+if not TEST_WITH_ROCM:
+    test_skips_or_fails = (
+        get_skips_and_xfails(inductor_skips, xfails=False)
+        | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
+        | get_skips_and_xfails(
+            inductor_gradient_expected_failures_single_sample, xfails=True
+        )
     )
-)
-
+else:
+    test_skips_or_fails = (
+        get_skips_and_xfails(inductor_skips, xfails=False)
+        | get_skips_and_xfails(inductor_skips_rocm, xfails=False)
+        | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
+        | get_skips_and_xfails(
+            inductor_gradient_expected_failures_single_sample, xfails=True
+        )
+    )
 
 def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout

@@ -2092,8 +2092,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3464
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
@@ -4365,8 +4363,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3378
-    @skipIfRocm
     def test_scatter3(self):
         def fn(a, dim, index, b):
             return aten.scatter(a, dim, index, b, reduce="add")
@@ -4452,8 +4448,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3378
-    @skipIfRocm
     def test_scatter_add2(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -4468,8 +4462,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3378
-    @skipIfRocm
     def test_scatter_add3(self):
         def fn(a, dim, index, b):
             return aten.scatter_add(a, dim, index, b)
@@ -4486,8 +4478,6 @@ class CommonTemplate:
                     ],
                 )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3378
-    @skipIfRocm
     def test_scatter_reduce1(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum")
@@ -4502,8 +4492,6 @@ class CommonTemplate:
             ],
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3378
-    @skipIfRocm
     def test_scatter_reduce2(self):
         def fn(a, dim, index, b):
             return aten.scatter_reduce(a, dim, index, b, "sum", include_self=False)
@@ -5047,6 +5035,7 @@ class CommonTemplate:
         b = torch.rand(2, 2, 1, 4, 1).int()
         self.common(fn, (a, b))
 
+    @skipIfRocm
     def test_argmax_argmin1(self):
         def fn(x):
             return (aten.argmax(x), aten.argmin(x))
@@ -5059,6 +5048,7 @@ class CommonTemplate:
         )
 
     # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3849
     @skipIfRocm
     def test_argmax_argmin2(self):
         def fn(x):
@@ -6007,8 +5997,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3463
-        @skipIfRocm
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
@@ -6021,8 +6009,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3463
-        @skipIfRocm
         def test_not_materialize_pointwise_reduction(self):
             def fn(a, b):
                 return (a - b).sum(dim=-1).amax(dim=-1)
@@ -6040,8 +6026,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
 
-        # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3463
-        @skipIfRocm
         def test_cant_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
@@ -6068,8 +6052,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertTrue("to(tl.int64)" in code)
                 self.assertEqual(fn_opt(), fn())
 
-        # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3463
-        @skipIfRocm
         def test_optimize_compute(self):
             def ones():
                 return torch.ones([4], device="cuda")
