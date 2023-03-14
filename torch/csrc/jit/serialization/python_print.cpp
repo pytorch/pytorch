@@ -923,7 +923,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto c : val.toStringRef()) {
-          if (c > static_cast<decltype(c)>(maxASCII)) {
+          if (static_cast<decltype(maxASCII)>(c) > maxASCII) {
             hasNonASCII = true;
             return true;
           }
