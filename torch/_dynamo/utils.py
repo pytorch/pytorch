@@ -1406,6 +1406,9 @@ def tensor_always_has_static_shape(
     return False, None
 
 
+# Note - this could live in shape_env, but then we would need to plumb the
+# config.assume_static_by_default as an input, and that seems a little annoying for little
+# gain.
 def dynamic_dims_from_tensor(
     e: torch.Tensor, dynamic_ranges: Optional[Dict[int, MinMaxConstraint]]
 ) -> List[DIM_DYNAMISM_STATE]:

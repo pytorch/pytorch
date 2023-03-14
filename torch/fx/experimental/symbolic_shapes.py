@@ -1588,15 +1588,15 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss)
-                if dynamic_ranges and pos in dynamic_ranges:
+                if dynamic_ranges:
                     dyn_range = dynamic_ranges[pos]
                     if dyn_range and i in dyn_range:
                         # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                         # constrained to an integer.
                         if _is_int(ss):
                             raise RuntimeError(f"Attempting to constrain dimension "
-                                            f"{source.name()}.size()[{i}] to {int(ss)}, "
-                                            "which violates user's constraints")
+                                               f"{source.name()}.size()[{i}] to {int(ss)}, "
+                                               "which violates user's constraints")
 
                         vr = dyn_range[i].to_range()
                         if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):

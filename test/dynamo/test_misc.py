@@ -4702,10 +4702,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
             return x.cos()
 
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
         torch._dynamo.mark_dynamic(y, 0)
-
-        torch._dynamo.reset()
         with self.assertRaises(
             torch._dynamo.exc.InternalTorchDynamoError,
         ):
@@ -4825,9 +4822,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
             return x.cos()
 
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y, y)
         torch._dynamo.mark_dynamic(y, 0)
-        torch._dynamo.reset()
         with self.assertRaises(
             torch._dynamo.exc.InternalTorchDynamoError,
         ):
