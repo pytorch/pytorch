@@ -879,6 +879,7 @@ void int8_gemm(
       reinterpret_cast<cublasLtHandle_t>(at::cuda::getCurrentCUDABlasHandle());
 
   at::opmath_type<int8_t> alpha_val = 1.0;
+  float beta_val = 0;
   cublasStatus_t cublasStatus = cublasLtMatmul(
       ltHandle,
       computeDesc.descriptor(),
@@ -887,7 +888,7 @@ void int8_gemm(
       Adesc.descriptor(),
       mat2_ptr,
       Bdesc.descriptor(),
-      0,
+      &beta_val,
       result_ptr,
       Cdesc.descriptor(),
       result_ptr,
