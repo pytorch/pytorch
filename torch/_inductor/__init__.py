@@ -27,6 +27,27 @@ def compile(
     return compile_fx(gm, example_inputs, config_patches=options)
 
 
+def aot_compile(
+    gm: torch.fx.GraphModule,
+    example_inputs: List[torch.Tensor],
+    options: Optional[Dict[str, Any]] = None,
+) -> str:
+    """
+    Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
+
+    Args:
+        gm: The FX graph to compile.
+        example_inputs:  List of tensor inputs.
+        options:  Optional dict of config options.  See `torch._inductor.config`.
+
+    Returns:
+        Path to the generated shared library
+    """
+    from .compile_fx import compile_fx
+
+    return compile_fx(gm, example_inputs, config_patches=options, aot_mode=True)()
+
+
 def list_mode_options(mode: str = None) -> Dict[str, Any]:
     r"""Returns a dictionary describing the optimizations that each of the available
     modes passed to `torch.compile()` performs.
@@ -42,12 +63,11 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
     mode_options = {
         "default": {},
         "reduce-overhead": {
-            "triton.cudagraphs": False,
-            "size_asserts": False,
+            "triton.cudagraphs": True,
         },
         "max-autotune": {
-            "epilogue_fusion": False,
-            "max_autotune": False,
+            "epilogue_fusion": True,
+            "max_autotune": True,
             "triton.cudagraphs": True,
         },
     }
