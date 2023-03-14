@@ -496,6 +496,8 @@ def min_cut_rematerialization_partition(
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
         if is_symint_node(node):
             weight = 1
+        elif is_sym_node(node):
+            weight = 999999
         elif is_non_tensor_node:
             weight = math.inf
         else:
@@ -523,8 +525,8 @@ def min_cut_rematerialization_partition(
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
     # Symints must be kept separate from tensors so that PythonFunction only calls
     # save_for_backward on tensors and stashes symints in autograd .ctx
-    saved_sym_nodes = list(filter(lambda n: is_symint_node(n), saved_values))
-    saved_values = list(filter(lambda n: not is_symint_node(n), saved_values))
+    saved_sym_nodes = list(filter(lambda n: is_sym_node(n), saved_values))
+    saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
