@@ -57,8 +57,8 @@ except ImportError:
 
             return wrapped
 
-def enable_dynamo_cache_lookup_profiler(enable: bool):
-    from torch._dynamo.eval_frame import (  # noqa: F401
+def _enable_dynamo_cache_lookup_profiler(enable: bool):
+    from torch._dynamo.eval_frame import (  # type: ignore[attr-defined]
         clear_profiler_hooks,
         set_profiler_hooks,
     )
@@ -236,7 +236,7 @@ class profile:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
-        enable_dynamo_cache_lookup_profiler(True)
+        _enable_dynamo_cache_lookup_profiler(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -252,7 +252,7 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        enable_dynamo_cache_lookup_profiler(False)
+        _enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()

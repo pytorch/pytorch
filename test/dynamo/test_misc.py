@@ -32,7 +32,7 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import ifunspec
-from torch.autograd.profiler import enable_dynamo_cache_lookup_profiler
+from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -2038,7 +2038,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with torch.autograd.profiler.profile() as prof:
             # just make sure the disable functionality works
-            enable_dynamo_cache_lookup_profiler(False)
+            _enable_dynamo_cache_lookup_profiler(False)
             res = opt_fn(x)
         events = list(
             filter(
