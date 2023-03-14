@@ -184,7 +184,7 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
         )
 
-    @unittest.skip("flaky test: sometimes SegFault on onnx_model.SerializeToString()")
+    @unittest.skip("flaky test: https://github.com/microsoft/onnx-script/issues/523")
     def test_matmul(self):
         class DynamicMatMul(torch.nn.Module):
             def forward(self, x, y):
