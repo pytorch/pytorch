@@ -6,7 +6,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._logging.loggable_types as rec_types
-from torch.testing._internal.dynamo_logging_utils import make_test
+from torch.testing._internal.dynamo_logging_utils import make_logging_test
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import LoggingTestCase
@@ -41,7 +41,7 @@ ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
 def multi_record_test(name, ty, num_records):
-    @make_test(name)
+    @make_logging_test(name)
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
@@ -52,7 +52,7 @@ def multi_record_test(name, ty, num_records):
 
 
 def within_range_record_test(name, ty, num_records_lower, num_records_higher):
-    @make_test(name)
+    @make_logging_test(name)
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
@@ -73,7 +73,7 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test("output_code", rec_types.OutputCodeLogRec, 2)
 
     @requires_cuda()
-    @make_test("schedule")
+    @make_logging_test("schedule")
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
@@ -83,7 +83,7 @@ class LoggingTests(LoggingTestCase):
     test_dynamo_debug = within_range_record_test("+dynamo", str, 30, 50)
     test_dynamo_info = within_range_record_test("dynamo", str, 2, 10)
 
-    @make_test("-dynamo")
+    @make_logging_test("-dynamo")
     def test_dynamo_error(self, records):
         try:
             fn_opt = torch._dynamo.optimize("inductor")(dynamo_error_fn)
@@ -97,7 +97,7 @@ class LoggingTests(LoggingTestCase):
     test_inductor_debug = within_range_record_test("+inductor", str, 5, 15)
     test_inductor_info = within_range_record_test("inductor", str, 2, 4)
 
-    @make_test("-inductor")
+    @make_logging_test("-inductor")
     def test_inductor_error(self, records):
         import torch._inductor.lowering
 
