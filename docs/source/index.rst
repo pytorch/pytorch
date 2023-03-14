@@ -49,7 +49,6 @@ Features described in this documentation are classified by release status:
    :hidden:
 
    compile/index
-   compile/installation
    compile/get-started
    compile/troubleshooting
    compile/faq
