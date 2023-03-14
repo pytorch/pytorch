@@ -431,16 +431,18 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
     return inductor.kernel.mm_plus_mm.tuned_mm_plus_mm(mat1, mat2, mat3, mat4)
 
 
+def shape_of_mm(a, b):
+    m, _ = a.get_size()
+    _, n = b.get_size()
+    return [m, n]
+
+
 @register_lowering_pattern(
     CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
 )
 def cat_mm(match, inputs, dim):
-    def shape_of(a, b):
-        m, _ = a.get_size()
-        _, n = b.get_size()
-        return [m, n]
 
-    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of)
+    return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of_mm)
 
 
 @register_lowering_pattern(
@@ -566,24 +568,35 @@ def cat_slice_cat(match, cat_input, size, dim=1):
         )
 
 
-@register_replacement_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
         CallFunction(aten.mm, Arg(), Arg()),
-        KeywordArg("added"),
+        KeywordArg("inp"),
     ),
     pass_number=2,
 )
-@register_replacement_pattern(
+@register_lowering_pattern(
     CallFunction(
         aten.add,
-        KeywordArg("added"),
+        KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
     pass_number=2,
 )
-def addmm(mat1, mat2, added):
-    return aten.addmm(added, mat1, mat2)
+def addmm(match, mat1, mat2, inp):
+    if isinstance(inp, ir.TensorBox):
+        inp_shape = inp.get_size()
+        matched = len(inp_shape) <= 2
+        mm_shape = shape_of_mm(mat1, mat2)
+        for i, m in zip(inp_shape, mm_shape):
+            matched &= i == 1 or i == m
+    else:  # inp is a Number
+        matched = False
+    if matched:
+        return L[aten.addmm](inp, mat1, mat2)
+    else:
+        return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
 # This slows things down:
