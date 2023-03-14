@@ -106,7 +106,6 @@ exclude_patterns = [
     'torch/csrc/**',
     'torch/_dynamo/**/*.py',
     'torch/_inductor/**/*.py',
-    'torch/_functorch/aot_autograd.py',
     'torch/_functorch/benchmark_utils.py',
     'torch/_functorch/compile_utils.py',
     'torch/_functorch/compilers.py',

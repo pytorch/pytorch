@@ -3,11 +3,12 @@ import dataclasses
 import itertools
 import logging
 import warnings
+from collections.abc import Iterable
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, NewType
+from typing import Any, Callable, Dict, Set, List, Optional, Tuple, Union, NewType, Deque
 
 from functorch import make_fx
 
@@ -113,7 +114,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
         if not roots:
             return
         seen = set()
-        q = collections.deque()
+        q: Deque = collections.deque()
         for node in roots:
             if node is not None:
                 seen.add(node)
@@ -142,7 +143,7 @@ def setup_stacktrace_preservation_hooks(roots: List):
             global callback_set
 
             if not callback_set:
-                torch.autograd.variable.Variable._execution_engine.queue_callback(
+                torch.autograd.variable.Variable._execution_engine.queue_callback(  # type: ignore[attr-defined]
                     get_callback(fx_traceback.format_stack())
                 )
                 callback_set = True
@@ -440,7 +441,7 @@ class ViewAndMutationMeta:
     num_intermediate_bases: int
 
     # For inference only: instructs us to keep data-only input mutations directly in the graph
-    keep_input_mutations: int
+    keep_input_mutations: bool
 
     # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
     #        + (# intermediate bases)
@@ -642,8 +643,8 @@ def run_functionalized_fw_and_collect_metadata(
     f,
     *,
     keep_input_mutations: bool
-) -> ViewAndMutationMeta:
-    memo = {}
+) -> Callable:
+    memo: Dict[torch.Tensor, torch.Tensor] = {}
 
     def to_fun(t):
         if isinstance(t, Tensor):
@@ -662,7 +663,7 @@ def run_functionalized_fw_and_collect_metadata(
         return torch._from_functional_tensor(t)
 
     @wraps(f)
-    def inner(*flat_args):
+    def inner(*flat_args) -> ViewAndMutationMeta:
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
         assert all(isinstance(a, KNOWN_TYPES) for a in flat_args)
 
@@ -1018,7 +1019,6 @@ def create_joint(
 
         setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
 
-        backward_out = []
         # Call the backwards pass
         if grad_primals:
             with fx_traceback.preserve_node_meta():
@@ -1028,6 +1028,8 @@ def create_joint(
                     grad_outputs=needed_tangents,
                     allow_unused=True,
                 )
+        else:
+            backward_out = ()
         backward_out_iter = iter(backward_out)
         return outs, [
             next(backward_out_iter) if i else None for i in inputs_needs_grads
@@ -1123,7 +1125,7 @@ def normalize_as_list(x):
     return [x]
 
 
-aot_autograd_decompositions = {}
+aot_autograd_decompositions: Dict[Callable, Callable] = {}
 
 
 # This is a list since looking forward, we can have this arbitrarily nested.
@@ -1174,7 +1176,7 @@ def make_boxed_func(f):
     def g(args):
         return f(*args)
 
-    g._boxed_call = True
+    g._boxed_call = True  # type: ignore[attr-defined]
     return g
 
 
@@ -1194,7 +1196,7 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
     assert isinstance(args, list)
 
     if disable_amp:
-        guard = torch._C._DisableAutocast()
+        guard = torch._C._DisableAutocast()   # type: ignore[attr-defined]
     try:
         if hasattr(f, "_boxed_call"):
             out = normalize_as_list(f(args))
@@ -1245,8 +1247,10 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         log.debug(f"====== Forward (only) graph {aot_config.aot_id} ======")
         log.debug(fw_module.print_readable(print_output=False))
 
-    disable_amp = torch._C._is_any_autocast_enabled()
-    context = disable_autocast_manager if disable_amp else nullcontext
+    disable_amp = torch._C._is_any_autocast_enabled()  # type: ignore[attr-defined]
+    context: Callable = nullcontext
+    if disable_amp:
+        context = disable_autocast_manager
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
@@ -1270,7 +1274,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph):
 
 @contextmanager
 def disable_autocast_manager():
-    guard = torch._C._DisableAutocast()
+    guard = torch._C._DisableAutocast()  # type: ignore[attr-defined]
     try:
         yield
     finally:
@@ -1490,7 +1494,7 @@ def merge_view_inputs(
             old_idx = arg_to_old_idx_map[other_arg]
             inner_calling_convention_meta[old_idx] = new_idx
         # post process into a list
-        post_processed_calling_convention_meta: List[Union[int, Callable]] = [
+        post_processed_calling_convention_meta: List[Union[int, Tuple[int, torch.Tensor]]] = [
             -1 for _ in range(len(inner_calling_convention_meta))
         ]
         for k, v in inner_calling_convention_meta.items():
@@ -1576,11 +1580,11 @@ def create_synthetic_base_metadata(
     synthetic_base_to_indices: Dict[S_Inner, List[S_Outer]] = {}
     for inner_idx in range(len(inner_args)):
         outer_aliased_indices_of_current_base_arg = [
-            outer_idx for outer_idx, inner_idx_or_tuple in enumerate(synthetic_base_info)
+            S_Outer(outer_idx) for outer_idx, inner_idx_or_tuple in enumerate(synthetic_base_info)
             if (isinstance(inner_idx_or_tuple, int) and inner_idx_or_tuple == inner_idx)
             or (isinstance(inner_idx_or_tuple, tuple) and inner_idx_or_tuple[0] == inner_idx)
         ]
-        synthetic_base_to_indices[inner_idx] = outer_aliased_indices_of_current_base_arg
+        synthetic_base_to_indices[S_Inner(inner_idx)] = outer_aliased_indices_of_current_base_arg
 
     # given the requires_grad info on mutated inputs,
     # generate the requires_grad info on those same mutated inputs, but after constructing synthetic bases.
@@ -1622,22 +1626,29 @@ def create_synthetic_base_metadata(
     output_grad_info = m.requires_grad_info[num_original_input_data_mutations:]
     input_metadata_mutation_grad_info = [
         outer_args[outer_idx].requires_grad for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
-    input_metadata_output_info = [
-        OutputAliasInfo(
+    input_metadata_output_info = []
+    for outer_idx in outer_aliased_arg_idx_with_metadata_mutations:
+        curr_info = synthetic_base_info[outer_idx]
+        assert isinstance(curr_info, tuple)
+        input_metadata_output_info.append(OutputAliasInfo(
             output_type=OutputType.alias_of_input,
             raw_type=torch.Tensor,
-            base_idx=synthetic_base_info[outer_idx][0],
-        ) for outer_idx in outer_aliased_arg_idx_with_metadata_mutations]
-    existing_output_infos = [
-        OutputAliasInfo(
+            base_idx=curr_info[0]
+        ))
+    existing_output_infos = []
+    for o in m.output_info:
+        # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
+        base_idx: Optional[int] = None
+        if o.base_idx is None:
+            base_idx = None
+        else:
+            idx_or_tuple = synthetic_base_info[o.base_idx]
+            base_idx = idx_or_tuple if isinstance(idx_or_tuple, int) else idx_or_tuple[0]
+        existing_output_infos.append(OutputAliasInfo(
             output_type=o.output_type,
             raw_type=o.raw_type,
-            # Map the input idx pre-synthetic-bases to the new idx post-synthetic-bases
-            base_idx=None if o.base_idx is None
-            else synthetic_base_info[o.base_idx]
-            if isinstance(synthetic_base_info[o.base_idx], int)
-            else synthetic_base_info[o.base_idx][0])
-        for o in m.output_info]
+            base_idx=base_idx,
+        ))
 
     num_outer_mutated_data_inps = len([x for x in m.input_info if x.mutates_data])
     inner_mutated_data_inps = [x for inner_idx, x in enumerate(inner_args) if input_infos[inner_idx].mutates_data]
@@ -1806,9 +1817,9 @@ def aot_wrapper_dedupe(
     #   }
     #   keep_arg_mask = [True, True, False, True]
 
-    seen_args = {}
-    keep_arg_mask = []
-    add_dupe_map = {}
+    seen_args: Dict[torch.Tensor, int] = {}
+    keep_arg_mask: List[bool] = []
+    add_dupe_map: Dict[int, int] = {}
     duped_arg_len = len(flat_args)
 
     j = 0  # index into deduped_flat_args
@@ -1877,7 +1888,7 @@ def aot_wrapper_dedupe(
         args.clear()
         return compiled_fn(deduped_args)
 
-    wrapped_compiled_fn._boxed_call = True
+    wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
 
     # This can be uncommented when we properly guard for duplicates,
     # but right now we must not do it.
@@ -1888,9 +1899,9 @@ def aot_wrapper_dedupe(
     def debugged_compiled_fn(args):
         # Test that the computed remove/add arg functions are an inverse
         new_args = add_dupe_args(remove_dupe_args(args))
-        seen = {}
+        seen: Set[torch.Tensor] = set()
         for i, (x, y) in enumerate(zip(new_args, args)):
-            seen[y] = None
+            seen.add(y)
             assert x is y, format_guard_bug_msg(
                 aot_config,
                 f"{describe_input(i, aot_config)} would be a duplicate of "
@@ -1911,7 +1922,7 @@ def aot_wrapper_dedupe(
         """
         return wrapped_compiled_fn(args)
 
-    debugged_compiled_fn._boxed_call = True
+    debugged_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
 
     return debugged_compiled_fn
 
@@ -1952,6 +1963,7 @@ def aot_wrapper_synthetic_base(
 
     def unpack_synthetic_bases(primals: List[Any]) -> List[Any]:
         f_args_inner = []
+        assert synthetic_base_info is not None
         for inner_idx_or_tuple in synthetic_base_info:
             if isinstance(inner_idx_or_tuple, int):
                 f_args_inner.append(primals[inner_idx_or_tuple])
@@ -1966,6 +1978,7 @@ def aot_wrapper_synthetic_base(
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
+        assert isinstance(args, list)
         unpacked_args = unpack_synthetic_bases(args)
         # This is a bit subtle. The goal of this entire function (aot_dispatch_synthetic_bases)
         # is to relieve the downstream logic from having to reason about mutations on inputs that alias
@@ -2172,11 +2185,13 @@ def create_runtime_wrapper(
                     o_ = o
                 o_grad = runtime_metadata.requires_grad_info[runtime_metadata.num_mutated_inputs + i]
                 if info.output_type == OutputType.alias_of_input:
+                    assert info.base_idx is not None
                     aliased_base_tensor = args[info.base_idx]
                     regenerated_out = gen_alias_from_base(aliased_base_tensor, o_, o_grad)
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
+                    assert info.base_idx is not None
                     aliased_base_tensor = args[info.base_idx]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
@@ -2214,7 +2229,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     assert len(fw_metadata.requires_grad_info) == fw_metadata.num_mutated_inputs + fw_metadata.num_outputs
     joint_inputs = (flat_args, traced_tangents)
-    disable_amp = torch._C._is_any_autocast_enabled()
+    disable_amp = torch._C._is_any_autocast_enabled()  # type: ignore[attr-defined]
 
     fn_prepared_for_autograd = fn_prepped_for_autograd(
         flat_fn,
@@ -2404,6 +2419,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             assert len(flat_args) == expected_grad_outs
             out_info = CompiledFunction.metadata.output_info
+            flat_bw_args: Iterable[Any] = []
             if (
                 CompiledFunction.metadata.num_mutated_metadata_only_inputs > 0
                 or CompiledFunction.metadata.num_outputs_aliased > 0
@@ -2467,14 +2483,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
-                                aot_config.bw_compiler, None, None,
+                                aot_config.bw_compiler, aot_config.bw_compiler, aot_config.partition_fn,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
                                 aot_config.dynamic_shapes
                             )
                         )
                     else:
-                        context = disable_autocast_manager if disable_amp else nullcontext
+                        context: Callable = nullcontext
+                        if disable_amp:
+                            context = disable_autocast_manager
                         with context(), track_graph_compiling(aot_config, "backward"):
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
                                 bw_module, all_args
@@ -2597,6 +2615,7 @@ def create_aot_dispatcher_function(
     # Check flat_args to see if they're already fake.  If so, use that fake
     # mode instead.
 
+    fake_mode: object = None
     for x in flat_args:
         if isinstance(x, FakeTensor):
             fake_mode = x.fake_mode
@@ -2617,11 +2636,12 @@ def create_aot_dispatcher_function(
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:
+    ), preserve_rng_state(), cross_ref, fake_mode, python_dispatcher_mode:  # type: ignore[attr-defined]
 
         def process_inputs(flat_args):
             if config.use_fake_tensor or isinstance(fake_mode, FakeTensorMode):
                 def convert(idx, x):
+                    assert isinstance(fake_mode, FakeTensorMode)
                     if shape_env is not None:
                         from torch._dynamo.source import ConstantSource
                         if isinstance(x, int):
@@ -2657,7 +2677,7 @@ def create_aot_dispatcher_function(
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
-            compiler_fn = aot_dispatch_autograd
+            compiler_fn: Callable = aot_dispatch_autograd
         else:
             compiler_fn = aot_dispatch_base
 
@@ -2675,14 +2695,14 @@ def create_aot_dispatcher_function(
 
 # Inspired by autodidax (thanks!)
 class PytreeThunk:
-    spec = None
+    spec: Optional[pytree.TreeSpec] = None
     # These are some kinda dumb microoptimizations that save about 3-4 us of overhead.
     is_simple = (
         None  # if the output spec is a tuple/list, we won't bother unflattening it.
     )
     is_really_simple = None  # if the output spec is a LeafSpec
 
-    def set(self, spec):
+    def set(self, spec: pytree.TreeSpec):
         assert self.spec is None or self.spec == spec
         self.spec = spec
         if type(self.spec) in [tuple, list] and all(
@@ -2697,6 +2717,7 @@ class PytreeThunk:
             return x[0]
         if self.is_simple:
             return x
+        assert self.spec is not None
         return pytree.tree_unflatten(x, self.spec)
 
 
@@ -2775,7 +2796,7 @@ def aot_function(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
         partition_fn=partition_fn,
-        decompositions=decompositions,
+        decompositions=decompositions if decompositions is not None else {},
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
@@ -2800,6 +2821,7 @@ def aot_function(
                 # order that original function expects. Add static args as well.
                 # They will appear as tensor constants in the traced graph.
                 nonlocal out_spec
+                assert isinstance(flat_args, list)
                 args, kwargs = pytree.tree_unflatten(flat_args, tensor_args_spec)
                 tree_out = fn(*args, **kwargs)
                 flat_out, spec = pytree.tree_flatten(tree_out)
@@ -2867,8 +2889,9 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     named_params = dict(mod.named_parameters(remove_duplicate=False))
     named_buffers = dict(mod.named_buffers(remove_duplicate=False))
     num_params_buffers = len(named_params) + len(named_buffers)
+    assert 'num_params_buffers' not in kwargs
     compiled_f = aot_function(
-        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs
+        functional_call, num_params_buffers=num_params_buffers, *args, **kwargs  # type: ignore[misc]
     )
 
     class AOTModule(nn.Module):
@@ -2897,7 +2920,7 @@ def aot_module_simplified(
     hasher_type=None,
     static_argnums=None,
     keep_inference_input_mutations=False,
-) -> nn.Module:
+) -> Callable:
     """
     This is the simplified or low overhead version of aot_module. For frontends
     like TorchDynamo, the input functions/modules to AOT are static and have
@@ -2929,17 +2952,19 @@ def aot_module_simplified(
     # and of course we can't do that unless we give the backend a real tensor.
     torch._dynamo.utils.assert_no_fake_params_or_buffers(mod)
 
-    params = {
+    params: Dict[str, Union[torch.Tensor, torch.nn.Parameter]] = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),
     }
-    params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = tuple(params_flat)
+    params_flat_, params_spec = pytree.tree_flatten(params)
+    params_flat: Tuple[Any, ...] = params_flat_ if isinstance(params_flat_, tuple) else tuple(params_flat_)
     params_len = len(params_flat)
 
     def functional_call(*args, **kwargs):
+        non_param_args = args[:params_len]
+        assert isinstance(non_param_args, list)
         with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
+            mod, pytree.tree_unflatten(non_param_args, params_spec)
         ):
             if isinstance(mod, torch.fx.GraphModule):
                 with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
@@ -2963,7 +2988,7 @@ def aot_module_simplified(
     if bw_compiler is None:
         bw_compiler = fw_compiler
 
-    full_args = []
+    full_args: List[Any] = []
     full_args.extend(params_flat)
     full_args.extend(args)
 
@@ -2977,7 +3002,7 @@ def aot_module_simplified(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
         partition_fn=partition_fn,
-        decompositions=decompositions,
+        decompositions=decompositions if decompositions is not None else {},
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
@@ -2995,15 +3020,15 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
-        full_args = []
+        full_args: List[Any] = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
         return compiled_fn(full_args)
 
     # Just for convenience
-    forward.zero_grad = mod.zero_grad
-    forward.named_parameters = mod.named_parameters
-    forward.named_buffers = mod.named_buffers
+    forward.zero_grad = mod.zero_grad  # type: ignore[attr-defined]
+    forward.named_parameters = mod.named_parameters  # type: ignore[attr-defined]
+    forward.named_buffers = mod.named_buffers  # type: ignore[attr-defined]
 
     return forward
 

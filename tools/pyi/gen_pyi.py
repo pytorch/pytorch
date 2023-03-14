@@ -479,7 +479,7 @@ def gen_pyi(
                 "def _from_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
             "_to_functional_tensor": [
-                "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
+                "def _to_functional_tensor(t: Tensor, mirror_autograd_meta: _bool = True) -> Tensor: ..."
             ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
