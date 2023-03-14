@@ -4091,7 +4091,7 @@ class TestQuantizedLinear(TestCase):
                 qw_cpu = qw.int_repr()
                 qw_packed, b_packed = qlinear_prepack(qw_cpu, w_scales, x.shape, x_scale, x_zp, b)
                 qy_cpu = qlinear(qx_cpu, x_scale, x_zp, qw_packed, 1 / w_scales, w_zps,
-                                b_packed, post_op, y_scale, y_zp)
+                                 b_packed, post_op, y_scale, y_zp)
 
                 # Reference
                 qw_packed_ref = qlinear_prepack_ref(qw, b)
