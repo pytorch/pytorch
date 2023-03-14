@@ -11,14 +11,8 @@ disable_progress = True
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
     return [
-<<<<<<< HEAD
         torch._logging.loggable_types.TORCHDYNAMO_LOG_NAME,
         torch._logging.loggable_types.TORCHINDUCTOR_LOG_NAME,
-=======
-        logging.getLogger("torch._dynamo"),
-        logging.getLogger("torch._inductor"),
-        logging.getLogger("torch.fx.experimental.symbolic_shapes"),
->>>>>>> origin
     ]
 
 
@@ -32,6 +26,7 @@ def set_loggers_level(level):
 def get_loggers_level():
     """Read current log level"""
     return get_loggers()[0].level
+
 
 # initialize torchdynamo loggers
 def init_logging(log_file_name=None):
