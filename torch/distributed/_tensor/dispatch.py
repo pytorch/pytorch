@@ -171,7 +171,10 @@ def operator_dispatch(
         # 3. if the return type is List[Tensor], return a list of empty
         # tensors with correct dtype.
 
-        def _default_tensor(spec: DTensorSpec):
+        def _default_tensor(spec: Optional[DTensorSpec]):
+            assert spec is not None, (
+                f"expect DTensorSpec object but got {spec}"
+            )
             if spec.tensor_meta is not None:
                 shape = spec.tensor_meta.shape
                 dtype = spec.tensor_meta.dtype
@@ -201,10 +204,26 @@ def operator_dispatch(
                 obj_list = [None for _ in range(dist.get_world_size())]
                 dist.all_gather_object(obj_list, None)
                 obj_list = list(filter(lambda x: x is not None, obj_list))
+                # TODO: this nested if-else statement is due to MYPY's
+                # issue on inferring reduce op's type. We have to explicitly
+                # type the lambda to make MYPY happy. But we better find a
+                # smarter way to do it.
                 if type_str == "bool":
-                    return functools.reduce(lambda x, y: x and y, obj_list, True)
+                    and_op: Callable[[bool, bool], bool] = lambda x, y: x and y
+                    return functools.reduce(and_op, obj_list, True)
+                elif type_str == "int":
+                    add_op: Callable[[int, int], int] = lambda x, y: x + y
+                    return functools.reduce(add_op, obj_list, 0)
+                elif type_str == "float":
+                    add_op: Callable[[float, float], float] = lambda x, y: x + y
+                    return functools.reduce(add_op, obj_list, 0.0)
+                elif type_str == "double":
+                    add_op: Callable[[double, double], double] = lambda x, y: x + y
+                    return functools.reduce(add_op, obj_list, 0.0)
                 else:
-                    return functools.reduce(lambda x, y: x+y, obj_list, 0)
+                    raise NotImplementedError(
+                        f"Unsupported primitive type {type_str}."
+                    )
 
             if type_str == "Tensor":
                 assert isinstance(output_sharding.output_spec, DTensorSpec), (
@@ -257,7 +276,10 @@ def operator_dispatch(
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
         local_tensor_kwargs = cast(Dict[str, object], local_tensor_kwargs)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
-        if mesh.mesh.numel() < dist.get_world_size():
+        if (
+            (mesh is not None)
+            and (mesh.mesh.numel() < dist.get_world_size())
+        ):
             # communicate the result to non-participating ranks if
             # op runs on a submesh and return type is scalar value
             ret_list = op_schema.func_schema.returns
