@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Callable, Dict, Union
 
+import operator
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
 from onnxscript.function_libs.torch_aten import ops  # type: ignore[import]
 
 import torch
 from torch.onnx._internal import _beartype
-
+from torch.onnx._internal.fx import errors
 
 TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
 
@@ -209,3 +210,39 @@ def _create_onnx_friendly_decomposition_table() -> (
 # op (e.g., torch.ops.aten.add.Tensor) has exporter, we exclude the op's decomposition
 # function in the _ONNX_FRIENDLY_DECOMPOSITION_TABLE.
 _ONNX_FRIENDLY_DECOMPOSITION_TABLE = _create_onnx_friendly_decomposition_table()
+
+
+@_beartype.beartype
+def find_symbolic_function(target: Union[Callable, torch._ops.OpOverload]) -> Callable:
+    """Find the symbolic function for a given target.
+
+    Args:
+        target: The fx.node.target to find the symbolic function for.
+
+    Returns:
+        The symbolic function for the given target.
+
+    Raises:
+        UnsupportedCallFunctionError: If the target is not matched to an "exporter_key",
+            or if it does but the "exporter_key" is not matched to a symbolic function.
+            FIXME: This is weird logic, the root cause is we went through two dictionaries
+            for dispatching. The new dispatcher should fix this.
+    """
+
+    if target == operator.getitem:
+        # FIXME: new dispatcher should fix this arbitrary lookup.
+        # __getitem__ on Tensor or Sequence of tensors. Not tuple.
+        exporter_key = "getitem"
+    elif (
+        isinstance(target, torch._ops.OpOverload)
+        and target in _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
+    ):
+        exporter_key = _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[target]
+    else:
+        raise errors.UnsupportedCallFunctionError([target], [])
+    # The opset version supported in ATenlib is defined at `torch.onnx._constants.FX_ONNX_OPSET`
+    symbolic_fn = _ATENLIB_FUNCTIONS.get(exporter_key)
+    if symbolic_fn is None:
+        raise errors.UnsupportedCallFunctionError([], [exporter_key])
+
+    return symbolic_fn

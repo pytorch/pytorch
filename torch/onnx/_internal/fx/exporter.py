@@ -17,7 +17,13 @@ import torch.fx
 from torch.onnx import _constants
 
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import function_dispatcher, options, passes
+from torch.onnx._internal.fx import (
+    function_dispatcher,
+    options,
+    passes,
+    analysis,
+    errors,
+)
 from torch.utils import _pytree
 
 # TODO: Separate into individual components.
@@ -45,6 +51,12 @@ def _export(
     decomposed_module = passes.shape_inference_with_fake_tensor(
         decomposed_module, *args
     )
+
+    # decomposed_module.print_readable()
+    # Check if there are unsupported call functions.
+    unsupported_call_functions = analysis.unsupported_call_functions(decomposed_module)
+    if unsupported_call_functions:
+        raise errors.UnsupportedCallFunctionError(unsupported_call_functions, [])
 
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may

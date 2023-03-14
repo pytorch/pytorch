@@ -280,6 +280,8 @@ def _export_fx_node_to_onnxscript(
         if node.target == operator.getitem and isinstance(
             fx_name_to_onnxscipt_value[node.args[0].name], tuple  # type: ignore[union-attr]
         ):
+            # FIXME: Remove special case handling. Either support with usual symbolic
+            # function dispatching, or handle this by a pre-pass.
             onnx_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]  # type: ignore[union-attr]
             index = node.args[1]
             output = onnx_tensor_tuple[index]  # type: ignore[index]
@@ -293,22 +295,8 @@ def _export_fx_node_to_onnxscript(
             fx_name_to_onnxscipt_value[node.name] = output
             return
 
-        if node.target == operator.getitem:
-            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
-            exporter_key = "getitem"
-        elif (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
-            exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target
-            ]
-        else:
-            raise RuntimeError(f"Unknown call_function target: {node.target}")
-        # Only the latest opset version is only supported in atenlib for now
-        symbolic_fn = function_dispatcher._ATENLIB_FUNCTIONS.get(exporter_key)
-        if symbolic_fn is None:
-            raise RuntimeError(f"Cannot find function for {exporter_key}")
+        symbolic_fn = function_dispatcher.find_symbolic_function(node.target)
+
         # Map FX inputs to ONNX inputs and fill optional inputs with default values.
         # torch_args and torch_kwargs are for op-level validation
         (
