@@ -292,7 +292,6 @@ def _find_onnxscript_op(
 
 
 def _convert_tensor_to_numpy(input: Any) -> Any:
-
     try:
         import numpy as np
     except ImportError:

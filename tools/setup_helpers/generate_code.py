@@ -54,7 +54,6 @@ def generate_code(
         operator_selector = SelectiveBuilder.get_nop_selector()
 
     if subset == "libtorch" or not subset:
-
         gen_autograd(
             native_functions_path or NATIVE_FUNCTIONS_PATH,
             tags_path or TAGS_PATH,

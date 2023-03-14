@@ -1455,7 +1455,6 @@ def _reset_trace_module_map():
 
 @_beartype.beartype
 def _get_module_attributes(module):
-
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
@@ -1800,7 +1799,6 @@ def _need_symbolic_context(symbolic_fn: Callable) -> bool:
 def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
     """Decorator that provides the symbolic context to the symbolic function if needed."""
     if _need_symbolic_context(symbolic_fn):
-
         # TODO(justinchuby): Update the module name of GraphContext when it is public
         warnings.warn(
             "The first argument to symbolic functions is deprecated in 1.13 and will be "
@@ -1824,7 +1822,6 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
 
 @_beartype.beartype
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
     if not schema.startswith("aten::") or symbolic_helper.is_caffe2_aten_fallback():
