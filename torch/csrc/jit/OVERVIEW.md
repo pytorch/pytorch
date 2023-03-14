@@ -592,7 +592,7 @@ The Environment object tracks the assignment of variable names during compilatio
 
 [frontend/convert_to_ssa.cpp](frontend/convert_to_ssa.cpp)
 
-As explained in the [Block](#Block) section, the IR is represented in structured control flow composed of ifs & loops. This makes it easier to optimize and lower to other compilers which do not support unstructured control flow. We lower Python control flow (break, continue, return) to this simplified form. We do closing over any variables in the environment, so we are able to convert all writes and reads from the environment directly to SSA form.
+As explained in the [Block](#block) section, the IR is represented in structured control flow composed of ifs & loops. This makes it easier to optimize and lower to other compilers which do not support unstructured control flow. We lower Python control flow (break, continue, return) to this simplified form. We do closing over any variables in the environment, so we are able to convert all writes and reads from the environment directly to SSA form.
 
 Conversion to SSA works in multiple parts.
 - First, we add loads and stores to control flow operators (ifs & loops).
