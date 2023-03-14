@@ -2,6 +2,7 @@
 
 import contextlib
 from functools import partial
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -509,6 +510,78 @@ class TestTransformers(NNTestCase):
                 cm = torch.no_grad()  # transformer fast path requires no grad
             with cm:
                 _test(batch_first, training, enable_nested_tensor)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_encoder_padding_and_src_mask_bool(self):
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=16,
+            nhead=2,
+            dim_feedforward=32,
+            dropout=0.1,
+            activation='relu',
+            batch_first=True,
+        )
+        encoder_norm = nn.LayerNorm(16)
+        encoder = nn.TransformerEncoder(
+            encoder_layer, 2, encoder_norm
+        )
+
+        inputs = torch.randn(2, 3, 16)
+
+        src_mask = torch.ones(3, 3, dtype=torch.bool).triu_(diagonal=1)
+        input_seq_len = torch.tensor([3, 2])
+        padding_mask = (
+            torch.arange(3)[None, :].cpu() >= input_seq_len[:, None]
+        )
+
+        with self.assertNoLogs(None):
+            encoder(
+                inputs,
+                mask=src_mask,
+                src_key_padding_mask=padding_mask,
+            )
+
+    @unittest.skipIf(sys.version_info < (3, 11), "not supported on pre-3.11 Python")
+    def test_decoder_padding_and_src_mask_bool(self):
+
+        def transformer_decoder(inputs, input_seq_len, memory):
+            decoder_layer = nn.TransformerDecoderLayer(
+                d_model=16,
+                nhead=2,
+                dim_feedforward=32,
+                dropout=0.1,
+                activation='relu',
+                batch_first=True,
+            )
+            decoder_norm = nn.LayerNorm(16)
+            decoder = nn.TransformerDecoder(
+                decoder_layer, 2, decoder_norm
+            )
+
+            src_mask = torch.ones(
+                inputs.shape[1], inputs.shape[1], dtype=torch.bool
+            ).triu_(diagonal=1)
+            padding_mask = (
+                torch.arange(inputs.shape[1])[None, :].cpu()
+                >= input_seq_len[:, None]
+            )
+
+            return decoder(
+                inputs,
+                memory,
+                tgt_mask=src_mask,
+                tgt_key_padding_mask=padding_mask,
+                memory_key_padding_mask=padding_mask,
+            )
+
+        inputs = torch.randn(2, 3, 16)
+        memory = torch.randn(2, 3, 16)
+        input_seq_len = torch.tensor([3, 2])
+
+        with self.assertNoLogs(None):
+            transformer_decoder(inputs, input_seq_len, memory)
+
+
 
     @unittest.skipIf(not TEST_FAIRSEQ, "Fairseq not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -1705,8 +1778,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0])  # mem_efficient_attention does not support dropout
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                                       head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                                       scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1731,18 +1808,19 @@ class TestSDPA(NNTestCase):
             # See check_gpu_sm86_head_dim_128 in pytorch/aten/src/ATen/native/transformers/cuda/sdp_utils.h
             if isSM86Device and head_dim == 128:
                 self.assertRaises(RuntimeError, lambda: F.scaled_dot_product_attention(query, key, value,
-                                                                                       dropout_p=dropout_p, is_causal=is_causal))
+                                                                                       dropout_p=dropout_p,
+                                                                                       is_causal=is_causal, scale=scale))
                 return
             else:
-                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal)
+                out = F.scaled_dot_product_attention(query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
             # High Precision Math Reference
             out_ref = F.scaled_dot_product_attention(query_ref, key_ref, value_ref,
-                                                     dropout_p=dropout_p, is_causal=is_causal)
+                                                     dropout_p=dropout_p, is_causal=is_causal, scale=scale)
             # Low Precision Math Reference
             out_lp_ref = F.scaled_dot_product_attention(query_ref_lp, key_ref_lp, value_ref_lp,
-                                                        dropout_p=dropout_p, is_causal=is_causal)
+                                                        dropout_p=dropout_p, is_causal=is_causal, scale=scale)
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -1789,8 +1867,12 @@ class TestSDPA(NNTestCase):
     @parametrize("is_causal", [True, False])
     @parametrize("dropout_p", [0.0, 0.22, 0.48])
     @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("scale", [None, "l1"])
     def test_flash_attention_vs_math_ref_grads(self, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype):
+                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
+                                               scale: str):
+
+        scale = scale if scale is None else (1 / head_dim)
         n_heads = 4
         query = torch.rand(batch_size, n_heads, seq_len_q, head_dim,
                            device="cuda", dtype=dtype, requires_grad=True)
@@ -1812,7 +1894,7 @@ class TestSDPA(NNTestCase):
 
         # Create real output
         output_tuple = torch.ops.aten._scaled_dot_product_flash_attention(
-            query, key, value, dropout_p=dropout_p, is_causal=is_causal, return_debug_mask=True)
+            query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale, return_debug_mask=True)
         out = output_tuple[0]
         dbug_mask = output_tuple[-1]
 
@@ -1829,17 +1911,18 @@ class TestSDPA(NNTestCase):
             with sdp_kernel(enable_math=True, enable_flash=False, enable_mem_efficient=False):
                 # High Precision Math Reference
                 out_ref = F.scaled_dot_product_attention(
-                    query_ref, key_ref, value_ref, is_causal=is_causal)
+                    query_ref, key_ref, value_ref, is_causal=is_causal, scale=scale)
                 # Low Precision Math Reference
                 out_lp_ref = F.scaled_dot_product_attention(
-                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal)
+                    query_ref_lp, key_ref_lp, value_ref_lp, is_causal=is_causal, scale=scale)
         else:
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal, scale=scale, dropout_mask=dropout_mask)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, dropout_mask=dropout_mask)[0]
+                query_ref_lp, key_ref_lp, value_ref_lp, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
+                dropout_mask=dropout_mask)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
