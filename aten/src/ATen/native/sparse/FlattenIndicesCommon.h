@@ -5,7 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -38,7 +38,7 @@ template <
   typename index_t,
   int64_t max_static_len = 0>
 Tensor _flatten_indices_impl(const Tensor& indices, IntArrayRef size) {
-  TORCH_INTERNAL_ASSERT(indices.dim() > 1 && indices.size(0) == size.size());
+  TORCH_INTERNAL_ASSERT(indices.dim() > 1 && static_cast<size_t>(indices.size(0)) == size.size());
 
   // Need owning storage in case of the Tensor class.
   const auto hash_coeffs_storage = [&]() -> auto {
