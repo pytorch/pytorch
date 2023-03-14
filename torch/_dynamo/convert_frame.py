@@ -41,6 +41,7 @@ from .utils import (
     is_namedtuple,
     istype,
     orig_code_map,
+    reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
@@ -102,6 +103,7 @@ def wrap_convert_context(fn):
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         cleanup = setup_compile_debug()
+        reset_graph_break_dup_checker()
         try:
             return fn(*args, **kwargs)
         finally:
