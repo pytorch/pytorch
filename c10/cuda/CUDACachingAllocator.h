@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -8,6 +9,7 @@
 
 #include <array>
 #include <mutex>
+#include <set>
 
 namespace c10 {
 
@@ -96,16 +98,12 @@ struct DeviceStats {
   int64_t max_split_size = 0;
 };
 
-struct Context {
-  virtual ~Context() = default;
-};
-
-typedef std::shared_ptr<Context> (*CreateContextFn)(void);
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)(void);
 
 struct History {
   void* addr;
   size_t real_size; // unrounded, actually requested size
-  std::shared_ptr<Context> context; // per-watcher context
+  std::shared_ptr<GatheredContext> context; // per-watcher context
 };
 
 // Struct containing info of an allocation block (i.e. a fractional part of a
@@ -129,7 +127,12 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+};
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
 };
 
 struct TraceEntry {
@@ -152,15 +155,15 @@ struct TraceEntry {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
-      std::shared_ptr<Context> context = nullptr)
+      std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         addr_(addr),
-        context_(context),
+        context_(std::move(context)),
         stream_(stream),
         size_(size) {}
   Action action_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
-  std::shared_ptr<Context> context_;
+  std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
   int64_t size_;
 };
@@ -168,6 +171,14 @@ struct TraceEntry {
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+};
+
+// returns the pointers freed in the pool
+// and the pointers allocated. Note: a pointer
+// may appear in both freed and allocated
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<void*> ptrs_allocated;
 };
 
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
@@ -212,6 +223,12 @@ class CUDAAllocator : public Allocator {
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual bool needsPoolSpecificPeerAccess() = 0;
+  virtual std::shared_ptr<AllocatorState> getCheckpointState(
+      int device,
+      MempoolId_t id) = 0;
+  virtual CheckpointDelta setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
 
@@ -277,6 +294,18 @@ inline void resetPeakStats(int device) {
 
 inline SnapshotInfo snapshot() {
   return get()->snapshot();
+}
+
+inline std::shared_ptr<AllocatorState> getCheckpointState(
+    int device,
+    MempoolId_t id) {
+  return get()->getCheckpointState(device, id);
+}
+
+inline CheckpointDelta setCheckpointPoolState(
+    int device,
+    std::shared_ptr<AllocatorState> pps) {
+  return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions

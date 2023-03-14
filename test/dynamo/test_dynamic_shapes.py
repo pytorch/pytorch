@@ -26,12 +26,9 @@ test_classes = {}
 
 ALL_DYNAMIC_XFAILS = {
     "MiscTests": [
-        "test_autocast_sdpa",
         "test_parsing_sdpa",
     ],
     "ReproTests": [
-        # aten.min.dim - couldn't find symbolic meta function/decomposition
-        "test_do_paste_mask",
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",
         # Cannot call sizes() on tensor with symbolic sizes/strides

@@ -1,8 +1,9 @@
 # Owner(s): ["module: unknown"]
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch.utils.flop_counter
+import torch.nn.functional as F
 import unittest
 
 try:
@@ -11,6 +12,8 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+HAS_CUDA = torch.cuda.is_available()
 
 def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
@@ -21,6 +24,7 @@ def get_total_flops(mode):
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
 
+@skipIfTorchDynamo
 class TestFlopCounter(TestCase):
     def test_flop_counter_variety(self):
         mode = FlopCounterMode()
@@ -132,17 +136,17 @@ class TestFlopCounter(TestCase):
         resnet18 = torchvision_models.resnet18()
         mode = FlopCounterMode(resnet18)
         with mode:
-            a = T(1, 3, 224, 224)
-            resnet18(a)
+            a = T(1, 3, 224, 224, requires_grad=True)
+            resnet18(a).sum().backward()
 
-        self.assertExpectedInline(get_total_flops(mode), """3628146688""")
-        layer1_conv_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution]
-        layer1_conv_back_flops = mode.flop_counts['layer1'][torch.ops.aten.convolution_backward]
-        self.assertExpectedInline(str(layer1_conv_flops), """0""")
-        self.assertExpectedInline(str(layer1_conv_back_flops), """0""")
+        self.assertExpectedInline(get_total_flops(mode), """10884440064""")
+        layer1_conv_flops = mode.flop_counts['ResNet.layer1'][torch.ops.aten.convolution]
+        layer1_conv_back_flops = mode.flop_counts['ResNet.layer1'][torch.ops.aten.convolution_backward]
+        self.assertExpectedInline(str(layer1_conv_flops), """924844032""")
+        self.assertExpectedInline(str(layer1_conv_back_flops), """1849688064""")
 
     def test_custom(self):
-        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args: 5})
+        mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: lambda *args, out: 5})
         with mode:
             a = T(4, 5)
             a + a
@@ -153,6 +157,78 @@ class TestFlopCounter(TestCase):
         mode = FlopCounterMode()
         with mode:
             T(4, 5).cos()
+
+    @unittest.skipIf(not HAS_CUDA, "CUDA not available")
+    def test_sdpa(self):
+        batch_size = 4
+        n_heads = 8
+        seq_len_q = 128
+        seq_len_k = 128
+        head_dim = 64
+        dtype = torch.float16
+
+        backends = [
+            torch.backends.cuda.enable_mem_efficient_sdp,
+            torch.backends.cuda.enable_flash_sdp,
+            torch.backends.cuda.enable_math_sdp
+        ]
+
+        def enable_backend(backend):
+            for cur in backends:
+                if backend == cur:
+                    backend(True)
+                else:
+                    backend(False)
+
+        torch.manual_seed(0)
+        qkv = torch.randn(batch_size, n_heads, seq_len_q, 3 * head_dim, device='cuda', dtype=dtype, requires_grad=True)
+        query, key, value = qkv.split(head_dim, dim=-1)
+
+        def f_forward(query, key, value):
+            return F.scaled_dot_product_attention(query, key, value, dropout_p=0, is_causal=True)
+
+        def f_forward_backward(query, key, value):
+            return F.scaled_dot_product_attention(query, key, value, dropout_p=0, is_causal=True).sum().backward()
+
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=True, enable_mem_efficient=False):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
+
+            # Note: The "math" backend does *not* do recomputation, which is why this value is lower
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 3)
+            self.assertExpectedInline(flops_bw, """402653184""")
+
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
+
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 7 // 2)
+            self.assertExpectedInline(flops_bw, """469762048""")
+
+        with torch.backends.cuda.sdp_kernel(enable_flash=False, enable_math=False, enable_mem_efficient=True):
+            mode = FlopCounterMode()
+            with mode:
+                f_forward(query, key, value)
+            flops_fw = get_total_flops(mode)
+            self.assertExpectedInline(flops_fw, """134217728""")
+            with mode:
+                f_forward_backward(query, key, value)
+
+            flops_bw = get_total_flops(mode)
+            self.assertEqual(int(flops_bw), int(flops_fw) * 7 // 2)
+            self.assertExpectedInline(flops_bw, """469762048""")
 
 
 
