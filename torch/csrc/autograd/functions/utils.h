@@ -109,7 +109,7 @@ inline bool isFwGradDefinedTensorList(const at::ITensorListRef& variables) {
 }
 
 inline bool isFwGradDefinedTensorList(
-    const c10::List<c10::optional<at::Tensor>> li) {
+    const c10::List<c10::optional<at::Tensor>>& li) {
   bool ret = false;
   for (auto i : c10::irange(li.size())) {
     auto t = li.get(i);
