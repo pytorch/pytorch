@@ -98,16 +98,6 @@ Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output)
     return output;
   }
 
-<<<<<<< HEAD
-=======
-  struct CachedGraph : public mps::MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* selfTensor_ = nil;
-    MPSGraphTensor* otherTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
->>>>>>> upstream/viable/strict
   MPSStream* stream = getCurrentMPSStream();
 
   mps::MPSGraphCache* cache_ = mps::MPSGraphCache::getInstance();
@@ -151,13 +141,9 @@ Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output)
     }
     Placeholder selfPlaceholder = Placeholder();
     Placeholder otherPlaceholder = Placeholder();
-<<<<<<< HEAD
+
     if (!(self.numel() == 0 || other.numel() == 0)) {
       selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-=======
-    if (!(self.numel() == 0 || other.numel() == 0)) {
-      selfPlaceholder = Placeholder(cachedGraph->selfTensor_, self);
->>>>>>> upstream/viable/strict
       otherPlaceholder = Placeholder(cachedGraph->otherTensor_, other);
     }
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);

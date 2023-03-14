@@ -52,7 +52,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   MPSStream* stream = getCurrentMPSStream();
 
   // Derive from MPSCachedGraph
-<<<<<<< HEAD
   // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
   // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
   // for the operation Here, we don't have any input tensors, just an output tensor If the operator to be added is unary
@@ -60,13 +59,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   // `MPSBinaryCachedGraph` and their corresponding Grad versions in `OperationUtils.h`.
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-=======
-  // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
-  // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
-  // for the operation Here, we don't have any input tensors, just an output tensor
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
->>>>>>> upstream/viable/strict
     MPSGraphTensor* outputTensor_ = nil;
   };
 

@@ -23,16 +23,6 @@ TORCH_IMPL_FUNC(triu_mps_out)
   }
   MPSStream* stream = getCurrentMPSStream();
 
-<<<<<<< HEAD
-=======
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
->>>>>>> upstream/viable/strict
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
@@ -98,17 +88,7 @@ TORCH_IMPL_FUNC(tril_mps_out)
     return;
   }
 
-<<<<<<< HEAD
   MPSStream* stream = getCurrentMPSStream();
-=======
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
->>>>>>> upstream/viable/strict
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
