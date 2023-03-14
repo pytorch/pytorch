@@ -46,7 +46,7 @@ inline Tensor view(const Tensor& self_arg, IntArrayRef shape) {
   return view_internal(self_arg, shape);
 }
 
-Tensor _reshape_alias(
+Tensor _reshape_copy_on_write(
     const Tensor& self_arg,
     const IntArrayRef shape,
     const IntArrayRef strides) {
@@ -58,7 +58,7 @@ Tensor _reshape_alias(
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
   m.impl(
-      TORCH_SELECTIVE_NAME("aten::_reshape_alias"), TORCH_FN(_reshape_alias));
+      TORCH_SELECTIVE_NAME("aten::_reshape_copy_on_write"), TORCH_FN(_reshape_copy_on_write));
 }
 
 #endif /* USE_VULKAN_API */

@@ -2804,8 +2804,8 @@ def is_same_size(a: Tensor, b: Tensor) -> bool:
     return a.shape == b.shape
 
 
-@register_decomposition([aten._reshape_alias, aten._unsafe_view])
-def _reshape_alias(x, shape, *args):
+@register_decomposition([aten._reshape_copy_on_write, aten._unsafe_view])
+def _reshape_copy_on_write(x, shape, *args):
     return aten.view(x, shape)
 
 

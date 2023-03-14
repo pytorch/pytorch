@@ -1381,6 +1381,13 @@ def get_grouped_by_view_native_functions(
         # view_copy op (SchemaKind.functional)
         if view_kind == ViewSchemaKind.non_aliasing:
             kind = f.func.kind()
+            if kind in grouped_by_views[schema]:
+                import pprint
+                print(schema)
+                print(view_kind)
+                print(kind)
+                pprint.pp(grouped_by_views[schema])
+                pprint.pp(grouped_by_views[schema][kind])
             assert kind not in grouped_by_views[schema]
             grouped_by_views[schema][kind] = f
         else:

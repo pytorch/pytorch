@@ -4585,15 +4585,15 @@
   dispatch:
     CompositeExplicitAutograd: _reshape_copy_symint
 
-# NOTE [ _reshape_alias ] is meant to be used in the implementation of reshape.
+# NOTE [ _reshape_copy_on_write ] is meant to be used in the implementation of reshape.
 # They are not user-facing, hence the leading underscore. Please don't use it
 # anywhere else.
-- func: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
+- func: _reshape_copy_on_write(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
   variants: function, method
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS: _reshape_alias
+    CPU, CUDA, Meta, QuantizedCPU, QuantizedCUDA, ZeroTensor, MPS: _reshape_copy_on_write
     # We don't need to support mkldnn since this is handled explicitly by the reshape operator.
 
 - func: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
@@ -13680,12 +13680,12 @@
   tags: view_copy
   autogen: permute_copy.out
 
-- func: _reshape_alias_copy(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutogradNonFunctional: _reshape_alias_copy_symint
-  tags: view_copy
-  autogen: _reshape_alias_copy.out
+# - func: _reshape_copy_on_write_copy(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
+#   variants: function
+#   dispatch:
+#     CompositeExplicitAutograd: _reshape_copy_on_write_copy_symint
+#   tags: view_copy
+#   autogen: _reshape_copy_on_write_copy.out
 
 - func: select_copy.int(Tensor self, int dim, SymInt index) -> Tensor
   variants: function

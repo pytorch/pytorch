@@ -1364,7 +1364,7 @@
 # making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntArrayRef shape)
 
-- name: _reshape_alias(Tensor(a) self, SymInt[] size, SymInt[] stride) -> Tensor(a)
+- name: _reshape_copy_on_write(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 

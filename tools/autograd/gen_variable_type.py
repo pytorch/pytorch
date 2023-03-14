@@ -354,7 +354,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "cumulative_trapezoid",
     "conj_physical_",
     "_neg_view",
-    "_reshape_alias",
+    "_reshape_copy_on_write",
     "_reshape_copy",
     "_linalg_det",
     "lu_solve",

@@ -47,8 +47,8 @@
 #include <ATen/ops/_mkldnn_reshape.h>
 #include <ATen/ops/_mkldnn_transpose.h>
 #include <ATen/ops/_neg_view_copy_native.h>
-#include <ATen/ops/_reshape_alias_copy_native.h>
-#include <ATen/ops/_reshape_alias_native.h>
+// #include <ATen/ops/_reshape_copy_on_write_copy_native.h>
+#include <ATen/ops/_reshape_copy_on_write_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
@@ -1626,7 +1626,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   //
   //     Similarly we don't call `view` because it duplicates some of the work
   //     we've already done, and instead call our internal/private operator
-  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `_reshape_copy_on_write` that essentially does the same thing as `view` and
   //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
     // Temporary check to revert to the old behavior/view in cases where the
@@ -1636,7 +1636,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-      return self._reshape_alias_symint(shape, stride.value());
+      return self._reshape_copy_on_write_symint(shape, stride.value());
     } else {
       return reshape_copy_on_write(self, proposed_shape);
     }
@@ -1684,7 +1684,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   //
   //     Similarly we don't call `view` because it duplicates some of the work
   //     we've already done, and instead call our internal/private operator
-  //     `_reshape_alias` that essentially does the same thing as `view` and
+  //     `_reshape_copy_on_write` that essentially does the same thing as `view` and
   //     `as_strided` without any of the extra overhead.
   if (stride.has_value()) {
     // Temporary check to revert to the old behavior/view in cases where the
@@ -1694,7 +1694,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias(shape, stride.value());
+      return self._reshape_copy_on_write(shape, stride.value());
     } else {
       return self.view(shape);
     }
@@ -1702,7 +1702,7 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
 }
 
-Tensor _reshape_alias(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+Tensor _reshape_copy_on_write(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
   // This is only used by `reshape` in cases where it would otherwise have dispatched
   // to `view`. This removes the overhead of calling `view` which duplicates some of
   // the work that's already been done (`infer_size_dv` and `computeStride`).

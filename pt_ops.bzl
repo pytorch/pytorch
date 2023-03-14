@@ -592,7 +592,7 @@ PT_BASE_OPS = [
     "aten::qscheme",
     "aten::quantize_per_tensor",
     "aten::reshape",
-    "aten::_reshape_alias",
+    "aten::_reshape_copy_on_write",
     "aten::resize_",
     "aten::resize_as_",
     "aten::scalar_tensor",

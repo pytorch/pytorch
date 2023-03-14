@@ -147,7 +147,7 @@ _SKIP_PYTHON_BINDINGS = [
     "fake_quantize_per_channel_affine_cachemask",
     "_new_zeros_with_same_feature_meta",
     "_has_same_storage_numel",  # used for forward AD internals
-    "_reshape_alias",
+    "_reshape_copy_on_write",
     "replace_",  # only used by the functionalization pass, doesn't need to be exposed to python
     "copy",  # only used by the functionalization pass
     "fill.Tensor",  # only used by the functionalization pass

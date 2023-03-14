@@ -146,7 +146,7 @@ full_codegen:
   - diagonal_copy
   - expand_copy
   - permute_copy
-  - _reshape_alias_copy
+#  - _reshape_alias_copy
   - select_copy.int
   - detach_copy
   - slice_copy.Tensor
@@ -214,7 +214,7 @@ symint:
   - slice_scatter
   - empty_strided
   - new_empty_strided
-  - _reshape_alias_copy
+#  - _reshape_alias_copy
   - select_backward
 autograd:
   - max_pool3d

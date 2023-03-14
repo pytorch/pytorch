@@ -556,7 +556,7 @@ static void checkBasicAsStridedValidForSlice(
       "rewrite the `as_strided` call as a sequence of PyTorch view operations");
 }
 
-Tensor _reshape_alias_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
+Tensor _reshape_copy_on_write_batching_rule(const Tensor& self, IntArrayRef sizes, IntArrayRef strides) {
   return reshape_batching_rule(self, sizes);
 }
 
@@ -1114,7 +1114,7 @@ TORCH_LIBRARY_IMPL(aten, Batched, m) {
   m.impl("mH", native::mH);             // composite wrt autograd
   m.impl("permute", permute_batching_rule);
   m.impl("reshape", reshape_batching_rule);
-  m.impl("_reshape_alias", _reshape_alias_batching_rule);
+  m.impl("_reshape_copy_on_write", _reshape_copy_on_write_batching_rule);
   m.impl("reshape_as", native::reshape_as); // composite wrt autograd
   m.impl("select.int", select_batching_rule);
   m.impl("slice.Tensor", slice_batching_rule);

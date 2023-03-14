@@ -294,7 +294,7 @@ std::tuple<Tensor, optional<int64_t>> select_batching_rule(const Tensor& self, o
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> _reshape_alias_batch_rule(const Tensor& self, optional<int64_t> bdim, const c10::SymIntArrayRef shape, const c10::SymIntArrayRef strides) {
+std::tuple<Tensor, optional<int64_t>> _reshape_copy_on_write_batch_rule(const Tensor& self, optional<int64_t> bdim, const c10::SymIntArrayRef shape, const c10::SymIntArrayRef strides) {
   (void) strides;
   TORCH_INTERNAL_ASSERT(bdim.has_value());
 
@@ -577,7 +577,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(squeeze, squeeze_batch_rule);
   VMAP_SUPPORT2(squeeze, dim, squeeze_dim_batch_rule);
   VMAP_SUPPORT2(squeeze, dims, squeeze_dims_batch_rule);
-  VMAP_SUPPORT(_reshape_alias, _reshape_alias_batch_rule);
+  VMAP_SUPPORT(_reshape_copy_on_write, _reshape_copy_on_write_batch_rule);
   VMAP_SUPPORT(roll, roll_batch_rule);
   VMAP_SUPPORT(permute, permute_batching_rule);
   VMAP_SUPPORT(diagonal, diagonal_batching_rule);

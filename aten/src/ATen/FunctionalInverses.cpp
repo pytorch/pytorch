@@ -156,19 +156,19 @@ Tensor FunctionalInverses::permute_copy_inverse(const Tensor& base, const Tensor
     return at::functionalization::permute_copy_inverse(mutated_view, dims, reapply_views);
 }
 
-Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
-    // Note that I'm directly calling reshape(), and ignoring the strides.
-    // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
-    // Specifically, passing in the strides directly can get us into trouble in cases like:
-    // b = a[0]; c = b.reshape(...); c.add_(1); print(a)
-    // When we eventually run the _reshape_alias_inverse() call here, if we were to pass in both sizes and strides,
-    // The call would fail because `mutated_view` doesn't have enough bytes of storage.
-    if (reapply_views) {
-      return at::_reshape_alias_symint(mutated_view, base.sym_sizes(), base.sym_strides());
-    } else {
-      return at::_reshape_alias_copy_symint(mutated_view, base.sym_sizes(), base.sym_strides());
-    }
-}
+// Tensor FunctionalInverses::_reshape_alias_copy_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, at::SymIntArrayRef size, at::SymIntArrayRef stride) {
+//     // Note that I'm directly calling reshape(), and ignoring the strides.
+//     // _reshape_alias() isn't available from user code, and is an implementation detail of reshape().
+//     // Specifically, passing in the strides directly can get us into trouble in cases like:
+//     // b = a[0]; c = b.reshape(...); c.add_(1); print(a)
+//     // When we eventually run the _reshape_alias_inverse() call here, if we were to pass in both sizes and strides,
+//     // The call would fail because `mutated_view` doesn't have enough bytes of storage.
+//     if (reapply_views) {
+//       return at::_reshape_copy_on_write_symint(mutated_view, base.sym_sizes(), base.sym_strides());
+//     } else {
+//       return at::_reshape_alias_copy_symint(mutated_view, base.sym_sizes(), base.sym_strides());
+//     }
+// }
 
 Tensor FunctionalInverses::select_copy_int_inverse(const Tensor& base, const Tensor& mutated_view, bool reapply_views, int64_t dim, c10::SymInt index) {
     // Pessimism: we can't reapply views for slice_scatter.
