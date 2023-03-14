@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -124,11 +123,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 

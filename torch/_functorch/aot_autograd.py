@@ -1,3 +1,4 @@
+import re
 import collections
 import dataclasses
 import itertools
@@ -27,7 +28,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
-from torch._guards import TracingContext, DuplicateInputs
+from torch._guards import TracingContext, DuplicateInputs, Source
 
 log = logging.getLogger(__name__)
 
@@ -1292,6 +1293,7 @@ class AOTConfig:
     aot_id: int
     keep_inference_input_mutations: bool
     dynamic_shapes: bool = False
+    aot_autograd_arg_pos_to_source : Optional[List[Source]] = None
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
     with enable_python_dispatcher():
@@ -1800,22 +1802,15 @@ def aot_wrapper_dedupe(
     deduped_flat_args = remove_dupe_args(flat_args)
 
     tracing_context = TracingContext.get()
-    if tracing_context:
+    if tracing_context and aot_config.aot_autograd_arg_pos_to_source and len(aot_config.aot_autograd_arg_pos_to_source) > 0:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
         for dupe_arg_pos, kept_pos in add_dupe_map.items():
-            dupe_arg_dict = flat_args[dupe_arg_pos].__dict__
-            kept_arg_dict = flat_args[kept_pos].__dict__
-            if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
-                d_positions = dupe_arg_dict['graph_arg_pos']
-                k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
-                if len(d_positions) > 1:
-                    for i in range(1, len(d_positions)):
-                        pos = d_positions[i]
-                        pre_pos = d_positions[i - 1]
-                        tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(pre_pos, pos))
+            if dupe_arg_pos != kept_pos:
+                dupe_arg_source = aot_config.aot_autograd_arg_pos_to_source[dupe_arg_pos]
+                kept_arg_source = aot_config.aot_autograd_arg_pos_to_source[kept_pos]
+                tracing_context.guards_context.aotautograd_guards.append(DuplicateInputs(kept_arg_source, dupe_arg_source))
 
     @wraps(flat_fn)
     def wrapped_flat_fn(*args):
@@ -2851,8 +2846,47 @@ def aot_module_simplified(
         bw_compiler = fw_compiler
 
     full_args = []
+    # First, the params
     full_args.extend(params_flat)
+
+    aot_autograd_arg_pos_to_source = []
+    # Then, the params 1:1 mapped sources, if relevant.
+    if hasattr(mod, "_nn_module_sources"):
+        # We now know this came from dynamo, and (1) we care about guards,
+        # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
+        # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
+        for name in params.keys():
+            if name in mod._nn_module_sources:
+                # Easy case
+                aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[name])
+            else:
+                # Complex case - an attribute is found with "." in its name!
+                # This is not valid for dynamo named params, so, we need to reconstruct
+                # the source.
+                # A name is always a base_name, and a param_name
+                base_name, param_name = name.split(".")
+                # The base name should always be known
+                base = mod._nn_module_sources[base_name]
+                # TODO(voz): Move this to torch._guards
+                from torch._dynamo.source import AttrSource
+                # Reconstruct this to ensure we get the same name contract as dynamo
+                new_source = AttrSource(base, param_name)
+                # Sanitize the name, just as dynamo does
+                new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_source.name())
+                # Invariant, this must always be here.
+                aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[new_name])
+
+
+    # Next, the input args
     full_args.extend(args)
+
+    # And now their dynamo equivalent, if there
+    if hasattr(mod, "graph"):
+        arg_srcs = [x._dynamo_source for x in mod.graph.nodes if x.op == "placeholder" and hasattr(x, "_dynamo_source")]
+        aot_autograd_arg_pos_to_source.extend(arg_srcs)
+
+    if len(aot_autograd_arg_pos_to_source) > 0:
+        assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False
     for x in full_args:
@@ -2868,7 +2902,8 @@ def aot_module_simplified(
         num_params_buffers=params_len,
         aot_id=next(AOT_COUNTER),
         keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=dynamic_shapes
+        dynamic_shapes=dynamic_shapes,
+        aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source
     )
 
     compiled_fn = create_aot_dispatcher_function(
