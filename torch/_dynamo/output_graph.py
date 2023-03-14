@@ -340,7 +340,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.graphargs.append(arg)
         if isinstance(arg.source, LocalInputSource):
             self.pos_to_arg[arg.source.pos] = curr_pos
-        self.tracing_context.module_context.register(arg.source.name(), arg.source)
+        self.tracing_context.module_context.register(
+            get_or_make_known_name(arg.source), arg.source
+        )
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -497,7 +499,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # The reason we need this uniform is that we need all the names to be the same, so that
         # all the sources can be the same, because when we eventually call .register into the
         # context_module, we need to make sure elements match.
-        name = get_or_make_known_name(name, source)
+        name = get_or_make_known_name(source)
         if not name or not name[0].isalpha():
             name = "sub" + name
         base = name
@@ -510,20 +512,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for n, p in target.named_parameters(
-                            recurse=False, remove_duplicate=False
-                        ):
+                        for n, p in target._parameters.items():
                             new_source = ParamBufferSource(source, n)
+<<<<<<< HEAD
                             new_name = new_source.name()
+=======
+                            new_name = new_source.flat_name()
+>>>>>>> 27ee6296c5b... Fix logic
                             self.register_attr_or_module(p, new_name, source=new_source)
                     # annoying, but there are cases when we do not have buffers
                     # see test_nn_moduledict_contains
                     if hasattr(target, "_buffers"):
-                        for n, p in target.named_buffers(
-                            recurse=False, remove_duplicate=False
-                        ):
+                        for n, p in target._buffers.items():
                             new_source = ParamBufferSource(source, n)
+<<<<<<< HEAD
                             new_name = new_source.name()
+=======
+                            new_name = new_source.flat_name()
+>>>>>>> 27ee6296c5b... Fix logic
                             self.register_attr_or_module(p, new_name, source=new_source)
                 return wrap_name(name)
             name = f"{base}_{i}"
