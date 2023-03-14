@@ -1338,7 +1338,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
 
-    log.debug(AOTForwardGraphLogRec(f"====== Forward (only) graph {aot_config.aot_id} ======\n", fw_module))
+    log.debug(AOTForwardGraphLogRec(aot_config.aot_id, fw_module))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -2142,7 +2142,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    log.debug(AOTJointGraphLogRec(f"====== Joint graph {aot_config.aot_id} ======\n", fx_g))
+    log.debug(AOTJointGraphLogRec(aot_config.aot_id, fx_g))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2159,8 +2159,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        log.debug(AOTForwardGraphLogRec(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
-        log.debug(AOTBackwardGraphLogRec(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
+        log.debug(AOTForwardGraphLogRec(aot_config.aot_id, fw_module))
+        log.debug(AOTBackwardGraphLogRec(aot_config.aot_id, bw_module))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(

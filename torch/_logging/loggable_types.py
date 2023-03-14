@@ -78,9 +78,10 @@ class GraphTabularLogRec(typing.NamedTuple):
         )
 
 
-class GraphCodeLogRec(typing.NamedTuple):
-    fn_name: str  # the compiled fn name
-    gm: GraphModule
+class GraphCodeLogRec:
+    def __init__(self, fn_name, gm):
+        self.fn_name = fn_name
+        self.gm = gm
 
     def __str__(self):
         return _gen_graph_log_str(
@@ -97,17 +98,19 @@ class DynamoGraphCodeLogRec(GraphCodeLogRec):
 
 @loggable("aot_forward_graph", AOT_AUTOGRAD_LOG_NAME)
 class AOTForwardGraphLogRec(GraphCodeLogRec):
-    pass
-
+    def __init__(self, aot_id, gm):
+        super().__init__(f"====== Forward graph {aot_id} ======\n", gm)
 
 @loggable("aot_backward_graph", AOT_AUTOGRAD_LOG_NAME)
 class AOTBackwardGraphLogRec(GraphCodeLogRec):
-    pass
+    def __init__(self, aot_id, gm):
+        super().__init__(f"====== Backward graph {aot_id} ======\n", gm)
 
 
 @loggable("aot_joint_graph", AOT_AUTOGRAD_LOG_NAME)
 class AOTJointGraphLogRec(GraphCodeLogRec):
-    pass
+    def __init__(self, aot_id, gm):
+        super().__init__(f"====== Joint graph {aot_id} =====\n", gm)
 
 
 @loggable("output_code", TORCHINDUCTOR_LOG_NAME, off_by_default=True)

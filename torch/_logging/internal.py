@@ -145,6 +145,8 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
                     f"Unrecognized log or artifact name passed to set_logs: {key}"
                 )
 
+        _init_logs()
+
     _set_logs(dynamo=dynamo,
               aot=aot,
               inductor=inductor,
