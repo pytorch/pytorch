@@ -2399,6 +2399,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
 
+    def test_size_typematch(self):
+        def f(x, y):
+            if isinstance(x, torch.Size):
+                return y + 1
+            else:
+                return y + 2
+
+        y = torch.zeros(1)
+        x1 = torch.Size((3,))
+        x2 = (3,)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(x1, y), opt_f(x1, y)))
+        self.assertTrue(same(f(x2, y), opt_f(x2, y)))
+        self.assertEqual(cnt.frame_count, 2)
+
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):
         def f(x):
