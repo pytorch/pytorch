@@ -308,27 +308,27 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def eq(x, y):
-        return f"{x} == {y}"
+        return f"to_float_mask({x} == {y})"
 
     @staticmethod
     def ne(x, y):
-        return f"{x} != {y}"
+        return f"to_float_mask({x} != {y})"
 
     @staticmethod
     def lt(x, y):
-        return f"{x} < {y}"
+        return f"to_float_mask({x} < {y})"
 
     @staticmethod
     def gt(x, y):
-        return f"{x} > {y}"
+        return f"to_float_mask({x} > {y})"
 
     @staticmethod
     def le(x, y):
-        return f"{x} <= {y}"
+        return f"to_float_mask({x} <= {y})"
 
     @staticmethod
     def ge(x, y):
-        return f"{x} >= {y}"
+        return f"to_float_mask({x} >= {y})"
 
     @staticmethod
     def and_(x, y):
@@ -573,9 +573,8 @@ class CppVecOverrides(OpOverrides):
             other_code = f"at::vec::Vectorized<float>({other!r})"
 
         type = f"decltype({var}())"
-        zero_val = "at::vec::Vectorized<float>(0)"
         float_mask = f"to_float_mask({mask})"
-        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask})"
 
     @staticmethod
     def index_expr(expr, dtype):
