@@ -124,7 +124,6 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   for (const auto i : c10::irange(
            kProfileEventsStartIdx,
            kProfileEventsStartIdx + profiledEventsSize)) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     TORCH_CHECK(static_cast<size_t>(i) < tupleElements.size());
     // Reconstruct remote event from the ivalues.
     torch::autograd::profiler::LegacyEvent fromIvalueEvent =

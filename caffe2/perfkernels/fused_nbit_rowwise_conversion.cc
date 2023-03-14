@@ -57,7 +57,6 @@ void Fused8BitRowwiseQuantizedToFloat__base(
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output + row * output_columns;
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
     for (std::size_t col = 0; col < static_cast<std::size_t>(output_columns); ++col) {
       output_row[col] =
           // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
