@@ -522,7 +522,6 @@ class WrapperCodeGen(CodeGen):
 
             device_cm_stack = contextlib.ExitStack()
             for line in self.lines:
-
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
                 elif isinstance(line, EnterCudaDeviceContextManagerLine):

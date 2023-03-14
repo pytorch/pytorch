@@ -52,11 +52,11 @@ struct PythonTraceback : public CapturedTraceback::Python {
   void appendSymbolized(
       const std::vector<CapturedTraceback::PyFrame>& to_symbolize,
       SymbolizedTracebacks& result) override {
-    auto torch = py::module::import("torch");
     py::str line_s = "line";
     py::str name_s = "name";
     py::str filename_s = "filename";
 
+    auto torch = py::module::import("torch");
     py::object stack_frames_for_code;
     if (py::hasattr(torch, "_inductor")) {
       py::object inductor = torch.attr("_inductor");
