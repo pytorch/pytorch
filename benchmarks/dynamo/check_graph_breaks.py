@@ -75,6 +75,7 @@ def main():
 
     actual = pd.read_csv(args.actual)
     expected = pd.read_csv(args.expected)
+    dynamic = pd.read_csv("benchmarks/dynamo/ci_expected_accuracy/extra_dynamic_breaks.csv")
 
     failed, msg = check_graph_breaks(actual, expected, args.expected)
     if failed:

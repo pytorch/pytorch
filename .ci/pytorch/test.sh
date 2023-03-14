@@ -320,7 +320,7 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_csv.py \
       -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # because I haven't tracked the cpu-side or dynamic expected artifacts yet, and need to differentiate filenames
       python benchmarks/dynamo/check_graph_breaks.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \

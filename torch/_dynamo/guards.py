@@ -431,6 +431,7 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard):
+        breakpoint()
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
