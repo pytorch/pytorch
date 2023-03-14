@@ -473,7 +473,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                assert self.nn_modules_sources
+                assert self.nn_modules_sources is not None
                 assert name not in self.nn_modules_sources
                 self.nn_modules[name] = target
                 self.nn_modules_sources[name] = source
