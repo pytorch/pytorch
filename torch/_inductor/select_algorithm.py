@@ -6,7 +6,6 @@ import logging
 import sys
 import textwrap
 import time
-import warnings
 from io import StringIO
 
 from typing import Any, List
@@ -15,7 +14,6 @@ from unittest.mock import patch
 import sympy
 
 import torch
-from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
@@ -42,20 +40,6 @@ class KernelNamespace:
 # these objects are imported from the generated wrapper code
 template_kernels = KernelNamespace()
 extern_kernels = KernelNamespace()
-
-
-def benchmark_choice_in_sub_process(
-    all_template_kernels, choice, args, out, expected_out, timings
-):
-    global template_kernels
-    template_kernels = all_template_kernels
-    result = choice.benchmark(*args, out=out)
-    if expected_out is not None:
-        torch.testing.assert_close(out, expected_out)
-
-    # use a tensor since the mutation to a python list in a sub process
-    # is not synced back to the parent process
-    timings.copy_(torch.tensor(result))
 
 
 class TritonTemplateKernel(TritonKernel):
@@ -776,6 +760,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
             return timing
 
+        if config.autotune_in_subproc:
+            from .autotune_process import tuning_process
+
+            # do the optional warmup
+            tuning_process.initialize()
+            assert tuning_process.valid()
+            tuning_process.sync_template_kernels()
+
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
@@ -845,36 +837,16 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 expected_output = None
 
-            # use a tensor since the mutation to a python list in a sub process
-            # is not synced back to the parent process
-            timings = torch.zeros(3, dtype=torch.float32)
+            from . import autotune_process
 
-            # cuda runtime does not work with "fork", use "spawn" to start processes.
-            ctx = multiprocessing.get_context("spawn")
-            child = ctx.Process(
-                target=benchmark_choice_in_sub_process,
-                args=(
-                    template_kernels,
-                    choice,
-                    inputs,
-                    output,
-                    expected_output,
-                    timings,
-                ),
+            timing = autotune_process.autotune(
+                choice,
+                inputs,
+                output,
+                expected_output,
             )
-            child.start()
-            child.join()
-
-            # child process fail
-            if child.exitcode != 0:
-                warnings.warn(
-                    f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
-                )
-                # return a large value to this choice will be ignored
-                return 1e10
-
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return timings[0].item()
+            return timing
 
         benchmark = (
             benchmark_in_sub_process
