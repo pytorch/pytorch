@@ -37,7 +37,7 @@ Optimizations
 Optimizations can be passed in :func:`~torch.compile` with either a backend mode parameter or as passes. To understand what are the available options you can run
 :func:`~torch._inductor.list_options()`` and :func:`~torch._inductor.list_mode_options`
 
-The default backend is `backend="inductor"` which will likely be the most reliable and performant option for most users,
+The default backend is `backend="inductor"` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.    
 
 .. autosummary::
@@ -53,7 +53,8 @@ IF you experience issues with models failing to compile, running of out of memor
 odds are you will find the right tool to solve your problem in our guides.
 
 .. WARNING::
-    A few features are still very much in development and not likely to work for most users
+    A few features are still very much in development and not likely to work for most users. Please do not use these features
+    in production code and if you're a library maintainer please do not expose these options to your users.
     - Dynamic shapes
     - Distributed training
     - Model export
