@@ -21,12 +21,11 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using CachedGraph = MPSBinaryCachedGraph;
   auto output = at::native::empty_mps({}, self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
 
-  struct CachedGraph : public MPSCachedGraph
-  {
-      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor* selfTensor_ = nil;
-      MPSGraphTensor* otherTensor_ = nil;
-      MPSGraphTensor* outputTensor_ = nil;
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* selfTensor_ = nil;
+    MPSGraphTensor* otherTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
   };
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 

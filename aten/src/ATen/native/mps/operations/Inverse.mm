@@ -57,22 +57,22 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
         return newCachedGraph;
       });
       cachedGraph = static_cast<CachedGraph*>(tmpCachedGraph);
+    }
+
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, A);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, isContiguous ? result : output);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
+        @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    if (!isContiguous) {
+      result.copy_(output);
+    }
   }
-
-  Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, A);
-  Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, isContiguous ? result : output);
-
-  NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
-      @{inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData()};
-
-  NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-      @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-  runMPSGraph(stream, cachedGraph->graph(), feeds, results);
-  if (!isContiguous) {
-    result.copy_(output);
-  }
-}
 }
 
 } // namespace at::native
