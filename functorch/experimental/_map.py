@@ -8,6 +8,7 @@ from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
+    maybe_disable_all_fake_tensor_modes,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -32,7 +33,7 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     if not all(isinstance(o, torch.Tensor) for o in args):
         raise ValueError("map() operands must be a list of tensors or modules")
 
-    with disable_proxy_modes_tracing():
+    with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
         body_graph = make_fx(f)(xs[0], *args)
 
     next_name = None
