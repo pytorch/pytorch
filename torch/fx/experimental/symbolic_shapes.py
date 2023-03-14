@@ -1588,20 +1588,21 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss)
-                dyn_range = dynamic_ranges[pos]
-                if dyn_range and i in dyn_range:
-                    # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
-                    # constrained to an integer.
-                    if _is_int(ss):
-                        raise RuntimeError(f"Attempting to constrain dimension "
-                                           f"{source.name()}.size()[{i}] to {int(ss)}, "
-                                           "which violates user's constraints")
+                if dynamic_ranges and pos in dynamic_ranges:
+                    dyn_range = dynamic_ranges[pos]
+                    if dyn_range and i in dyn_range:
+                        # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
+                        # constrained to an integer.
+                        if _is_int(ss):
+                            raise RuntimeError(f"Attempting to constrain dimension "
+                                            f"{source.name()}.size()[{i}] to {int(ss)}, "
+                                            "which violates user's constraints")
 
-                    vr = dyn_range[i].to_range()
-                    if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
-                        for symbol in ss.node.expr.free_symbols:
-                            self._verify_valid_range(symbol, vr)
-                    dynamic_sources.append(property_source)
+                        vr = dyn_range[i].to_range()
+                        if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
+                            for symbol in ss.node.expr.free_symbols:
+                                self._verify_valid_range(symbol, vr)
+                        dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
@@ -1679,7 +1680,7 @@ class ShapeEnv:
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names])
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names], dynamic_ranges=None)
         if guards:
             code = " and ".join(guards)
             return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
