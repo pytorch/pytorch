@@ -43,9 +43,9 @@ In this folder is an ipython notebook that I used for exploration and finding re
 
 There is a list of all known categories defined in `common.py`. It has designations for types of categories as well such as `_frontend`.
 
-The `categorize` function in commitlist.py does an adequate job of adding the appropriate categories. Since new categories though may be created for your release you may find it helpful to add new heursitics around files changed to help with categorization.
+The `categorize` function in commitlist.py does an adequate job of adding the appropriate categories. Since new categories though may be created for your release you may find it helpful to add new heuristics around files changed to help with categorization.
 
-If you update the automatic ization you can run the following to update the commit list.
+If you update the automatic categorization you can run the following to update the commit list.
 `python commitlist.py --rerun_with_new_filters` Note that this will only update the commits in the commit list that have a category of "Uncategorized".
 
 One you have dug through the commits and done as much automated categorization you can run the following for an interface to categorize any remaining commits.
@@ -55,7 +55,7 @@ I added scripts to train a commit classifier from the set of labeled commits in 
 
 - There should already exist a `results/` directory from gathering the commitlist.csv. The next step is to create `mkdir results/classifier`
 - Run `python classifier.py --train` This will train the model and save for inference.
-- Run `python categorize.py --use_classifier` This will pre-populate the output with the most likely category.
+- Run `python categorize.py --use_classifier` This will pre-populate the output with the most likely category. And pressing enter will confirm selection.
  - Or run `python categorize.py` to label without the classifier.
 
 The interface modifies results/commitlist.csv. If you want to take a coffee break, you can CTRL-C out of it (results/commitlist.csv gets written to on each categorization) and then commit and push results/commitlist.csv to a branch for safekeeping.
@@ -96,6 +96,9 @@ The categories are as follow:
     * memory_format
     * foreach
     * dataloader
+    * nestedtensor
+    * sparse
+    * mps
 
 
 The topics are as follow:
@@ -126,3 +129,92 @@ This part is a little tedious but it seems to work. May want to explore using pa
 4. You can now send these google docs to the relevant submodule owners for review.
 5. Install the google doc extension [docs to markdown](https://github.com/evbacher/gd2md-html)
 6. Start to compile back down these markdown files into a single markdown file.
+
+`TODO`: This is by far the most manual process and is ripe for automation. If the next person up would like to investigate Google Doc APIS there is some room hor improvement here.
+
+### Part 4: Cherry Picks
+
+You will likely have started this process prior to the branch-cut being finalized. This means Cherry Picks.
+This was my process for keeping track. I use a notes app to log my progress as I periodically incorporate the new cherry picks.
+I will have initially ran something like:
+``` Bash
+python commitlist.py --create_new tags/v1.13.1 <commit-hash>
+```
+I keep track of that commit-hash. Once there are some cherry-picks that you would like to incorporate I rebase the release branch to upstream
+and run:
+```Bash
+python commitlist.py --update_to <latest-cherry-pick-hash>
+```
+I then run
+``` Python
+import pandas as pd
+
+commit_list_df = pd.read_csv("results/commitlist.csv")
+last_known_good_hash = "<the most recent hash>"
+
+previous_index = commit_list_df[commit_list_df.commit_hash == last_known_good_hash].index.values[0]
+cherry_pick_df = commit_list_df.iloc[previous_index+1:]
+path = "<your_path>/cherry_picks.csv"
+cherry_pick_df.to_csv(path, index=False)
+
+
+from commitlist import CommitList, to_markdown
+cherry_pick_commit_list = CommitList.from_existing(path)
+
+import os
+categories = list(cherry_pick_commit_list.stat().keys())
+for category in categories:
+    print(f"Exporting {category}...")
+    lines =to_markdown(cherry_pick_commit_list, category)
+    filename = f'/tmp/cherry_pick/results/result_{category}.md'
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+    with open(filename, 'w') as f:
+        f.writelines(lines)
+
+```
+
+This will create new markdown files only from cherry picked commits. And I manually copied and pasted these into the submodule google docs and commented so that
+the submodule owners will see these new commits.
+
+
+### Part 5: Pulling on the submodules into one
+I pretty much followed the run book here. One thing I did was use the [markdown-all-in-one](https://marketplace.visualstudio.com/items?itemName=yzhang.markdown-all-in-one)
+extension to create a table of contents which was really helpful in jumping to sections and copy and pasting the appropriate commits.
+
+You will then create a release at [Pytorch Release](https://github.com/pytorch/pytorch/releases) and if you save as a draft you can see how it will be rendered.
+
+
+
+#### Tidbits
+You will probably have a release note that doesn't fit into the character limit of github. I used the following regex:
+`\[#(\d+)\]\(https://github.com/pytorch/pytorch/pull/\d+\)` to replace the full lunks to (#<pull-request-number>).
+This will get formatted correctly in the github UI and can be checked when creating a draft release.
+
+
+The following markdown code is helpful for creating side-by-side tables of BC breaking/ deprecated code:
+
+
+``` Markdown
+<table>
+<tr>
+<th>PRIOR RELEASE NUM</th>
+<th>NEW RELEASE NUM</th>
+</tr>
+<tr>
+<td>
+
+```Python
+# Code Snippet 1
+```
+
+</td>
+<td>
+
+```Python
+# Code Snippet 2
+```
+
+</td>
+</tr>
+</table>
+```

@@ -28,7 +28,7 @@ try:
 except ImportError:
     HAS_IMBLEARN = False
 
-# 94% of all files are captured at len 5, good hyperpatameter to play around with.
+# 94% of all files are captured at len 5, good hyperparameter to play around with.
 MAX_LEN_FILE = 6
 
 UNKNOWN_TOKEN = "<Unknown>"
@@ -94,11 +94,6 @@ class CommitClassifier(nn.Module):
         title_embed = self.dropout(title_embed)
         title_embed = self.out_proj_title(title_embed)
 
-        # Encode file input
-        # IF someone wants to make this better:
-        # I think a better feature would be splitting file strings to
-        # top level directories and then using an embedding bag to
-        # encode what files were changed.
         files: list[str] = input_batch.files
         batch_file_indexes = []
         for file in files:

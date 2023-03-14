@@ -91,7 +91,6 @@ categories = [
     'functorch',
     'gnn',
     'distributions',
-    'windows',
     'serialization',
  ]  + [f'{category}_frontend' for category in frontend_categories] + pytorch_2_categories + [quantization.name] + [distributed.name]
 
