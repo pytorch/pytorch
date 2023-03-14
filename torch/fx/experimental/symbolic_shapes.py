@@ -1385,12 +1385,12 @@ class ShapeEnv:
     # simplified
     def create_symbol(self, val: int, source: Source, dim_state=DIM_DYNAMISM_STATE) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
+        dyn = dim_state == DIM_DYNAMISM_STATE.DYNAMIC
 
         if val < 0:
             from torch._dynamo.source import NegateSource
             return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        dyn = dim_state == DIM_DYNAMISM_STATE.DYNAMIC
         if dyn or val not in self.val_to_var or not self.duck_shape:
             # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
@@ -1574,7 +1574,7 @@ class ShapeEnv:
                     if src in dynamic_sources:
                         raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's constraint")
 
-        for t, source in zip(placeholders, sources):
+        for pos, (t, source) in enumerate(zip(placeholders, sources)):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
@@ -1588,7 +1588,8 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss)
-                if dynamic_ranges and i in dynamic_ranges:
+                dyn_range = dynamic_ranges[pos]
+                if dyn_range and i in dyn_range:
                     # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                     # constrained to an integer.
                     if _is_int(ss):
@@ -1596,11 +1597,11 @@ class ShapeEnv:
                                            f"{source.name()}.size()[{i}] to {int(ss)}, "
                                            "which violates user's constraints")
 
-                    vr = dynamic_ranges[i].to_range()
+                    vr = dyn_range[i].to_range()
                     if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
                         for symbol in ss.node.expr.free_symbols:
                             self._verify_valid_range(symbol, vr)
-                dynamic_sources.append(property_source)
+                    dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())

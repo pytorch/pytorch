@@ -35,6 +35,7 @@ from ..source import (
 )
 from ..utils import (
     clone_input,
+    dynamic_dims_from_tensor,
     get_fake_value,
     getfile,
     global_key_name,
@@ -1072,16 +1073,9 @@ def wrap_to_fake_tensor_and_record(
             assert not static_shapes, tensor_static_reason_to_message(reason)
 
         if not static_shapes:
-            dynamic_dims: List[DIM_DYNAMISM_STATE] = []
-            for i, _ in enumerate(e.size()):
-                if dynamic_ranges and i in dynamic_ranges:
-                    dynamic_dims.append(DIM_DYNAMISM_STATE.DYNAMIC)
-                else:
-                    dynamic_dims.append(
-                        DIM_DYNAMISM_STATE.STATIC
-                        if config.assume_static_by_default
-                        else DIM_DYNAMISM_STATE.DUCK
-                    )
+            dynamic_dims: List[DIM_DYNAMISM_STATE] = dynamic_dims_from_tensor(
+                e, dynamic_ranges
+            )
         else:
             dynamic_dims = None
 

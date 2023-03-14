@@ -1,6 +1,6 @@
 import contextlib
 import copy
-from typing import Callable, Tuple, Generator, Dict
+from typing import Callable, Tuple, Generator, Dict, Optional
 from unittest.mock import patch
 
 import torch
@@ -27,6 +27,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
+from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 
 from .workflow import ExportedProgram
 
@@ -206,7 +207,7 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 
 # See Note - [On Export Dynamic Dimension UX]
 # The integer here represents a dimension
-Constraint = Tuple[torch.Tensor, int]
+Constraint = Tuple[torch.Tensor, Tuple[int, Optional[MinMaxConstraint]]]
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -240,4 +241,4 @@ Constraint = Tuple[torch.Tensor, int]
 #     ]
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
-    return (t, index)
+    return (t, (index, None))

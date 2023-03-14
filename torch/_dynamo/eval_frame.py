@@ -21,10 +21,10 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from .backends.registry import CompilerFn, lookup_backend
-
 from .hooks import Hooks
 
 if TYPE_CHECKING:
@@ -590,7 +590,9 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
-    constraints: List[Tuple[torch.nn.Tensor, int]] = None,
+    constraints: List[
+        Tuple[torch.nn.Tensor, Tuple[int, Optional[MinMaxConstraint]]]
+    ] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -707,7 +709,9 @@ def export(
     try:
         for constraint in constraints:
             tensor = constraint[0]
-            index = constraint[1]
+            dim_to_range: Tuple[int, Optional[MinMaxConstraint]] = constraint[1]
+            index = dim_to_range[0]
+            valid_range = dim_to_range[1]
             # TODO(voz): Is tensor defaultdict friendly?
             if id(tensor) not in tensor_id_to_indices:
                 if torch._dynamo.has_dynamic_dims(tensor):
@@ -720,7 +724,12 @@ def export(
             if index in tensor_id_to_indices[id(tensor)]:
                 raise RuntimeError(f"Duplicate index {index}")
             tensor_id_to_indices[id(tensor)].add(index)
-            torch._dynamo.mark_dynamic(tensor, index)
+            if valid_range:
+                torch._dynamo.mark_dynamic_constrain(
+                    tensor, index, min=valid_range.min, max=valid_range.max
+                )
+            else:
+                torch._dynamo.mark_dynamic(tensor, index)
 
         seen_tensors = set(tensor_id_to_indices.keys())
         arg_ids = {id(arg) for arg in flat_args if isinstance(arg, torch.Tensor)}

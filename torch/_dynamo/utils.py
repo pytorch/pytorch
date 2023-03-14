@@ -40,9 +40,9 @@ import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental.symbolic_shapes import DIM_DYNAMISM_STATE, MinMaxConstraint
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
-
 from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
@@ -1404,3 +1404,34 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
+
+
+def dynamic_dims_from_tensor(
+    e: torch.Tensor, dynamic_ranges: Optional[Dict[int, MinMaxConstraint]]
+) -> List[DIM_DYNAMISM_STATE]:
+    """
+    Given a tensor, returns a list of dimension dynamism states.
+
+    :param e: The input tensor.
+    :type e: torch.Tensor
+    :param dynamic_ranges: A dictionary containing the indices of dynamic dimensions and their corresponding
+    constraints. Defaults to None.
+    :type dynamic_ranges: Optional[Dict[int, MinMaxConstraint]], optional
+    :return: A list of DIM_DYNAMISM_STATE values representing the dynamism state of each dimension in the input tensor.
+    :rtype: List[DIM_DYNAMISM_STATE]
+
+    An invariant is that the length of this list is the number of dimensions of the tensor.
+    If a dimension is marked in dynamic_ranges, it is set as DYNAMIC.
+    Otherwise, it is set to the default dimension state, either DUCK or STATIC depending on the configuration.
+    """
+    dynamic_dims: List[DIM_DYNAMISM_STATE] = []
+    for i, _ in enumerate(e.size()):
+        if dynamic_ranges and i in dynamic_ranges:
+            dynamic_dims.append(DIM_DYNAMISM_STATE.DYNAMIC)
+        else:
+            dynamic_dims.append(
+                DIM_DYNAMISM_STATE.STATIC
+                if config.assume_static_by_default
+                else DIM_DYNAMISM_STATE.DUCK
+            )
+    return dynamic_dims
