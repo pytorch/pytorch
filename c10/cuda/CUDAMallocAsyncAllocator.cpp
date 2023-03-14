@@ -330,8 +330,9 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
 
   std::lock_guard<std::mutex> lk(general_mutex);
 
-  if (!capture_underway && ungraphed_ptrs_defer_free_until_no_capture.size() > 0) {
-     // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
+  if (!capture_underway &&
+      ungraphed_ptrs_defer_free_until_no_capture.size() > 0) {
+    // See Note [Avoid freeing uncaptured ptrs during CUDA graph capture]
     for (const auto ptr : ungraphed_ptrs_defer_free_until_no_capture) {
       auto it = ptr_info.find(ptr);
       TORCH_INTERNAL_ASSERT(it != ptr_info.end(), "ptr not found in ptr_info");
@@ -340,7 +341,6 @@ void mallocAsync(void** devPtr, int device, size_t size, cudaStream_t stream) {
 
     ungraphed_ptrs_defer_free_until_no_capture.clear();
   }
-
 
   lazy_init_device(device);
 
@@ -774,15 +774,14 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     }
 
     capture_free_streams.clear();
-      TORCH_CHECK(
+    TORCH_CHECK(
         capture_underway,
         "CudaMallocAsync::notifyCaptureEnded called, "
         "but CudaMallocAsync::capture_underway is false.");
     capture_underway = false;
   }
 
-
-  void destroyPool(int device, MempoolId_t mempool_id) override {
+  void releasePool(int device, MempoolId_t mempool_id) override {
     // Q: Do we need to do anything special here, like clear long-lived
     //    pointers created during the original capture (for example,
     //    tensors intended as the graph's I/O surface) that might still

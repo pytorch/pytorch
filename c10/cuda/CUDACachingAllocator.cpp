@@ -755,7 +755,6 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
-
   // Indicates that a current stream should be allocated to a pool
   // rather than the global memory.
   ska::flat_hash_map<cudaStream_t, MempoolId_t> stream_to_pool_map;
@@ -797,7 +796,7 @@ class DeviceCachingAllocator {
     // done outside the lock because we don't know what locks the recorder needs
     // to have...
     CreateContextFn context_recorder = context_recorder_.load();
-    std::shared_ptr<Context> context =
+    std::shared_ptr<GatheredContext> context =
         context_recorder ? context_recorder() : nullptr;
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
@@ -1365,7 +1364,7 @@ class DeviceCachingAllocator {
   }
 
   // Called by CUDAGraph::reset
-  void destroyPool(MempoolId_t mempool_id) {
+  void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
     // delete and cudaFree the mempool its capture used, because
@@ -1960,7 +1959,7 @@ class DeviceCachingAllocator {
       int64_t addr,
       size_t size,
       cudaStream_t stream,
-      std::shared_ptr<Context> context) {
+      std::shared_ptr<GatheredContext> context) {
     auto te = TraceEntry(
         action,
         addr,
@@ -2228,9 +2227,9 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->endAllocateStreamToPool(stream);
   }
 
-  void destroyPool(int device, MempoolId_t mempool_id) override {
+  void releasePool(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->destroyPool(std::move(mempool_id));
+    device_allocator[device]->releasePool(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {
