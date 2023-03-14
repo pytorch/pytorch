@@ -9,7 +9,7 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
 import os
@@ -23,6 +23,9 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import torch._logging
+from . import config
 
 try:
     import numpy as np
@@ -41,8 +44,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
-
-from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
@@ -254,9 +255,38 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def init_logging():
-    torchdynamo_logging.init_logging(log_file_name=config.log_file_name)
+def setup_compile_debug():
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    exitstack = contextlib.ExitStack()
+
+    if compile_debug:
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG,
+            aot=logging.DEBUG,
+            inductor=logging.DEBUG,
+            output_code=True,  # this is off by default
+        )
+
+        debug_file_handler = add_file_handler()
+        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
+
+    return exitstack
+
+
+def reset_graph_break_dup_checker():
     graph_break_dup_warning_checker.reset()
+
+
+def add_file_handler():
+    log_path = os.path.join(get_debug_dir(), "torchdynamo")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
+
+    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file.setLevel(logging.DEBUG)
+    logger = logging.getLogger("torch._dynamo")
+    logger.addHandler(log_file)
+    return log_file
 
 
 def gen_record_file_name(exc, code):

@@ -24,7 +24,7 @@ from torch import fx as fx
 
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
-from torch._dynamo.utils import get_debug_dir, init_logging
+from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -291,8 +291,6 @@ class DebugContext:
 
     def __enter__(self):
         log = logging.getLogger("torch._inductor")
-        if not log.handlers:
-            init_logging()
 
         if config.debug:
 

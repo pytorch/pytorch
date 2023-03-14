@@ -1,5 +1,4 @@
 import itertools
-import os
 
 import torch._logging
 
@@ -26,18 +25,6 @@ def set_loggers_level(level):
 def get_loggers_level():
     """Read current log level"""
     return get_loggers()[0].level
-
-
-# initialize torchdynamo loggers
-def init_logging(log_file_name=None):
-    in_test = "PYTEST_CURRENT_TEST" in os.environ and "___LOG_TESTING" not in os.environ
-    if not in_test:
-        compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
-
-        if not compile_debug:
-            pass
-        else:
-            pass
 
 
 # Creates a logging function that logs a message with a step # prepended.

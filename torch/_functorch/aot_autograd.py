@@ -20,8 +20,6 @@ from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed
 from torch._logging.loggable_types import AOTForwardGraphLogRec, AOTJointGraphLogRec, AOTBackwardGraphLogRec
-import torch._logging
-import torch._dynamo.logging
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types

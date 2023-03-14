@@ -78,10 +78,6 @@ class LogRegistry:
         self.name_to_log_qname[log_qname] = log_qname
         self.log_qname_to_rec_types = set(self.log_qname_to_rec_types[parent_qname])
 
-
-
-
-
 log_registry = LogRegistry()
 
 @dataclass
@@ -130,12 +126,12 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
             if log_registry.is_artifact(key):
                 log_state.enable_artifact(key)
             elif log_registry.is_log(key):
-                log_state.set_level(log_registry.name_to_log_qname[key])
                 if val not in logging._levelToName:
                     raise ValueError(
                         f"Unrecognized log level for log {key}: {val}, valid level values "
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
+                log_state.enable_log(key, val)
             else:
                 # Check if it is a qualified name log
                 # if so, check that its root logger is parent

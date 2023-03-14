@@ -38,10 +38,10 @@ from .utils import (
     gen_record_file_name,
     guard_failures,
     increment_frame,
-    init_logging,
     is_namedtuple,
     istype,
     orig_code_map,
+    setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
 )
@@ -101,9 +101,11 @@ def wrap_convert_context(fn):
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
+        cleanup = setup_compile_debug()
         try:
             return fn(*args, **kwargs)
         finally:
+            cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
@@ -195,7 +197,6 @@ def convert_frame_assert(
     export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
-    init_logging()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
@@ -418,7 +419,6 @@ def replay(filename):
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
-    init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
     record.globals = {
