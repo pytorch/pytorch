@@ -14,6 +14,7 @@ import logging
 import functools
 import os
 import re
+from importlib import __import__
 from typing import DefaultDict, Dict, Set
 from dataclasses import dataclass, field
 
@@ -72,6 +73,13 @@ class LogRegistry:
 
     def supports_verbosity(self, log_name):
         return log_name in self.log_names_with_verbosity
+
+    def register_existing_child_log(self, parent_qname, log_qname):
+        self.name_to_log_qname[log_qname] = log_qname
+        self.log_qname_to_rec_types = set(self.log_qname_to_rec_types[parent_qname])
+
+
+
 
 
 log_registry = LogRegistry()
@@ -183,17 +191,12 @@ VERBOSITY_REGEX = (
 )
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
-def gen_settings_regex(loggable_names):
-    loggable_names_verbosity = [
-        (VERBOSITY_REGEX if log_registry.supports_verbosity(name) else "") + name
-        for name in loggable_names
-    ]
-    group = "(" + "|".join(loggable_names_verbosity) + ")"
-    return re.compile(f"({group},\\s*)*{group}?")
+def _gen_settings_regex():
+    return re.compile(r"((\+|-)?\w+,\\s*)*(\+|-)?\w+?")
 
 
 def _validate_settings(settings):
-    return re.fullmatch(gen_settings_regex(log_registry.get_loggable_names()), settings) is not None
+    return re.fullmatch(_gen_settings_regex(), settings) is not None
 
 
 def _parse_log_settings(settings):
@@ -228,10 +231,28 @@ def _parse_log_settings(settings):
         if log_registry.is_log(name):
             assert level is not None
             log_state.enable_log(name, level)
-        else:
+        elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
+        elif _is_valid_module(name):
+            registered_parent = _get_registered_parent_qname(name)
+            if registered_parent:
+                log_registry.register_existing_child_log(registered_parent, name)
+            else:
+                log_registry.register_log(name, name, True)
+                log_state.enable_log(name)
+        else:
+            raise ValueError(
+                f"Invalid log settings: {settings}, must be a comma separated list of log or artifact names."
+            )
 
     return log_state
+
+def _is_valid_module(qname):
+    try:
+        __import__(qname)
+        return True
+    except ImportError:
+        return False
 
 
 class FilterByType(logging.Filter):
@@ -296,14 +317,14 @@ def _clear_handlers(log):
     for handler in to_remove:
         log.removeHandler(handler)
 
-def _parent_is_registered(log_qname):
+def _get_registered_parent_qname(log_qname):
     logger = logging.getLogger(log_qname)
     while logger.parent:
-        if log_registry.is_log(logger.name):
-            return True
+        if log_registry.is_log(logger.parent):
+            return logger.parent.name
         logger = logger.parent
 
-    return False
+    return None
 
 # initialize loggers log_names
 # each developer component should call this for their own logs
@@ -329,7 +350,7 @@ def init_logs(log_file_name=None):
         )  # allow all messages through logger
         # ensure log_name is in the dictionary
         rec_types = log_qname_to_enabled_types[log_qname]
-        if level == logging.DEBUG or log_registry.supports_verbosity(name):
+        if level == logging.DEBUG or not log_registry.supports_verbosity(name):
             rec_types.update(log_registry.log_qname_to_rec_types[log_qname])
 
     for name in log_state.enabled_artifact_names:
