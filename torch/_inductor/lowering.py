@@ -1083,13 +1083,17 @@ def _foobar(_):
 
 
 @functools.lru_cache(1)
-def _warn_triton_random(salt):
-    developer_warning("using triton random, expect difference from eager")
+def _warn_triton_random():
+    developer_warning(
+        "Using triton random. You should not expect identical results to eager."
+        "If you would like to prevent torch.compile from compiling RNG operations"
+        "(which will be slower but match eager exactly), set config.fallback_random=True."
+    )
 
 
 def warn_triton_random():
     # only warn once per graph
-    _warn_triton_random(V.graph.creation_time)
+    _warn_triton_random()
 
 
 def make_rand(fn_name):
