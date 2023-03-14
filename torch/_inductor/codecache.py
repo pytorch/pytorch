@@ -120,9 +120,9 @@ class PersistentCache:
             1. Check global_cache[name][inputs][choice], return benchmark if cached.
             2. Check local_cache[name][inputs][choice], return benchmark if cached.
             3.
-                a. `max_autotune=True`: benchmark the choice, update
+                a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[name][inputs][choice], and return the benchmark.
-                b. `max_autotune=False`: don't benchmark the choice, return nothing.
+                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
         gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
@@ -145,7 +145,7 @@ class PersistentCache:
                         callback(choice_hash, cached=False)
             return hit
 
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not check_cache(
