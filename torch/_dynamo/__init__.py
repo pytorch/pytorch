@@ -43,6 +43,8 @@ __all__ = [
     "list_backends",
     "mark_dynamic_constrain",
     "clear_dynamic",
+    "has_dynamic_dims",
+    "clear_dynamic_dims",
 ]
 
 
