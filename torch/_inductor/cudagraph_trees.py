@@ -22,6 +22,7 @@ from weakref import ref as WeakRef
 
 import torch.fx
 from torch import Tensor
+from torch.utils.weak import TensorWeakRef
 
 if torch.has_cuda:
     from torch._C import _cuda_CUDAAllocator_AllocatorState as AllocatorState
@@ -106,7 +107,7 @@ class TreeManagerContainer:
                 if self.live_cudagraphify_fns == 0:
                     self.tree_manager = None
 
-    def _finalize_reference(self):
+    def finalize_cudagraphify_fn(self):
         with self.lock:
             self.live_cudagraphify_fns -= 1
             if self.live_cudagraphify_fns == 0:
@@ -135,7 +136,7 @@ class TreeManagerContainer:
         with self.lock:
             self.live_cudagraphify_fns += 1
 
-        weakref.finalize(fn, self._finalize_reference)
+        weakref.finalize(fn, self.finalize_cudagraphify_fn)
 
     def get_tree_manager(self) -> CUDAGraphTreeManager:
         with self.lock:
@@ -170,29 +171,16 @@ def is_live(weak_ref):
     return weak_ref() is not None
 
 
-class TensorWeakRef:
-    """
-    Wrapper around a weak ref of a Tensor that handles the _fix_weakref() call required
-    when unwrapping a Tensor weakref.
-    """
-
-    ref: WeakRef[Tensor]
-
-    def __init__(self, tensor: Tensor):
-        assert isinstance(tensor, Tensor)
-        self.ref = weakref.ref(tensor)
-
-    def __call__(self):
-        out = self.ref()
-        if out is None:
-            return out
-        assert isinstance(out, Tensor)
-        out._fix_weakref()
-        return out
-
-
 def is_cuda_tensor(x):
     return isinstance(x, torch.Tensor) and x.device.type == "cuda"
+
+
+# A path index of (depth, offset) indices into a graph that is `depth`` number of nodes from the root
+# at graph output offset
+PathOutputIndex = Tuple[int, int]
+
+# For each node in the path, for each output, is the output alive
+PathLiveness = List[List[bool]]
 
 
 class CUDAGraphNode:
@@ -263,6 +251,7 @@ class CUDAGraphNode:
             (inputs[i].data_ptr() if i in self.static_input_idxs else None)
             for i in range(len(inputs))
         ]
+        # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
             get_expanded_dims(x) if idx not in self.static_input_idxs else []
             for idx, x in enumerate(inputs)
@@ -273,12 +262,14 @@ class CUDAGraphNode:
         self.recorded_liveness_before_graph: List[List[bool]] = []
         self.recorded_liveness_after_graph: List[List[bool]] = []
 
-        # indices into node at level i for output j
-        self.expected_dead_indices_before_graph: List[Tuple[int, int]] = []
-        self.expected_dead_indices_after_graph: List[Tuple[int, int]] = []
+        # List of Tuples of (depth, output_index) that index into node at depth
+        # number of nodes from root and output_index of outputs. Will index into
+        # path_weakrefs.
+        self.expected_dead_indices_before_graph: List[PathOutputIndex] = []
+        self.expected_dead_indices_after_graph: List[PathOutputIndex] = []
 
         # all live indices after graph recording
-        self.live_indices_after_graph: List[Tuple[int, int]] = []
+        self.live_indices_after_graph: List[PathOutputIndex] = []
 
         if self.parent is not None:
             previous_liveness = self.parent.recorded_liveness_after_graph
@@ -340,6 +331,10 @@ class CUDAGraphNode:
         self.checkpointed_caching_state: Optional[AllocatorState] = None
 
     def run(self, new_inputs):
+
+        if config.triton.debug_cudagraph_trees:
+            self.debug_check_invariants_before_invocation()
+
         assert len(self.static_input_data_ptrs) == len(new_inputs)
 
         storage_cache = {}
@@ -377,13 +372,14 @@ class CUDAGraphNode:
         ]
 
         self._add_replayed_outputs(outputs)
+        self.debug_check_invariants_after_invocation()
 
         return outputs
 
     def all_outputs_are_dead(self):
         "All outputs of the path from this node to its root are dead"
-        for i, j in self.live_indices_after_graph:
-            if is_live(self.path_weakrefs[i][j]):
+        for depth, output_index in self.live_indices_after_graph:
+            if is_live(self.path_weakrefs[depth][output_index]):
                 return False
 
         return True
@@ -415,6 +411,9 @@ class CUDAGraphNode:
 
     def _add_first_outputs(self, outputs):
         "Add the outputs from the first invocation of the node and set up metadata"
+
+        # getting liveness before we have added the outputs to path, so the length
+        # of the two lists is equal
         prev_liveness = self.recorded_liveness_before_graph
         curr_liveness = self._get_liveness(self.path_weakrefs)
 
@@ -422,18 +421,20 @@ class CUDAGraphNode:
         self.expected_dead_indices_after_graph = delta
 
         assert len(self.outputs_weakrefs) == 0
-        weak_refs = [self._map_to_ref(o) for o in outputs]
-        self.outputs_weakrefs.extend(weak_refs)
+        self._add_replayed_outputs(outputs)
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
 
         self.checkpointed_caching_state = torch._C._cuda_getCheckpointState(
             self.device, self.cuda_graphs_pool
         )
 
-        for i in range(len(self.path_weakrefs)):
-            for j in range(len(self.path_weakrefs[i])):
-                if is_live(self.path_weakrefs[i][j]):
-                    self.live_indices_after_graph.append((i, j))
+        # now, get liveness with outputs added
+        for depth in range(len(self.path_weakrefs)):
+            for output_index in range(len(self.path_weakrefs[depth])):
+                if is_live(self.path_weakrefs[depth][output_index]):
+                    self.live_indices_after_graph.append((depth, output_index))
+
+        self.debug_check_invariants_after_invocation()
 
     def _add_replayed_outputs(self, outputs):
         self.outputs_weakrefs.clear()
@@ -483,10 +484,10 @@ class CUDAGraphNode:
         return False
 
     @staticmethod
-    def _check_liveness(indices: List[Tuple[int, int]], output_refs: List[List[bool]]):
+    def _check_liveness(indices: List[PathOutputIndex], output_refs: List[List[bool]]):
         "Check that all of the indices specified are dead references"
-        for i, j in indices:
-            if output_refs[i][j]() is not None:
+        for depth, output_index in indices:
+            if output_refs[depth][output_index]() is not None:
                 return False
         return True
 
@@ -497,7 +498,7 @@ class CUDAGraphNode:
     @staticmethod
     def _get_different_indices(
         prev: List[List[bool]], curr: List[List[bool]]
-    ) -> List[Tuple[int, int]]:
+    ) -> List[PathOutputIndex]:
         "Find indices where the two lists differ."
         dead_indices = []
         assert len(prev) <= len(curr)
@@ -519,6 +520,33 @@ class CUDAGraphNode:
 
         return [pytree.tree_map(is_live, outputs) for outputs in weakrefs]
 
+    def debug_assert_invariants(
+        self, expected_liveness: List[List[bool]], newly_dead: List[PathOutputIndex]
+    ):
+        if not config.triton.debug_cudagraph_trees:
+            return
+
+        for i, node in enumerate(self._path_from_root):
+            assert self.path_weakrefs[i] is node.outputs_weakrefs
+
+        for depth, outputs_liveness in enumerate(expected_liveness):
+            for output_idx, output_liveness in enumerate(outputs_liveness):
+                # tensor can die early, but it can't be alive when it should be dead
+                assert output_liveness or not self.path_weakrefs[depth][output_idx]()
+
+        for depth, output_index in newly_dead:
+            assert not self.path_weakrefs[depth][output_index]()
+
+    def debug_check_invariants_before_invocation(self):
+        self.debug_assert_invariants(
+            self.recorded_liveness_before_graph, self.expected_dead_indices_before_graph
+        )
+
+    def debug_check_invariants_after_invocation(self):
+        self.debug_assert_invariants(
+            self.recorded_liveness_before_graph, self.expected_dead_indices_after_graph
+        )
+
     def data_ptrs_dead_since_invocation(self) -> List[int]:
         """
         Since this node was invoked, return data ptrs of all tensor outputs that have died
@@ -531,8 +559,10 @@ class CUDAGraphNode:
 
         path = list(self._path_from_root)
         ptrs_to_deallocate = []
-        for (i, j) in _get_different_indices:
-            ptrs_to_deallocate.append(path[i].outputs_metadata[j]["data_ptr"])
+        for (depth, output_index) in _get_different_indices:
+            ptrs_to_deallocate.append(
+                path[depth].outputs_metadata[output_index]["data_ptr"]
+            )
 
         return ptrs_to_deallocate
 
@@ -853,7 +883,7 @@ class CUDAGraphTreeManager:
 
     def try_end_curr_execution(self) -> None:
         """
-        Check if the current executng node can be terminated, either because all outputs of the
+        Check if the current executing node can be terminated, either because all outputs of the
         previously executed node are dead or because it was executed in a different generation.
         Will set current_node to None if successful.
         """
