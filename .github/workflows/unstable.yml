@@ -29,5 +29,26 @@ jobs:
           echo " PR to trigger this workflow. That can be done either manually or"
           echo " automatically using PyTorch auto-label bot."
           echo
-          echo "Once the jobs are deemed stable enough (% red signal < 20% and TTS < 3h),"
+          echo "Once the jobs are deemed stable enough (% red signal < 5% and TTS < 3h),"
           echo " they can graduate and move back to pull or trunk."
+
+  linux-focal-py3_8-gcc7-build:
+    name: linux-focal-py3.8-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-py3.8-gcc7
+      docker-image-name: pytorch-linux-focal-py3.8-gcc7
+      test-matrix: |
+        { include: [
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+        ]}
+
+  linux-focal-py3_8-gcc7-test:
+    name: linux-focal-py3.8-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-py3_8-gcc7-build
+    with:
+      build-environment: linux-focal-py3.8-gcc7
+      docker-image: ${{ needs.linux-focal-py3_8-gcc7-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-py3_8-gcc7-build.outputs.test-matrix }}

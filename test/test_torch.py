@@ -30,7 +30,7 @@ from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
-    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests,
+    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, load_tests, skipIfTorchInductor, slowTest,
     TEST_WITH_CROSSREF, skipIfTorchDynamo,
@@ -55,7 +55,7 @@ from torch.testing._internal.common_cuda import (
     tf32_on_and_off, tf32_is_not_fp32, TEST_CUDNN)
 from torch.testing._internal.common_dtype import (
     floating_types_and, get_all_math_dtypes, all_types_and_complex_and, complex_types,
-    all_types_and, floating_types, floating_and_complex_types,
+    all_types_and, floating_types, floating_and_complex_types, integral_types_and
 )
 
 # Protects against includes accidentally setting the default dtype
@@ -628,12 +628,6 @@ class TestTorchDeviceType(TestCase):
 
         zero_d_uint8 = torch.tensor(1, dtype=torch.uint8, device=device)
         one_d_uint8 = torch.tensor([1], dtype=torch.uint8, device=device)
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            self.assertEqual((1,), torch.masked_select(zero_d_uint8, zero_d_uint8).shape)
-            self.assertEqual((1,), torch.masked_select(zero_d_uint8, one_d_uint8).shape)
-            self.assertEqual((1,), torch.masked_select(one_d_uint8, zero_d_uint8).shape)
 
         # mode
         self.assertEqual([(), ()], [x.shape for x in torch.mode(zero_d, dim=0, keepdim=True)])
@@ -2781,6 +2775,7 @@ else:
         torch.testing.assert_close(expected, actual)
 
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
+    @unittest.skipIf(IS_JETSON, "psutil issue for largeTensorTest. Too large for Jetson.")
     @onlyCUDA
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
@@ -2797,6 +2792,7 @@ else:
     @dtypes(torch.half)  # only small dtype not to get oom
     @largeTensorTest('25GB', device='cpu')
     @largeTensorTest('4GB', device='cuda')
+    @unittest.skipIf(IS_JETSON, "psutil issue for largeTensorTest. Too large for Jetson.")
     def test_large_cumprod(self, device, dtype):
         # initialization to avoid overflow and half caveats
         x = torch.empty(2**30 + 200, device=device, dtype=dtype)
@@ -3686,16 +3682,17 @@ else:
             warn = 'masked_select received a mask with dtype torch.uint8,'
         else:
             warn = 'indexing with dtype torch.uint8 is now deprecated, pl'
-        for maskType in [torch.uint8, torch.bool]:
+        for maskType in integral_types_and(torch.bool):
             num_src = 10
             src = torch.tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], dtype=dtype, device=device)
             mask = torch.randint(2, (num_src,), device=device, dtype=maskType)
 
-            with warnings.catch_warnings(record=True) as w:
+            if maskType is not torch.bool:
+                with self.assertRaisesRegex(RuntimeError, r'expected BoolTensor for mask'):
+                    dst = src.masked_select(mask)
+                continue
+            else:
                 dst = src.masked_select(mask)
-                if maskType is torch.uint8:
-                    self.assertEqual(len(w), 1)
-                    self.assertEqual(str(w[0].message)[0:53], str(warn))
             dst2 = []
             for i in range(num_src):
                 if mask[i]:
@@ -3752,42 +3749,36 @@ else:
     def test_masked_fill(self, device, dtypes):
         dtype = dtypes[0]
         mask_dtype = dtypes[1]
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
 
-            num_dest = 10
-            dst = torch.zeros(num_dest, dtype=dtype)
-            mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
-            val = random.random()
-            dst2 = dst.clone()
+        num_dest = 10
+        dst = torch.zeros(num_dest, dtype=dtype)
+        mask = torch.randint(2, (num_dest,), dtype=mask_dtype)
+        val = random.random()
+        dst2 = dst.clone()
 
-            dst.masked_fill_(mask, val)
-            for i in range(num_dest):
-                if mask[i]:
-                    dst2[i] = val
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
+        if mask_dtype is not torch.bool:
+            with self.assertRaisesRegex(RuntimeError, 'only supports boolean masks'):
+                dst.masked_fill_(mask, val)
+            return
 
-            # test non-contiguous case
-            dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
-            dst2 = dst.contiguous()
-            if dtype.is_complex:
-                mask = dst.abs() > 0
-            else:
-                mask = dst > 0
-            self.assertTrue(not dst.is_contiguous())
-            self.assertTrue(dst2.is_contiguous())
-            dst.masked_fill_(mask.to(mask_dtype), val)
-            dst2.masked_fill_(mask.to(mask_dtype), val)
-            self.assertEqual(dst, dst2, atol=0, rtol=0)
+        dst.masked_fill_(mask, val)
+        for i in range(num_dest):
+            if mask[i]:
+                dst2[i] = val
+        self.assertEqual(dst, dst2, atol=0, rtol=0)
 
-            if mask_dtype == torch.uint8:
-                self.assertEqual(len(w), 3)
-
-                warn = 'masked_fill_ received a mask with dtype torch.uint8,'
-                for wi in w:
-                    self.assertEqual(str(wi.message)[0:52], str(warn))
-            else:
-                self.assertEqual(len(w), 0)
+        # test non-contiguous case
+        dst = ((torch.randn(num_dest, num_dest, num_dest) * 10).to(dtype)).permute((2, 0, 1))
+        dst2 = dst.contiguous()
+        if dtype.is_complex:
+            mask = dst.abs() > 0
+        else:
+            mask = dst > 0
+        self.assertTrue(not dst.is_contiguous())
+        self.assertTrue(dst2.is_contiguous())
+        dst.masked_fill_(mask.to(mask_dtype), val)
+        dst2.masked_fill_(mask.to(mask_dtype), val)
+        self.assertEqual(dst, dst2, atol=0, rtol=0)
 
     # FIXME: find a test suite for the masked fill operator
     def test_masked_fill_bool_tensor(self, device):
@@ -6367,7 +6358,7 @@ class TestTorch(TestCase):
         # fail parse with float variables
         self.assertRaises(TypeError, lambda: torch.ones((torch.tensor(3.), torch.tensor(4))))
         # fail parse with numpy floats
-        self.assertRaises(TypeError, lambda: torch.ones((np.float(3.), torch.tensor(4))))
+        self.assertRaises(TypeError, lambda: torch.ones((3., torch.tensor(4))))
         self.assertRaises(TypeError, lambda: torch.ones((np.array(3.), torch.tensor(4))))
 
         # fail parse with > 1 element variables

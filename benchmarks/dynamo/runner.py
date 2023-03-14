@@ -174,6 +174,11 @@ def parse_args():
         help="Choose the output directory to save the logs",
         default=DEFAULT_OUTPUT_DIR,
     )
+    parser.add_argument(
+        "--keep-output-dir",
+        action="store_true",
+        help="Do not cleanup the output directory before running",
+    )
 
     # Choose either generation of commands, pretty parsing or e2e runs
     group = parser.add_mutually_exclusive_group(required=False)
@@ -217,6 +222,21 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--base-sha",
+        help="commit id for the tested pytorch",
+    )
+    parser.add_argument(
+        "--total-partitions",
+        type=int,
+        help="Total number of partitions, to be passed to the actual benchmark script",
+    )
+    parser.add_argument(
+        "--partition-id",
+        type=int,
+        help="ID of partition, to be passed to the actual benchmark script",
+    )
+
+    parser.add_argument(
         "--update-dashboard",
         action="store_true",
         default=False,
@@ -244,7 +264,7 @@ def parse_args():
         "--update-dashboard-test",
         action="store_true",
         default=False,
-        help="does all of --no-graphs, --no-update-lookup, and --no-gh-comment",
+        help="does all of --no-graphs, --no-update-archive, and --no-gh-comment",
     )
     parser.add_argument(
         "--dashboard-image-uploader",
@@ -345,8 +365,10 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
         lines.append("#!/bin/bash")
         lines.append("set -x")
         lines.append("# Setup the output directory")
-        lines.append(f"rm -rf {output_dir}")
-        lines.append(f"mkdir {output_dir}")
+        if not args.keep_output_dir:
+            lines.append(f"rm -rf {output_dir}")
+        # It's ok if the output directory already exists
+        lines.append(f"mkdir -p {output_dir}")
         lines.append("")
 
         for testing in ["performance", "accuracy"]:
@@ -374,7 +396,7 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
                         filters = DEFAULTS["quick"][suite]
                         cmd = f"{cmd} {filters}"
 
-                    if testing == "performance" and compiler in (
+                    if compiler in (
                         "inductor",
                         "inductor_no_cudagraphs",
                     ):
@@ -385,6 +407,12 @@ def generate_commands(args, dtypes, suites, devices, compilers, output_dir):
 
                     if args.threads is not None:
                         cmd = f"{cmd} --threads {args.threads}"
+
+                    if args.total_partitions is not None:
+                        cmd = f"{cmd} --total-partitions {args.total_partitions}"
+
+                    if args.partition_id is not None:
+                        cmd = f"{cmd} --partition-id {args.partition_id}"
                     lines.append(cmd)
                 lines.append("")
         runfile.writelines([line + "\n" for line in lines])
@@ -403,12 +431,15 @@ def generate_dropdown_comment(title, body):
 
 
 def build_summary(args):
-    import git
-
     out_io = io.StringIO()
 
     def print_commit_hash(path, name):
-        if exists(path):
+        if args.base_sha is not None:
+            if name == "pytorch":
+                out_io.write(f"{name} commit: {args.base_sha}\n")
+        elif exists(path):
+            import git
+
             repo = git.Repo(path, search_parent_directories=True)
             sha = repo.head.object.hexsha
             date = repo.head.object.committed_datetime
@@ -431,7 +462,6 @@ def build_summary(args):
     out_io.write("\n")
     out_io.write("### Commit hashes ###\n")
     print_commit_hash("../pytorch", "pytorch")
-    print_commit_hash("../functorch", "functorch")
     print_commit_hash("../torchbenchmark", "torchbench")
 
     out_io.write("\n")

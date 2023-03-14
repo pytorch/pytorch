@@ -470,7 +470,6 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
     auto new_sizes = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
     auto new_strides = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
     auto new_offsets = std::vector<int64_t>(offsets);
-    std::vector<Tensor> tensor_slices(ntensors);
     for (int64_t i : c10::irange(ntensors)) {
       int64_t *size_ptr = new_sizes[i].data_ptr<int64_t>();
       int64_t *stride_ptr = new_strides[i].data_ptr<int64_t>();
@@ -969,6 +968,12 @@ Tensor reshape_as_nested(const Tensor& self, const Tensor& other) {
   }
   // reshape with other.opt_sizes_
   return self.reshape(sizes);
+}
+
+Tensor& normal_nested_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+  self_buf.normal_(mean, std, gen);
+  return self;
 }
 
 } // namespace native
