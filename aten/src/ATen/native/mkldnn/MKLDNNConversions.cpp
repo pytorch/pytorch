@@ -343,8 +343,4 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
-  return mkldnn_to_dense(mkldnn_tensor, dtype, c10::nullopt);
-}
-
 }}
