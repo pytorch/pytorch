@@ -1,5 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from typing import Callable, cast, Dict, Tuple, Union, Optional
+from typing import Callable, cast, Dict, Tuple, Union, Sequence, Optional
 
 import torch
 
@@ -24,20 +24,21 @@ _ENABLE_FALLBACK = False
 
 def wrap(res: object, spec: OutputSpecType) -> object:
     if isinstance(res, torch.Tensor):
+        spec = cast(Sequence[DTensorSpec], spec)
         assert spec is not None and len(spec) == 1, \
             f"output spec does not match with output! Expected DTensorSpec, got {spec}."
-        spec = cast(DTensorSpec, spec[0])
-        assert spec.tensor_meta is not None
+        assert spec[0].tensor_meta is not None
         return dtensor.DTensor(
             res,
-            spec.mesh,
-            spec.placements,
-            shape=spec.tensor_meta.shape,
-            dtype=spec.tensor_meta.dtype,
+            spec[0].mesh,
+            spec[0].placements,
+            shape=spec[0].tensor_meta.shape,
+            dtype=spec[0].tensor_meta.dtype,
             requires_grad=res.requires_grad,
-            stride=spec.tensor_meta.stride,
+            stride=spec[0].tensor_meta.stride,
         )
     elif isinstance(res, (list, tuple)):
+        spec = cast(Sequence[DTensorSpec], spec)
         assert spec is not None and len(res) == len(spec), \
             f"output spec does not match with output! Expected list/tuple, got {spec}."
         res_list = []
@@ -177,16 +178,19 @@ def operator_dispatch(
     if suggested_input_schema.is_inplace:
         # inplace op should return self instead of re-wrapping
         self = cast(dtensor.DTensor, args[0])
-        self._spec = cast(DTensorSpec, output_sharding.output_spec)
+        # assert isinstance(output_sharding.output_spec, Sequence[DTensorSpec])
+        # spec = cast(DTensorSpec, output_sharding.output_spec[0])
+        assert output_sharding.output_spec is not None
+        self._spec = cast(DTensorSpec, output_sharding.output_spec[0])
         return self
     elif suggested_input_schema.is_out_variant:
-        # out variant could possibly have multiple out args (i.e. lu_unpack.out)
+        output_specs = cast(Sequence[DTensorSpec], output_sharding.output_spec)
         out_dts = []
         spec_idx = 0
         for arg in suggested_input_schema.func_schema.arguments:
             if arg.is_out:
                 out_dt = cast(dtensor.DTensor, kwargs[arg.name])
-                out_dt._spec = cast(DTensorSpec, output_specs[spec_idx])
+                out_dt._spec = output_specs[spec_idx]
                 out_dts.append(out_dt)
                 spec_idx += 1
 

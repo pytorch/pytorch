@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple, Union
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import torch
 from torch.utils._pytree import tree_map_only
@@ -11,7 +11,7 @@ ArgsType = Tuple[object, ...]
 KwargsType = Dict[str, object]
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type sould
 # be the same set of possiblities.
-OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+OutputSpecType = Optional[Sequence[Optional[DTensorSpec]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:

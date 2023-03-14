@@ -160,7 +160,7 @@ def _get_dtensor_dispatch_graph(
 
     op_schema = DTensor._propagator.prepare_op_schema(op_overload, args, kwargs)
     # get DTensor specs for inputs and outputs
-    output_sharding = DTensor._propagator.propagate_op_sharding(
+    output_sharding = DTensor._propagator.propagate(
         op_overload,
         op_schema,
     )

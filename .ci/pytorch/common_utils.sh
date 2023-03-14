@@ -149,21 +149,17 @@ function clone_pytorch_xla() {
   fi
 }
 
-function setup_torchdeploy_deps(){
-  conda install -y -n "py_${ANACONDA_PYTHON_VERSION}" "libpython-static=${ANACONDA_PYTHON_VERSION}"
-  local CC
-  local CXX
-  CC="$(which gcc)"
-  CXX="$(which g++)"
-  export CC
-  export CXX
-  pip install --upgrade pip
+function install_matplotlib() {
+  pip_install matplotlib
+}
+
+function install_tabulate() {
+  pip_install tabulate
 }
 
 function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
-  setup_torchdeploy_deps
   pushd ..
   git clone --recurse-submodules https://github.com/pytorch/multipy.git
   pushd multipy
