@@ -502,7 +502,7 @@ class PrioritizeLoad : public IRMutator {
         // also check indices
         bool same = true;
         // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        for (const auto i: c10::irange(v->indices().size())) {
+        for (const auto i : c10::irange(v->indices().size())) {
           if (!exprEquals(v->indices()[i], nested_store_->indices()[i])) {
             same = false;
             break;

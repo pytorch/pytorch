@@ -280,7 +280,8 @@ void check_inputs(
 
     check_tensor(
         input,
-        i == static_cast<decltype(i)>(root) ? at::optional<at::Tensor>{output} : at::nullopt,
+        i == static_cast<decltype(i)>(root) ? at::optional<at::Tensor>{output}
+                                            : at::nullopt,
         input_multiplier,
         output_multiplier,
         numel,
