@@ -484,7 +484,7 @@ Inside this directory, each run will have a separate folder named with the times
    $ ls
    run_2023_03_01_08_20_52_143510-pid_180167
 
-In the run folder there will be a torchdynamo directory which contains debug logs, and an aot_torchinductor
+In the run folder there will be a torchdynamo directory which contains debug logs, and an torchinductor
 folder which contains a subfolder for each compiled kernel with inductor debug artifacts.
 
 ::
@@ -492,13 +492,13 @@ folder which contains a subfolder for each compiled kernel with inductor debug a
    $ cd
    run_2023_03_01_08_20_52_143510-pid_180167
    $ ls
-   aot_torchinductor  torchdynamo
+   torchinductor  torchdynamo
 
-Moving further into the aot_torchinductor directory, the \*.log files are logs from the aot autograd phase of compilation, model__0_forward_1.0 contains the inductor debug artifacts.
+Moving further into the torchinductor directory, the \*.log files are logs from the aot autograd phase of compilation, model__0_forward_1.0 contains the inductor debug artifacts.
 
 ::
 
-   $ cd aot_torchinductor
+   $ cd torchinductor
    $ ls
    aot_model___0_debug.log  model__0_forward_1.0
    $ cd model__0_forward_1.0
