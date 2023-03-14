@@ -41,18 +41,15 @@ void memset_junk(void* data, size_t num) {
   }
 }
 
+#ifdef __linux__
 static inline bool is_thp_alloc_enabled() {
-  static bool value = [&](const char* pt) {
-    if (pt != nullptr) {
-      return std::atoi(pt);
-    } else {
-      return 0;
-    }
-  }(std::getenv("THP_MEM_ALLOC_ENABLE"));
+  static bool value = [&] {
+    const char* ptr = std::getenv("THP_MEM_ALLOC_ENABLE");
+    return ptr != nullptr ? std::atoi(ptr) : 0;
+  }();
   return value;
 }
 
-#ifdef __linux__
 inline size_t c10_compute_alignment(size_t nbytes) {
   static const auto pagesize = sysconf(_SC_PAGESIZE);
   // for kernels that don't provide page size, default it to 4K
@@ -64,7 +61,7 @@ inline bool is_thp_alloc(size_t nbytes) {
   // enable thp (transparent huge pages) for larger buffers
   return (is_thp_alloc_enabled() && (nbytes >= gAlloc_threshold_thp));
 }
-#else
+#elif !defined(__ANDROID__) && !defined(_MSC_VER)
 constexpr size_t c10_compute_alignment(C10_UNUSED size_t nbytes) {
   return gAlignment;
 }
@@ -113,16 +110,16 @@ void* alloc_cpu(size_t nbytes) {
       " (",
       strerror(err),
       ")");
-#ifdef __linux__
-  // MADV_HUGEPAGE advise is available only for linux.
-  // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
   if (is_thp_alloc(nbytes)) {
+#ifdef __linux__
+    // MADV_HUGEPAGE advise is available only for linux.
+    // general posix compliant systems can check POSIX_MADV_SEQUENTIAL advise.
     int ret = madvise(data, nbytes, MADV_HUGEPAGE);
     if (ret != 0) {
       TORCH_WARN_ONCE("thp madvise for HUGEPAGE failed with ", strerror(errno));
     }
-  }
 #endif
+  }
 #endif
 
   // move data to a thread's NUMA node

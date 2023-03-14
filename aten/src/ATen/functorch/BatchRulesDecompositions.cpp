@@ -242,7 +242,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(numpy_T);
   OP_DECOMPOSE(reshape_as);
   OP_DECOMPOSE(slogdet);
-  OP_DECOMPOSE(t);
   OP_DECOMPOSE2(result_type, Tensor);
   OP_DECOMPOSE2(result_type, Scalar);
   OP_DECOMPOSE2(result_type, Scalar_Tensor);
@@ -259,7 +258,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(std_mean, dim);
   OP_DECOMPOSE(swapaxes);
   OP_DECOMPOSE2(subtract, Tensor);
-  OP_DECOMPOSE(sum_to_size);
+  m.impl("sum_to_size", native::sum_to_size_symint);
   OP_DECOMPOSE(svd);
   OP_DECOMPOSE(swapdims);
   OP_DECOMPOSE(take_along_dim);
@@ -281,7 +280,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(where, ScalarOther);
   OP_DECOMPOSE2(where, ScalarSelf);
   OP_DECOMPOSE(orgqr);
-  OP_DECOMPOSE2(unflatten, int);
+  m.impl("unflatten.int", native::unflatten_symint);
   m.impl("_convolution_double_backward", native::_convolution_double_backward);
   OP_DECOMPOSE(conv_transpose1d);
   OP_DECOMPOSE2(conv_transpose2d, input);
@@ -298,7 +297,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(diagonal_copy);
   m.impl("pad", native::pad_symint);
   m.impl("_pad_circular", native::_pad_circular_symint);
-  OP_DECOMPOSE(t_);
   OP_DECOMPOSE(swapdims_);
   OP_DECOMPOSE(swapaxes_);
   OP_DECOMPOSE(unfold_copy);
