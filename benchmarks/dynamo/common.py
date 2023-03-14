@@ -163,6 +163,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
     "hf_GPT2_large",  # Intermittent failure on CI
+    "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",
@@ -226,13 +227,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "fastNLP_Bert",  # AssertionError: 1900: <class 'torch.Tensor'>, 256: <class 'int'>
-    "speech_transformer",  # AssertionError: 2040: <class 'torch.Tensor'>, 256: <class 'int'>
-    "yolov3",  # AssertionError: 2304: <class 'torch.Tensor'>, 32: <class 'int'>
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # ceiling is not defined
-    "volo_d1_224",  # ceiling is not defined
+    "pnasnet5large",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -242,9 +241,9 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=True)],
     # torchbench
     "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
+    "yolov3",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     # timm_models
     "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "dla102",  # Accuracy failed for key name base_layer.1.bias.grad
     "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'

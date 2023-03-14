@@ -7571,7 +7571,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     def test_masked_fill(self):
         class MaskedFillModel(torch.nn.Module):
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 return x.masked_fill(mask, 2)
 
         x = torch.zeros(4, 2, 3, requires_grad=True)
@@ -7592,7 +7592,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         class MaskedFillModel(torch.jit.ScriptModule):
             @torch.jit.script_method
             def forward(self, x):
-                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.uint8)
+                mask = torch.tensor([[0, 0, 1], [1, 1, 0]], dtype=torch.bool)
                 x.masked_fill_(mask, 2)
                 return x
 
@@ -9872,7 +9872,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # fmt: on
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
-
         x = torch.rand(5).log()
         y = torch.rand(5)
         self._kldiv_loss(x, y)
@@ -14473,7 +14472,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
     # test case to 'xfail'.
     @skipFxTest(reason="TypeError: missing a required argument: 'end'")
     def test_grid_sample(self, mode, padding_mode, align_corners):
-
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
 
         class GridSampleModule(torch.nn.Module):
