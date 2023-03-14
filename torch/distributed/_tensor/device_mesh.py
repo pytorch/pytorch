@@ -100,13 +100,12 @@ class DeviceMesh:
 
     device_type: str
     mesh: torch.Tensor
-    _backend: str
 
     def __init__(
         self,
         device_type: str,
         mesh: MeshExprT,
-        dim_groups: Optional[List[ProcessGroup]] = None,
+        init_process_group: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -114,122 +113,12 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        default_pg = self._get_or_create_default_group()
-        self._backend = default_pg._get_backend_name()
-        # TODO: if user want to pass pg_options, offer a way to do it
-        # check default pg backend, should support device_type
-        if device_type == "cpu":
-            assert (
-                self._backend == "gloo" or self._backend == "threaded"
-            ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
-        elif device_type == "cuda":
-            if self._backend == "gloo":
-                warnings.warn(
-                    "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
-                )
-            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
-        else:
-            raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
-            )
-
-        world_size = get_world_size()
-        if self.mesh.numel() > world_size:
-            raise RuntimeError(
-                f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
-            )
-
-        unique_mesh_values = self.mesh.unique(sorted=True)
-        if unique_mesh_values.numel() != self.mesh.numel():
-            raise RuntimeError(
-                f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
-            )
-
-        # coordinates of this rank on the mesh
-        rank_coords = (self.mesh == get_rank()).nonzero()
-        assert rank_coords.size(0) in (0, 1)
-        self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-        )
-
-        # groups created by dimension, each dimension should have exact
-        # one valid process group per rank
-        self._dim_groups: List[ProcessGroup] = []
-        if dim_groups is not None:
-            # if user hand creating dimension based groups
-            # we just take it and use it for communication
-            if not isinstance(dim_groups, list):
-                raise RuntimeError(
-                    "dim_groups expected to be Optional[List[ProcessGroup]]"
-                )
-
-            for group in dim_groups:
-                if not isinstance(group, ProcessGroup):
-                    raise RuntimeError(
-                        f"found object in dim_groups that is not a ProcessGroup: {group}"
-                    )
-
-            if self.get_rank() in self.mesh:
-                if len(dim_groups) != self.mesh.ndim:
-                    raise RuntimeError(
-                        f"length of dim_groups ({len(dim_groups)}) expected to be equal to mesh.ndim ({self.mesh.ndim})"
-                    )
-            else:
-                if len(dim_groups) != 0:
-                    raise RuntimeError(
-                        f"length of dim_groups ({len(dim_groups)}) expected to be equal to 0 on rank {self.get_rank()} "
-                        f"for mesh {self.mesh}"
-                    )
-
-            self._dim_groups = dim_groups
-            return
-
-        if self.mesh.ndim == 1 and unique_mesh_values[-1] == world_size - 1:
-            # if the mesh is the same as world_pg, we just append the default
-            # pg to the first dim goups, as new_group cannot have the exact
-            # same ranks as world
-            self._dim_groups.append(default_pg)
-        else:
-            # create sub pgs base on the mesh argument specified
-            # handle multi-dim mesh, create subgroups by
-            # looping over the pg_ranks_by_dim for each dim
-            for dim in range(self.mesh.ndim):
-                # swap the current dim to the last dim
-                # then reshape to flatten out other dims
-                pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
-                    -1, self.mesh.size(dim)
-                )
-
-                # multi-dim mesh, create subgroups by
-                # looping over the pg_ranks for each dim
-                # and append the groups
-                for dim_mesh in pg_ranks_by_dim:
-                    subgroup_ranks = dim_mesh.tolist()
-                    # call new_group regardless of the current rank in the
-                    # pg or not, it's required that all ranks participate
-                    # in subgroup construction
-                    new_subgroup = new_group(
-                        ranks=subgroup_ranks, backend=self._backend
-                    )
-                    # only add to dim_groups if the current rank in the subgroup
-                    if self.get_rank() in subgroup_ranks:
-                        if len(self._dim_groups) > dim:
-                            raise RuntimeError(
-                                f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
-                                f"in {subgroup_ranks}!"
-                            )
-                        self._dim_groups.append(new_subgroup)
+        if init_process_group:
+            self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
         if not is_initialized():
             # TODO: we will support mesh on a subset of WORLD in future
-            world_size = int(os.getenv("WORLD_SIZE", 1))
-            if self.mesh.numel() < world_size:
-                raise RuntimeError(
-                    "DeviceMesh must include every process in WORLD, "
-                    f"but WORLD_SIZE({world_size}) != mesh size({self.mesh.numel()})"
-                )
-
             unique_mesh_values = self.mesh.unique(sorted=True)
             if unique_mesh_values.numel() != self.mesh.numel():
                 raise RuntimeError(
@@ -249,9 +138,89 @@ class DeviceMesh:
                     f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
                 )
 
+            world_size = int(os.getenv("WORLD_SIZE", unique_mesh_values[-1] + 1))
+
             _backend = "gloo" if self.device_type == "cpu" else "nccl"
             init_process_group(backend=_backend)
+        else:
+            world_size = get_world_size()
+            if self.mesh.numel() > world_size:
+                raise RuntimeError(
+                    f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
+                )
+
         return _get_default_group()
+
+    def _init_process_groups(self):
+        default_pg = self._get_or_create_default_group()
+        self._backend = default_pg._get_backend_name()
+        # TODO: if user want to pass pg_options, offer a way to do it
+        # check default pg backend, should support device_type
+        if self.device_type == "cpu":
+            assert (
+                self._backend == "gloo" or self._backend == "threaded"
+            ), f"ProcessGroup backend: {self._backend} not supporting CPU!"
+        elif self.device_type == "cuda":
+            if self._backend == "gloo":
+                warnings.warn(
+                    "We recommend using nccl backend for cuda device type, gloo backend might only have partial support!"
+                )
+            assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
+        else:
+            raise RuntimeError(
+                f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
+            )
+
+        unique_mesh_values = self.mesh.unique(sorted=True)
+        if unique_mesh_values.numel() != self.mesh.numel():
+            raise RuntimeError(
+                f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
+            )
+
+        # coordinates of this rank on the mesh
+        rank_coords = (self.mesh == get_rank()).nonzero()
+        assert rank_coords.size(0) in (0, 1)
+        self._coordinate_on_dim: Optional[List[int]] = (
+            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+        )
+
+        # groups created by dimension, each dimension should have exact
+        # one valid process group per rank
+        dim_groups: List[ProcessGroup] = []
+
+        if self.mesh.ndim == 1 and unique_mesh_values[-1] == get_world_size() - 1:
+            # if the mesh is the same as world_pg, we just append the default
+            # pg to the first dim goups, as new_group cannot have the exact
+            # same ranks as world
+            dim_groups.append(default_pg)
+        else:
+            # create sub pgs base on the mesh argument specified
+            # handle multi-dim mesh, create subgroups by
+            # looping over the pg_ranks_by_dim for each dim
+            for dim in range(self.mesh.ndim):
+                # swap the current dim to the last dim
+                # then reshape to flatten out other dims
+                pg_ranks_by_dim = self.mesh.swapdims(-1, dim).reshape(
+                    -1, self.mesh.size(dim)
+                )
+                # multi-dim mesh, create subgroups by
+                # looping over the pg_ranks for each dim
+                # and append the groups
+                for dim_mesh in pg_ranks_by_dim:
+                    subgroup_ranks = dim_mesh.tolist()
+                    # call new_group regardless of the current rank in the
+                    # pg or not, it's required that all ranks participate
+                    # in subgroup construction
+                    new_subgroup = new_group(ranks=subgroup_ranks)
+                    # only add to dim_groups if the current rank in the subgroup
+                    if self.get_rank() in subgroup_ranks:
+                        if len(dim_groups) > dim:
+                            raise RuntimeError(
+                                f"Each device mesh dimension should get only one process group, but got {self.get_rank} "
+                                f"in {subgroup_ranks}!"
+                            )
+                        dim_groups.append(new_subgroup)
+        return dim_groups
 
     def __enter__(self) -> "DeviceMesh":
         # set global device_mesh to this instance
@@ -277,6 +246,8 @@ class DeviceMesh:
         return self.mesh.equal(other.mesh)
 
     def get_dim_groups(self) -> List[ProcessGroup]:
+        if not hasattr(self, "_dim_groups"):
+            raise RuntimeError("DeviceMesh process groups not initialized!")
         return self._dim_groups
 
     # pyre-fixme[3]: Return type must be annotated.
@@ -286,9 +257,6 @@ class DeviceMesh:
     @property
     def ndim(self) -> int:
         return self.mesh.ndim
-
-    def backend(self) -> str:
-        return self._backend
 
     def get_rank(self) -> int:
         return get_rank()
@@ -524,7 +492,7 @@ class DeviceMesh:
 
         work = None
         # no direct dist.all_to_all support on 'gloo' so we manually do scatters
-        if self.backend() == "gloo":
+        if self._backend == "gloo":
             # TODO: pull the handle of uneven case in #492
             dim_group_size = get_world_size(dim_group)
             for i in range(dim_group_size):
@@ -541,7 +509,7 @@ class DeviceMesh:
                     async_op=async_op,
                 )
 
-        elif self.backend() == "nccl":
+        elif self._backend == "nccl":
             work = all_to_all(
                 output_tensor_list,
                 input_tensor_list,
@@ -550,6 +518,6 @@ class DeviceMesh:
             )
         else:
             raise RuntimeError(
-                f"DeviceMesh does not support all-to-all collective operations on {self.backend()} backend."
+                f"DeviceMesh does not support all-to-all collective operations on {self._backend} backend."
             )
         return work
