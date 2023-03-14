@@ -21,6 +21,7 @@ from ..ir import ReductionHint, TileHint
 from ..utils import (
     ceildiv,
     conditional_product,
+    create_bandwidth_info_str,
     do_bench,
     get_num_bytes,
     has_triton,
@@ -135,6 +136,11 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
+
+        binary._init_handles()
+        launcher.n_regs = getattr(binary, "n_regs", None)
+        launcher.n_spills = getattr(binary, "n_spills", None)
+        launcher.shared = getattr(binary, "shared", None)
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -155,8 +161,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
-    def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+    def benchmark_all_configs(self, *args, **kwargs):
         from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -171,9 +176,14 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
+        return timings
+
+    def autotune_to_one_config(self, *args, **kwargs):
+        """Do the actual autotuning"""
+        timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
@@ -223,12 +233,12 @@ def start_graph():
 def end_graph():
     if len(collected_calls) == 0:
         return
-    overall_time = sum(call[1] for call in collected_calls)
-    overall_gb = sum(call[2] for call in collected_calls)
+    overall_time = sum(call[0] for call in collected_calls)
+    overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
     print(f"SUMMARY ({cur_file})")
     print(
-        f"{overall_time:.2f}ms\t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
     )
     print()
 
@@ -250,14 +260,10 @@ class DebugAutotuner(CachingAutotuner):
         num_gb = get_num_bytes(*args) / 1e9
         gb_per_s = num_gb / (ms / 1e3)
 
-        collected_calls.append((kernel_name, ms, num_gb, gb_per_s))
-        import colorama
-
-        info_str = f"{kernel_name}\t {ms:.3f}ms\t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s"
-        if ms > 0.012 and gb_per_s < 650:
-            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
-        else:
-            print(info_str)
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
+        print(
+            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
+        )
 
 
 def hash_configs(configs: List[Config]):
@@ -311,8 +317,13 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
+    # The autotune cache will simply replace the list of candidate configs with
+    # the best config cached. We don't want that when we benchmark triton kernels.
+    # We need the perf for each of the candidate config instead.
+    cache_autotune_result = not config.benchmark_kernel
+
     # on disk caching logic
-    if filename is not None and len(configs) > 1:
+    if cache_autotune_result and filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
@@ -504,7 +515,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
-        ) and not config.max_autotune:
+        ) and not (config.max_autotune or config.max_autotune_pointwise):
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
@@ -549,7 +560,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)
