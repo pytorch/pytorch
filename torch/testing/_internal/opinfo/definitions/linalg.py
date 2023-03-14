@@ -1259,18 +1259,22 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(
-                unittest.skip("Flaky on ROCm https://github.com/pytorch/pytorch/issues/93044"),
-                'TestBwdGradients',
-                'test_fn_grad',
-                device_type='cuda',
+                unittest.skip(
+                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93044"
+                ),
+                "TestBwdGradients",
+                "test_fn_grad",
+                device_type="cuda",
                 dtypes=get_all_complex_dtypes(),
                 active_if=TEST_WITH_ROCM,
             ),
             DecorateInfo(
-                unittest.skip("Flaky on ROCm https://github.com/pytorch/pytorch/issues/93045"),
-                'TestFwdGradients',
-                'test_forward_mode_AD',
-                device_type='cuda',
+                unittest.skip(
+                    "Flaky on ROCm https://github.com/pytorch/pytorch/issues/93045"
+                ),
+                "TestFwdGradients",
+                "test_forward_mode_AD",
+                device_type="cuda",
                 dtypes=get_all_complex_dtypes(),
                 active_if=TEST_WITH_ROCM,
             ),
