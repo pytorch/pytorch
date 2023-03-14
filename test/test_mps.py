@@ -2008,6 +2008,9 @@ class TestMPS(TestCaseMPS):
             helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/96113
+        torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
@@ -6472,6 +6475,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((1,), (0,))
         # input.numel() == 0
         helper((0,), (0,))
+        # none of dims that needs to be flipped
+        helper((1, 3), [0])
 
     # Test index select
     def test_index_select(self):
@@ -9912,12 +9917,12 @@ class TestRNNMPS(TestCaseMPS):
     ]
 
     def test_lstm_forward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 

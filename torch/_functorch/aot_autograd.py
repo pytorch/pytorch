@@ -1239,10 +1239,12 @@ def track_graph_compiling(aot_config, graph_name):
     global graph_being_compiled
     # TODO: Don't shove the aot_id in here; set it in the context
     graph_being_compiled = [f"{aot_config.aot_id}_{graph_name}"]
-    yield
-    global nth_graph
-    nth_graph += 1
-    graph_being_compiled = []
+    try:
+        yield
+    finally:
+        global nth_graph
+        nth_graph += 1
+        graph_being_compiled = []
 
 
 def make_boxed_func(f):
@@ -2380,6 +2382,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
             def call_compiled_backward():
                 if CompiledFunction.compiled_bw is None:
+                    assert all(a is not None for a in all_args)
                     if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(

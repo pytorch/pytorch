@@ -34,8 +34,8 @@
 #include <gloo/reduce.h>
 #include <gloo/scatter.h>
 
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/ThreadLocalState.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
