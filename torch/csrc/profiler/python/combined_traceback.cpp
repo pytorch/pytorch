@@ -52,7 +52,6 @@ struct PythonTraceback : public CapturedTraceback::Python {
   void appendSymbolized(
       const std::vector<CapturedTraceback::PyFrame>& to_symbolize,
       SymbolizedTracebacks& result) override {
-    auto torch = py::module::import("torch");
     py::str line_s = "line";
     py::str name_s = "name";
     py::str filename_s = "filename";
