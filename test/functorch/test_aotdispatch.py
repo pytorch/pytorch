@@ -2805,7 +2805,9 @@ symbolic_aot_autograd_module_failures = {
     torch.nn.CrossEntropyLoss,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.Bilinear,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReplicationPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReplicationPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
     torch.nn.ReflectionPad1d,  # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.ReflectionPad3d,  # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 
