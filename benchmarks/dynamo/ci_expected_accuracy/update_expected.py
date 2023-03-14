@@ -27,7 +27,7 @@ import requests
 
 # Note: the public query url targets this rockset lambda:
 # https://console.rockset.com/lambdas/details/commons.artifacts
-ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/d7052c1e-b96c-44f3-b6cf-bc8fd5c4b7e4"
+ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/c021973d-8985-4392-b398-7e2a0e90bf7d"
 
 
 def query_job_sha(repo, sha):
@@ -63,8 +63,7 @@ def get_artifacts_urls(results, suites):
             suite, shard_id, num_shards, machine = parse_test_str(test_str)
             workflowId = r["workflowId"]
             id = r["id"]
-            # TODO(whc) .get( ,1) only needed until new query URL is available
-            runAttempt = r.get("runAttempt", 1)
+            runAttempt = r["runAttempt"]
 
             if suite in suites:
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
