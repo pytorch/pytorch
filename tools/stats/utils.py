@@ -80,8 +80,8 @@ if __name__ == '__main__':
     final_dict = {i: [config_name, mode, oncall, time] for i, ((config_name, mode, oncall), time) in enumerate(team_to_times.items())}
     df = pd.DataFrame.from_dict(final_dict, orient="index", columns=["config_name", "mode", "oncall", "time"])
     df["time"] = df["time"] / 60 /  60 
-    df = df.groupby(["config_name", "oncall"])["time"].sum().reset_index()
-    df = df.sort_values(by=["config_name", 'time'])
+    df = df.groupby(["mode", "oncall"])["time"].sum().reset_index()
+    df = df.sort_values(by=["mode", 'time'])
     df = df[(df["time"] > 1)]
     # df["in_minutes"] = df["time"] / 60
     # df["in_hours"] = df["in_minutes"] / 60

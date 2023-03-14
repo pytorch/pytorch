@@ -1,4 +1,4 @@
-                                       time   in_minutes   in_hours
+                                time(seconds)   in_minutes   in_hours
 module: complex                    4.244500     0.070742   0.001179
 module: numpy                      8.079500     0.134658   0.002244
 module: cuda graphs               22.965333     0.382756   0.006379
