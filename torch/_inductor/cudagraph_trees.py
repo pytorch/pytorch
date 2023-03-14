@@ -265,7 +265,7 @@ def _use_cuda_memory_pool_manager(device, existing_graph, mem_pool):
     all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
     existing_graph should already have been used in a capture, and the mem_pool must already exist.
     """
-    with torch.cuda.device(f"cuda:{device}"):
+    with torch.cuda.device(device):
         capture_id = existing_graph.id()
         torch._C._cuda_allocateThreadToPrivatePool(device, mem_pool)
         torch._C._cuda_notifyCaptureBegin(device, capture_id, mem_pool)
@@ -342,11 +342,12 @@ class CUDAWarmupNode:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.cuda_graphs_pool, refs)
 
-        with torch.cuda.device(f"cuda:{self.device_index}"):
-            with clear_cublas_manager(), _use_cuda_memory_pool_manager(
-                self.device_index, self.existing_cuda_graph, self.cuda_graphs_pool
-            ):
-                out = self.wrapped_function.model(new_inputs)
+        with torch.cuda.device(
+            self.device_index
+        ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
+            self.device_index, self.existing_cuda_graph, self.cuda_graphs_pool
+        ):
+            out = self.wrapped_function.model(new_inputs)
 
         assert len(new_inputs) == 0
 
@@ -611,9 +612,7 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.cuda_graphs_pool, memory)
 
-        with torch.cuda.device(
-            "cuda:{self.device}"
-        ), clear_cublas_manager(), torch.cuda.graph(
+        with torch.cuda.device(self.device), clear_cublas_manager(), torch.cuda.graph(
             self.graph, stream=stream, pool=self.cuda_graphs_pool
         ):
             static_outputs = model(inputs)
@@ -836,17 +835,18 @@ class CUDAGraphNode:
         stream.wait_stream(torch.cuda.current_stream())
         recording_inputs = []
 
-        with warnings.catch_warnings(record=True):
-            with torch.cuda.graph(
-                inps_alloc_graph,
-                pool=self.cuda_graphs_pool,
-                stream=stream,
-            ):
-                for i, inp in enumerate(inputs):
-                    if i not in self.static_input_idxs:
-                        recording_inputs.append(static_input(inp))
-                    else:
-                        recording_inputs.append(inp)
+        with warnings.catch_warnings(record=True), torch.cuda.device(
+            self.device
+        ), torch.cuda.graph(
+            inps_alloc_graph,
+            pool=self.cuda_graphs_pool,
+            stream=stream,
+        ):
+            for i, inp in enumerate(inputs):
+                if i not in self.static_input_idxs:
+                    recording_inputs.append(static_input(inp))
+                else:
+                    recording_inputs.append(inp)
 
         return recording_inputs
 
@@ -970,7 +970,7 @@ class CUDAGraphTreeManager:
 
         self.warmed_up_functions: Set[FunctionID] = set()
 
-        with torch.cuda.device(f"cuda:{device_index}"):
+        with torch.cuda.device(device_index):
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
