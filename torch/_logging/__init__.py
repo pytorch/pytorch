@@ -1,1 +1,1 @@
-from .internal import init_logs
+from .internal import _init_logs, set_logs

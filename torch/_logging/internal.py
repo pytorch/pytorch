@@ -118,6 +118,11 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
              guards=False,
              output_code=False,
              schedule=False):
+    """
+    Enable setting the log level of individual components through kwargs.
+    Args are set using the following format:
+        set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>)
+    """
     log_state.clear()
 
     def _set_logs(**kwargs):
@@ -329,7 +334,7 @@ def _get_registered_parent_qname(log_qname):
 # initialize loggers log_names
 # each developer component should call this for their own logs
 # in the appropriate location after relevant types have been registered
-def init_logs(log_file_name=None):
+def _init_logs(log_file_name=None):
     for log_name in log_registry.get_log_qnames():
         log = logging.getLogger(log_name)
         log.setLevel(logging.DEBUG)  # allow all messages through to the handlers

@@ -13,7 +13,7 @@ def make_test(settings, log_names):
         def test_fn(self):
             records = []
             with log_settings(settings):
-                torch._logging.init_logs()
+                torch._logging._init_logs()
                 with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
                     fn(self, records)
 

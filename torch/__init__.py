@@ -1497,4 +1497,4 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
 
 
 from . import _logging
-_logging.init_logs()
+_logging._init_logs()
