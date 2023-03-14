@@ -50,6 +50,12 @@ test_failures = {
     "test_conv2d_unary_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
 }
 
+if TEST_WITH_ROCM:
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3849
+    test_skips["test_argmax_argmin1_dynamic_shapes"] = ("cpu", "cuda")
+    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
+    test_skips["test_convolution1_dynamic_shapes"] = ("cpu", "cuda")
+
 
 def make_dynamic_cls(cls):
     return make_test_cls_with_patches(
@@ -203,5 +209,5 @@ if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")
