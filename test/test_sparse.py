@@ -430,7 +430,7 @@ class TestSparse(TestSparseBase):
                 return
 
             def fn(x):
-                return x.to_dense(masked=gradcheck.masked)
+                return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
@@ -557,7 +557,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual(res, self.safeToDense(x))
 
             def fn(x):
-                return x.to_dense(masked=gradcheck.masked)
+                return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
@@ -935,7 +935,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked=gradcheck.masked), s.requires_grad_())
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1781,7 +1781,7 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    return res.to_dense(masked=True)
+                    return res.to_dense(masked_grad=True)
                 gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
 
         nnz = 10
@@ -3992,7 +3992,7 @@ class TestSparseOneOff(TestCase):
 
 def _sparse_to_dense(tensor):
     if tensor.dtype != torch.bool:
-        return tensor.to_dense(masked=True)
+        return tensor.to_dense(masked_grad=True)
 
     # to_dense uses coalesce which isn't implemented for bool
     return tensor.to(torch.int8).to_dense().to(torch.bool)
@@ -4403,7 +4403,7 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked=gradcheck.masked), t)
+            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
             self.assertTrue(r)
 
     @all_sparse_layouts('from_layout', include_strided=True)

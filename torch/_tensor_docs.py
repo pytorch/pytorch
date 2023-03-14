@@ -5360,14 +5360,14 @@ See :func:`torch.topk`
 add_docstr_all(
     "to_dense",
     r"""
-to_dense(dtype=None, masked=None) -> Tensor
+to_dense(dtype=None, masked_grad=None) -> Tensor
 
 Creates a strided copy of :attr:`self` if :attr:`self` is not a strided tensor, otherwise returns :attr:`self`.
 
 Keyword args:
     {dtype}
-    masked (bool, optional): If set to ``True`` (default) and
-      :attr:`self` has any sparse layout then the backward of
+    masked_grad (bool, optional): If set to ``True`` (default) and
+      :attr:`self` has a sparse layout then the backward of
       :meth:`to_dense` returns ``grad.sparse_mask(self)``.
 
 Example::

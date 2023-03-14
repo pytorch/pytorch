@@ -1676,10 +1676,10 @@
 
 # DO NOT define a backward for to_dense
 # See [Note: Sometimes view derivatives]
-# - name: to_dense(Tensor self, bool? masked=None, ScalarType? dtype=None) -> Tensor
+# - name: to_dense(Tensor self, *, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
 #
-- name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked=None) -> Tensor
-  self: to_dense_backward(grad, self, masked)
+- name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
+  self: to_dense_backward(grad, self, masked_grad)
 
 - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
@@ -1802,7 +1802,7 @@
   result: auto_linear
 
 - name: sparse_mask(Tensor self, Tensor mask) -> Tensor
-  self: grad.to_dense().sparse_mask(mask).to_dense()
+  self: grad.to_dense(c10::nullopt, c10::nullopt).sparse_mask(mask).to_dense(c10::nullopt, c10::nullopt)
   mask: non_differentiable
 
 - name: _sparse_coo_tensor_with_dims_and_tensors(int sparse_dim, int dense_dim, SymInt[] size, Tensor indices, Tensor values, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=False) -> Tensor
