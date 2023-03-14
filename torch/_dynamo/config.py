@@ -9,10 +9,14 @@ from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
 
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
+
+# Note (mlazos): This is deprecated and will be removed very soon
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
