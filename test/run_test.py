@@ -812,7 +812,8 @@ def get_pytest_args(options):
     pytest_args = [
         "--use-pytest",
         "-vv",
-        "-rfEX"
+        "-rfEX",
+        "-s"
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
