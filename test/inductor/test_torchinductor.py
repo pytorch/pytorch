@@ -6892,7 +6892,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             finally:
                 torch.cuda.memory._record_memory_history(False)
             snapshot = str(torch.cuda.memory._snapshot())
-            assert "called_inside_compile" in snapshot
+            self.assertTrue("called_inside_compile" in snapshot)
 
     copy_tests(CommonTemplate, CudaTests, "cuda")
 
