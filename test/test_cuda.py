@@ -4978,7 +4978,9 @@ class TestCudaComm(TestCase):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks
         c = gather_traceback(True, True, True)
         r, = symbolize_tracebacks([c])
-        self.assertTrue("combined_traceback.cpp" in str(r))
+        r = str(r)
+        self.assertTrue("test_cuda.py" in r)
+        self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
