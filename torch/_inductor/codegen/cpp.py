@@ -1869,24 +1869,21 @@ class CppVecKernelChecker(CppVecKernel):
 
                     cur_node = node_ctx.get_fx_node()
                     input_value: torch.fx.Node = cur_node.all_input_nodes[1]
-                    if dtype == torch.float and input_value.target in [
-                        "load",
-                        "constant",
-                    ]:
-                        # Support masked_load for BF16. Because the legalization will
-                        # insert to_dtype to convert the BF16 input to FP32.
-                        dtype = (
-                            V.graph.get_dtype(input_value.args[1])
-                            if input_value.target == "load"
-                            else input_value.args[-1]
-                        )
-                        if dtype in [torch.bfloat16]:
-                            opt_ctx.is_load_bf16_as_fp32 = True
-                        else:
-                            self.simd_vec = False
-                    elif dtype == torch.float and input_value.target in ["where"]:
-                        # Support masked_fill_softmax
-                        pass
+                    if dtype == torch.float:
+                        if input_value.target in ["load", "constant"]:
+                            # Support masked_load for BF16. Because the legalization will
+                            # insert to_dtype to convert the BF16 input to FP32.
+                            dtype = (
+                                V.graph.get_dtype(input_value.args[1])
+                                if input_value.target == "load"
+                                else input_value.args[-1]
+                            )
+                            if dtype in [torch.bfloat16]:
+                                opt_ctx.is_load_bf16_as_fp32 = True
+                            elif dtype == torch.float:
+                                pass
+                            else:
+                                self.simd_vec = False
                     elif dtype == torch.bfloat16:
                         if not all(usr.target == "store" for usr in cur_node.users):
                             self.simd_vec = False
@@ -2036,7 +2033,7 @@ class CppKernelProxy(CppKernel):
                         value,
                     ) = _node.args
                     if src_dtype == torch.bfloat16:
-                        # Since we always convert the load/store value to float if the tensor is blfoat16.
+                        # Since we always convert the load/store value to float if the tensor is bfloat16.
                         # Therefore, the reduction should never work with bfloat16 value. Hence, we update
                         # the bfloat16 reduction by updating the dtype and src_dtype to float.
                         assert dtype in [torch.float, torch.bfloat16]
@@ -2062,7 +2059,7 @@ class CppKernelProxy(CppKernel):
                     pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
-                def _eliminate_redudant_to_node(sub_graph: torch.fx.Graph):
+                def _eliminate_redundant_to_node(sub_graph: torch.fx.Graph):
                     # Eliminate the redudant to_dtype node. Let's consider a pattern as follows:
                     #   graph():
                     #     %to_dtype1 = call_method[target=to_dtype](args = (%ops, %input, torch.float), kwargs = {})
@@ -2075,20 +2072,23 @@ class CppKernelProxy(CppKernel):
                     all_to_nodes = [
                         node for node in sub_graph.nodes if node.target == "to_dtype"
                     ]
-                    all_to_nodes = [
+                    all_to_nodes_and_users = [
                         {node: node.users} for node in all_to_nodes if _used_by_to(node)
                     ]
-                    for node, users in all_to_nodes:
-                        if all(usr.args[-1] == node.args[-1] for usr in users):
-                            val_node = node.all_input_nodes[-1]
-                            node.replace_all_uses_with(val_node)
-                            sub_graph.eliminate_dead_code()
+                    for node_users in all_to_nodes_and_users:
+                        for node, users in node_users.items():
+                            if all(usr.args[-1] == node.args[-1] for usr in users):
+                                val_node = node.all_input_nodes[-1]
+                                node.replace_all_uses_with(val_node)
+                                sub_graph.erase_node(node)
+
+                    sub_graph.lint()
 
                 def _eliminate_to_node_mem_copy(sub_grah: torch.fx.Graph):
                     pass
 
-                _eliminate_redudant_to_node()
-                _eliminate_to_node_mem_copy()
+                _eliminate_redundant_to_node(sub_graph)
+                _eliminate_to_node_mem_copy(sub_graph)
 
             eliminate_to_dtype(sub_graph)
 
