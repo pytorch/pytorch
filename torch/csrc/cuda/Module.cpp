@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <unordered_set>
 #if AT_CUDNN_ENABLED()
 
 #include <ATen/native/cudnn/Macros.h>
@@ -11,9 +12,11 @@
 #include <ATen/cuda/Sleep.h>
 #include <ATen/cuda/detail/CUDAHooks.h>
 #include <ATen/cuda/jiterator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <ATen/cuda/CUDAGraphsUtils.cuh>
+
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
@@ -793,6 +796,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str requested_size_s = "requested_size";
   py::str stream_s = "stream";
   py::str segment_type_s = "segment_type";
+  py::str segment_pool_id = "segment_pool_id";
   py::str large_s = "large";
   py::str small_s = "small";
   py::str size_s = "size";
@@ -820,6 +824,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
     // represent the stream rather than a torch.cuda.stream object
     segmentDict[stream_s] = int64_t(segmentInfo.stream);
     segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
+    segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
 
     py::list blocks;
     for (const auto& blockInfo : segmentInfo.blocks) {
@@ -1037,6 +1042,52 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
+void no_op_delete(void* ptr){};
+
+// We choose to ignore certain blocks that are currently allocated
+// when we set the pool to its checkpoint. For those blocks, we need
+// to swap out the deleter function of their corresponding blocks
+// so that a deallocation is not triggered when they die.
+void removeStorageDeleterFns(
+    const std::vector<c10::StorageImpl*>& stale_live_storages,
+    std::unordered_set<void*> definitely_stale_pointers) {
+  for (c10::StorageImpl* stale_storage : stale_live_storages) {
+    auto ptr = stale_storage->data_ptr().get();
+    auto allocated_pointer = definitely_stale_pointers.find(ptr);
+    TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
+    auto t = c10::cuda::CUDACachingAllocator::get();
+    bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
+        t->raw_deleter(), &no_op_delete);
+
+    TORCH_CHECK(
+        succeeded,
+        "Unexpected deleter function on storage, could not swap function");
+  }
+}
+
+void addStorageDeleterFns(
+    std::vector<at::Tensor>& tensors_to_add_deleters_to,
+    c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
+  std::unordered_map<void*, c10::StorageImpl*> storages;
+  for (auto& tensor : tensors_to_add_deleters_to) {
+    storages[tensor.storage().data_ptr().get()] =
+        tensor.storage().unsafeGetStorageImpl();
+  }
+
+  for (auto& data_ptr : delta.dataptrs_allocd) {
+    auto storage_pair = storages.find(data_ptr.get());
+    if (storage_pair != storages.end()) {
+      auto ctx = storage_pair->second->data_ptr().get_context();
+      TORCH_CHECK(ctx == nullptr, " Not expecting deleter function");
+
+      auto curr_deleter = storage_pair->second->data_ptr().get_deleter();
+      storage_pair->second->set_data_ptr_noswap(std::move(data_ptr));
+    } else {
+      data_ptr.release_context();
+    }
+  }
+}
+
 static void registerCudaPluggableAllocator(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1152,6 +1203,63 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+
+  py::class_<
+      c10::cuda::CUDACachingAllocator::AllocatorState,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>>(
+      m, "_cuda_CUDAAllocator_AllocatorState");
+
+  m.def("_cuda_getCheckpointState", [](int device, c10::cuda::MempoolId_t id) {
+    return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
+  });
+
+  m.def(
+      "_cuda_setCheckpointPoolState",
+      [](int device,
+         std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
+         std::vector<at::Tensor> stale_tensors,
+         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
+        // Could pass in Storage Pointers instead
+        std::unordered_set<c10::StorageImpl*> ptr_set;
+        // iterate on std::vector for determinism
+        std::vector<c10::StorageImpl*> ptrs;
+        for (const auto& ten : stale_tensors) {
+          auto ptr = ten.storage().unsafeGetStorageImpl();
+          if (!ptr_set.count(ptr)) {
+            ptrs.push_back(ten.storage().unsafeGetStorageImpl());
+            ptr_set.insert(ten.storage().unsafeGetStorageImpl());
+          }
+        }
+        auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
+            device, pps);
+        auto& freed_pointers = delta.ptrs_freed;
+        auto& allocd_pointers = delta.dataptrs_allocd;
+
+        std::unordered_set<void*> allocd_set;
+        for (auto& data_ptr : delta.dataptrs_allocd) {
+          allocd_set.insert(data_ptr.get());
+        }
+        std::unordered_set<void*> freed_pointer_set;
+        size_t definite_freed_count = 0;
+        for (void* ptr : freed_pointers) {
+          if (!allocd_set.count(ptr)) {
+            definite_freed_count += 1;
+          }
+          freed_pointer_set.insert((ptr));
+        }
+        // that block has already been freed,
+        // so even those this will error, so too will the allcoator
+        // when the corresponding tensor dies because there is no
+        // live tensor correponding to it
+        TORCH_CHECK(
+            ptr_set.size() >= definite_freed_count,
+            "Any stale tensors which are being manually freed"
+            " must be passed to set checkpoint");
+
+        removeStorageDeleterFns(ptrs, freed_pointer_set);
+
+        addStorageDeleterFns(tensors_to_add_deleters_to, delta);
+      });
 }
 
 static void bindGetDeviceProperties(PyObject* module) {

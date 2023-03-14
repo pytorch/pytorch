@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Allocator.h>
+#include <c10/core/StorageImpl.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -8,6 +9,7 @@
 
 #include <array>
 #include <mutex>
+#include <set>
 
 namespace c10 {
 
@@ -125,7 +127,12 @@ struct SegmentInfo {
   int64_t active_size = 0;
   cudaStream_t stream = 0;
   bool is_large = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+};
+
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
 };
 
 struct TraceEntry {
@@ -164,6 +171,14 @@ struct TraceEntry {
 struct SnapshotInfo {
   std::vector<SegmentInfo> segments;
   std::vector<std::vector<TraceEntry>> device_traces;
+};
+
+// returns the pointers freed in the pool
+// and the pointers allocated. Note: a pointer
+// may appear in both freed and allocated
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<at::DataPtr> dataptrs_allocd;
 };
 
 C10_CUDA_API void setAllocatorSettings(const std::string& env);
@@ -208,6 +223,12 @@ class CUDAAllocator : public Allocator {
       bool alloc_trace_record_context) = 0;
   virtual void attachOutOfMemoryObserver(OutOfMemoryObserver observer) = 0;
   virtual bool needsPoolSpecificPeerAccess() = 0;
+  virtual std::shared_ptr<AllocatorState> getCheckpointState(
+      int device,
+      MempoolId_t id) = 0;
+  virtual CheckpointDelta setCheckpointPoolState(
+      int device,
+      std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
 };
 
@@ -273,6 +294,18 @@ inline void resetPeakStats(int device) {
 
 inline SnapshotInfo snapshot() {
   return get()->snapshot();
+}
+
+inline std::shared_ptr<AllocatorState> getCheckpointState(
+    int device,
+    MempoolId_t id) {
+  return get()->getCheckpointState(device, id);
+}
+
+inline CheckpointDelta setCheckpointPoolState(
+    int device,
+    std::shared_ptr<AllocatorState> pps) {
+  return get()->setCheckpointPoolState(device, pps);
 }
 
 // CUDAGraph interactions
