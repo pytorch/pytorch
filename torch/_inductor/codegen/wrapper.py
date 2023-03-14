@@ -614,20 +614,23 @@ class WrapperCodeGen(CodeGen):
                     "",
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
+                    'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
                 ]
             )
             with output.indent():
-                output.writeline(f"benchmark_all_kernels('{get_benchmark_name()}')")
+                output.writeline(
+                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs)"
+                )
             output.writeline("else:")
             with output.indent():
                 output.writeline("benchmark_compiled_module()")
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
-        self.header.splice(f"\n\n{kernel_path_comment}{name} = {kernel}")
+    def define_kernel(self, name: str, kernel: str, metadata: str = None):
+        metadata_comment = f"{metadata}\n" if metadata else ""
+        self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return

@@ -47,10 +47,10 @@
 #endif
 
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/ATen_fwd.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <algorithm>
 #include <numeric>
