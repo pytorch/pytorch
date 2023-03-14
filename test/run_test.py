@@ -431,7 +431,7 @@ def run_test(
         if not options.pytest:
             raise RuntimeError("A test running without pytest cannot skip retries using "
                                "the PYTEST_SKIP_RETRIES set.")
-        unittest_args = [args if "--reruns" not in arg for arg in unittest_args]
+        unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(options)
