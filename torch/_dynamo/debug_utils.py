@@ -269,16 +269,20 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += f"args = []\n"
     # get hint shape/stride when dynamic shape enabled
-    hint_if_symint = lambda x: tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+    hint_if_symint = lambda x: tuple(
+        i.node.hint if isinstance(i, torch.SymInt) else i for i in x
+    )
     for arg in args:
         if isinstance(arg, int):
             model_str += f"args.append({arg})\n"
         elif isinstance(arg, torch.SymInt):
             model_str += f"args.append({arg.node.hint})  # {arg}\n"
         elif isinstance(arg, torch.Tensor):
-            model_str += f"args.append(rand_strided" + \
-                f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})" + \
-                f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
+            model_str += (
+                f"args.append(rand_strided"
+                + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
+                + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
+            )
         else:
             raise TypeError(f"arg is neither SymInt/int nor torch.Tensor, {arg}")
 
@@ -548,7 +552,10 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
             # because inductor clears the tensor list in its codegen. And example_inputs
             # are available only for the first invocation.
             fake_mode = FakeTensorMode()
-            copy_tensor_attrs = [fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x for x in real_inputs]
+            copy_tensor_attrs = [
+                fake_mode.from_tensor(x) if isinstance(x, torch.Tensor) else x
+                for x in real_inputs
+            ]
             if config.repro_level == 3:
                 # Always dump the original module in case we have segfaults
                 dump_to_minify(
