@@ -341,7 +341,7 @@ def min_cut_rematerialization_partition(
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
         fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-        required_bw_nodes.update(bwd_outputs)
+        required_bw_nodes.update(o for o in bwd_outputs if o is not None)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -519,7 +519,13 @@ def min_cut_rematerialization_partition(
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+    try:
+        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+    except Exception:
+        print('Failed to compute min-cut on following graph:')
+        print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        raise
+
     reachable, non_reachable = partition
     cutset = set()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
