@@ -49,6 +49,7 @@ skipIfNoBFloat16Cuda = _skipper(
     lambda: not torch.cuda.is_bf16_supported(), "BFloat16 CUDA is not available"
 )
 
+
 # skips tests for all versions below min_opset_version.
 # if exporting the op is only supported after a specific version,
 # add this wrapper to prevent running the test for opset_versions
@@ -169,7 +170,7 @@ def skipFxTest(*, reason: str = ""):
     def skip_decorator(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            if self.is_fx:
+            if getattr(self, "is_fx", None):
                 raise unittest.SkipTest(f"Skip FX test. {reason}")
             return func(self, *args, **kwargs)
 
