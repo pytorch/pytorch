@@ -3096,7 +3096,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         a = opt_fn(torch.tensor(False), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.tensor([1.25, 1.25]), a))
 
-    @unittest.expectedFailure
     def test_map_side_effects(self):
         from functorch.experimental.control_flow import map
 
@@ -3113,8 +3112,11 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return map(body, xs)
 
         mod = Module()
-        opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
-        opt_fn(torch.randn(3, 2))
+        with self.assertRaisesRegex(
+            TypeError, "missing 1 required positional argument"
+        ):
+            opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
+            opt_fn(torch.randn(3, 2))
 
     def test_cond_nested(self):
         from functorch.experimental.control_flow import cond
