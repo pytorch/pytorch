@@ -13,7 +13,7 @@ on real world models for both training and inference with a single line of code.
     The :func:`~torch.compile` API is experimental and subject to change.
 
 The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html> `
-showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we 
+showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we
 co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>__`
 
 .. code:: python
@@ -41,7 +41,7 @@ Optimizations can be passed in :func:`~torch.compile` with either a backend mode
 :func:`~torch._inductor.list_options()`` and :func:`~torch._inductor.list_mode_options`
 
 The default backend is `backend="inductor"` which will likely be the most reliable and performant option for most users and library maintainers,
-other backends are there for power users who don't mind more experimental community support.   
+other backends are there for power users who don't mind more experimental community support.
 
 You can get the full list of community backends by running :func:`~torch._dynamo.list_backends``
 
@@ -73,7 +73,7 @@ odds are you will find the right tool to solve your problem in our guides.
 Learn more
 ----------
 
-If you can't wait to get started and want to learn more about the internals of the PyTorch 2.0 stack then 
+If you can't wait to get started and want to learn more about the internals of the PyTorch 2.0 stack then
 please check out the references below.
 
 .. toctree::
@@ -82,5 +82,3 @@ please check out the references below.
    installation
    get-started
    technical-overview
-
-
