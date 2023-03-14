@@ -1,0 +1,472 @@
+{
+    "oncall: run_tests": [
+        "test_cpp_extensions_aot_ninja",
+        "test_cpp_extensions_aot_no_ninja"
+    ],
+    "oncall: unsure": [
+        "test_custom_backend",
+        "test_value_ranges",
+        "test_value_ranges"
+    ],
+    "module: intel": [
+        "backends/xeon/test_launch",
+        "test_itt"
+    ],
+    "module: unknown": [
+        "benchmark_utils/test_benchmark_utils",
+        "test_ao_sparsity",
+        "test_autocast",
+        "test_function_schema",
+        "test_futures",
+        "test_license",
+        "test_logging",
+        "test_mkl_verbose",
+        "test_mkldnn_verbose",
+        "test_namedtuple_return_api",
+        "test_native_functions",
+        "test_numba_integration",
+        "test_openmp",
+        "test_ops_fwd_gradients",
+        "test_ops_gradients",
+        "test_per_overload_api",
+        "test_tensorboard",
+        "test_utils",
+        "test_ops",
+        "test_ops_jit",
+        "test_flop_counter"
+    ],
+    "module: distributions": [
+        "distributions/test_distributions",
+        "distributions/test_constraints"
+    ],
+    "module: dynamo": [
+
+        "dynamo/test_aot_autograd",
+        "dynamo/test_comptime",
+        "dynamo/test_dynamic_shapes",
+        "dynamo/test_export",
+        "dynamo/test_export_mutations",
+        "dynamo/test_functions",
+        "dynamo/test_global",
+        "dynamo/test_minifier",
+        "dynamo/test_misc",
+        "dynamo/test_model_output",
+        "dynamo/test_modules",
+        "dynamo/test_nops",
+        "dynamo/test_optimizers",
+        "dynamo/test_python_autograd",
+        "dynamo/test_replay_record",
+        "dynamo/test_repros",
+        "dynamo/test_skip_non_tensor",
+        "dynamo/test_subgraphs",
+        "dynamo/test_unspec",
+        "dynamo/test_verify_correctness",
+        "dynamo/test_backends",
+        "dynamo/test_interop",
+        "dynamo/test_aot_cudagraphs",
+        "dynamo/test_optimizations",
+        "export/test_export",
+        "distributed/test_dynamo_distributed",
+        "distributed/test_inductor_collectives"
+    ],
+    "module: inductor": [
+        "inductor/test_minifier",
+        "inductor/test_torchinductor",
+        "inductor/test_torchinductor_opinfo",
+        "inductor/test_config",
+        "inductor/test_torchinductor_dynamic_shapes",
+        "inductor/test_standalone_compile",
+        "inductor/test_perf",
+        "inductor/test_select_algorithm",
+        "inductor/test_smoke",
+        "inductor/test_pattern_matcher",
+        "inductor/test_kernel_benchmark"
+    ],
+    "oncall: jit": [
+        "lazy/test_debug_util",
+        "lazy/test_reuse_ir",
+        "lazy/test_step_closures",
+        "lazy/test_ts_opinfo",
+        "test_dynamic_shapes",
+        "test_jit_autocast",
+        "test_jit_disabled",
+        "test_schema_check",
+        "test_jit",
+        "_nvfuser/test_torchscript",
+        "test_jit_fuser_legacy",
+        "test_jit_legacy"
+    ],
+    "module: nn": [
+        "nn/test_convolution",
+        "nn/test_dropout",
+        "nn/test_embedding",
+        "nn/test_lazy_modules",
+        "nn/test_module_hooks",
+        "nn/test_multihead_attention",
+        "nn/test_packed_sequence",
+        "nn/test_parametrization",
+        "nn/test_pooling",
+        "nn/test_pruning",
+        "test_expanded_weights",
+        "test_module_init",
+        "test_modules",
+        "test_native_mha",
+        "test_nn",
+        "test_stateless",
+        "test_subclass",
+        "test_transformers"
+    ],
+    "oncall: profiler": [
+        "profiler/test_memory_profiler",
+        "profiler/test_profiler",
+        "profiler/test_profiler_tree"
+    ],
+    "module: autograd": [
+        "test_autograd",
+        "test_functional_autograd_benchmark",
+        "test_public_bindings"
+    ],
+    "module: tests": [
+        "test_binary_ufuncs",
+        "test_dlpack",
+        "test_indexing",
+        "test_reductions",
+        "test_shape_ops",
+        "test_sort_and_select",
+        "test_testing",
+        "test_torch",
+        "test_unary_ufuncs",
+        "test_view_ops"
+    ],
+    "oncall: mobile": [
+        "test_bundled_inputs",
+        "test_mobile_optimizer",
+        "test_model_dump",
+        "test_set_default_mobile_cpu_allocator",
+        "test_show_pickle",
+        "test_vulkan",
+        "test_xnnpack_integration",
+        "test_metal"
+    ],
+    "module: complex": [
+        "test_complex"
+    ],
+    "module: cpp": [
+        "test_cpp_api_parity"
+    ],
+    "module: cpp-extensions": [
+        "test_cpp_extensions_open_device_registration",
+        "test_cpp_extensions_jit"
+    ],
+    "module: cuda": [
+        "test_cuda",
+        "test_cuda_nvml_based_avail",
+        "test_cuda_primary_ctx",
+        "test_cuda_sanitizer",
+        "test_cuda_trace",
+        "test_jiterator"
+    ],
+    "module: dataloader": [
+        "test_dataloader",
+        "test_datapipe"
+    ],
+    "module: dispatch": [
+        "test_dispatch"
+    ],
+    "module: meta tensors": [
+        "test_fake_tensor",
+        "test_weak"
+    ],
+    "module: mta": [
+        "test_foreach"
+    ],
+    "oncall: distributed": [
+        "test_functional_optim",
+        "distributed/_shard/sharded_optim/test_sharded_optim",
+        "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
+        "distributed/_shard/sharded_tensor/ops/test_chunk",
+        "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
+        "distributed/_shard/sharded_tensor/ops/test_embedding",
+        "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
+        "distributed/_shard/sharded_tensor/ops/test_init",
+        "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
+        "distributed/_shard/sharded_tensor/ops/test_softmax",
+        "distributed/_shard/sharded_tensor/test_sharded_tensor",
+        "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
+        "distributed/_shard/sharding_plan/test_sharding_plan",
+        "distributed/_shard/sharding_spec/test_sharding_spec",
+        "distributed/checkpoint/test_checkpoint",
+        "distributed/checkpoint/test_file_system_checkpoint",
+        "distributed/fsdp/test_checkpoint_wrapper",
+        "distributed/fsdp/test_distributed_checkpoint",
+        "distributed/fsdp/test_fsdp_apply",
+        "distributed/fsdp/test_fsdp_checkpoint",
+        "distributed/fsdp/test_fsdp_clip_grad_norm",
+        "distributed/fsdp/test_fsdp_comm",
+        "distributed/fsdp/test_fsdp_comm_hooks",
+        "distributed/fsdp/test_fsdp_core",
+        "distributed/fsdp/test_fsdp_exec_order",
+        "distributed/fsdp/test_fsdp_flatten_params",
+        "distributed/fsdp/test_fsdp_freezing_weights",
+        "distributed/fsdp/test_fsdp_fx",
+        "distributed/fsdp/test_fsdp_grad_acc",
+        "distributed/fsdp/test_fsdp_hybrid_shard",
+        "distributed/fsdp/test_fsdp_ignored_modules",
+        "distributed/fsdp/test_fsdp_input",
+        "distributed/fsdp/test_fsdp_memory",
+        "distributed/fsdp/test_fsdp_meta",
+        "distributed/fsdp/test_fsdp_misc",
+        "distributed/fsdp/test_fsdp_mixed_precision",
+        "distributed/fsdp/test_fsdp_multiple_forward",
+        "distributed/fsdp/test_fsdp_multiple_wrapping",
+        "distributed/fsdp/test_fsdp_optim_state",
+        "distributed/fsdp/test_fsdp_overlap",
+        "distributed/fsdp/test_fsdp_pure_fp16",
+        "distributed/fsdp/test_fsdp_sharded_grad_scaler",
+        "distributed/fsdp/test_fsdp_state_dict",
+        "distributed/fsdp/test_fsdp_tp_integration",
+        "distributed/fsdp/test_fsdp_traversal",
+        "distributed/fsdp/test_fsdp_uneven",
+        "distributed/fsdp/test_fsdp_use_orig_params",
+        "distributed/fsdp/test_utils",
+        "distributed/fsdp/test_wrap",
+        "distributed/rpc/cuda/test_tensorpipe_agent",
+        "distributed/test_c10d_common",
+        "distributed/test_c10d_gloo",
+        "distributed/test_c10d_nccl",
+        "distributed/test_c10d_spawn_gloo",
+        "distributed/test_c10d_spawn_nccl",
+        "distributed/test_pg_wrapper",
+        "distributed/test_store",
+        "distributed/_composable/fully_shard/test_fully_shard_init",
+        "distributed/_composable/fully_shard/test_fully_shard_mixed_precision",
+        "distributed/_composable/fully_shard/test_fully_shard_model_checkpoint",
+        "distributed/_composable/fully_shard/test_fully_shard_optim_checkpoint",
+        "distributed/_composable/fully_shard/test_fully_shard_runtime",
+        "distributed/_composable/test_checkpoint",
+        "distributed/_composable/test_compose",
+        "distributed/_composable/test_contract",
+        "distributed/_composable/test_replicate",
+        "distributed/_shard/sharded_tensor/ops/test_tensor_ops",
+        "distributed/_tensor/test_api",
+        "distributed/_tensor/test_common_rules",
+        "distributed/_tensor/test_device_mesh",
+        "distributed/_tensor/test_dtensor",
+        "distributed/_tensor/test_init",
+        "distributed/_tensor/test_math_ops",
+        "distributed/_tensor/test_matrix_ops",
+        "distributed/_tensor/test_pointwise_ops",
+        "distributed/_tensor/test_redistribute",
+        "distributed/_tensor/test_tensor_ops",
+        "distributed/_tensor/test_view_ops",
+        "distributed/_tools/test_memory_tracker",
+        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
+        "distributed/algorithms/quantization/test_quantization",
+        "distributed/algorithms/test_join",
+        "distributed/checkpoint/test_2d_fsdp_dt_checkpoint",
+        "distributed/checkpoint/test_dedup_tensors",
+        "distributed/checkpoint/test_file_system_checkpoint_cpu",
+        "distributed/checkpoint/test_fsdp_model_state",
+        "distributed/checkpoint/test_fsdp_optim_state",
+        "distributed/checkpoint/test_nested_dict",
+        "distributed/checkpoint/test_planner",
+        "distributed/checkpoint/test_traverse",
+        "distributed/checkpoint/test_utils",
+        "distributed/nn/jit/test_instantiator",
+        "distributed/optim/test_zero_redundancy_optimizer",
+        "distributed/rpc/test_share_memory",
+        "distributed/tensor/parallel/test_2d_parallel",
+        "distributed/tensor/parallel/test_parallelize_api",
+        "distributed/tensor/parallel/test_tp_examples",
+        "distributed/tensor/parallel/test_tp_style",
+        "distributed/tensor/parallel/test_view_sharding_dim_change",
+        "distributed/test_c10d_error_logger",
+        "distributed/test_c10d_object_collectives",
+        "distributed/test_c10d_pypg",
+        "distributed/test_c10d_spawn_ucc",
+        "distributed/test_data_parallel",
+        "distributed/test_distributed_spawn",
+        "distributed/test_launcher",
+        "distributed/test_multi_threaded_pg",
+        "distributed/test_nccl",
+        "distributed/fsdp/test_fsdp_unshard_params",
+        "distributed/_spmd/test_tracing",
+        "distributed/checkpoint/test_dtensor_checkpoint",
+        "distributed/test_functional_api",
+        "distributed/pipeline/sync/skip/test_api",
+        "distributed/pipeline/sync/skip/test_gpipe",
+        "distributed/pipeline/sync/skip/test_inspect_skip_layout",
+        "distributed/pipeline/sync/skip/test_leak",
+        "distributed/pipeline/sync/skip/test_portal",
+        "distributed/pipeline/sync/skip/test_stash_pop",
+        "distributed/pipeline/sync/skip/test_tracker",
+        "distributed/pipeline/sync/skip/test_verify_skippables",
+        "distributed/pipeline/sync/test_balance",
+        "distributed/pipeline/sync/test_bugs",
+        "distributed/pipeline/sync/test_checkpoint",
+        "distributed/pipeline/sync/test_copy",
+        "distributed/pipeline/sync/test_deferred_batch_norm",
+        "distributed/pipeline/sync/test_dependency",
+        "distributed/pipeline/sync/test_inplace",
+        "distributed/pipeline/sync/test_microbatch",
+        "distributed/pipeline/sync/test_phony",
+        "distributed/pipeline/sync/test_pipe",
+        "distributed/pipeline/sync/test_pipeline",
+        "distributed/pipeline/sync/test_stream",
+        "distributed/pipeline/sync/test_transparency",
+        "distributed/pipeline/sync/test_worker",
+        "distributed/_tensor/test_utils",
+        "distributed/_spmd/test_iter_graph_module",
+        "distributed/_tensor/test_dtensor_ops",
+        "distributed/rpc/test_faulty_agent",
+        "distributed/rpc/test_tensorpipe_agent",
+        "distributed/_shard/sharded_tensor/ops/test_linear",
+        "distributed/_shard/sharded_tensor/test_megatron_prototype",
+        "distributed/_shard/test_partial_tensor",
+        "distributed/fsdp/test_fsdp_summon_full_params",
+        "distributed/_tensor/test_tp_sharding_ops",
+        "distributed/test_traceable_collectives"
+    ],
+    "module: codegen": [
+        "test_functionalization"
+    ],
+    "module: fx": [
+        "test_fx_experimental",
+        "test_fx"
+    ],
+    "module: fx.passes": [
+        "test_fx_passes"
+    ],
+    "module: functionalization": [
+        "test_fx_reinplace_pass"
+    ],
+    "module: ci": [
+        "test_import_stats"
+    ],
+    "module: nvfuser": [
+        "test_jit_cuda_fuser",
+        "test_nvfuser_dynamo",
+        "test_nvfuser_frontend",
+        "_nvfuser/test_dynamo",
+        "_nvfuser/test_python_frontend"
+    ],
+    "NNC": [
+        "test_jit_fuser_te",
+        "test_tensorexpr",
+        "test_tensorexpr_pybind"
+    ],
+    "module: mkldnn": [
+        "test_jit_llga_fuser",
+        "test_mkldnn",
+        "test_mkldnn_fusion"
+    ],
+    "module: vmap": [
+        "test_legacy_vmap"
+    ],
+    "module: linear algebra": [
+        "test_linalg",
+        "test_matmul_cuda"
+    ],
+    "module: masked operators": [
+        "test_masked",
+        "test_maskedtensor"
+    ],
+    "oncall: r2p": [
+        "test_monitor",
+        "distributed/elastic/metrics/api_test",
+        "distributed/elastic/multiprocessing/api_test",
+        "distributed/elastic/timer/local_timer_example",
+        "distributed/elastic/timer/local_timer_test",
+        "distributed/elastic/utils/distributed_test",
+        "distributed/elastic/utils/logging_test",
+        "distributed/elastic/utils/util_test",
+        "distributed/elastic/events/lib_test"
+    ],
+    "module: multiprocessing": [
+        "test_multiprocessing",
+        "test_multiprocessing_spawn"
+    ],
+    "module: named tensor": [
+        "test_namedtensor"
+    ],
+    "module: nestedtensor": [
+        "test_nestedtensor"
+    ],
+    "module: numpy": [
+        "test_numpy_interop"
+    ],
+    "module: optimizer": [
+        "test_optim"
+    ],
+    "module: __torch_function__": [
+        "test_overrides"
+    ],
+    "oncall: package/deploy": [
+        "test_package",
+        "test_deploy"
+    ],
+    "module: primTorch": [
+        "test_prims",
+        "test_decomp",
+        "test_meta"
+    ],
+    "module: ProxyTensor": [
+        "test_proxy_tensor"
+    ],
+    "module: __torch_dispatch__": [
+        "test_python_dispatch"
+    ],
+    "module: pytree": [
+        "test_pytree"
+    ],
+    "module: scatter & gather ops": [
+        "test_scatter_gather_ops"
+    ],
+    "module: serialization": [
+        "test_serialization"
+    ],
+    "module: sparse": [
+        "test_sparse",
+        "test_sparse_csr"
+    ],
+    "module: fft": [
+        "test_spectral_ops"
+    ],
+    "module: tensor creation": [
+        "test_tensor_creation_ops"
+    ],
+    "module: typing": [
+        "test_type_hints",
+        "test_type_info"
+    ],
+    "module: type promotion": [
+        "test_type_promotion"
+    ],
+    "module: decompositions": [
+        "test_decomp"
+    ],
+    "oncall: quantization": [
+        "test_quantization"
+    ],
+    "module: cuda graphs": [
+        "dynamo/test_cudagraphs"
+    ],
+    "oncall: pt2": [
+        "test_sympy_utils"
+    ],
+    "module: functorch": [
+        "functorch/test_aotdispatch",
+        "functorch/test_control_flow",
+        "functorch/test_dims",
+        "functorch/test_eager_transforms",
+        "functorch/test_functionalize",
+        "functorch/test_memory_efficient_fusion",
+        "functorch/test_minifier",
+        "functorch/test_ops",
+        "functorch/test_vmap",
+        "functorch/test_vmap_registrations"
+    ],
+    "module: mps": [
+        "test_mps"
+    ]
+}

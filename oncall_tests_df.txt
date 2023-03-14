@@ -1,0 +1,60 @@
+defaultdict(<function <lambda> at 0x7fe2b099ae50>, {'module: intel': 117.45966666666666, 'module: unknown': 275206.48800000496, 'module: distributions': 1714.309666666666, 'module: dynamo': 6249.935833333331, 'module: inductor': 69663.95466666669, 'oncall: jit': 31634.063666666458, 'module: nn': 28236.071999999956, 'oncall: profiler': 684.9019999999999, 'module: autograd': 2674.887500000001, 'module: tests': 20157.67733333345, 'oncall: mobile': 2739.4216666666657, 'module: complex': 4.244499999999999, 'module: cpp': 650.1013333333335, 'oncall: run_tests': 32.99383333333334, 'module: cpp-extensions': 4903.1465, 'module: cuda': 3297.716833333333, 'oncall: unsure': 47.276666666666664, 'module: dataloader': 10100.918333333331, 'module: dispatch': 1398.5939999999998, 'module: meta tensors': 364.2124999999999, 'module: mta': 7497.874833333329, 'oncall: distributed': 69270.6828333333, 'module: codegen': 212.93366666666662, 'module: fx': 9397.104499999996, 'module: fx.passes': 44.64366666666665, 'module: functionalization': 54.44600000000001, 'module: ci': 169.53266666666661, 'module: nvfuser': 18420.08050000007, 'NNC': 27275.61716666665, 'module: mkldnn': 6351.321499999997, 'module: vmap': 99.34366666666665, 'module: linear algebra': 7891.057833333355, 'module: masked operators': 954.1126666666662, 'oncall: r2p': 319.8165000000001, 'module: multiprocessing': 5078.049166666665, 'module: named tensor': 50.83349999999995, 'module: nestedtensor': 98.15799999999992, 'module: numpy': 8.079499999999996, 'module: optimizer': 4491.569666666666, 'module: __torch_function__': 88.27833333333065, 'oncall: package/deploy': 118.76633333333331, 'module: primTorch': 155840.34033332832, 'module: ProxyTensor': 6536.85799999998, 'module: __torch_dispatch__': 94.06466666666662, 'module: pytree': 36.53616666666667, 'module: scatter & gather ops': 173.48950000000005, 'module: serialization': 2689.935833333333, 'module: sparse': 17087.12083333336, 'module: fft': 309.68733333333324, 'module: tensor creation': 2076.320500000004, 'module: typing': 556.6984999999996, 'module: type promotion': 438.04283333333234, 'module: decompositions': 124787.8363333354, 'oncall: quantization': 30410.627000000008, 'module: cuda graphs': 22.965333333333334, 'oncall: pt2': 358.17499999999995, 'module: functorch': 82694.12700000146, 'module: mps': 619.0123333333165})
+                                       time   in_minutes   in_hours
+module: complex                    4.244500     0.070742   0.001179
+module: numpy                      8.079500     0.134658   0.002244
+module: cuda graphs               22.965333     0.382756   0.006379
+oncall: run_tests                 32.993833     0.549897   0.009165
+module: pytree                    36.536167     0.608936   0.010149
+module: fx.passes                 44.643667     0.744061   0.012401
+oncall: unsure                    47.276667     0.787944   0.013132
+module: named tensor              50.833500     0.847225   0.014120
+module: functionalization         54.446000     0.907433   0.015124
+module: __torch_function__        88.278333     1.471306   0.024522
+module: __torch_dispatch__        94.064667     1.567744   0.026129
+module: nestedtensor              98.158000     1.635967   0.027266
+module: vmap                      99.343667     1.655728   0.027595
+module: intel                    117.459667     1.957661   0.032628
+oncall: package/deploy           118.766333     1.979439   0.032991
+module: ci                       169.532667     2.825544   0.047092
+module: scatter & gather ops     173.489500     2.891492   0.048192
+module: codegen                  212.933667     3.548894   0.059148
+module: fft                      309.687333     5.161456   0.086024
+oncall: r2p                      319.816500     5.330275   0.088838
+oncall: pt2                      358.175000     5.969583   0.099493
+module: meta tensors             364.212500     6.070208   0.101170
+module: type promotion           438.042833     7.300714   0.121679
+module: typing                   556.698500     9.278308   0.154638
+module: mps                      619.012333    10.316872   0.171948
+module: cpp                      650.101333    10.835022   0.180584
+oncall: profiler                 684.902000    11.415033   0.190251
+module: masked operators         954.112667    15.901878   0.265031
+module: dispatch                1398.594000    23.309900   0.388498
+module: distributions           1714.309667    28.571828   0.476197
+module: tensor creation         2076.320500    34.605342   0.576756
+module: autograd                2674.887500    44.581458   0.743024
+module: serialization           2689.935833    44.832264   0.747204
+oncall: mobile                  2739.421667    45.657028   0.760950
+module: cuda                    3297.716833    54.961947   0.916032
+module: optimizer               4491.569667    74.859494   1.247658
+module: cpp-extensions          4903.146500    81.719108   1.361985
+module: multiprocessing         5078.049167    84.634153   1.410569
+module: dynamo                  6249.935833   104.165597   1.736093
+module: mkldnn                  6351.321500   105.855358   1.764256
+module: ProxyTensor             6536.858000   108.947633   1.815794
+module: mta                     7497.874833   124.964581   2.082743
+module: linear algebra          7891.057833   131.517631   2.191961
+module: fx                      9397.104500   156.618408   2.610307
+module: dataloader             10100.918333   168.348639   2.805811
+module: sparse                 17087.120833   284.785347   4.746422
+module: nvfuser                18420.080500   307.001342   5.116689
+module: tests                  20157.677333   335.961289   5.599355
+NNC                            27275.617167   454.593619   7.576560
+module: nn                     28236.072000   470.601200   7.843353
+oncall: quantization           30410.627000   506.843783   8.447396
+oncall: jit                    31634.063667   527.234394   8.787240
+oncall: distributed            69270.682833  1154.511381  19.241856
+module: inductor               69663.954667  1161.065911  19.351099
+module: functorch              82694.127000  1378.235450  22.970591
+module: decompositions        124787.836333  2079.797272  34.663288
+module: primTorch             155840.340333  2597.339006  43.288983
+module: unknown               275206.488000  4586.774800  76.446247
