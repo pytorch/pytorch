@@ -42,7 +42,7 @@ def collect_mul_ops(node, target_name="aten::mul.Tensor", seen=None):
                 new_input_nodes.append(input_node)
 
         input_nodes = new_input_nodes
-        if len(group) > 1:
+        if len(group) > 2:
             yield group
 
     for input_node in input_nodes:
@@ -69,10 +69,9 @@ def reorder_tangents(graph):
 
     if AOT_PARTITIONER_DEBUG:
         print(f"Found {len(groups)} groups of pointwise multiplications to reorder")
-    # print(f"Found {[len(group) for group in groups]} groups")
     for group in groups:
         if AOT_PARTITIONER_DEBUG:
-            print(' + GROUP: ', group)
+            print(' + will reorder group: ', group)
         inputs = [group[0]._args[0]] + [node._args[1] for node in group]
         end = group[-1]
         while inputs:

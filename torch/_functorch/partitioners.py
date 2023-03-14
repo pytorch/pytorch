@@ -274,8 +274,8 @@ def pointwise_ops():
 
 
 def min_cut_rematerialization_partition(
-    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None, reorder_backwards=True,
-    *, num_fwd_outputs
+    joint_module: fx.GraphModule, _joint_inputs, compiler="nvfuser", recomputable_ops=None,
+    reorder_backwards=config.reorder_backwards, *, num_fwd_outputs
 ) -> Tuple[fx.GraphModule, fx.GraphModule]:
     """
     Partitions the joint graph such that the backward recomputes the forward.
