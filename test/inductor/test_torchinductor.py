@@ -5793,6 +5793,14 @@ class CommonTemplate:
             (torch.randn(32), torch.randn(32)),
         )
 
+    def test_inplace_where_pointwise(self):
+        # https://github.com/pytorch/pytorch/issues/96446
+        def fn(a, b):
+            a[0] = 2
+            return a * b
+
+        self.common(fn, (torch.rand(1), torch.rand(2)))
+
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
