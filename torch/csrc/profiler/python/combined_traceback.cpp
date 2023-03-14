@@ -57,7 +57,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     py::str filename_s = "filename";
 
     for (const auto& f : to_symbolize) {
-      auto f_code = (PyCodeObject*) f.code;
+      auto f_code = (PyCodeObject*)f.code;
       py::handle filename = f_code->co_filename;
       py::handle funcname = f_code->co_name;
       auto lineno = PyCode_Addr2Line(f_code, f.lasti);
