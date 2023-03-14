@@ -33,7 +33,6 @@ ALL_DYNAMIC_XFAILS = {
         "test_convert_boxes_to_pooler_format",
         # Cannot call sizes() on tensor with symbolic sizes/strides
         "test_hf_t5_forward",
-        "test_sort_out2",
     ],
     "SubGraphTests": [
         "test_enumerate_not_break_graph",
