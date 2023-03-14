@@ -105,7 +105,7 @@ class DeviceMesh:
         self,
         device_type: str,
         mesh: MeshExprT,
-        init_process_group: bool = True,
+        init_process_groups: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -113,12 +113,15 @@ class DeviceMesh:
             if isinstance(mesh, torch.Tensor)
             else torch.tensor(mesh, dtype=torch.int)
         )
-        if init_process_group:
-            self._dim_groups = self._init_process_groups()
+        # always try to create default (world) pg, even if it is not initialized
+        # already. The world pg is used for device mesh identity (rank) on each
+        # process (we need to know if the current global rank is in the mesh or not)
+        default_pg = self._get_or_create_default_group()
+        if init_process_groups:
+            self._dim_groups = self._init_process_groups(default_pg)
 
     def _get_or_create_default_group(self):
         if not is_initialized():
-            # TODO: we will support mesh on a subset of WORLD in future
             unique_mesh_values = self.mesh.unique(sorted=True)
             if unique_mesh_values.numel() != self.mesh.numel():
                 raise RuntimeError(
@@ -149,10 +152,18 @@ class DeviceMesh:
                     f"Mesh should not be bigger than default world size, but found {self.mesh.numel()} ranks!"
                 )
 
+        # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
+
+        # calculate the coordinates of the current global rank on the mesh
+        rank_coords = (self.mesh == get_rank()).nonzero()
+        assert rank_coords.size(0) in (0, 1)
+        self._coordinate_on_dim: Optional[List[int]] = (
+            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+        )
+
         return _get_default_group()
 
-    def _init_process_groups(self):
-        default_pg = self._get_or_create_default_group()
+    def _init_process_groups(self, default_pg):
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
@@ -168,7 +179,7 @@ class DeviceMesh:
             assert self._backend == "gloo" or self._backend == "nccl" or self._backend == "threaded"
         else:
             raise RuntimeError(
-                f"DeviceMesh only support cpu or cuda device type, but got {device_type}"
+                f"DeviceMesh only support cpu or cuda device type, but got {self.device_type}"
             )
 
         unique_mesh_values = self.mesh.unique(sorted=True)
@@ -176,13 +187,6 @@ class DeviceMesh:
             raise RuntimeError(
                 f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
             )
-
-        # coordinates of this rank on the mesh
-        rank_coords = (self.mesh == get_rank()).nonzero()
-        assert rank_coords.size(0) in (0, 1)
-        self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-        )
 
         # groups created by dimension, each dimension should have exact
         # one valid process group per rank

@@ -110,10 +110,15 @@ class DeviceMeshTest(DTensorTestBase):
 
     @with_comms
     def test_lazy_init_device_mesh(self):
-        mesh = DeviceMesh(self.device_type, [self.rank], init_process_group=False)
+        mesh = DeviceMesh(self.device_type, [1], init_process_groups=False)
 
         with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
-            one_rank_dim_pg = mesh.get_dim_groups()
+            mesh.get_dim_groups()
+
+        if self.rank == 1:
+            assert mesh.get_coordinate() is not None
+        else:
+            assert mesh.get_coordinate() is None
 
 
 class DeviceMeshTestNDim(DTensorTestBase):

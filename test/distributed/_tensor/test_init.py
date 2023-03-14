@@ -113,7 +113,7 @@ class DTensorConstructorTest(DTensorTestBase):
         # default world_size is 4
         # construct a cuda device 1d mesh
         sub_mesh_list = [0, 3]
-        mesh = DeviceMesh(self.device_type, sub_mesh_list)
+        mesh = DeviceMesh(self.device_type, sub_mesh_list, init_process_groups=False)
         placements = [Shard(0)]
         size = [32, 3]
         dist_tensor = zeros(size, device_mesh=mesh, placements=placements)
