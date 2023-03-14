@@ -8686,10 +8686,10 @@ class TestNNDeviceType(NNTestCase):
         loss = torch.nn.MultiMarginLoss()
         x = torch.rand((56, 128), device=device)
         targets = torch.randint(22, (56,), device=device)
-        out = model(x)
-        l = loss(out, targets)
         f = io.StringIO()
         with contextlib.redirect_stderr(f):
+            out = model(x)
+            l = loss(out, targets)
             l.backward()
         self.assertTrue(len(f.getvalue()) == 0)
 
