@@ -1,10 +1,17 @@
 # PyTorch 2.0 Release notes
 
+- [Highlights](#highlights)
+- [Backwards Incompatible Changes](#backwards-incompatible-changes)
+- [Deprecations](#deprecations)
+- [New Features](#new-features)
+- [Improvements](#improvements)
+- [Bug fixes](#bug-fixes)
+- [Performance](#performance)
+- [Documentation](#documentation)
+
 # Highlights
 
-- &lt;Summary to be provided>
-
-# Backwards Incompatible changes
+# Backwards Incompatible Changes
 
 ### **Drop support for Python versions <= 3.7 (#93155)**
 
@@ -919,7 +926,7 @@ str
 
 Users must use PyTorch 1.x versions to use Caffe2 ONNX exporter. This capability will be completely removed from PyTorch 2.x series.
 
-# New features
+# New Features
 
 ## torch.nn API
 
