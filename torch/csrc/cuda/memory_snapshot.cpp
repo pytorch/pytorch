@@ -47,6 +47,7 @@ std::string _memory_snapshot_pickled() {
   IValue requested_size_s = "requested_size";
   IValue stream_s = "stream";
   IValue segment_type_s = "segment_type";
+  IValue segment_pool_id = "segment_pool_id";
   IValue large_s = "large";
   IValue small_s = "small";
   IValue size_s = "size";
@@ -76,6 +77,9 @@ std::string _memory_snapshot_pickled() {
     segmentDict.insert(stream_s, int64_t(segmentInfo.stream));
     segmentDict.insert(
         segment_type_s, (segmentInfo.is_large ? large_s : small_s));
+    segmentDict.insert(
+        segment_pool_id,
+        std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
 
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {

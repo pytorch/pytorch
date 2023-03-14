@@ -18,26 +18,27 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   }
 
   struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* outputTensor_ = nil;
   };
 
-  MPSGraphCache *cache_ = MPSGraphCache::getInstance();
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
     string key = "fill_scalar_mps_impl" + getTensorsStringKey(self) + ":" + to_string(value.toDouble());
 
     CachedGraph* cachedGraph = cache_->LookUpAs<CachedGraph>(key);
     if (!cachedGraph) {
-      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^ MPSCachedGraph * () {
-        CachedGraph *newCachedGraph = nil;
+      cachedGraph = cache_->CreateCachedGraphAs<CachedGraph>(key, ^MPSCachedGraph*() {
+        CachedGraph* newCachedGraph = nil;
 
-        @autoreleasepool{
-          MPSGraph *mpsGraph = make_mps_graph();
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
           auto isBool = self.scalar_type() == c10::ScalarType::Bool;
           auto isUInt8 = self.scalar_type() == c10::ScalarType::Byte;
-          auto dataType = !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
+          auto dataType =
+              !isUInt8 ? !isBool ? getMPSScalarType(self.scalar_type()) : MPSDataTypeInt8 : MPSDataTypeUInt32;
           // constantWithScalar does not work for boolTypes on MacOS-12.[34]
           // workaround by filing it as int8 tensor and than casting to bool
           // See https://github.com/pytorch/pytorch/issues/82427
@@ -47,17 +48,12 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
           MPSGraphTensor* inputTensor = [mpsGraph constantWithScalar:value.toDouble()
                                                                shape:getMPSShape(self)
                                                             dataType:dataType];
-          MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor
-                                                                 name:nil];
+          MPSGraphTensor* outputTensor = [mpsGraph identityWithTensor:inputTensor name:nil];
           if (isBool) {
-              outputTensor = [mpsGraph castTensor:outputTensor
-                                           toType:MPSDataTypeBool
-                                             name:@"constWithBool-workaround"];
+            outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeBool name:@"constWithBool-workaround"];
           }
           if (isUInt8) {
-              outputTensor = [mpsGraph castTensor:outputTensor
-                                           toType:MPSDataTypeUInt8
-                                             name:@"constWithUInt8-workaround"];
+            outputTensor = [mpsGraph castTensor:outputTensor toType:MPSDataTypeUInt8 name:@"constWithUInt8-workaround"];
           }
 
           newCachedGraph->outputTensor_ = outputTensor;
@@ -66,13 +62,11 @@ Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
       });
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
-                                                needsCopyToOutput ? output : self,
-                                                nullptr, !needsCopyToOutput);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : self, nullptr, !needsCopyToOutput);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
-    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
+        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
 
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), /*feeds*/ nil, results);
 
@@ -109,7 +103,10 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
 }
 
 Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  TORCH_CHECK(value.dim() == 0,
+              "fill_ only supports 0-dimension value tensor but got tensor with ",
+              value.dim(),
+              " dimensions.");
   Scalar scalar_value = value.item();
   if (scalar_value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
     return self;
