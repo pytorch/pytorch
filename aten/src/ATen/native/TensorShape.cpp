@@ -11,7 +11,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/DimVector.h>
@@ -19,6 +18,7 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/native/TypeProperties.h>
