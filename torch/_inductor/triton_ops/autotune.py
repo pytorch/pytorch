@@ -2,9 +2,11 @@ import builtins
 import copy
 import functools
 import hashlib
+import inspect
 import json
 import logging
 import operator
+import os
 import os.path
 import re
 import threading
@@ -16,7 +18,15 @@ from torch._dynamo.utils import dynamo_timed
 from .. import config
 from ..codecache import cache_dir
 from ..ir import ReductionHint, TileHint
-from ..utils import conditional_product, has_triton
+from ..utils import (
+    ceildiv,
+    conditional_product,
+    create_bandwidth_info_str,
+    do_bench,
+    get_num_bytes,
+    has_triton,
+    next_power_of_2,
+)
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -26,19 +36,16 @@ log = logging.getLogger(__name__)
 
 if has_triton():
     import triton
-    from triton import cdiv, Config, next_power_of_2
+    from triton import Config
     from triton.runtime.jit import get_cuda_stream, KernelInterface
 else:
-    cdiv = None
     Config = object
     get_cuda_stream = None
     KernelInterface = object
-    next_power_of_2 = None
     triton = None
 
 
 class CachingAutotuner(KernelInterface):
-
     """
     Simplified version of Triton autotuner that has no invalidation
     key and caches the best config to disk to improve cold start times.
@@ -129,6 +136,11 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
+
+        binary._init_handles()
+        launcher.n_regs = getattr(binary, "n_regs", None)
+        launcher.n_spills = getattr(binary, "n_spills", None)
+        launcher.shared = getattr(binary, "shared", None)
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -146,13 +158,10 @@ class CachingAutotuner(KernelInterface):
                 stream=stream,
             )
 
-        from triton.testing import do_bench
-
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
-    def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
+    def benchmark_all_configs(self, *args, **kwargs):
         from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -167,9 +176,14 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)
+            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
             for launcher in self.launchers
         }
+        return timings
+
+    def autotune_to_one_config(self, *args, **kwargs):
+        """Do the actual autotuning"""
+        timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
@@ -186,22 +200,70 @@ class CachingAutotuner(KernelInterface):
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}
             )
-        try:
-            result = launcher(
-                *args,
-                grid=grid,
-                stream=stream,
-            )
-        except TypeError as e:
-            if re.match(r"function takes exactly \d+ arguments \(\d+ given\)", str(e)):
-                raise RuntimeError(
-                    """Consider updating Triton with
-`pip install -U "git+https://github.com/openai/triton@af76c989eb4799b015f8b288ccd8421558772e56#subdirectory=python"`"""
-                ) from e
-            else:
-                raise e
+        return launcher(
+            *args,
+            grid=grid,
+            stream=stream,
+        )
 
-        return result
+
+def _find_names(obj):
+    import gc
+    import inspect
+
+    frame = inspect.currentframe()
+    for frame in iter(lambda: frame.f_back, None):
+        frame.f_locals
+    obj_names = []
+    for referrer in gc.get_referrers(obj):
+        if isinstance(referrer, dict):
+            for k, v in referrer.items():
+                if v is obj:
+                    obj_names.append(k)
+    return obj_names
+
+
+collected_calls = []
+
+
+def start_graph():
+    collected_calls.clear()
+
+
+def end_graph():
+    if len(collected_calls) == 0:
+        return
+    overall_time = sum(call[1] for call in collected_calls)
+    overall_gb = sum(call[2] for call in collected_calls)
+    cur_file = inspect.stack()[1].filename
+    print(f"SUMMARY ({cur_file})")
+    print(
+        f"{overall_time:.2f}ms   \t {overall_gb:.2f} GB\t {overall_gb/(overall_time/1e3):.2f}GB/s"
+    )
+    print()
+
+
+class DebugAutotuner(CachingAutotuner):
+    def __init__(self, *args, regex_filter="", **kwargs):
+        self.regex_filter = regex_filter
+        super().__init__(*args, **kwargs)
+
+    def run(self, *args, grid, stream):
+        possible_names = _find_names(self)
+        kernel_name = f"{max(possible_names, key=lambda x: len(x))}"
+        if not re.match(self.regex_filter, kernel_name):
+            return
+        super().run(*args, grid=grid, stream=stream)
+        (launcher,) = self.launchers
+
+        ms = self.bench(launcher, *args, grid=grid)[0]
+        num_gb = get_num_bytes(*args) / 1e9
+        gb_per_s = num_gb / (ms / 1e3)
+
+        collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
+        print(
+            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
+        )
 
 
 def hash_configs(configs: List[Config]):
@@ -255,8 +317,13 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
+    # The autotune cache will simply replace the list of candidate configs with
+    # the best config cached. We don't want that when we benchmark triton kernels.
+    # We need the perf for each of the candidate config instead.
+    cache_autotune_result = not config.benchmark_kernel
+
     # on disk caching logic
-    if filename is not None and len(configs) > 1:
+    if cache_autotune_result and filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
@@ -273,6 +340,15 @@ def cached_autotune(
     mutated_arg_names = meta.pop("mutated_arg_names", ())
 
     def decorator(fn):
+        if config.profile_bandwidth:
+            return DebugAutotuner(
+                fn,
+                meta=meta,
+                regex_filter=config.profile_bandwidth_regex,
+                configs=configs,
+                save_cache_hook=save_cache_hook,
+                mutated_arg_names=mutated_arg_names,
+            )
         return CachingAutotuner(
             fn,
             meta=meta,
@@ -636,7 +712,7 @@ def grid(xnumel, ynumel=None, znumel=None):
     def get_grid_dim(numel, block):
         if numel is None:
             return 1
-        return cdiv(numel, block)
+        return ceildiv(numel, block)
 
     def grid_fn(meta):
         return (

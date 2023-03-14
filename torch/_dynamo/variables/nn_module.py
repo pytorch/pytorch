@@ -240,35 +240,25 @@ class NNModuleVariable(VariableTracker):
                 )
 
             else:
-                # for lazy modules, run the pre-hooks which will update the type
-                # TODO mlazos: we don't fully support all of the hooks that exist,
-                # so restrict using __call__ only to lazy modules for now
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
                     "since inlined function may have default args which must be guarded."
                 )
-                if is_lazy:
-                    if istype(mod.__call__, types.FunctionType):
-                        fn = mod.__call__
-                        fn_source = AttrSource(self.source, "__call__")
-                    else:
-                        assert istype(mod.__call__, types.MethodType)
-                        fn = mod.__call__.__func__
-                        fn_source = AttrSource(
-                            AttrSource(self.source, "__call__"), "__func__"
-                        )
-                        args = [self] + args
+                if isinstance(mod, torch.fx.GraphModule):
+                    # TODO: do we want to support __call__ for GM's?
+                    # If so at least some changes are needed, we don't allow inlining
+                    # the call_wrapped currently, and maybe other issues too
+                    fn = mod.forward
                 else:
-                    if istype(mod.forward, types.FunctionType):
-                        fn = mod.forward
-                        fn_source = AttrSource(self.source, "forward")
-                    else:
-                        assert istype(mod.forward, types.MethodType)
-                        fn = mod.forward.__func__
-                        fn_source = AttrSource(
-                            AttrSource(self.source, "forward"), "__func__"
-                        )
-                        args = [self] + args
+                    fn = mod.__call__
+                fn_source = AttrSource(self.source, "__call__")
+                if istype(mod.__call__, types.MethodType):
+                    fn = fn.__func__
+                    fn_source = AttrSource(fn_source, "__func__")
+                    args = [self] + args
+                else:
+                    assert istype(mod.__call__, types.FunctionType)
+
                 options["source"] = fn_source
                 return tx.inline_user_function_return(
                     variables.UserFunctionVariable(fn, **options),
@@ -290,8 +280,33 @@ class NNModuleVariable(VariableTracker):
         key = self.module_key
         module = tx.output.get_submodule(key)
 
-        if name == "forward":
+        if name == "__call__":
+            # TODO(whc)  do we really need this special case?
             return self.call_function(tx, args, kwargs)
+        elif name == "forward":
+            # TODO(whc)
+            # This is the old special case moved to a new place.  (copy from call_function below)
+            # Old behavior: we'd route "forward" meth call to 'call_function', which inlined forward.
+            # New behavior: since call_function now hits '__call__', forward would fall through to 'wrap_proxy' below,
+            # instead of being inlined.  What should we do about this?
+            #   1) all methods get inlined now at the bottom of this call_method, instead of put into the graph as calls
+            #   2) we maintain this special case just for forward
+            assert self.source, (
+                "Must provide a valid source in order to inline, "
+                "since inlined function may have default args which must be guarded."
+            )
+            fn = module.forward.__func__
+            assert istype(fn, types.FunctionType)
+            options["source"] = AttrSource(
+                AttrSource(self.source, "forward"), "__func__"
+            )
+            args = [self] + args
+
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, **options),
+                args,
+                kwargs,
+            )
 
         if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
