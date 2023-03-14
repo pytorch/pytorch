@@ -56,6 +56,11 @@ std::vector<Tensor> not_implemented_list(
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
+bool chunk_grad_outputs_efficient_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool is_causal);
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,

@@ -55,8 +55,6 @@ xfail_functorch_batched = {
 xfail_functorch_batched_decomposition = {
     "aten::diagonal_copy",
     "aten::is_same_size",
-    "aten::t",
-    "aten::t_",
     "aten::unfold_copy",
 }
 

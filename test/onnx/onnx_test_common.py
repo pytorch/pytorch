@@ -219,6 +219,8 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
             input_kwargs = input_kwargs or {}
             if isinstance(input_args, torch.Tensor):
                 input_args = (input_args,)
+            if training == torch.onnx.TrainingMode.EVAL:
+                model.eval()
             run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
                 model,
                 input_args,
