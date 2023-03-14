@@ -1907,6 +1907,50 @@ class CommonTemplate:
                     (v,),
                 )
 
+    def test_conv_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, conv_in_channel, conv_out_channel) -> None:
+                super().__init__()
+                self.conv = torch.nn.Conv2d(conv_in_channel, conv_out_channel, (3, 3))
+
+            def forward(self, x):
+                res = self.conv(x)
+                res = F.relu(res)
+                res = self.conv(res)
+                return res
+
+        with torch.no_grad():
+            m = M(3, 3).eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(1, 3, 224, 224)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
+    def test_linear_used_from_multiple_places(self):
+        if self.device == "cuda":
+            raise unittest.SkipTest("only support cpu conv/linear fusion test")
+
+        class M(torch.nn.Module):
+            def __init__(self, in_channel, out_channel) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(in_channel, out_channel)
+
+            def forward(self, x):
+                res = self.linear(x)
+                res = F.relu(res)
+                res = self.linear(res)
+                return res
+
+        with torch.no_grad():
+            m = M(224, 224).bfloat16().eval()
+            m_opt = torch.compile(m)
+            x = torch.randn(224, 224, dtype=torch.bfloat16)
+            m_opt(x)
+            self.assertEqual(m(x), m_opt(x))
+
     @slow()
     def test_conv2d_unary(self):
         # For gpu path, there is an accuracy issue
@@ -5843,6 +5887,36 @@ if HAS_CPU:
             # aten parallel.
             assert same(result, mod(v), tol=5e-1)
 
+        def test_cat_mul(self):
+            # https://github.com/pytorch/pytorch/issues/93365
+            def fn(p0, p1):
+                y1 = torch.cat([p0, p1], dim=0)
+                y2 = torch.mul(y1, y1)
+                return y1, y2
+
+            p0 = torch.randn(3, 4)
+            p1 = torch.randn(3, 4)
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(p0, p1)
+            real_out = fn(p0, p1)
+            compiled_out = opt_fn(p0, p1)
+            assert same(real_out, compiled_out)
+
+        def test_reduce_with_masked(self):
+            # https://github.com/pytorch/pytorch/issues/96484
+            def fn(a, b):
+                a = torch.nn.functional.pad(a, (0, -1))
+                c = a + b
+                return c.min(0).values
+
+            a = torch.randn([2])
+            b = torch.randn([2])
+            opt_fn = torch._dynamo.optimize("inductor")(fn)
+            opt_fn(a, b)
+            real_out = fn(a, b)
+            compiled_out = opt_fn(a, b)
+            assert same(real_out, compiled_out)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -6656,6 +6730,7 @@ if HAS_CPU:
                 )
                 return clone_3
 
+            metrics.reset()
             x = torch.randn(1, 384, 20, 20).to(memory_format=torch.channels_last)
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             same(fn(x), opt_fn(x))
@@ -7473,6 +7548,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             patch.object(config.triton, "descriptive_names", "torch")(test_funcs)(
                 func_and_kernel_torch
             )
+
+        @patch.object(config, "profile_bandwidth", True)
+        def test_bandwidth_profiler(self):
+            @torch._dynamo.optimize("inductor")
+            def fn(x):
+                x = x.cos()
+                x = x.cos()
+                x = torch.mm(x, x)
+                x = x.sin()
+                x = x.relu()
+                return x
+
+            inp = torch.randn(4, 4, device="cuda")
+            code = run_and_get_triton_code(fn, inp)
+            fn(inp)
+            self.assertTrue("start_graph" in code)
+            self.assertTrue("end_graph" in code)
 
         def test_split_op_with_sym(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

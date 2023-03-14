@@ -1067,6 +1067,7 @@ void add_out_sparse_csr(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.sizes().equals(B.sizes()) && A.sizes().equals(C.sizes()));
 
   // Only 32-bit indices are supported
+  const auto output_indices_dtype = promoteTypes(A.crow_indices().scalar_type(), B.crow_indices().scalar_type());
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
       A.crow_indices().to(kInt),
       A.col_indices().to(kInt),
@@ -1085,7 +1086,9 @@ void add_out_sparse_csr(
       B.device());
 
   // Modify C tensor in-place to swap indices tensors with 32-bit variants
-  indices_to_32_bit_inplace(C);
+  auto C_crow_indices_backup = C.crow_indices();
+  auto C_col_indices_backup = C.col_indices();
+  indices_to_32_bit_inplace(C); // no-op with 32-bit indices
 
   int nnzA = at::native::cuda_int_cast(A_32._nnz(), "nnzA");
   int nnzB = at::native::cuda_int_cast(B_32._nnz(), "nnzB");
@@ -1215,6 +1218,14 @@ void add_out_sparse_csr(
             C_crow_indices_ptr,
             C_col_indices_ptr,
             work_data.get());
+
+        if (output_indices_dtype == at::kLong) {
+          static_cast<SparseCsrTensorImpl*>(C.unsafeGetTensorImpl())->set_member_tensors(
+              C_crow_indices_backup.copy_(C.crow_indices()),
+              C_col_indices_backup.resize_({nnzC}).copy_(C.col_indices()),
+              C.values(),
+              C.sizes());
+        }
       });
 }
 
