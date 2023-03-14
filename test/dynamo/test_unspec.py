@@ -199,6 +199,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             res = opt_fn(x, y)
             self.assertTrue(same(ref, res))
 
+    def test_shape_graph_break(self):
+        from torch._dynamo.comptime import comptime
+
+        def fn(x):
+            x_shape = x.size()
+            comptime.graph_break()
+            return x + torch.randn(x_shape)
+
+        x = torch.randn(20)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        torch._dynamo.mark_dynamic(x, 0)
+        opt_fn(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
