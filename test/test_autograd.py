@@ -9995,7 +9995,7 @@ class TestAutogradInferenceMode(TestCase):
         run_test(lambda x: x.add_(2))
         run_test(lambda x: x.transpose_(0, 1))
 
-        # inplace ops with manual kernel for ADOrInplace key in VariableTypeManual.cpp
+        # inplace ops with manual kernel for ADInplaceOrView key in VariableTypeManual.cpp
         run_test(lambda x: x.resize_(1, 2))
         run_test(lambda x: x.resize_as_(torch.ones(1, 2)))
         run_test(lambda x: x.copy_(torch.ones(1, 2, 3)))
