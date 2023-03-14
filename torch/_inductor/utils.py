@@ -324,10 +324,6 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
 
 
-def free_symbol_has(index: sympy.Expr, pattern: str):
-    return any(pattern in v.name for v in index.free_symbols)
-
-
 def has_incompatible_cudagraph_ops(gm):
     forbidden_list = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -594,16 +590,6 @@ def get_num_bytes(*args):
     )
 
 
-def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
-    import colorama
-
-    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    if ms > 0.012 and gb_per_s < 650:
-        return colorama.Fore.RED + info_str + colorama.Fore.RESET
-    else:
-        return info_str
-
-
 def get_benchmark_name():
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -635,7 +621,7 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
+def benchmark_all_kernels(benchmark_name):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -652,45 +638,18 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
         args = kernel_mod.get_args()
+        ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
         num_gb = get_num_bytes(*args) / 1e9
+        gb_per_s = num_gb / (ms / 1e3)
 
-        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
-            if not any(x is None for x in [n_regs, n_spills, shared]):
-                kernel_detail_str = (
-                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
-                )
-            else:
-                kernel_detail_str = ""
+        # follow what we do in DebugAutotuner
+        info_str = f"{benchmark_name:20} {kernel_key[:10]} {ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
+        import colorama
 
-            gb_per_s = num_gb / (ms / 1e3)
-            return create_bandwidth_info_str(
-                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
-            )
-
-        bench_result = []
-        if benchmark_all_configs:
-            assert hasattr(kernel_mod, "benchmark_all_configs")
-            bench_result = kernel_mod.benchmark_all_configs(args)
-            print(f"{benchmark_name:20} {kernel_key[:10]}")
-            for launcher, ms in bench_result.items():
-                print(
-                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
-                )
+        if ms > 0.012 and gb_per_s < 650:
+            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
-            assert (
-                len(kernel_mod.triton_.launchers) == 1
-            ), "Autotuner should have selected the best config"
-            launcher = kernel_mod.triton_.launchers[0]
-            print(
-                get_info_str(
-                    ms,
-                    launcher.n_regs,
-                    launcher.n_spills,
-                    launcher.shared,
-                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
-                )
-            )
+            print(info_str)
 
         nfound += 1
     if nfound == 0:

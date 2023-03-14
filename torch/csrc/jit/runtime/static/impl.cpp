@@ -133,7 +133,7 @@ auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
 } // namespace
 
 std::string dumpValueSet(
-    const c10::FastSet<const Value*>& value_set,
+    const FastSet<const Value*>& value_set,
     const char* set_name) {
   std::ostringstream oss;
   oss << set_name << ": {";
@@ -229,7 +229,7 @@ bool removeSelfFromGraphInput(std::shared_ptr<torch::jit::Graph>& graph) {
   return true;
 }
 
-std::vector<Value*> valueVecFromFastSet(const c10::FastSet<const Value*>& s) {
+std::vector<Value*> valueVecFromFastSet(const FastSet<const Value*>& s) {
   std::vector<Value*> result;
   result.reserve(s.size());
   for (auto* v : s) {
@@ -248,7 +248,7 @@ bool mayContainAlias(const AliasDb& db, const Value* v1, const Value* v2) {
 bool mayContainAlias(
     const AliasDb& db,
     const Value* a,
-    const c10::FastSet<const Value*>& b) {
+    const FastSet<const Value*>& b) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
   return db.mayContainAlias(const_cast<Value*>(a), valueVecFromFastSet(b));
 }
@@ -390,9 +390,9 @@ bool isPureFunction(const Node* node) {
 ManagedTensorRanges::ManagedTensorRanges(
     Block& block,
     const AliasDb& alias_db,
-    const c10::FastSet<const Value*>& managed_tensor_values) {
+    const FastSet<const Value*>& managed_tensor_values) {
   const std::vector<Node*> nodes(block.nodes().begin(), block.nodes().end());
-  const c10::FastSet<const Value*> graph_inputs(
+  const FastSet<const Value*> graph_inputs(
       block.inputs().begin(), block.inputs().end());
 
   const auto num_nodes = nodes.size();
@@ -589,7 +589,7 @@ StaticModule::StaticModule(
 
   // Maps each Value* in the graph to its index in the values_ array that will
   // eventually be created by StaticRuntime.
-  c10::FastMap<const Value*, uint32_t> value_to_index;
+  FastMap<const Value*, uint32_t> value_to_index;
   prepareFunctionsAndConstants(graph_->block(), alias_db, value_to_index);
 
   const auto constants_index_offset = 0;
@@ -610,7 +610,7 @@ StaticModule::StaticModule(
 size_t StaticModule::prepareBlockInfo(
     Block* block,
     const size_t start_idx,
-    c10::FastMap<const Value*, uint32_t>& value_to_index) {
+    FastMap<const Value*, uint32_t>& value_to_index) {
   block_infos_.emplace(block, BlockInfo(start_idx, *block));
 
   const auto num_inputs = block->inputs().size();
@@ -671,7 +671,7 @@ void StaticModule::attachNodeMetadata(Block* block) {
 void StaticModule::prepareFunctionsAndConstants(
     Block* block,
     const AliasDb& alias_db,
-    c10::FastMap<const Value*, uint32_t>& value_to_index) {
+    FastMap<const Value*, uint32_t>& value_to_index) {
   for (auto* node : block->nodes()) {
     for (auto* sub_block : node->blocks()) {
       prepareFunctionsAndConstants(sub_block, alias_db, value_to_index);
@@ -702,14 +702,14 @@ void StaticModule::prepareFunctionsAndConstants(
 
 size_t StaticModule::prepareStaticNodeInfos(
     Block* block,
-    const c10::FastMap<const Value*, uint32_t>& value_to_index,
+    const FastMap<const Value*, uint32_t>& value_to_index,
     const AliasDb& alias_db,
     size_t node_idx) {
   const auto node_start = node_idx;
 
   auto& block_info = block_infos_.at(block);
   std::vector<StaticNodeInfo> nodes;
-  c10::FastMap<Node*, bool> node_has_out_variant;
+  FastMap<Node*, bool> node_has_out_variant;
 
   for (auto* node : block->nodes()) {
     if (node->kind() == prim::Constant) {
@@ -754,7 +754,7 @@ size_t StaticModule::prepareStaticNodeInfos(
 
 void BlockInfo::set_nodes(
     std::vector<StaticNodeInfo> nodes,
-    const c10::FastMap<Node*, bool>& node_has_out_variant) {
+    const FastMap<Node*, bool>& node_has_out_variant) {
   nodes_ = std::move(nodes);
 
   for (auto& node : nodes_) {
@@ -773,7 +773,7 @@ void BlockInfo::prepare_for_memory_planner(
 
   // Never manage graph outputs so that we can do std::move(output_ivalue).
   // This does not affect performance if the graph returns a collection object.
-  c10::FastSet<const Value*> graph_output_values(
+  FastSet<const Value*> graph_output_values(
       block_.outputs().begin(), block_.outputs().end());
 
   // collect register indices of outputs of ops with out variant
@@ -1796,7 +1796,7 @@ bool BlockRunner::check_for_memory_leak(
         i,
         " was not cleaned up");
   }
-  c10::FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
+  FastSet<const IValue*> output_ivalues(outputs_.begin(), outputs_.end());
   for (const auto n : c10::irange(nodes_.size())) {
     auto& pnode = nodes_[n];
     for (const auto i : c10::irange(pnode.num_outputs())) {

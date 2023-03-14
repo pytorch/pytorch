@@ -230,6 +230,7 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -238,10 +239,12 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -253,6 +256,7 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
+    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -261,10 +265,12 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
+    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
+    "distributed/_shard/test_partial_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -896,10 +902,15 @@ CUSTOM_HANDLERS = {
 
 
 PYTEST_BLOCKLIST = [
+    "test_package",
+    "inductor/test_torchinductor",
+    "test_quantization",
+    "test_fx",
     "profiler/test_profiler",
     "dynamo/test_repros",  # skip_if_pytest
     "dynamo/test_optimizers",  # skip_if_pytest
     "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
+    "dynamo/test_unspec",  # imports repros
 ]
 
 
@@ -1151,10 +1162,6 @@ def must_serial(file: str) -> bool:
     )
 
 
-def can_run_in_pytest(test):
-    return (test not in PYTEST_BLOCKLIST) and (os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0')
-
-
 def get_selected_tests(options):
     selected_tests = options.include
 
@@ -1365,7 +1372,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1383,7 +1390,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if can_run_in_pytest(test):
+            if test not in PYTEST_BLOCKLIST:
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:

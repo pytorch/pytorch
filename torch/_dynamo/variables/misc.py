@@ -280,19 +280,13 @@ class AutocastModeVariable(ContextWrappingVariable):
         self.mode = mode
 
     def exit(self, tx, *args):
-        self.mode = (
-            exit_functional_autocast(self.mode[0]),
-            tx.output.create_node(
-                "call_function", exit_functional_autocast, (self.mode[1],), {}
-            ),
+        self.mode = tx.output.create_node(
+            "call_function", exit_functional_autocast, (self.mode,), {}
         )
 
     def enter(self, tx):
-        self.mode = (
-            enter_functional_autocast(*self.target_values),
-            tx.output.create_node(
-                "call_function", enter_functional_autocast, (*self.target_values,), {}
-            ),
+        self.mode = tx.output.create_node(
+            "call_function", enter_functional_autocast, (*self.target_values,), {}
         )
 
     def module_name(self):

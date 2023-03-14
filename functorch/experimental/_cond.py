@@ -101,7 +101,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@cond.py_impl(DispatchKey.CompositeExplicitAutograd)
+@cond.py_impl(DispatchKey.CUDA)
+@cond.py_impl(DispatchKey.CPU)
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
@@ -111,7 +112,8 @@ def cond_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.Autograd)
+@cond.py_impl(DispatchKey.AutogradCUDA)
+@cond.py_impl(DispatchKey.AutogradCPU)
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
@@ -245,4 +247,3 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
-cond.fallthrough(DispatchKey.AutocastCPU)

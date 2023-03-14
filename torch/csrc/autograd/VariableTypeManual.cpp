@@ -231,8 +231,6 @@ const Tensor& resize_(
     SymIntArrayRef size,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  // Hold sizes to verify if we actually resize `self`.
-  auto org_size = self_.sym_sizes();
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
   }
@@ -246,10 +244,6 @@ const Tensor& resize_(
     AT_ERROR("cannot resize variables that has a forward grad");
   }
 
-  // If `self` was resized, increment the version.
-  if (org_size != size) {
-    torch::autograd::increment_version(self);
-  }
   return self;
 }
 
@@ -259,8 +253,6 @@ const Tensor& resize_as_(
     const Tensor& the_template,
     c10::optional<MemoryFormat> optional_memory_format) {
   auto& self_ = unpack(self, "self", 0);
-  // Hold sizes to verify if we actually resize `self`.
-  auto org_size = self_.sym_sizes();
   auto& the_template_ = unpack(the_template, "the_template", 1);
   if (self.requires_grad()) {
     AT_ERROR("cannot resize variables that require grad");
@@ -277,11 +269,6 @@ const Tensor& resize_as_(
   // Handle fw grad
   if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
-  }
-
-  // If `self` was resized, increment the version.
-  if (org_size != the_template_.sym_sizes()) {
-    torch::autograd::increment_version(self);
   }
   return self;
 }

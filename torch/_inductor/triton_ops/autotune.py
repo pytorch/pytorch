@@ -21,7 +21,6 @@ from ..ir import ReductionHint, TileHint
 from ..utils import (
     ceildiv,
     conditional_product,
-    create_bandwidth_info_str,
     do_bench,
     get_num_bytes,
     has_triton,
@@ -136,11 +135,6 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
-
-        binary._init_handles()
-        launcher.n_regs = getattr(binary, "n_regs", None)
-        launcher.n_spills = getattr(binary, "n_spills", None)
-        launcher.shared = getattr(binary, "shared", None)
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -161,7 +155,8 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     @dynamo_timed
-    def benchmark_all_configs(self, *args, **kwargs):
+    def autotune_to_one_config(self, *args, **kwargs):
+        """Do the actual autotuning"""
         from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
@@ -176,14 +171,9 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         timings = {
-            launcher: self.bench(launcher, *cloned_args, **kwargs)[0]
+            launcher: self.bench(launcher, *cloned_args, **kwargs)
             for launcher in self.launchers
         }
-        return timings
-
-    def autotune_to_one_config(self, *args, **kwargs):
-        """Do the actual autotuning"""
-        timings = self.benchmark_all_configs(*args, **kwargs)
         self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
@@ -261,9 +251,15 @@ class DebugAutotuner(CachingAutotuner):
         gb_per_s = num_gb / (ms / 1e3)
 
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
-        print(
-            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
+        import colorama
+
+        info_str = (
+            f"{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:.2f}GB/s \t {kernel_name}"
         )
+        if ms > 0.012 and gb_per_s < 650:
+            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+        else:
+            print(info_str)
 
 
 def hash_configs(configs: List[Config]):
@@ -317,13 +313,8 @@ def cached_autotune(
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
 
-    # The autotune cache will simply replace the list of candidate configs with
-    # the best config cached. We don't want that when we benchmark triton kernels.
-    # We need the perf for each of the candidate config instead.
-    cache_autotune_result = not config.benchmark_kernel
-
     # on disk caching logic
-    if cache_autotune_result and filename is not None and len(configs) > 1:
+    if filename is not None and len(configs) > 1:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)

@@ -42,11 +42,12 @@ def list_mode_options(mode: str = None) -> Dict[str, Any]:
     mode_options = {
         "default": {},
         "reduce-overhead": {
-            "triton.cudagraphs": True,
+            "triton.cudagraphs": False,
+            "size_asserts": False,
         },
         "max-autotune": {
-            "epilogue_fusion": True,
-            "max_autotune": True,
+            "epilogue_fusion": False,
+            "max_autotune": False,
             "triton.cudagraphs": True,
         },
     }
