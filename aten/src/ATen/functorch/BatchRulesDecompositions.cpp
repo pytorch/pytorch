@@ -117,6 +117,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(flipud);
   OP_DECOMPOSE2(float_power, Tensor_Tensor);
   OP_DECOMPOSE2(float_power, Tensor_Scalar);
+  OP_DECOMPOSE2(float_power, Scalar);
   OP_DECOMPOSE2(floor_divide, Scalar);
   OP_DECOMPOSE(gather_backward);
   OP_DECOMPOSE(ger);
@@ -326,6 +327,11 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_tensor);
   OP_DECOMPOSE2(linalg_matrix_rank, atol_rtol_float);
 
+  // comparison ops
+  OP_DECOMPOSE2(greater, Scalar);
+  OP_DECOMPOSE2(less_equal, Scalar);
+  OP_DECOMPOSE2(less, Scalar);
+  OP_DECOMPOSE2(not_equal, Scalar);
 }
 
 }}

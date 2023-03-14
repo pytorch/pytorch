@@ -3746,10 +3746,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # One or more of the overload doesn't have a Batch rule.
         xfail('bincount'),
         xfail('float_power'),
-        xfail('gt'),
-        xfail('le'),
-        xfail('lt'),
-        xfail('ne'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # RuntimeError: Expected all tensors to be on the same device,
