@@ -11,7 +11,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type, Tuple, Optional
+from typing import Callable, Any, Type, Tuple, Optional, List
 
 import torch
 import torch.distributed as dist
@@ -624,6 +624,13 @@ class DistributedDataParallel(Module, Joinable):
                          >>> ...
                          >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
                          >>> static_graph = ddp_logging_data.get("can_set_static_graph")
+        delay_all_reduce_named_params (list of tuple of str and torch.nn.Parameter): a list
+                    of named parameters whose all reduce will be delayed when the gradient of
+                    the parameter specified in ``param_to_hook_all_reduce`` is ready. Other
+                    arguments of DDP do not apply to named params specified in this argument
+                    as these named params will be ignored by DDP reducer.
+        param_to_hook_all_reduce (torch.nn.Parameter): a parameter to hook delayed all reduce
+                    of parameters specified in ``delay_all_reduce_named_params``.
 
 
     Attributes:
@@ -652,22 +659,40 @@ class DistributedDataParallel(Module, Joinable):
         check_reduction=False,
         gradient_as_bucket_view=False,
         static_graph=False,
+        delay_all_reduce_named_params=None,
+        param_to_hook_all_reduce=None,
         mixed_precision: Optional[_MixedPrecision] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
         self.logger = None
+        if bool(delay_all_reduce_named_params is not None) != bool(param_to_hook_all_reduce is not None):
+            self._log_and_throw(
+                ValueError,
+                "delay_all_reduce_named_params and param_to_hook_all_reduce "
+                "need to be set at the same time."
+            )
+
+        self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
         else:
             self.parameters_to_ignore = set()
+        if delay_all_reduce_named_params is not None:
+            for name, param in delay_all_reduce_named_params:
+                self.parameters_to_ignore.add(name)
+                self._delay_all_reduce_params.append(param)
+
         self._module_parameters = [p for n, p in module.named_parameters() if n not in self.parameters_to_ignore]
         if not any((p.requires_grad for p in self._module_parameters)):
-            self._log_and_throw(
-                RuntimeError,
-                "DistributedDataParallel is not needed when a module "
-                "doesn't have any parameter that requires a gradient.",
-            )
+            if len(self._delay_all_reduce_params):
+                logger.info("Delay the AllReduce of all parameters.")
+            else:
+                self._log_and_throw(
+                    RuntimeError,
+                    "DistributedDataParallel is not needed when a module "
+                    "doesn't have any parameter that requires a gradient.",
+                )
 
         if device_ids is not None and len(device_ids) > 1:
             self._log_and_throw(
@@ -761,6 +786,20 @@ class DistributedDataParallel(Module, Joinable):
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
 
+        # Initialize gradient buffers and register all reduce hook
+        self._delay_grad_buffer = None
+        self._delay_grad_views: List[torch.Tensor] = []
+        self._delay_all_reduce_all_params = False
+        if len(self._delay_all_reduce_params) != 0:
+            self._register_delay_all_reduce_hook(
+                bucket_cap_mb=bucket_cap_mb,
+                process_group=self.process_group,
+                param_to_hook_all_reduce=param_to_hook_all_reduce,
+                device_ids=device_ids,
+            )
+            if self._delay_all_reduce_all_params:
+                return
+
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
@@ -829,6 +868,55 @@ class DistributedDataParallel(Module, Joinable):
             self._set_static_graph()
 
         self._setup_in_backward_optimizers()
+
+    def _register_delay_all_reduce_hook(
+        self,
+        bucket_cap_mb,
+        process_group,
+        param_to_hook_all_reduce,
+        device_ids,
+    ):
+        # 1. Create gradient buffer
+        device = torch.device("cpu") if device_ids is None else device_ids[0]
+        self._delay_grad_buffer = torch.zeros(
+            sum([p.numel() for p in self._delay_all_reduce_params]),
+            device=device,
+        )
+
+        # 2. Broadcast the parameters
+        detached_params = [p.detach() for p in self._delay_all_reduce_params]
+        dist._broadcast_coalesced(process_group, detached_params, bucket_cap_mb, 0)
+
+        # 3. Hook all reduce to the specified parameter
+        world_size = dist.get_world_size(process_group)
+
+        def _delayed_all_reduce(grad):
+            self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
+            _ = dist.all_reduce(self._delay_grad_buffer, group=process_group, async_op=True)
+            return grad
+
+        param_to_hook_all_reduce.register_hook(_delayed_all_reduce)
+
+        # 4. Build tensor views for gradients
+        offset = 0
+        for param in self._delay_all_reduce_params:
+            grad_view = self._delay_grad_buffer[offset : (offset + param.numel())].view(
+                param.shape
+            )
+            self._delay_grad_views.append(grad_view)
+            offset = offset + param.numel()
+
+        # 5. Check whether the all reduce of all params requiring grad is delayed.
+        for module_name, module in self.module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if param.requires_grad:
+                    full_name = f"{module_name}.{param_name}"
+                    if full_name not in self.parameters_to_ignore:
+                        # There is at least a param whose all reduce will not be delayed.
+                        # In this case, we should not set self._delay_all_reduce_all_params
+                        # to True.
+                        return
+        self._delay_all_reduce_all_params = True
 
     def _setup_in_backward_optimizers(self):
         # Check if user has used apply_optim_in_backward to overlap optimizer
@@ -1336,10 +1424,36 @@ class DistributedDataParallel(Module, Joinable):
             with self._inside_ddp_forward():
                 return self.module(*inputs, **kwargs)
 
+    def _clear_grad_buffer(self):
+        # Making param.grad points to the grad buffers before backward is based on the
+        # assumption that the grad accumulation is done in place in autograd engine,
+        # for some edge cases, if the grad accumulation in autograd engine is not in
+        # place, then the param.grad and grad buffers are detached.
+        if self._delay_grad_buffer is not None:
+            # We batch zero_grad for all params by resetting the whole grad
+            # buffer when the grad of all params is set to None.
+            all_param_grad_none = all(
+                [param.grad is None for param in self._delay_all_reduce_params]
+            )
+
+            for index, param in enumerate(self._delay_all_reduce_params):
+                if param.grad is None:
+                    param.grad = self._delay_grad_views[index]
+                    if not all_param_grad_none:
+                        param.grad.zero_()
+
+            if all_param_grad_none:
+                self._delay_grad_buffer.zero_()
+
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.forward"
         ):
+            if self._delay_all_reduce_all_params:
+                output = self.module.forward(*inputs, **kwargs)
+                self._clear_grad_buffer()
+                return output
+
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 assert self.logger is not None
                 self.logger.set_runtime_stats_and_log()
@@ -1441,6 +1555,9 @@ class DistributedDataParallel(Module, Joinable):
             output = _tree_unflatten_with_rref(
                 output_placeholders, treespec, output_is_rref
             )
+
+        # At the end of the forward pass, reset the grad buffer and grad views
+        self._clear_grad_buffer()
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

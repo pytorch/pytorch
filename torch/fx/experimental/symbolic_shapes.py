@@ -1454,7 +1454,7 @@ class ShapeEnv:
     # some equality guards are nontrivial!  It would be nice to get simplified
     # output to print them too).  It's private because it's not
     # intended for normal use
-    def produce_guards(self, placeholders, sources, dynamic_ranges: Dict[int, "MinMaxConstraint"],
+    def produce_guards(self, placeholders, sources, dynamic_ranges: Optional[Dict[int, "MinMaxConstraint"]],
                        source_ref=lambda n: n.name(), *, strict_mark_dyn=False, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -1574,7 +1574,7 @@ class ShapeEnv:
                     if src in dynamic_sources:
                         raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's constraint")
 
-        for t, source, dyn_dims in zip(placeholders, sources, dynamic_ranges):
+        for t, source in zip(placeholders, sources):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
@@ -1588,7 +1588,7 @@ class ShapeEnv:
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
                 track_symint(property_source, ss)
-                if dyn_dims and i in dyn_dims:
+                if dynamic_ranges and i in dynamic_ranges:
                     # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
                     # constrained to an integer.
                     if _is_int(ss):
@@ -1596,11 +1596,11 @@ class ShapeEnv:
                                            f"{source.name()}.size()[{i}] to {int(ss)}, "
                                            "which violates user's constraints")
 
-                    vr = dyn_dims[i].to_range()
+                    vr = dynamic_ranges[i].to_range()
                     if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
                         for symbol in ss.node.expr.free_symbols:
                             self._verify_valid_range(symbol, vr)
-                    dynamic_sources.append(property_source)
+                dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())

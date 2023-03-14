@@ -285,12 +285,7 @@ class MetaConverter:
                     from torch._dynamo.source import AttrSource
 
                     base = self.meta_tensor(
-                        t._base,
-                        shape_env,
-                        callback,
-                        source=AttrSource(source, "_base"),
-                        dynamic_dims=dynamic_dims,
-                        dynamic_dims_range=dynamic_dims_range,
+                        t._base, shape_env, callback, source=AttrSource(source, "_base")
                     )
 
                     def is_c_of_r(complex_dtype, real_dtype):
