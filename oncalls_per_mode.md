@@ -1,3 +1,4 @@
+<!-- Here we cut out data points with times less than 1 hour -->
 |     | mode        | oncall                 |     time (hours) |
 |----:|:------------|:-----------------------|---------:|
 |  42 | crossref    | module: unknown        |  2.58015 |
