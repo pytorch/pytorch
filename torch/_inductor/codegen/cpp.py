@@ -69,6 +69,10 @@ RTYPE_TO_CPP = {
 
 
 def reduction_init(reduction_type, dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
@@ -139,20 +143,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     return prefix
 
 
-def float16_reduction_prefix(rtype):
-    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
-    # errors, float32 accumulation should be used instead.
-    assert rtype in (
-        "sum",
-        "any",
-    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
-    prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
-        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
-    ]
-    return prefix
-
-
 def parallel_num_threads():
     threads = config.cpp.threads
     if threads < 1:
@@ -186,6 +176,25 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
+
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            return f"{expr.p}"
+        return f"{expr.p}.0/{expr.q}.0"
 
 
 cexpr = CppPrinter().doprint
@@ -503,7 +512,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def square(a):
-        return f"{a}.pow(2)"
+        return f"{a} * {a}"
 
     @staticmethod
     def where(a, b, c):
@@ -544,27 +553,29 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.is_masked_load
 
         code = BracesBuffer()
-
         var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity());"
-            )
-        elif other == float("inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());"
-            )
-        else:
-            code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
-
+        code.writeline(f"auto {var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            zero_val = "at::vec::Vectorized<float>(0)"
-            float_mask = f"to_float_mask({mask})"
-            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
-            code.writeline(f"{var} = {blendv};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        if other == float("-inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
+            )
+        elif other == float("inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
+            )
+        else:
+            other_code = f"at::vec::Vectorized<float>({other!r})"
+
+        type = f"decltype({var}())"
+        zero_val = "at::vec::Vectorized<float>(0)"
+        float_mask = f"to_float_mask({mask})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -809,7 +820,7 @@ class CppOverrides(OpOverrides):
         if other == float("-inf"):
             other_code = f"-std::numeric_limits<{type}>::infinity()"
         elif other == float("inf"):
-            other_code = "std::numeric_limits<{type}>::infinity()"
+            other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
         else:
@@ -923,13 +934,14 @@ class CppKernel(Kernel):
                 ],
             )
         else:
-            if dtype == torch.float16:
-                self.reduction_prefix.writelines(
-                    float16_reduction_prefix(reduction_type)
+            if dtype in (torch.float16, torch.bfloat16):
+                self.reduction_prefix.writeline(
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
-            self.reduction_prefix.writeline(
-                f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-            )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
@@ -2040,12 +2052,7 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
-
-        if not V.graph.aot_mode or self.count == 1:
-            code.writeline(cpp_prefix())
-
-        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
+        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -2060,12 +2067,9 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        if V.graph.aot_mode:
-            codecache_def.splice(code)
-        else:
-            codecache_def.writeline("async_compile.cpp('''")
-            codecache_def.splice(code)
-            codecache_def.writeline("''')")
+        codecache_def.writeline("async_compile.cpp('''")
+        codecache_def.splice(code)
+        codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does

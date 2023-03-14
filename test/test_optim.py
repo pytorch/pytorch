@@ -1618,11 +1618,13 @@ class TestOptim(TestCase):
         from torch.optim import adam, adamw
 
         num_tensors = 5
-        for functional_optim, amsgrad in itertools.product((adam.adam, adamw.adamw), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = [[torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+        for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
+            params, grads, exp_avgs, exp_avg_sqs = [
+                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4)]
+            prev_params = [t.clone().detach() for t in params]
             max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
             state_steps = [torch.ones((1,), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
-            grad_scale = torch.ones((1,), dtype=torch.float32, device="cuda")
+            grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
             found_inf = torch.ones((1,), dtype=torch.float32, device="cuda")
 
             functional_optim(
@@ -1653,6 +1655,7 @@ class TestOptim(TestCase):
                     for _ in range(num_tensors)
                 ],
             )
+            self.assertEqual(params, prev_params)
 
     def test_empty_grad(self):
         optimizers = [
@@ -4078,6 +4081,15 @@ class TestSWAUtils(TestCase):
         for p_swa, p_swa2 in zip(averaged_dnn.parameters(), averaged_dnn2.parameters()):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
+
+    def test_averaged_model_default_avg_fn_picklable(self):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5),
+            torch.nn.Linear(5, 5),
+        )
+        averaged_dnn = AveragedModel(dnn)
+        pickle.dumps(averaged_dnn)
 
     def test_averaged_model_exponential(self):
         # Test AveragedModel with EMA as avg_fn

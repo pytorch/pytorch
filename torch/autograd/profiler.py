@@ -58,7 +58,7 @@ except ImportError:
             return wrapped
 
 def enable_dynamo_cache_lookup_profiler(enable: bool):
-    from torch._C._dynamo.eval_frame import (
+    from torch._dynamo.eval_frame import (  # noqa: F401
         clear_profiler_hooks,
         set_profiler_hooks,
     )
@@ -76,7 +76,6 @@ def enable_dynamo_cache_lookup_profiler(enable: bool):
 
         def _profiler_end(record):
             torch.ops.profiler._record_function_exit._RecordFunction(record)
-
         set_profiler_hooks(_profiler_start, _profiler_end)
     else:
         clear_profiler_hooks()
@@ -237,6 +236,7 @@ class profile:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
+        enable_dynamo_cache_lookup_profiler(True)
         self._prepare_trace()
         self._start_trace()
         return self
@@ -252,6 +252,7 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
+        enable_dynamo_cache_lookup_profiler(False)
         if self.use_cuda:
             torch.cuda.synchronize()
         self.kineto_results = _disable_profiler()
@@ -515,12 +516,10 @@ class record_function(_ContextDecorator):
         self.record = torch.jit.annotate(Optional["torch.classes.profiler._RecordFunction"], None)
 
     def __enter__(self):
-        enable_dynamo_cache_lookup_profiler(True)
         self.record = torch.ops.profiler._record_function_enter_new(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
-        enable_dynamo_cache_lookup_profiler(False)
         if not self.run_callbacks_on_exit:
             return
 
