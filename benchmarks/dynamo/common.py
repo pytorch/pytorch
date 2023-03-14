@@ -249,7 +249,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "volo_d1_224",  # NameError: name 'ceiling' is not defined
 ]
 
 
