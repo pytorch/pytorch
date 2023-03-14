@@ -776,6 +776,17 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
 }
 
+void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto& it : devNCCLCommMap_) {
+    auto& ncclComms = it.second;
+
+    for (const auto& ncclComm : ncclComms) {
+      ncclComm->ncclCommAbort(abortReason);
+    }
+  }
+}
+
 ProcessGroupNCCL::~ProcessGroupNCCL() {
   terminateProcessGroup_.store(true);
 
@@ -789,19 +800,9 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     workCleanupThread_.join();
   }
 
-  {
-    // Abort all NCCL Communicators on Process Group Destruction
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& it : devNCCLCommMap_) {
-      auto& ncclComms = it.second;
-
-      for (const auto& ncclComm : ncclComms) {
-        std::string abortReason =
-            c10::str("Process Group destroyed on rank ", rank_);
-        ncclComm->ncclCommAbort(abortReason);
-      }
-    }
-  }
+  // Abort all NCCL Communicators on Process Group Destruction
+  std::string abortReason = c10::str("Process Group destroyed on rank ", rank_);
+  abort(abortReason);
 }
 
 void ProcessGroupNCCL::abortTimedOutCollectives(
