@@ -7688,6 +7688,12 @@ class ExprPrinterTests(TestCase):
         self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
         self.assertEqual(pexpr(expr), "math.floor(s1)")
 
+    def test_print_ceil(self):
+        s1 = sympy.Symbol("s1", integer=False)
+        expr = sympy.ceiling(s1)
+        self.assertEqual(texpr(expr), "tl.libdevice.ceil(s1)")
+        self.assertEqual(pexpr(expr), "math.ceil(s1)")
+
 
 if HAS_CUDA and not TEST_WITH_ASAN:
 
