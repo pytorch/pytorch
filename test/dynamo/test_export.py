@@ -2288,6 +2288,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         common_utils.instantiate_parametrized_tests(ExportTests)
 
+common_utils.instantiate_parametrized_tests(ExportTests)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
