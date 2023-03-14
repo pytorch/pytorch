@@ -82,6 +82,10 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.libdevice.floor({self.paren(self._print(expr.args[0]))})"
 
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.libdevice.ceil({self.paren(self._print(expr.args[0]))})"
+
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
