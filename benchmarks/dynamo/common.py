@@ -238,14 +238,9 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=True)],
     # torchbench
     "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
-    "yolov3",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     # timm_models
-    "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
     "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
-    "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
     "volo_d1_224",  # NameError: name 'ceiling' is not defined
 ]
 
