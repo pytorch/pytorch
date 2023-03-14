@@ -761,7 +761,6 @@ def gen_variable_type(
     template_path: str,
     used_keys: Set[str],
 ) -> None:
-
     """VariableType.h and VariableType.cpp body
 
     This is the at::Type subclass for differentiable tensors. The
