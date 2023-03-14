@@ -18,6 +18,7 @@ from torch._prims_common import (
     is_float_dtype,
     is_integer_dtype,
     Number,
+    type_to_dtype,
 )
 from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_operator
 from .._dynamo.utils import import_submodule
@@ -508,6 +509,11 @@ def squeeze(x, dim=None):
     return view(x, new_shape) if new_shape != x.get_size() else x
 
 
+@register_lowering(aten.squeeze_copy, type_promotion_kind=None)
+def squeeze_copy(x, dim=None):
+    return clone(squeeze(x, dim))
+
+
 @register_lowering([aten.squeeze_])
 def squeeze_(x, dim=None):
     val = squeeze(x, dim)
@@ -841,6 +847,12 @@ def glu(x, dim=-1):
 
 def register_onednn_fusion_ops():
     if torch._C.has_mkldnn:
+        cpu_needs_realized_inputs = [
+            torch.ops.mkldnn._convolution_pointwise,
+            torch.ops.mkldnn._convolution_pointwise_,
+            torch.ops.mkldnn._convolution_transpose_pointwise,
+            torch.ops.mkldnn._linear_pointwise,
+        ]
 
         @register_lowering(torch.ops.mkldnn._convolution_pointwise)
         def convolution_unary(
@@ -981,6 +993,7 @@ def register_onednn_fusion_ops():
             )
 
         if torch._C.has_mkl:
+            cpu_needs_realized_inputs.append(torch.ops.mkl._mkl_linear)
 
             @register_lowering(torch.ops.mkl._mkl_linear)
             def mkl_packed_linear(
@@ -997,6 +1010,7 @@ def register_onednn_fusion_ops():
                     result = add(result, b)
                 return result
 
+        add_needs_realized_inputs(cpu_needs_realized_inputs)
     else:
         pass
 
@@ -1249,7 +1263,6 @@ make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
 make_fallback(aten.addmv)
-make_fallback(aten.aminmax)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1261,13 +1274,10 @@ make_fallback(aten.deg2rad)
 make_fallback(aten.diagonal_copy, warn=False)
 make_fallback(aten.diagonal_scatter, warn=False)
 make_fallback(aten.digamma, warn=False)
-make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
 make_fallback(aten.erfc, warn=False)
 make_fallback(aten.erfinv, warn=False)
-make_fallback(aten.fmax, warn=False)
-make_fallback(aten.fmin, warn=False)
 make_fallback(aten.dist)
 make_fallback(aten._efficientzerotensor)
 make_fallback(aten._embedding_bag_per_sample_weights_backward)
@@ -1280,8 +1290,6 @@ make_fallback(aten.i0)
 make_fallback(aten.igamma, warn=False)
 make_fallback(aten.igammac, warn=False)
 make_fallback(aten.isin)
-make_fallback(aten.isneginf, warn=False)
-make_fallback(aten.isposinf, warn=False)
 make_fallback(aten.kthvalue)
 make_fallback(aten.linalg_cholesky_ex)
 make_fallback(aten.linalg_cross)
@@ -1301,8 +1309,6 @@ make_fallback(aten.linalg_solve_triangular)
 make_fallback(aten._linalg_svd)
 make_fallback(aten.logaddexp2)
 make_fallback(aten.logcumsumexp)
-make_fallback(aten.log_sigmoid_forward, warn=False)
-make_fallback(aten.logspace, warn=False)
 make_fallback(aten.lu_unpack)
 make_fallback(aten.max_pool3d_with_indices)
 make_fallback(aten.max_unpool2d)
@@ -1312,8 +1318,6 @@ make_fallback(aten.mode)
 make_fallback(aten.multilabel_margin_loss_forward)
 make_fallback(aten.multi_margin_loss)
 make_fallback(aten.nanmedian)
-make_fallback(aten.nansum)
-make_fallback(aten.narrow_copy, warn=False)
 make_fallback(aten.ormqr)
 make_fallback(aten._pdist_forward)
 make_fallback(aten.pixel_shuffle)
@@ -1355,15 +1359,11 @@ make_fallback(aten.special_scaled_modified_bessel_k1)
 make_fallback(aten.special_spherical_bessel_j0, warn=False)
 make_fallback(aten.special_zeta, warn=False)
 make_fallback(aten.take)
-make_fallback(aten.threshold, warn=False)
-make_fallback(aten.trace, warn=False)
 make_fallback(aten._trilinear)
-make_fallback(aten.unfold_copy, warn=False)
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.unsafe_split, warn=False)
 make_fallback(aten.vdot)
 make_fallback(aten.view_as_complex)
-make_fallback(aten.view_copy)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
 make_fallback(aten.adaptive_max_pool3d_backward)
@@ -1384,7 +1384,6 @@ make_fallback(aten.replication_pad1d_backward)
 make_fallback(aten.smooth_l1_loss_backward)
 make_fallback(aten.soft_margin_loss_backward, warn=False)
 make_fallback(aten.softshrink_backward, warn=False)
-make_fallback(aten.squeeze_copy)
 make_fallback(aten.linalg_pinv.atol_rtol_tensor)
 make_fallback(aten.segment_reduce.default)
 make_fallback(aten._segment_reduce_backward.default)
@@ -1399,7 +1398,6 @@ make_fallback(aten.index_reduce)
 make_fallback(aten.masked_scatter)
 make_fallback(aten.to_sparse)
 make_fallback(aten.triangular_solve)
-make_fallback(aten.expand_copy)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
@@ -1500,30 +1498,6 @@ def iota(
         dtype=dtype,
         inner_fn=fn,
         ranges=[length],
-    )
-
-
-@register_lowering(aten.triu)
-def triu(x, diagonal=0):
-    x_loader = x.make_loader()
-    dtype = x.get_dtype()
-
-    def inner_fn(index):
-        *_, i, j = index
-        return ops.where(
-            ops.ge(
-                ops.index_expr(j - i - diagonal, torch.int32),
-                ops.constant(0, torch.int32),
-            ),
-            x_loader(index),
-            ops.constant(0, dtype),
-        )
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(x.get_size()),
     )
 
 
@@ -1902,6 +1876,8 @@ def copy_strided(x, stride):
 
 @register_lowering([torch.full, aten.full])
 def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    kwargs["dtype"] = dtype if dtype is not None else type_to_dtype(type(fill_value))
     return tensor_constructor(fill_value)(size, **kwargs)
 
 
@@ -2013,6 +1989,11 @@ def index(x, indices):
     output_size = list(indices_sizes[0])
 
     x_size = x.get_size()
+
+    indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
+    if 0 in indexed_size and 0 not in output_size:
+        raise IndexError("index is out of bounds for dimension with size 0")
+
     output_size = [
         *x_size[:start_offset],
         *output_size,
@@ -3909,6 +3890,14 @@ try:
     def all_gather_into_tensor(shard, tag, ranks, group_size):
         return TensorBox.create(
             ir.AllGatherIntoTensor.create(shard, tag, ranks, group_size)
+        )
+
+    @register_lowering(aten.reduce_scatter_tensor)
+    def reduce_scatter_tensor(input, reduce_op, scatter_dim, tag, ranks, group_size):
+        return TensorBox.create(
+            ir.ReduceScatterTensor.create(
+                input, reduce_op, scatter_dim, tag, ranks, group_size
+            )
         )
 
 except ImportError:

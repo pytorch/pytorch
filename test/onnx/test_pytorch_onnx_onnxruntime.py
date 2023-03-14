@@ -13,7 +13,6 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
-
 import torch
 import torchvision
 from model_defs import (
@@ -35,9 +34,10 @@ from pytorch_test_common import (
     skipShapeChecking,
     skipTraceTest,
 )
+
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
-from torch.onnx import _constants, verification
+from torch.onnx import _constants, errors, verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoLapack
 
@@ -4144,6 +4144,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             additional_test_inputs=[x2],
         )
 
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                aa = torch.tensor([[0], [1], [2]])
+                return aa.expand_as(x)
+
+        x = torch.ones(3, 2)
+        x2 = torch.randn(3, 5)
+        self.run_test(
+            Model(),
+            (x,),
+            input_names=["x"],
+            dynamic_axes={"x": [0, 1]},
+            additional_test_inputs=[x2],
+        )
+
     def test_multinomial(self):
         class Multinomial(torch.nn.Module):
             def forward(self, weight):
@@ -4904,6 +4919,24 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
         y = torch.randint(10, (2, 3, 5), dtype=torch.long)
         self.run_test(XorModel(), input_args=(x, y))
+
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_logical_not(self):
+        class NotModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.logical_not(x)
+
+        x = torch.randint(0, 2, (5, 5), dtype=torch.bool)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (5, 5), dtype=torch.int32)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (5, 5), dtype=torch.double)
+        self.run_test(NotModel(), input_args=(x,))
+
+        x = torch.randint(10, (2, 3, 5), dtype=torch.float32)
+        self.run_test(NotModel(), input_args=(x,))
 
     @skipIfUnsupportedMinOpsetVersion(11)  # float equal added after opset 11
     def test_eq(self):
@@ -7517,6 +7550,221 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         x = torch.tensor([0.9920, -1.0362, -1.5000, 3.5000], requires_grad=True)
         self.run_test(Round(), x)
 
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_default(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=False)
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_hop_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                hop_length = 4
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    hop_length=hop_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_non_divisible_hop_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                hop_length = 5
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    hop_length=hop_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_int_same_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_length = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    win_length=win_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_int_different_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_length = 9
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    win_length=win_length,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_custom(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(16)
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    window=window,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_custom_window_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(10)
+                return torch.stft(
+                    x, n_fft=n_fft, window=window, center=False, return_complex=False
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises((AssertionError, RuntimeError)):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_window_length(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                win_len = 17
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    win_length=win_len,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_window_size_with_win_len(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                window = torch.hann_window(10)
+                win_len = 10
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    window=window,
+                    win_length=win_len,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((1, 32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_one_dimension(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_input_size(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=False)
+
+        x = torch.randn((1, 1, 32), requires_grad=True)
+        with self.assertRaises(RuntimeError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_wrong_return_complex(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(x, n_fft=n_fft, center=False, return_complex=True)
+
+        x = torch.randn((1, 32), requires_grad=True)
+        with self.assertRaises(errors.SymbolicValueError):
+            self.run_test(STFT(), x)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_normalize(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    normalized=True,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
+    @skipIfUnsupportedMinOpsetVersion(17)
+    def test_stft_not_onesided(self):
+        class STFT(torch.nn.Module):
+            def forward(self, x):
+                n_fft = 16
+                return torch.stft(
+                    x,
+                    n_fft=n_fft,
+                    center=False,
+                    onesided=False,
+                    return_complex=False,
+                )
+
+        x = torch.randn((32), requires_grad=True)
+        self.run_test(STFT(), x, atol=1e-6)
+
     def test_constant_pad(self):
         model = torch.nn.ConstantPad1d(2, 3.5)
         x = torch.randn(2, 4, 4)
@@ -7569,6 +7817,21 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(2, 3, 6)
         self.run_test(PadModel(), (x))
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_pad_circular_dynamic_axes(self):
+        class PadModel(torch.nn.Module):
+            def forward(self, x):
+                out = torch.nn.functional.pad(x, (2, 1, 2, 1), mode="circular")
+                return out
+
+        x = torch.randn(4, 3, 5, 6)
+        self.run_test(
+            PadModel(),
+            x,
+            input_names=["input_1"],
+            dynamic_axes={"input_1": [0, 1, 2, 3]},
+        )
 
     @skipIfUnsupportedMaxOpsetVersion(10)
     @skipScriptTest()  # TODO: the logic in symbolic_opset9 doesn't handle script
