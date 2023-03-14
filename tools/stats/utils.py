@@ -56,7 +56,7 @@ if __name__ == '__main__':
                 oncalls = file_to_oncall[test_file]
                 for oncall in oncalls:
                     team_to_times[oncall] += time
-    print(team_to_times)
+    # print(team_to_times)
     df = pd.DataFrame.from_dict(team_to_times, orient="index", columns=["time"])
     df = df.sort_values(by=['time'])
     df["in_minutes"] = df["time"] / 60
