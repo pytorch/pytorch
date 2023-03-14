@@ -7614,9 +7614,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertIsNone(self.get_manager())
             self.assertEqual(all_live_block_count(), 0)
 
-        def get_manager(self):
+        def get_manager(self, device_index=None):
             return torch._inductor.cudagraph_trees.get_container(
-                self.device_idx
+                (self.device_idx if not device_index else device_index)
             ).tree_manager
 
         def get_roots(self):
@@ -7981,6 +7981,55 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             # two separate roots
             self.assertEqual(self.get_root_children(), [0, 0])
+
+        def test_alias_of_parameter(self):
+            class AliasMod(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = torch.nn.Parameter(torch.rand([20, 20], device="cuda"))
+
+                def forward(self, x):
+                    return self.param[0], self.param, self.param + x
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(mod, inp):
+                return mod(inp)
+
+            inp = torch.rand([20, 20], device="cuda")
+            mod = AliasMod()
+
+            storage_ref = torch.multiprocessing.reductions.StorageWeakRef(
+                mod.param.untyped_storage()
+            )
+
+            for _ in range(3):
+                outs = foo(mod, inp)
+
+            self.assertEqual(mod(inp), outs)
+
+            self.assertFalse(storage_ref.expired())
+
+            node = self.get_manager().current_node
+            self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+        @requires_multigpu()
+        def test_manager_per_device(self):
+            def test():
+                def foo(args):
+                    x = args[0]
+                    args.clear()
+                    return x + 3
+
+                inp = torch.rand([20, 20], device="cuda:1")
+
+                foo_cg = tree_cudagraphify_impl(foo, [inp], (), device_index=1)
+                foo_cg([inp])
+
+                self.assertTrue(self.get_manager(device_index=0) is None)
+                self.assertFalse(self.get_manager(device_index=1) is None)
+
+            test()
+            self.assertTrue(self.get_manager(device_index=1) is None)
 
 
 if HAS_CPU:

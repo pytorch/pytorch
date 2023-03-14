@@ -265,15 +265,16 @@ def _use_cuda_memory_pool_manager(device, existing_graph, mem_pool):
     all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
     existing_graph should already have been used in a capture, and the mem_pool must already exist.
     """
-    capture_id = existing_graph.id()
-    torch._C._cuda_allocateThreadToPrivatePool(device, mem_pool)
-    torch._C._cuda_notifyCaptureBegin(device, capture_id, mem_pool)
-    try:
-        yield
-    finally:
-        torch._C._cuda_notifyCaptureAboutToEnd(device, capture_id)
-        torch._C._cuda_notifyCaptureEnded(device, capture_id)
-        torch._C._cuda_notifyCaptureDestroy(device, mem_pool)
+    with torch.cuda.device(f"cuda:{device}"):
+        capture_id = existing_graph.id()
+        torch._C._cuda_allocateThreadToPrivatePool(device, mem_pool)
+        torch._C._cuda_notifyCaptureBegin(device, capture_id, mem_pool)
+        try:
+            yield
+        finally:
+            torch._C._cuda_notifyCaptureAboutToEnd(device, capture_id)
+            torch._C._cuda_notifyCaptureEnded(device, capture_id)
+            torch._C._cuda_notifyCaptureDestroy(device, mem_pool)
 
 
 def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
@@ -341,10 +342,11 @@ class CUDAWarmupNode:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.cuda_graphs_pool, refs)
 
-        with clear_cublas_manager(), _use_cuda_memory_pool_manager(
-            self.device_index, self.existing_cuda_graph, self.cuda_graphs_pool
-        ):
-            out = self.wrapped_function.model(new_inputs)
+        with torch.cuda.device(f"cuda:{self.device_index}"):
+            with clear_cublas_manager(), _use_cuda_memory_pool_manager(
+                self.device_index, self.existing_cuda_graph, self.cuda_graphs_pool
+            ):
+                out = self.wrapped_function.model(new_inputs)
 
         assert len(new_inputs) == 0
 
@@ -450,9 +452,9 @@ class CUDAGraphNode:
             for i in range(len(inputs))
         ]
 
-        # When we checkpoint, and free generations, we will be manually freeing the outputs 
+        # When we checkpoint, and free generations, we will be manually freeing the outputs
         # of CUDAGraphNodes. We should not be freeing parameters, not do we need to account for
-        # their liveness (they are static), so we need to compute which outputs are aliases of 
+        # their liveness (they are static), so we need to compute which outputs are aliases of
         # parameters
         self.static_input_storage_ptrs: Set[int] = {
             inputs[i].untyped_storage().data_ptr()
@@ -609,7 +611,9 @@ class CUDAGraphNode:
             ]
             check_memory_pool(self.cuda_graphs_pool, memory)
 
-        with clear_cublas_manager(), torch.cuda.graph(
+        with torch.cuda.device(
+            "cuda:{self.device}"
+        ), clear_cublas_manager(), torch.cuda.graph(
             self.graph, stream=stream, pool=self.cuda_graphs_pool
         ):
             static_outputs = model(inputs)
@@ -966,17 +970,18 @@ class CUDAGraphTreeManager:
 
         self.warmed_up_functions: Set[FunctionID] = set()
 
-        self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
+        with torch.cuda.device(f"cuda:{device_index}"):
+            self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
+            # Keeps Memory Pool Alive
+            self.graph = torch.cuda.CUDAGraph()
 
-        # Keeps Memory Pool Alive
-        self.graph = torch.cuda.CUDAGraph()
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
 
-        torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
+            self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
-        with warnings.catch_warnings(record=True):
-            with torch.cuda.graph(
+            with warnings.catch_warnings(record=True), torch.cuda.graph(
                 self.graph,
                 pool=self.cuda_graphs_thread_pool,
                 stream=stream,
