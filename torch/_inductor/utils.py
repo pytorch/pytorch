@@ -238,13 +238,14 @@ def get_fused_kernel_name(node_schedule):
         operator.or_,
         [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
-    if config.triton.descriptive_names == "aten":
+    if config.triton.descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
+        sources = sorted(set(sources))
     elif config.triton.descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -254,11 +255,37 @@ def get_fused_kernel_name(node_schedule):
                     sources.append(origin.meta["source_fn"])
                 else:
                     sources.append(origin.meta["source_fn"].__name__)
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "inductor_node":
+        sources = [
+            origin.name for origin in all_origins if origin.op == "call_function"
+        ]
     else:
         raise NotImplementedError
-    sources = set(sources)
-    sources = sorted(sources)[: config.kernel_name_max_ops]
+    sources = sources
     return "_".join(["fused"] + sources)
+
+
+def get_kernel_metadata(node_schedule):
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+    )
+    inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+    original_aten_dict = collections.defaultdict(list)
+    for node in inductor_nodes:
+        if "original_aten" in node.meta:
+            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
+                node
+            )
+    metadata = [
+        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+    ]
+    for original_aten, nodes in original_aten_dict.items():
+        metadata.append(
+            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
+        )
+    return "\n".join(metadata)
 
 
 def gather_origins(args, kwargs):
@@ -599,13 +626,16 @@ def get_num_bytes(*args):
 
 
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
-    import colorama
-
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    if ms > 0.012 and gb_per_s < 650:
-        return colorama.Fore.RED + info_str + colorama.Fore.RESET
-    else:
-        return info_str
+    try:
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+    except ImportError:
+        log.warning("Colorama is not installed. Install it if you want colored output")
+
+    return info_str
 
 
 def get_benchmark_name():

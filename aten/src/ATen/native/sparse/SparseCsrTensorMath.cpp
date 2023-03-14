@@ -3,12 +3,12 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mkl/Sparse.h>
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>

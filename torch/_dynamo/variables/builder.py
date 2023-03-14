@@ -25,7 +25,6 @@ from ..source import (
     AttrSource,
     ConstantSource,
     GetItemSource,
-    GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
     LocalInputSource,
@@ -673,17 +672,22 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
+        unspec = not config.specialize_int and config.dynamic_shapes
+        if unspec and type(value) is torch.Size:
+            return SizeVariable(
+                [
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
+                    for i, v in enumerate(value)
+                ],
+                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+            )
+        elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
-                or isinstance(self.source, GlobalSource)
-                or isinstance(self.source, GetItemSource)
-                or (
-                    isinstance(self.source, AttrSource)
-                    and isinstance(self.source.base, GlobalSource)
-                )
+                # Assume integers from global variables want to be specialized
+                or not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
