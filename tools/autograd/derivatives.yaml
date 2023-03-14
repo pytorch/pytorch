@@ -1676,7 +1676,7 @@
 
 # DO NOT define a backward for to_dense
 # See [Note: Sometimes view derivatives]
-# - name: to_dense(Tensor self, *, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
+# - name: to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
 #
 - name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   self: to_dense_backward(grad, self, masked_grad)

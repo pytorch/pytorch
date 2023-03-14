@@ -59,7 +59,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
                 # mkldnn float/bfloat tensor to cpu float or bfloat tensor
                 for dtype2 in types:
-                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype=dtype2)
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
                     atol = 1e-5 if dtype1 == torch.float and dtype2 == torch.float else 1e-2
                     self.assertEqual(cpu_tensor, cpu_tensor_2.float(), atol=atol, rtol=0)
@@ -85,7 +85,7 @@ class TestMkldnn(TestCase):
                 self.assertEqual(mkldnn_tensor.dtype, cpu_tensor_1.dtype)
                 # mkldnn float/bfloat tensor to cpu float or bfloat tensor
                 for dtype2 in types:
-                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype=dtype2)
+                    cpu_tensor_2 = mkldnn_tensor.to_dense(dtype2)
                     self.assertEqual(cpu_tensor_2.dtype, dtype2)
                     self.assertEqual(cpu_tensor_bf16, cpu_tensor_2.bfloat16(), atol=1e-5, rtol=0)
 
@@ -283,13 +283,13 @@ class TestMkldnn(TestCase):
                 mkldnn_conv = mkldnn_utils.to_mkldnn(copy.deepcopy(conv))
                 mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
                 y = mkldnn_conv(x.to_mkldnn()).to_dense()
-                y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(dtype=torch.float32)
+                y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
                 msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
                 with self.assertRaisesRegex(RuntimeError, msg):
                     mkldnn_conv_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(conv), torch.bfloat16)
-                    y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(dtype=torch.float32)
+                    y_bf16 = mkldnn_conv_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
 
     def test_conv1d_bf16(self):
         self._test_conv_bf16_base(dim=1)
@@ -494,7 +494,7 @@ class TestMkldnn(TestCase):
         fn = getattr(torch, name)
         if has_bf16_support():
             y = fn(x.to_mkldnn()).to_dense()
-            y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(dtype=torch.float32)
+            y_bf16 = fn(x_bf16.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
             msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
@@ -536,7 +536,7 @@ class TestMkldnn(TestCase):
             loss1.backward()
             loss2.backward()
             self.assertEqual(y1, y2.to(torch.float32), atol=1e-1, rtol=0)
-            self.assertEqual(x1.grad.to_dense(), x2.grad.to_dense(dtype=torch.float32), atol=1e-2, rtol=0)
+            self.assertEqual(x1.grad.to_dense(), x2.grad.to_dense(torch.float32), atol=1e-2, rtol=0)
         else:
             msg = r"bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
             self.assertRaisesRegex(RuntimeError,
@@ -593,7 +593,7 @@ class TestMkldnn(TestCase):
             loss.backward()
             loss_bf16 = y_bf16.sum()
             loss_bf16.backward()
-            self.assertEqual(x_fp32.grad.to_dense(), x_bf16.grad.to_dense(dtype=torch.float32))
+            self.assertEqual(x_fp32.grad.to_dense(), x_bf16.grad.to_dense(torch.float32))
         else:
             x_bf16 = torch.randn(size, dtype=torch.bfloat16).requires_grad_()
             m_bf16 = mkldnn_utils.to_mkldnn(torch.nn.PReLU(), torch.bfloat16)
@@ -661,7 +661,7 @@ class TestMkldnn(TestCase):
 
                 if has_bf16_support():
                     y = max_pool(input.to_mkldnn()).to_dense()
-                    y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(dtype=torch.float32)
+                    y_bf16 = max_pool(x_bf16.to_mkldnn()).to_dense(torch.float32)
                     self.assertEqual(y, y_bf16, atol=0.1, rtol=1e-3)
                 else:
                     msg = "mkldnn_max_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
@@ -777,7 +777,7 @@ class TestMkldnn(TestCase):
                 count_include_pad=count_include_pad)
             if has_bf16_support():
                 y = avg_pool(input.to_mkldnn()).to_dense()
-                y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(dtype=torch.float)
+                y_bf16 = avg_pool(x_bf16.to_mkldnn()).to_dense(torch.float)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
                 msg = "mkldnn_avg_pool%dd: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq" % dim
@@ -848,7 +848,7 @@ class TestMkldnn(TestCase):
 
         if has_bf16_support():
             y = adaptive_avg_pool2d(x.to_mkldnn()).to_dense()
-            y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(dtype=torch.float32)
+            y_bf16 = adaptive_avg_pool2d(x.to_mkldnn()).to_dense(torch.float32)
             self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
         else:
             msg = "mkldnn_adaptive_avg_pool2d: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
@@ -916,7 +916,7 @@ class TestMkldnn(TestCase):
             mkldnn_bn = mkldnn_utils.to_mkldnn(copy.deepcopy(bn))
             if has_bf16_support():
                 y = bn(input.to_mkldnn().to_dense())
-                y_bf16 = bn(input.to_mkldnn().to_dense(dtype=torch.float))
+                y_bf16 = bn(input.to_mkldnn().to_dense(torch.float))
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
                 msg = "mkldnn_batch_norm: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
@@ -1206,7 +1206,7 @@ class TestMkldnn(TestCase):
             mkldnn_linear_bf16 = mkldnn_utils.to_mkldnn(copy.deepcopy(linear), torch.bfloat16)
             if has_bf16_support():
                 y = mkldnn_linear(x.to_mkldnn()).to_dense()
-                y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(dtype=torch.float32)
+                y_bf16 = mkldnn_linear_bf16(x_bf16.to_mkldnn()).to_dense(torch.float32)
                 self.assertEqual(y, y_bf16, atol=1e-1, rtol=1e-3)
             else:
                 msg = "mkldnn_linear: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq"
