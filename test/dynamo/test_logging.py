@@ -3,10 +3,9 @@ import functools
 import unittest.mock
 
 import torch
-import torch._dynamo.logging as td_logging
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch._logging
+import torch._logging.loggable_types as rec_types
 from torch.testing._internal.dynamo_logging_utils import make_test
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -70,8 +69,8 @@ def single_record_test(name, ty):
 
 class LoggingTests(LoggingTestCase):
 
-    test_bytecode = multi_record_test("bytecode", td_logging.ByteCodeLogRec, 2)
-    test_output_code = multi_record_test("output_code", td_logging.OutputCodeLogRec, 2)
+    test_bytecode = multi_record_test("bytecode", rec_types.ByteCodeLogRec, 2)
+    test_output_code = multi_record_test("output_code", rec_types.OutputCodeLogRec, 2)
 
     @requires_cuda()
     @make_test("schedule")
@@ -79,7 +78,7 @@ class LoggingTests(LoggingTestCase):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertEqual(len(records), 1)
-        self.assertIsInstance(records[0].msg, td_logging.ScheduleLogRec)
+        self.assertIsInstance(records[0].msg, rec_types.ScheduleLogRec)
 
     test_dynamo_debug = within_range_record_test("+dynamo", str, 30, 50)
     test_dynamo_info = within_range_record_test("dynamo", str, 2, 10)
@@ -94,7 +93,7 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
 
-    test_aot = multi_record_test("aot", td_logging.AOTJointGraphLogRec, 3)
+    test_aot = multi_record_test("aot", rec_types.AOTJointGraphLogRec, 3)
     test_inductor_debug = within_range_record_test("+inductor", str, 5, 15)
     test_inductor_info = within_range_record_test("inductor", str, 2, 4)
 
@@ -121,7 +120,7 @@ class LoggingTests(LoggingTestCase):
 
 # single record tests
 exclusions = {"bytecode", "output_code", "schedule"}
-for name, ty in torch._logging.NAME_TO_RECORD_TYPE.items():
+for name, ty in torch._logging.internal.log_registry.name_to_rec_type.items():
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(name, ty))
 

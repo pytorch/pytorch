@@ -12,6 +12,7 @@ import torch
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
+from torch._logging.loggable_types import OutputCodeLogRec
 from torch.fx.experimental.symbolic_shapes import (
     magic_methods,
     method_to_operator,
@@ -21,7 +22,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
-from .._dynamo.logging import OutputCodeLogRec
 
 from . import config, ir
 from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen

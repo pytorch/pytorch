@@ -7,6 +7,7 @@ import weakref
 from typing import Dict, Optional, Set
 
 import torch
+from torch._logging.loggable_types import ByteCodeLogRec, GuardLogRec
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -26,7 +27,6 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
-from .logging import ByteCodeLogRec, GuardLogRec
 from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
@@ -194,7 +194,6 @@ def convert_frame_assert(
     export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
-    init_logging()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()

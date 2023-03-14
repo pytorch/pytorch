@@ -19,7 +19,7 @@ import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import dynamo_timed
-from torch._dynamo.logging import AOTForwardGraphLogRec, AOTJointGraphLogRec, AOTBackwardGraphLogRec
+from torch._logging.loggable_types import AOTForwardGraphLogRec, AOTJointGraphLogRec, AOTBackwardGraphLogRec
 import torch._logging
 import torch._dynamo.logging
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
@@ -2438,9 +2438,6 @@ def create_aot_dispatcher_function(
         **aot_autograd_decompositions,
         **aot_config.decompositions,
     }
-
-    if not torch._logging.is_initialized():
-        torch._dynamo.logging.init_logging()
 
     # NB: don't bother setting allow_fallback_kernels; this should not actually
     # be configurable in fake tensor, we should automatically do the right

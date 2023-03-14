@@ -11,9 +11,9 @@ from typing import Dict, List, Set
 import sympy
 
 import torch
+from torch._logging.loggable_types import ScheduleLogRec
 
 from ..._dynamo import config as dynamo_config
-from ..._dynamo.logging import ScheduleLogRec
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
 from ..ir import ReductionHint

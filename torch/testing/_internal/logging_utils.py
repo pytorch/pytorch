@@ -8,12 +8,14 @@ import logging
 def log_settings(settings):
     return unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": settings})
 
-def make_test(settings, log_names, install_hook=None):
+def make_test(settings, log_names):
     def wrapper(fn):
         def test_fn(self):
             records = []
-            with log_settings(settings), self._handler_watcher([logging.getLogger(n) for n in log_names], records, install_hook):
-                fn(self, records)
+            with log_settings(settings):
+                torch._logging.init_logs()
+                with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
+                    fn(self, records)
 
         return test_fn
 
@@ -34,6 +36,7 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
+        torch._logging.init_logs()
 
     def _handler_watcher(self, loggers, record_list, install_hook=None):
         exit_stack = contextlib.ExitStack()

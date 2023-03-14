@@ -1,6 +1,5 @@
 import torch
 from torch.testing._internal.logging_utils import LoggingTestCase
-from torch.testing._internal.dynamo_logging_utils import make_test
 from torch._functorch.aot_autograd import aot_function
 from torch._functorch.compilers import nop
 

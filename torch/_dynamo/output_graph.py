@@ -18,6 +18,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._logging.loggable_types import DynamoGraphCodeLogRec, GraphTabularLogRec
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -31,7 +32,6 @@ from .bytecode_transformation import (
 from .codegen import PyCodegen
 from .exc import BackendCompilerFailed, unimplemented
 from .guards import GuardBuilder
-from .logging import DynamoGraphCodeLogRec, GraphTabularLogRec
 from .mutation_guard import is_dynamic_nn_module
 from .side_effects import SideEffects
 from .source import (

@@ -3,8 +3,9 @@ import textwrap
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
+from torch._logging.loggable_types import ByteCodeLogRec
+
 from . import config
-from .logging import ByteCodeLogRec
 
 from .utils import counters
 
