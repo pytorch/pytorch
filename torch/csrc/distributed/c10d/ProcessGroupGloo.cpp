@@ -2813,7 +2813,8 @@ void ProcessGroupGloo::monitoredBarrier(
     // some ranks have not responded.
     // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
     // processed.
-    auto rankFailure = (processedRanks.size() != static_cast<size_t>(size_ - 1));
+    auto rankFailure =
+        (processedRanks.size() != static_cast<size_t>(size_ - 1));
     if (waitAllRanks && rankFailure) {
       std::vector<int> failedRanks;
       for (const auto i : c10::irange(1, size_)) {
