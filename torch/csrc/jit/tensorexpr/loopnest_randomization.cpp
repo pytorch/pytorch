@@ -394,7 +394,7 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
           // Find pairs of axes that can be reordered
           std::vector<std::pair<ForPtr, ForPtr>> valid_pairs;
           for (const auto i : c10::irange(loops.size())) {
-            for (const auto j: c10::irange(i + 1, loops.size())) {
+            for (const auto j : c10::irange(i + 1, loops.size())) {
               if (LoopNest::findOuterFor(loops[i], loops[j])) {
                 valid_pairs.emplace_back(loops[i], loops[j]);
               }

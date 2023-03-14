@@ -70,7 +70,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
 
     std::vector<MPSScalar> strideScalars(sizes.size());
-    for (const auto  i: c10::irange(sizes.size())) {
+    for (const auto i : c10::irange(sizes.size())) {
       strideScalars[i] = getMPSScalar(strides[i], ScalarType::Int);
       feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, strideScalars[i]);
     }
@@ -574,7 +574,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph,
   @autoreleasepool {
     std::vector<int32_t> sizeArray(shape_size);
     const int64_t int_max = std::numeric_limits<int32_t>::max();
-    for (const auto i: c10::irange(shape_size)) {
+    for (const auto i : c10::irange(shape_size)) {
       TORCH_CHECK(size[i] <= int_max);
       sizeArray[i] = static_cast<int32_t>(size[i]);
     }
@@ -702,7 +702,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
           // Self is the input tensor we are creating view of
           newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
           newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-          for (const auto C10_UNUSED i: c10::irange(size.size())) {
+          for (const auto C10_UNUSED i : c10::irange(size.size())) {
             newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
           }
           if (needsScatter) {
@@ -837,7 +837,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     if (kernel_size == 0) {
       src_sizes[0] = src_strides[0] = 1;
     } else {
-      for (const auto i: c10::irange(kernel_size)) {
+      for (const auto i : c10::irange(kernel_size)) {
         src_sizes[i] = (uint32_t)(src.sizes()[i]);
         src_strides[i] = (uint32_t)(src.strides()[i]);
       }

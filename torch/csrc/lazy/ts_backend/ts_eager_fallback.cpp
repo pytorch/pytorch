@@ -246,7 +246,7 @@ void ts_eager_fallback(
   // CPU together.
   auto eager_tensors = to_eager(tensor_args, device_type);
 
-  for (const auto i: c10::irange(tensor_args_indices.size())) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto idx = tensor_args_indices[i];
     (*stack)[arguments_begin + idx] = c10::IValue(eager_tensors[i]);
   }
@@ -257,7 +257,7 @@ void ts_eager_fallback(
   // Step 3: We need to take special care to handle mutable aliases properly:
   // If any input tensors are mutable aliases, we need to directly copy the
   // updated data on the eager tensors back to the original inputs.
-  for (const auto i: c10::irange(tensor_args_indices.size())) {
+  for (const auto i : c10::irange(tensor_args_indices.size())) {
     auto tensor_idx = tensor_args_indices[i];
     const auto alias_info = schema_args[tensor_idx].alias_info();
     if (alias_info != nullptr && alias_info->isWrite()) {
@@ -288,7 +288,7 @@ void ts_eager_fallback(
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  for (const auto idx: c10::irange(returns.size())) {
+  for (const auto idx : c10::irange(returns.size())) {
     if (returns[idx].isTensor()) {
       const auto& return_tens = returns[idx].toTensor();
       if (return_tens.defined()) {
@@ -299,7 +299,7 @@ void ts_eager_fallback(
           bool found_alias = false;
           // We could store some extra metadata on the function schema to avoid
           // the loop here if we need to improve perf.
-          for (const auto i: c10::irange(tensor_args_indices.size())) {
+          for (const auto i : c10::irange(tensor_args_indices.size())) {
             auto input_tensor_idx = tensor_args_indices[i];
             const auto& input_tensor = eager_tensors[i];
             const auto input_alias_info =

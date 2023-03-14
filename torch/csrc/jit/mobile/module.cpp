@@ -334,7 +334,7 @@ TORCH_API ModuleInfo get_module_info(const mobile::Module& module) {
   std::vector<std::string> type_name_list;
   for (const auto& func_ptr : module.compilation_unit().methods()) {
     const auto& function = *func_ptr;
-    for (const auto i: c10::irange(function.get_code().op_names_.size())) {
+    for (const auto i : c10::irange(function.get_code().op_names_.size())) {
       const auto& op = function.get_code().op_names_[i];
       minfo.opname_to_num_args[mobile::operator_str(op)] =
           function.get_code().operator_input_sizes_[i];

@@ -1000,13 +1000,13 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
 
       NSMutableArray<NSNumber*>* gamma_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_channel_dims];
 
-      for (const auto i: c10::irange(num_channel_dims))
+      for (const auto i : c10::irange(num_channel_dims))
         gamma_axes[i] = [NSNumber numberWithInt:static_cast<int>(i)];
 
       // Axes along which to reduce to get "batch norm" gradient
       // This will be applied on shape [1, M, -1]
       NSMutableArray<NSNumber*>* bn_axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_normalized_dims];
-      for (const auto i: c10::irange(num_normalized_dims))
+      for (const auto i : c10::irange(num_normalized_dims))
         bn_axes[i] = [NSNumber numberWithInt:static_cast<int>(1 + 1 + i)];
 
       // Shape of input to do "batch norm" backward
@@ -1014,7 +1014,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
       NSMutableArray<NSNumber*>* bn_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
       bn_shape[0] = [NSNumber numberWithInt:1];
       bn_shape[1] = [NSNumber numberWithInt:M];
-      for (const auto i: c10::irange(num_normalized_dims))
+      for (const auto i : c10::irange(num_normalized_dims))
         bn_shape[i + 2] = input_shape[i + num_channel_dims];
 
       // Shape of mean to do "batch norm" backward
@@ -1023,7 +1023,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
       bn_mean_shape[0] = [NSNumber numberWithInt:1];
       bn_mean_shape[1] = [NSNumber numberWithInt:M];
-      for (const auto i: c10::irange(num_normalized_dims))
+      for (const auto i : c10::irange(num_normalized_dims))
         bn_mean_shape[i + 2] = [NSNumber numberWithInt:1];
 
       // Shape of gamma to multiply with "batch norm" backward
@@ -1032,7 +1032,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_mps(const Tensor& grad_ou
           [NSMutableArray<NSNumber*> arrayWithCapacity:(num_normalized_dims + 2)];
       bn_gamma_shape[0] = [NSNumber numberWithInt:1];
       bn_gamma_shape[1] = [NSNumber numberWithInt:1];
-      for (const auto i: c10::irange(num_normalized_dims))
+      for (const auto i : c10::irange(num_normalized_dims))
         bn_gamma_shape[i + 2] = input_shape[i + num_channel_dims];
 
       string key = "layer_norm_backward_mps:" + std::to_string(has_weight) + ":" +

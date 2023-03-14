@@ -156,7 +156,7 @@ std::ostream& operator<<(std::ostream& os, const ShapeArguments& sa) {
   }
 
   os << "(";
-  for (const auto i: c10::irange(sa.len())) {
+  for (const auto i : c10::irange(sa.len())) {
     os << sa.at(i);
   }
   os << ")";
@@ -422,7 +422,8 @@ struct SymbolicShapeOpAnalyzer {
     TORCH_INTERNAL_ASSERT(
         inputs_.size() >= shape_compute_graph_->inputs().size(),
         "Missing Arg for Shape Graph");
-    for (const auto index: c10::irange(shape_compute_graph_->inputs().size())) {
+    for (const auto index :
+         c10::irange(shape_compute_graph_->inputs().size())) {
       auto shape_arguments = c10::get_if<ShapeArguments>(&inputs_[index]);
       if (!shape_arguments || !shape_arguments->has_dim()) {
         continue;
@@ -792,7 +793,7 @@ c10::SymbolicShape combine_bounds(
     return c10::SymbolicShape();
   }
   std::vector<c10::ShapeSymbol> merged_shapes;
-  for (const auto i: c10::irange(*lower_bound.rank())) {
+  for (const auto i : c10::irange(*lower_bound.rank())) {
     // TODO: Merge equivalent expressions (not needed for current use case)
     if (lower_bound[i] == upper_bound[i]) {
       merged_shapes.push_back(lower_bound[i]);
