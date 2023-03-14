@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
