@@ -1,24 +1,33 @@
-import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
-import sys
 import builtins
-import itertools
-import operator
-import math
+import collections
 import functools
+import itertools
+import logging
+import math
+import operator
+import sys
+import textwrap
 import threading
+import traceback
 from contextlib import contextmanager
 from functools import lru_cache
-import traceback
-import collections
-import textwrap
-import logging
+from typing import cast, Dict, List, Optional, Set, Type, Union
+
+import torch
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
-from torch._guards import ShapeGuard, Source
-from torch.utils._sympy.value_ranges import ValueRanges, ValueRangeAnalysis
+from torch import (  # noqa: F401
+    sym_float,
+    sym_max,
+    sym_min,
+    sym_not,
+    SymBool,
+    SymFloat,
+    SymInt,
+)
+from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -705,6 +714,12 @@ reflectable_magic_methods = {
 def error():
     raise AssertionError("shouldn't be hit")
 
+
+def get_debugging_stack(num_frames_to_cut=2):
+    # cut this frame and the caller's frame by default
+    return ''.join(traceback.format_list(traceback.extract_stack()[:-num_frames_to_cut]))
+
+
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
         aa = a.args
@@ -1179,6 +1194,11 @@ class ShapeGuardPrinter(StrPrinter):
             "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
         )
         return self.source_ref(self.symbol_to_source[expr][0])
+
+
+class LoggingShapeGuardPrinter(ShapeGuardPrinter):
+    def __init__(self, var_to_sources):
+        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
 
 TLS = threading.local()
@@ -1803,6 +1823,23 @@ class ShapeEnv:
             # problem
         )
 
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
+        """
+        Adds or updates a replacement for a symbol.
+        Use this instead of `self.replacements[a] = expr`.
+        """
+        if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
+            # specializing to a constant, which is likely unexpected
+
+            # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
+            # when adding a to self.replacements, and again when simplifying an expression containing a.
+            # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
+            # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
+            if a not in self.replacements or expr != self.replacements[a]:
+                log.warning(f"Specializing {self.var_to_sources[a][0].name()} to {expr}")
+                log.debug("SPECIALIZATION", stack_info=True)
+        self.replacements[a] = expr
+
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
         """
@@ -1816,7 +1853,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self.replacements[a] = self.replacements[a].xreplace(cur_replace)
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
     @lru_cache(256)
@@ -1856,7 +1893,7 @@ class ShapeEnv:
                 solution = solutions[0][free[0]]
                 if all(t.is_integer for t in sympy.preorder_traversal(solution)):
                     new_var = self._find(solution)
-                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
             except RecursionError:
@@ -1884,6 +1921,23 @@ class ShapeEnv:
             # add necessary mod guards
             self.evaluate_expr(eq_expr)
         return self.simplify(expr)
+
+    def _add_guard(self, expr: "sympy.Expr") -> None:
+        stack = get_debugging_stack()
+        guard = ShapeGuard(expr, stack)
+        if torch._dynamo.config.print_guards:
+            if log.level <= logging.WARNING:
+                # reusing flag that prints guards
+                frame_summaries = TracingContext.get().frame_summary_stack
+                # frame_summaries describes a stack of functions
+                # TODO(avik): It would be better to describe a stack of function calls instead
+                current_loc = TracingContext.get().loc_in_frame
+                # current_loc describes a line in the current frame
+                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
+                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
+                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
+            log.debug("SHAPE GUARD", stack_info=True)
+        self.guards.append(guard)
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
@@ -1927,18 +1981,13 @@ class ShapeEnv:
             # maybe_guard_eq in those cases.
             self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
-        # TODO: optimize this; avoid formatting traces until we need them
-        # NB: drop two frames; evaluate_expr and the Sym* function that
-        # actually called us
         if not self._suppress_guards_tls():
-            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append(ShapeGuard(expr, stack))
+                self._add_guard(expr)
             elif concrete_val is sympy.false:
-                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
+                self._add_guard(sympy.Not(expr))
             else:
-                self.guards.append(
-                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
+                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
         return concrete_val
 
 def _should_allocate(user_marked_dynamic, assume_static_by_default):
