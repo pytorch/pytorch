@@ -1553,16 +1553,18 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
           for (const auto j : c10::irange(js)) {
             opmath_t acc_value = 0;//is_bmm ? opmath_t(0) : opmath_t(r2[j]);
             for (const auto k : c10::irange(ks)) {
-              acc_value += s2[k] * m1[k][j];
+              acc_value += static_cast<opmath_t>(s2[k]) *
+                  static_cast<opmath_t>(m1[k][j]);
             }
             if (is_bmm) {
               r2[j] = acc_value;
             } else {
               // For beta == 0, the r's value will be ignored, especially for nan value.
               if (beta == scalar_t{0}) {
-                r2[j] = alpha * acc_value;
+                r2[j] = alpha.to<opmath_t>() * acc_value;
               } else {
-                r2[j] = r2[j] * beta + alpha * acc_value;
+                r2[j] = r2[j] * beta.to<opmath_t>() +
+                    alpha.to<opmath_t>() * acc_value;
               }
             }
           }
