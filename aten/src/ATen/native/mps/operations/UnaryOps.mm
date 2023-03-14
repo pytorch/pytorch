@@ -279,16 +279,6 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
 
   double eps_ = eps ? eps.value() : -1.0;
 
-<<<<<<< HEAD
-=======
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* gradOutputTensor_ = nil;
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
->>>>>>> upstream/viable/strict
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   MPSStream* stream = getCurrentMPSStream();

@@ -40,16 +40,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   using CachedGraph = MPSUnaryCachedGraph;
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
-<<<<<<< HEAD
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-=======
-              "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
->>>>>>> upstream/viable/strict
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the

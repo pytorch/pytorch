@@ -58,17 +58,7 @@ TORCH_IMPL_FUNC(softmax_mps_out)
   using namespace mps;
   using CachedGraph = MPSUnaryCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
-<<<<<<< HEAD
-=======
 
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
-
->>>>>>> upstream/viable/strict
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
@@ -179,17 +169,6 @@ TORCH_IMPL_FUNC(softmax_backward_mps_out)
   using CachedGraph = MPSUnaryGradCachedGraph;
   MPSStream* stream = getCurrentMPSStream();
 
-<<<<<<< HEAD
-=======
-  // Derive from MPSCachedGraph
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* softmaxTensor_ = nil;
-    MPSGraphTensor* gradOutputTensor_ = nil;
-    MPSGraphTensor* gradInputTensor_ = nil;
-  };
-
->>>>>>> upstream/viable/strict
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
   @autoreleasepool {
