@@ -279,6 +279,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatchedDecomposition, m) {
   OP_DECOMPOSE(vstack);
   OP_DECOMPOSE2(where, ScalarOther);
   OP_DECOMPOSE2(where, ScalarSelf);
+  OP_DECOMPOSE2(where, Scalar);
   OP_DECOMPOSE(orgqr);
   m.impl("unflatten.int", native::unflatten_symint);
   m.impl("_convolution_double_backward", native::_convolution_double_backward);
