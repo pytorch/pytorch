@@ -496,29 +496,26 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         name = get_or_make_known_name(source)
         if not name or not name[0].isalpha():
             name = "sub" + name
-        base = name
-        for i in itertools.count():
-            if name not in self.nn_modules:
-                self.nn_modules[name] = target
-                assert self.names_to_sources is not None
-                self.tracing_context.module_context.register(name, source)
-                if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
-                    # annoying, but there are cases when we do not have parameters
-                    # see test_nn_moduledict_contains
-                    if hasattr(target, "_parameters"):
-                        for n, p in target._parameters.items():
-                            new_source = ParamBufferSource(source, n)
-                            new_name = new_source.flat_name()
-                            self.register_attr_or_module(p, new_name, source=new_source)
-                    # annoying, but there are cases when we do not have buffers
-                    # see test_nn_moduledict_contains
-                    if hasattr(target, "_buffers"):
-                        for n, p in target._buffers.items():
-                            new_source = ParamBufferSource(source, n)
-                            new_name = new_source.flat_name()
-                            self.register_attr_or_module(p, new_name, source=new_source)
-                return wrap_name(name)
-            name = f"{base}_{i}"
+        if name not in self.nn_modules:
+            self.nn_modules[name] = target
+            assert self.names_to_sources is not None
+            self.tracing_context.module_context.register(name, source)
+            if isinstance(target, torch.nn.Module) and not is_lazy_module(target):
+                # annoying, but there are cases when we do not have parameters
+                # see test_nn_moduledict_contains
+                if hasattr(target, "_parameters"):
+                    for n, p in target._parameters.items():
+                        new_source = ParamBufferSource(source, n)
+                        new_name = new_source.flat_name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
+                # annoying, but there are cases when we do not have buffers
+                # see test_nn_moduledict_contains
+                if hasattr(target, "_buffers"):
+                    for n, p in target._buffers.items():
+                        new_source = ParamBufferSource(source, n)
+                        new_name = new_source.flat_name()
+                        self.register_attr_or_module(p, new_name, source=new_source)
+            return wrap_name(name)
         raise AssertionError("unreachable")
 
     def compile_subgraph(
