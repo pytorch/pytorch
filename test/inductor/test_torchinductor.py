@@ -8023,7 +8023,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 inp = torch.rand([20, 20], device="cuda:1")
 
                 foo_cg = tree_cudagraphify_impl(foo, [inp], (), device_index=1)
-                foo_cg([inp])
+                self.assertEqual(foo_cg([inp]), foo([inp]))
 
                 self.assertTrue(self.get_manager(device_index=0) is None)
                 self.assertFalse(self.get_manager(device_index=1) is None)
