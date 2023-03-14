@@ -17,24 +17,24 @@ class Model(nn.Module):
 
 
 class CUTLASSSparseLinear(nn.Module):
-    def __init__(self, linear_model):
+    def __init__(self, linear_model, n):
         super().__init__()
 
         m, k = linear_model.weight.shape
         mask = linear_model.weight.data != 0
 
         self.weight_tensor = linear_model.weight.data.masked_select(mask).view(m, k // 2)
-        self.bias_tensor = linear_model.bias.data
+        self.bias_tensor = linear_model.bias.repeat((n, 1)).T.contiguous()
         self.mask = mask
         self.meta = None
 
     def forward(self, x):
         if self.mask is not None:
-            prod, self.meta = torch._cutlass_linear(self.weight_tensor, x.T, self.mask)
+            prod, self.meta = torch._cutlass_linear(self.weight_tensor, x.T, self.bias_tensor, self.mask)
             self.mask = None
         else:
-            prod, _ = torch._cutlass_linear(self.weight_tensor, x.T, self.meta)
-        return prod.T + self.bias_tensor
+            prod, _ = torch._cutlass_linear(self.weight_tensor, x.T, self.bias_tensor, self.meta)
+        return prod.T
 
 
 def get_linear(m, k, n):
@@ -48,7 +48,7 @@ def get_linear(m, k, n):
     pruner.squash_mask()
 
     input_tensor = torch.randn(n, k, device=device, dtype=dtype)
-    sparse_linear = CUTLASSSparseLinear(model.linear)
+    sparse_linear = CUTLASSSparseLinear(model.linear, n)
     dense_linear = model.linear
 
     for i in range(5):

@@ -4497,8 +4497,10 @@ class TestSparseAny(TestCase):
         def run_test(m, n, k):
             a = make_tensor(m, k)
             b = make_tensor(k, n)
+            c = torch.zeros(m, n)
             a = a.half().cuda()
             b = b.half().cuda()
+            c = c.half().cuda()
 
             c0_results = []
             c1_results = []
@@ -4514,7 +4516,7 @@ class TestSparseAny(TestCase):
 
                 c1 = torch.mm(a_dense, b)
 
-                c0, meta_reordered = torch._cutlass_linear(a_sparse, b, mask)
+                c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask)
                 torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
 
                 # sparse_t, _ = benchmark_torch_function_in_microseconds(torch._cutlass_linear, a_sparse, b, meta_reordered)

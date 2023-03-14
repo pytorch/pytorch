@@ -119,18 +119,13 @@ __global__ void reorder_meta_kernel(
 }
 
 template <typename LayoutInputA, typename LayoutInputB>
-std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
+std::tuple<Tensor, Tensor> do_sgemm(const Tensor& tensor_a,
+                                    const Tensor& tensor_b,
+                                    const Tensor& tensor_c,
                                     const Tensor& mask_or_meta,
-                                    const LayoutInputA& layout_sparse,
-                                    const LayoutInputB& layout_dense) {
-    auto result = sparse.new_empty({sparse.size(0), dense.size(1)});
-
-    auto tensor_a = sparse;
-    auto tensor_b = dense;
-    auto tensor_c = result;
-    auto tensor_d = result;
-    auto layout_a = layout_sparse;
-    auto layout_b = layout_dense;
+                                    const LayoutInputA& layout_a,
+                                    const LayoutInputB& layout_b) {
+    auto tensor_d = tensor_a.new_empty({tensor_a.size(0), tensor_b.size(1)});
 
     using ElementInputA =
         cutlass::half_t; // <- data type of elements in input matrix A
@@ -168,11 +163,13 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
     using LayoutInputE = cutlass::layout::RowMajor;
     using ReorderedLayoutInputE = typename Gemm::LayoutE;
 
+    constexpr int kSparse = Gemm::kSparse;
+
     Tensor meta_reordered;
     if (mask_or_meta.dtype() == at::kBool) {
         auto mask = mask_or_meta;
 
-        TORCH_CHECK(mask.layout() == Layout::Strided, "torch._cutlass_linear: Expected sparse argument to be strided, but got layout ", sparse.layout());
+        TORCH_CHECK(mask.layout() == Layout::Strided, "torch._cutlass_linear: Expected mask argument to be strided, but got layout ", mask.layout());
 
         const int length_m = mask.size(0);
         const int length_k = mask.size(1);
@@ -217,28 +214,11 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
         meta_reordered = mask_or_meta;
     }
 
-    const int length_m = sparse.size(0);
-    const int length_k = dense.size(0);
-    const int length_n = dense.size(1);
+    const int length_m = tensor_a.size(0);
+    const int length_k = tensor_b.size(0);
+    const int length_n = tensor_b.size(1);
 
-    auto meta_reordered_device_ref = cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>((ElementInputE*)meta_reordered.data_ptr(), ReorderedLayoutInputE::packed({length_m, length_k / 16}));
-
-    constexpr int kSparse = Gemm::kSparse;
-    TORCH_CHECK(
-        dense.size(0) % kSparse == 0,
-        "Expected dense.size(0) of value ",
-        dense.size(0),
-        " to be evenly divisible by ",
-        kSparse,
-        " but got.");
-    TORCH_CHECK(
-        sparse.size(1) * kSparse == dense.size(0),
-        "Expected sparse.size(1) of value ",
-        sparse.size(1),
-        " to match dense.size(0) of value ",
-        dense.size(0),
-        " to match after being multiplied by ",
-        kSparse);
+    TORCH_CHECK(tensor_a.size(1) == length_k / kSparse);
 
     // FIXME: remove these checks!
     static_assert(sizeof(uint16_t) == sizeof(ElementInputE));
@@ -246,10 +226,21 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
     // TORCH_CHECK(length_k % 16 == 0);
     TORCH_CHECK(length_k % 64 == 0);
 
-    TORCH_CHECK(tensor_a.size(0) == length_m);
-    TORCH_CHECK(tensor_a.size(1) == length_k / kSparse);
-    TORCH_CHECK(tensor_b.size(0) == length_k);
-    TORCH_CHECK(tensor_b.size(1) == length_n);
+    TORCH_CHECK(
+        tensor_b.size(0) % kSparse == 0,
+        "Expected tensor_b.size(0) of value ",
+        tensor_b.size(0),
+        " to be evenly divisible by ",
+        kSparse,
+        " but got.");
+    TORCH_CHECK(
+        tensor_a.size(1) * kSparse == tensor_b.size(0),
+        "Expected tensor_a.size(1) of value ",
+        tensor_a.size(1),
+        " to match tensor_b.size(0) of value ",
+        tensor_b.size(0),
+        " to match after being multiplied by ",
+        kSparse);
 
     TORCH_CHECK(
         tensor_a.device() == tensor_b.device(),
@@ -260,6 +251,8 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
     TORCH_CHECK(
         tensor_c.device() == tensor_d.device(),
         "Check 2: Expected all Tensors to live on the GPU.");
+
+    auto meta_reordered_device_ref = cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>((ElementInputE*)meta_reordered.data_ptr(), ReorderedLayoutInputE::packed({length_m, length_k / 16}));
 
     // Create a tuple of problem size for matrix multiplication
     cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
@@ -274,7 +267,7 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
 
     // Initialize alpha and beta for dot product computation
     float alpha = 1;
-    float beta = 0;
+    float beta = 1;
 
     // Split K dimension into 1 partitions
     int split_k_slices = 1;
@@ -306,42 +299,48 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& sparse, const Tensor& dense,
 
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    return std::make_tuple(result, meta_reordered);
+    return std::make_tuple(tensor_d, meta_reordered);
 }
 
 // TODO: Pull back in device and cuda version constraints.
 std::tuple<Tensor, Tensor> _cutlass_linear(
-    const Tensor& sparse, const Tensor& dense, const Tensor& mask_or_meta) {
-    TORCH_CHECK(sparse.dim() == 2, "torch._cutlass_linear: Expected sparse argument to be 2D tensor, got ", sparse.dim(), " dims");
-    TORCH_CHECK(sparse.layout() == Layout::Strided, "torch._cutlass_linear: Expected sparse argument to be strided, but got layout ", sparse.layout());
-    const auto sparse_strides = sparse.strides();
-    TORCH_CHECK((sparse_strides[0] == 1 || sparse_strides[1] == 1) && sparse_strides[0] != sparse_strides[1], "torch._cutlass_linear: Invalid strides for sparse argument: row stride = ", sparse_strides[0], ", column stride = ", sparse_strides[1]);
+      const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
+      const Tensor& mask_or_meta) {
+    TORCH_CHECK(tensor_a.dim() == 2, "torch._cutlass_linear: Expected tensor_a argument to be 2D tensor, got ", tensor_a.dim(), " dims");
+    TORCH_CHECK(tensor_a.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_a argument to be strided, but got layout ", tensor_a.layout());
+    const auto strides_a = tensor_a.strides();
+    TORCH_CHECK((strides_a[0] == 1 || strides_a[1] == 1) && strides_a[0] != strides_a[1], "torch._cutlass_linear: Invalid strides for tensor_a argument: row stride = ", strides_a[0], ", column stride = ", strides_a[1]);
 
-    TORCH_CHECK(dense.dim() == 2, "torch._cutlass_linear: Expected dense argument to be 2D tensor, got ", dense.dim(), " dims");
-    TORCH_CHECK(dense.layout() == Layout::Strided, "torch._cutlass_linear: Expected dense argument to be strided, but got layout ", dense.layout());
-    const auto dense_strides = dense.strides();
-    TORCH_CHECK((dense_strides[0] == 1 || dense_strides[1] == 1) && dense_strides[0] != dense_strides[1], "torch._cutlass_linear: Invalid strides for dense argument: row stride = ", dense_strides[0], ", column stride = ", dense_strides[1]);
+    TORCH_CHECK(tensor_b.dim() == 2, "torch._cutlass_linear: Expected tensor_b argument to be 2D tensor, got ", tensor_b.dim(), " dims");
+    TORCH_CHECK(tensor_b.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_b argument to be strided, but got layout ", tensor_b.layout());
+    const auto strides_b = tensor_b.strides();
+    TORCH_CHECK((strides_b[0] == 1 || strides_b[1] == 1) && strides_b[0] != strides_b[1], "torch._cutlass_linear: Invalid strides for tensor_b argument: row stride = ", strides_b[0], ", column stride = ", strides_b[1]);
 
-    if (sparse_strides[1] == 1) {
-        auto layout_sparse = cutlass::layout::RowMajor(sparse.stride(0));
-        if (dense_strides[1] == 1) {
-            auto layout_dense = cutlass::layout::RowMajor(dense.stride(0));
-            return do_sgemm(sparse, dense, mask_or_meta, layout_sparse, layout_dense);
+    TORCH_CHECK(tensor_c.dim() == 2, "torch._cutlass_linear: Expected tensor_c argument to be 2D tensor, got ", tensor_c.dim(), " dims");
+    TORCH_CHECK(tensor_c.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_c argument to be strided, but got layout ", tensor_c.layout());
+    const auto strides_c = tensor_c.strides();
+    TORCH_CHECK(strides_c[1] == 1 && strides_c[0] != strides_c[1], "torch._cutlass_linear: Invalid strides for tensor_c argument: row stride = ", strides_c[0], ", column stride = ", strides_c[1]);  // Must be in row-major format.
+
+    if (strides_a[1] == 1) {
+        auto layout_a = cutlass::layout::RowMajor(strides_a[0]);
+        if (strides_b[1] == 1) {
+            auto layout_b = cutlass::layout::RowMajor(strides_b[0]);
+            return do_sgemm(tensor_a, tensor_b, tensor_c, mask_or_meta, layout_a, layout_b);
         }
-        else if (dense_strides[0] == 1) {
-            auto layout_dense = cutlass::layout::ColumnMajor(dense.stride(1));
-            return do_sgemm(sparse, dense, mask_or_meta, layout_sparse, layout_dense);
+        else {
+            auto layout_b = cutlass::layout::ColumnMajor(strides_b[1]);
+            return do_sgemm(tensor_a, tensor_b, tensor_c, mask_or_meta, layout_a, layout_b);
         }
     }
-    else if (sparse_strides[0] == 1) {
-        auto layout_sparse = cutlass::layout::ColumnMajor(sparse.stride(1));
-        if (dense_strides[1] == 1) {
-            auto layout_dense = cutlass::layout::RowMajor(dense.stride(0));
-            return do_sgemm(sparse, dense, mask_or_meta, layout_sparse, layout_dense);
+    else {
+        auto layout_a = cutlass::layout::ColumnMajor(strides_a[1]);
+        if (strides_b[1] == 1) {
+            auto layout_b = cutlass::layout::RowMajor(strides_b[0]);
+            return do_sgemm(tensor_a, tensor_b, tensor_c, mask_or_meta, layout_a, layout_b);
         }
-        else if (dense_strides[0] == 1) {
-            auto layout_dense = cutlass::layout::ColumnMajor(dense.stride(1));
-            return do_sgemm(sparse, dense, mask_or_meta, layout_sparse, layout_dense);
+        else {
+            auto layout_b = cutlass::layout::ColumnMajor(strides_b[1]);
+            return do_sgemm(tensor_a, tensor_b, tensor_c, mask_or_meta, layout_a, layout_b);
         }
     }
 
