@@ -304,11 +304,14 @@ class DTensorSpec:
     mesh: DeviceMesh
     placements: Sequence[Placement]
 
+    # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMetadata] = None
 
     def __hash__(self) -> int:
-        # TODO: tensor meta should all be part of the hash function, but we only
-        # use shape for now, need to fix this later
+        # hashing and equality check for DTensorSpec are used to cache the sharding
+        # propagation results. We only need to consider the mesh, placements and shape
+        # Caveat: we need to keep this in mind and sync hash and eq if we add more
+        # fields to them,
         if self.tensor_meta is not None:
             return hash((self.mesh, tuple(self.placements), self.tensor_meta.shape))
         else:
@@ -383,67 +386,6 @@ class DTensorSpec:
             for idx, placement in enumerate(self.placements)
             if placement.is_partial()
         ]
-
-    def _local_shape_from_global_shape(
-        self, global_shape: List[int]
-    ) -> Tuple[int, ...]:
-        local_shape = global_shape  # start with global shape
-        ndim = len(global_shape)
-        for idx, placement in enumerate(self.placements):
-            mesh_dim_size = self.mesh.size(idx)
-            my_coordinate = self.mesh.get_coordinate()
-            assert my_coordinate is not None, "Rank not part of mesh!"
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                assert (
-                    shard_dim < ndim
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {ndim}"
-                local_shard_size, _ = placement._local_shard_size_on_dim(
-                    local_shape[shard_dim], mesh_dim_size, my_coordinate[idx]
-                )
-                assert isinstance(local_shard_size, int)
-                local_shape[shard_dim] = local_shard_size
-
-        return tuple(local_shape)
-
-    @property
-    def local_shape(self) -> Tuple[int, ...]:
-        """
-        Compute the shape of a local shard of the given DTensor on its current
-        coordinate of the mesh.
-        """
-        assert self.tensor_meta is not None, "DTensorSpec does not contain tensor meta."
-        return self._local_shape_from_global_shape(list(self.tensor_meta.shape))
-
-    @property
-    def local_offsets(self) -> Tuple[int, ...]:
-        """
-        Compute the offsets of a local shard of the given DTensor on its current
-        global rank. This is mostly used by distributed checkpointing to know the
-        exact offsets of the local shard.
-        """
-        assert self.tensor_meta is not None, "DTensorSpec does not contain tensor meta."
-        local_offsets = [0] * len(self.tensor_meta.shape)
-        local_shape = list(self.tensor_meta.shape)
-
-        for idx, placement in enumerate(self.placements):
-            mesh_dim_size = self.mesh.size(idx)
-            my_coordinate = self.mesh.get_coordinate()
-            assert my_coordinate is not None, "Rank not part of mesh!"
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                assert (
-                    shard_dim < len(local_shape)
-                ), f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-                shard_size, shard_offset = placement._local_shard_size_on_dim(
-                    local_shape[shard_dim],
-                    mesh_dim_size,
-                    my_coordinate[idx],
-                    return_offset=True,
-                )
-                local_shape[shard_dim] = shard_size
-                local_offsets[shard_dim] = shard_offset
-        return tuple(local_offsets)
 
     @classmethod
     def from_dim_map(
