@@ -714,6 +714,8 @@ Optimizations
 
     compile
 
+`torch.compile documentation <https://pytorch.org/docs/masater/compile/index.html>`_
+
 Operator Tags
 ------------------------------------
 .. autoclass:: Tag

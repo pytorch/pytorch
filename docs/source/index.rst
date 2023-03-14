@@ -51,12 +51,13 @@ Features described in this documentation are classified by release status:
    compile/index
    compile/installation
    compile/get-started
+   compile/troubleshooting
+   compile/faq
+   compile/technical-overview
    compile/guards-overview
    compile/custom-backends
    compile/deep-dive
-   compile/troubleshooting
-   compile/faq
-   compile/ir
+   ir
 
 .. toctree::
    :maxdepth: 1
