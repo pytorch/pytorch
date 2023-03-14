@@ -123,6 +123,8 @@ class DeviceMesh:
     def _get_or_create_default_group(self):
         if not is_initialized():
             unique_mesh_values = self.mesh.unique(sorted=True)
+            world_size = int(os.getenv("WORLD_SIZE", unique_mesh_values[-1] + 1))
+
             if unique_mesh_values.numel() != self.mesh.numel():
                 raise RuntimeError(
                     f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
@@ -141,7 +143,6 @@ class DeviceMesh:
                     f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
                 )
 
-            world_size = int(os.getenv("WORLD_SIZE", unique_mesh_values[-1] + 1))
 
             _backend = "gloo" if self.device_type == "cpu" else "nccl"
             init_process_group(backend=_backend)

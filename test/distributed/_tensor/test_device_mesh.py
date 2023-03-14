@@ -12,7 +12,6 @@ from torch.distributed.distributed_c10d import (
     get_process_group_ranks,
     get_world_size,
     is_initialized,
-    new_group,
     ProcessGroup,
 )
 from torch.testing._internal.common_utils import run_tests
