@@ -7,7 +7,8 @@ import builtins
 import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
-    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await, is_ignored_fn, Union, is_union
+    is_optional, _qualified_name, Any, Future, is_future, _Await, is_await,\
+    is_ignored_fn, Union, is_union, check_args_exist
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
@@ -323,11 +324,17 @@ def try_ann_to_type(ann, loc):
         return NoneType.get()
     if inspect.isclass(ann) and is_tensor(ann):
         return TensorType.get()
+    try:
+        check_args_exist(ann)
+    except RuntimeError as e:
+        msg = "The contained type of {} needs to be specified at\n{}".format(repr(ann), repr(loc))
+        raise RuntimeError(msg) from e
     if is_tuple(ann):
         # Special case for the empty Tuple type annotation `Tuple[()]`
         if len(ann.__args__) == 1 and ann.__args__[0] == ():
             return TupleType([])
         return TupleType([try_ann_to_type(a, loc) for a in ann.__args__])
+
     if is_list(ann):
         elem_type = try_ann_to_type(ann.__args__[0], loc)
         if elem_type:
