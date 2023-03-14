@@ -3,8 +3,6 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-typedef struct PyCodeObject PyCodeObject;
-
 namespace torch {
 
 // struct that holds the result of symbolizing multiple tracebacks
@@ -20,7 +18,7 @@ struct TORCH_API SymbolizedTracebacks {
 
 struct TORCH_API CapturedTraceback : public c10::GatheredContext {
   struct PyFrame {
-    PyCodeObject* code;
+    void* code; // PyCodeObject*, but python headers not present
     int lasti;
   };
 
