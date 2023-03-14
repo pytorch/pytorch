@@ -39,6 +39,10 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_matrix_ops
 time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/ops/test_softmax
 time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_sharded_optim
+
+# DTensor/TP tests
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_2d_parallel
+
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
 time python test/run_test.py --verbose -i test_optim -- -k optimizers_with_varying_tensors
