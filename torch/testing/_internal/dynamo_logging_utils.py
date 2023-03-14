@@ -2,7 +2,7 @@ import torch._logging.loggable_types
 import functools
 from . import logging_utils
 
-make_test = functools.partial(
+make_logging_test = functools.partial(
     logging_utils.make_test,
     log_names=(
         torch._logging.loggable_types.TORCHDYNAMO_LOG_NAME,

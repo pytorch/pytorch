@@ -11,6 +11,7 @@
 import collections
 import itertools
 import logging
+import functools
 import os
 import re
 from typing import DefaultDict, Dict, Set
@@ -314,24 +315,26 @@ def init_logs(log_file_name=None):
         log.propagate = False
         _clear_handlers(log)
 
-    name_to_levels = _get_log_state()
+    log_state = _get_log_state()
     log_qname_to_enabled_types: DefaultDict[str, Set[type]] = collections.defaultdict(set)
     log_qname_to_level = dict()
 
     # generate a map of log_name -> the types that should be logged
-    for name, level in name_to_levels.items():
+    for name, level in log_state.log_name_to_level.items():
         log_qname = log_registry.name_to_log_qname[name]
-        if log_registry.is_log(name):
-            log_qname_to_level[log_qname] = level
-            logging.getLogger(log_qname).setLevel(
-                logging.DEBUG
-            )  # allow all messages through logger
-            # ensure log_name is in the dictionary
-            rec_types = log_qname_to_enabled_types[log_qname]
-            if level == logging.DEBUG or log_registry.supports_verbosity(name):
-                rec_types.update(log_registry.log_qname_to_rec_types[log_qname])
-        else:
-            log_qname_to_enabled_types[log_qname].add(log_registry.name_to_rec_type[name])
+        assert log_registry.is_log(name)
+        log_qname_to_level[log_qname] = level
+        logging.getLogger(log_qname).setLevel(
+            logging.DEBUG
+        )  # allow all messages through logger
+        # ensure log_name is in the dictionary
+        rec_types = log_qname_to_enabled_types[log_qname]
+        if level == logging.DEBUG or log_registry.supports_verbosity(name):
+            rec_types.update(log_registry.log_qname_to_rec_types[log_qname])
+
+    for name in log_state.enabled_artifact_names:
+        log_qname = log_registry.name_to_log_qname[name]
+        log_qname_to_enabled_types[log_qname].add(log_registry.name_to_rec_type[name])
 
     for log_name, enabled_types in log_qname_to_enabled_types.items():
         log = logging.getLogger(log_name)
@@ -351,3 +354,17 @@ def init_logs(log_file_name=None):
                 enabled_types,
                 level,
             )
+
+
+@functools.lru_cache(None)
+def warning_once(self, *args, **kwargs):
+    """
+    This method is identical to `logger.warning()`, but will emit the warning with the same message only once
+    Note: The cache is for the function arguments, so 2 different callers using the same arguments will hit the cache.
+    The assumption here is that all warning messages are unique across the code. If they aren't then need to switch to
+    another type of cache that includes the caller frame information in the hashing function.
+    """
+    self.warning(*args, **kwargs)
+
+
+logging.Logger.warning_once = warning_once
