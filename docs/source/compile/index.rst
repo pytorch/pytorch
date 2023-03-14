@@ -79,6 +79,5 @@ please check out the references below.
 .. toctree::
    :maxdepth: 1
 
-   installation
    get-started
    technical-overview
