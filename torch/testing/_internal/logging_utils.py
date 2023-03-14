@@ -36,7 +36,7 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
-        torch._logging.init_logs()
+        torch._logging._init_logs()
 
     def _handler_watcher(self, loggers, record_list, install_hook=None):
         exit_stack = contextlib.ExitStack()

@@ -97,7 +97,7 @@ class LoggingTests(LoggingTestCase):
     test_inductor_debug = within_range_record_test("+inductor", str, 5, 15)
     test_inductor_info = within_range_record_test("inductor", str, 2, 4)
 
-    @make_logging_test("-inductor")
+    @make_logging_test("-dynamo")
     def test_inductor_error(self, records):
         import torch._inductor.lowering
 
