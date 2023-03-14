@@ -3,10 +3,13 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-struct PyCodeObject;
+typedef struct PyCodeObject PyCodeObject;
 
 namespace torch {
 
+// struct that holds the result of symbolizing multiple tracebacks
+// each traceback is a list of indices into all_frames
+// (lots of Frames get duplicated across traces)
 struct TORCH_API SymbolizedTracebacks {
   std::vector<unwind::Frame> all_frames;
   // index into all_frames, so that
@@ -38,14 +41,20 @@ struct TORCH_API CapturedTraceback : public c10::GatheredContext {
     virtual ~Python() = default;
     Python* next_ = nullptr;
   };
+  // called once by each python interpreter to
+  // register python stack recording functionality
+  // p cannot be deleted once added.
   static void addPythonUnwinder(Python* p);
 
  private:
   std::vector<PyFrame> frames_;
   std::vector<void*> cpp_frames_;
   std::vector<jit::StackEntry> script_frames_;
-  friend SymbolizedTracebacks symbolize(
-      const std::vector<CapturedTraceback*>& to_symbolize);
+  friend TORCH_API SymbolizedTracebacks
+  symbolize(const std::vector<CapturedTraceback*>& to_symbolize);
+
+  // non-owning reference to one of the immortal Python* objects
+  // registered above.
   Python* python_ = nullptr;
 };
 
