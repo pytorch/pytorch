@@ -10,7 +10,7 @@ def get_field(csv, model_name: str, field: str, typ=float):
     return typ(csv.loc[csv["name"] == model_name][field])
 
 
-def check_graph_breaks(actual_csv, expected_csv, expected_filename):
+def check_graph_breaks(actual_csv, expected_csv, expected_filename, dynamic_csv=None):
 
     failed = []
     improved = []
@@ -22,19 +22,17 @@ def check_graph_breaks(actual_csv, expected_csv, expected_filename):
 
         if graph_breaks == expected_graph_breaks:
             status = "PASS"
+            print(f"{model:34}  {status}")
+            continue
+
         elif graph_breaks > expected_graph_breaks:
-            status = "FAIL"
+            status = "FAIL:"
             failed.append(model)
         elif graph_breaks < expected_graph_breaks:
-            status = "IMPROVED"
+            status = "IMPROVED:"
             improved.append(model)
         print(
-            f"""
-            {model:34}:
-                graph_breaks={graph_breaks},
-                expected_graph_breaks={expected_graph_breaks},
-                {status}
-            """
+            f"{model:34}  {status:9} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
         )
 
     msg = ""
@@ -75,9 +73,11 @@ def main():
 
     actual = pd.read_csv(args.actual)
     expected = pd.read_csv(args.expected)
-    dynamic = pd.read_csv("benchmarks/dynamo/ci_expected_accuracy/extra_dynamic_breaks.csv")
+    dynamic = pd.read_csv(
+        "benchmarks/dynamo/ci_expected_accuracy/extra_dynamic_breaks.csv"
+    )
 
-    failed, msg = check_graph_breaks(actual, expected, args.expected)
+    failed, msg = check_graph_breaks(actual, expected, dynamic, args.expected)
     if failed:
         print(msg)
         sys.exit(1)
