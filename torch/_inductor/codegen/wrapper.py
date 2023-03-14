@@ -628,9 +628,9 @@ class WrapperCodeGen(CodeGen):
             with output.indent():
                 output.writeline("benchmark_compiled_module()")
 
-    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
-        kernel_path_comment = f"# kernel path: {kernel_path}\n" if kernel_path else ""
-        self.header.splice(f"\n\n{kernel_path_comment}{name} = {kernel}")
+    def define_kernel(self, name: str, kernel: str, metadata: str = None):
+        metadata_comment = f"{metadata}\n" if metadata else ""
+        self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return

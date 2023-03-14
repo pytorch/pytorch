@@ -1708,7 +1708,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         )
 
         inp = torch.randn(6, 7)
-        breakpoint()
         self.assertEqual(gm(inp), f(inp))
 
     @patch.object(torch._dynamo.config, "dynamic_shapes", True)
