@@ -14,6 +14,7 @@ from . import config, utils
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 inductor_decompositions = get_decompositions(
     [
@@ -363,6 +364,8 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
         result = result * alpha
+    if beta == 0:
+        return result
     if not isinstance(beta, numbers.Number) or beta != 1:
         self = self * beta
     return self + result
@@ -383,6 +386,36 @@ def lift(self):
 def bernoulli(self, *, generator=None):
     assert generator is None
     return torch.rand_like(self, dtype=torch.float32) < self
+
+
+@register_decomposition([aten.fmin, prims.fmin])
+def fmin(self, other):
+    return torch.where(torch.isnan(other) | (other > self), self, other)
+
+
+@register_decomposition([aten.fmax, prims.fmax])
+def fmax(self, other):
+    return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition([aten.narrow_copy])
+def narrow_copy(self, dim, start, length):
+    return torch.narrow(self, dim, start, length).clone()
+
+
+@register_decomposition([aten.expand_copy])
+def expand_copy(self, size, *, implicit=False):
+    return aten.expand(self, size, implicit=implicit).clone()
+
+
+@register_decomposition([aten.view_copy.default])
+def view_copy_default(self, size):
+    return aten.view(self, size).clone()
+
+
+@register_decomposition([aten.view_copy.dtype])
+def view_copy_dtype(self, dtype):
+    return self.to(dtype).clone()
 
 
 """
