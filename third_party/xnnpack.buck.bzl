@@ -10,6 +10,7 @@ load(
     "OPERATOR_SRCS",
     "SUBGRAPH_SRCS",
     "TABLE_SRCS",
+    "XNNPACK_SRCS",
 )
 load(
     ":xnnpack_wrapper_defs.bzl",
@@ -84,16 +85,44 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
     )
 
     fb_xplat_cxx_library(
+        name = "hot",
+        srcs = [
+            "XNNPACK/src/enums/microkernel-type.c",
+            "XNNPACK/src/enums/operator-type.c"
+            ],
+        header_namespace = "",
+        exported_headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        exported_deps = [
+            # Dependency only on pthreadpool interface
+            ":interface",
+            third_party("pthreadpool_header"),
+            third_party("cpuinfo"),
+            third_party("FP16"),
+            third_party("FXdiv"),
+            third_party("clog"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "operators",
         # srcs have to include HOT_SRCS to be able to build on ARVR
         srcs = OPERATOR_SRCS + [
+            "XNNPACK/src/cache.c",
+            "XNNPACK/src/operator-run.c",
+            "XNNPACK/src/allocator.c",
             "XNNPACK/src/binary-elementwise-config.c",
             "XNNPACK/src/packing.c",
-            "XNNPACK/src/cache.c",
             "XNNPACK/src/indirection.c",
             "XNNPACK/src/operator-utils.c",
             "XNNPACK/src/normalization.c",
-            "XNNPACK/src/allocator.c",
             "XNNPACK/src/memory.c",
             "XNNPACK/src/mutex.c",
         ],
@@ -119,6 +148,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
+            ":hot",
             ":interface",
             ":ukernels_f16c",
             third_party("cpuinfo"),
@@ -130,7 +160,7 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
 
     fb_xplat_cxx_library(
         name = "subgraph",
-        srcs = SUBGRAPH_SRCS,
+        srcs = SUBGRAPH_SRCS + ["XNNPACK/src/runtime.c"],
         headers = subdir_glob([
             ("XNNPACK/src", "**/*.h"),
         ]),
@@ -156,6 +186,8 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         windows_compiler_flags_override = WINDOWS_FLAGS,
         deps = [
             ":interface",
+            ":operators",
+            third_party("pthreadpool_header"),
             third_party("FP16"),
             third_party("FXdiv"),
             third_party("clog"),
@@ -1965,7 +1997,6 @@ def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = F
         srcs = [
             "XNNPACK/src/init.c",
             "XNNPACK/src/params.c",
-            "XNNPACK/src/operator-run.c",
             "XNNPACK/src/microparams-init.c",
             "XNNPACK/src/x8-lut-config.c",
             "XNNPACK/src/hardware-config.c",
