@@ -48,14 +48,14 @@ Features described in this documentation are classified by release status:
    :caption: torch.compile
    :hidden:
 
-   dynamo/index
-   dynamo/installation
-   dynamo/get-started
-   dynamo/guards-overview
-   dynamo/custom-backends
-   dynamo/deep-dive
-   dynamo/troubleshooting
-   dynamo/faq
+   compile/index
+   compile/installation
+   compile/get-started
+   compile/guards-overview
+   compile/custom-backends
+   compile/deep-dive
+   compile/troubleshooting
+   compile/faq
    ir
 
 .. toctree::

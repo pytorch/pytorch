@@ -1,5 +1,6 @@
 Frequently Asked Questions
 ==========================
+**Author**: `Mark Saroufim <https://github.com/msaroufim>`_
 
 At a high level, the TorchDynamo stack consists of a graph capture from
 Python code using dynamo and a backend compiler. In this example the
