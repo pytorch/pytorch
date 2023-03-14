@@ -42,19 +42,6 @@ ignored_attributes = [
     "dump_patches",
 ]
 
-def _configure_hooks(script_module):
-    # Copy the forward hooks and pre-hooks to the new ScriptModule
-    # to allow the hooks to be run from eager as ScriptFunctions
-    for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
-        script_module._forward_pre_hooks[idx] = fn
-    for idx, fn in enumerate(script_module._c._get_forward_hooks()):
-        script_module._forward_hooks[idx] = fn
-
-    # The _update_has_hooks method sets _has_hooks attr which is used by _call_impl during python execution
-    # of a scriptmodule.  This needs to be run both on scriptmodule creation and loading.
-    script_module._update_has_hooks = torch.nn.Module._update_has_hooks.__get__(script_module)
-    script_module._update_has_hooks()
-
 def _compile_and_register_class(obj, rcb, qualified_name):
     script_class = _get_script_class(obj)
 
@@ -541,7 +528,6 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
             if name in ignored_properties:
                 continue
             item = getattr(nn_module, name, None)
-
             if inspect.ismethod(item) and _jit_internal.is_ignored_fn(item):
                 unbound_function = getattr(nn_module, name).__func__
                 bound_method = unbound_function.__get__(script_module)
@@ -554,6 +540,7 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
 
     # Actually create the ScriptModule, initializing it with the function we just defined
     script_module = torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
+
     # Compile methods if necessary
     if concrete_type not in concrete_type_store.methods_compiled:
         create_methods_and_properties_from_stubs(concrete_type, method_stubs, property_stubs)
@@ -563,8 +550,13 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
         torch._C._run_emit_module_hook(cpp_module)
         concrete_type_store.methods_compiled.add(concrete_type)
 
+    # Copy the forward hooks and pre-hooks to the new ScriptModule
+    # to allow the hooks to be run from eager as ScriptFunctions
+    for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
+        script_module._forward_pre_hooks[idx] = fn
+    for idx, fn in enumerate(script_module._c._get_forward_hooks()):
+        script_module._forward_hooks[idx] = fn
 
-    _configure_hooks(script_module)
 
     # Special handling so methods like __len__ work in script methods on classes derived from containers
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential, torch.nn.ModuleDict)) and \
@@ -889,7 +881,10 @@ def wrap_cpp_module(cpp_module):
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(script_module._c._type())
 
-        _configure_hooks(script_module)
+        for idx, fn in enumerate(script_module._c._get_forward_pre_hooks()):
+            script_module._forward_pre_hooks[idx] = fn
+        for idx, fn in enumerate(script_module._c._get_forward_hooks()):
+            script_module._forward_hooks[idx] = fn
 
     return torch.jit.RecursiveScriptModule._construct(cpp_module, init_fn)
 
