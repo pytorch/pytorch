@@ -123,6 +123,7 @@ class DeviceMesh:
     def _get_or_create_default_group(self):
         if not is_initialized():
             unique_mesh_values = self.mesh.unique(sorted=True)
+            # assume we are using env:// and with env vars set, TODO: add some check here
             world_size = int(os.getenv("WORLD_SIZE", unique_mesh_values[-1] + 1))
 
             if unique_mesh_values.numel() != self.mesh.numel():
