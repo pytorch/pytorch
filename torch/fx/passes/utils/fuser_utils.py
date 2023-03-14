@@ -8,9 +8,7 @@ from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 from torch.fx.passes.utils import lift_subgraph_as_module
-from torch.fx._compatibility import compatibility
 
-@compatibility(is_backward_compatible=False)
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
     indegree_map = {node : 0 for node in nodes}
@@ -39,7 +37,6 @@ def topo_sort(nodes: NodeList) -> NodeList:
     return sorted_nodes
 
 
-@compatibility(is_backward_compatible=False)
 def validate_partition(partition: NodeList) -> bool:
     # verify the partition does't form a dependency cycle in the original graph
     # returns True for valid partition, False for invalid
@@ -88,7 +85,6 @@ def validate_partition(partition: NodeList) -> bool:
     return True
 
 
-@compatibility(is_backward_compatible=False)
 def fuse_as_graphmodule(gm: GraphModule,
                         nodes: NodeList,
                         module_name: str) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
@@ -185,7 +181,6 @@ def fuse_as_graphmodule(gm: GraphModule,
     return fused_gm, original_inputs, original_outputs
 
 
-@compatibility(is_backward_compatible=False)
 def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, ...], orig_outputs: Tuple[Node, ...]):
     # add sub_gm into gm
     submodule_name = sub_gm.__class__.__name__
@@ -207,7 +202,6 @@ def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, 
             orig_output.replace_all_uses_with(proxy_out, propagate_meta=True)
     return gm
 
-@compatibility(is_backward_compatible=False)
 def erase_nodes(gm: GraphModule, nodes: NodeList):
 
     # erase original nodes in inversed topological order
@@ -215,7 +209,6 @@ def erase_nodes(gm: GraphModule, nodes: NodeList):
         gm.graph.erase_node(node)
 
 
-@compatibility(is_backward_compatible=False)
 def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         sorted_nodes = topo_sort(nodes)

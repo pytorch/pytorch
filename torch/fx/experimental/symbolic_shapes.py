@@ -34,7 +34,7 @@ from sympy.core.logic import fuzzy_and, fuzzy_or
 aten = torch._ops.ops.aten  # type: ignore[has-type]
 
 __all__ = [
-    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv",
+    "has_symbolic_sizes_strides", "create_contiguous", "ShapeEnv", "is_concrete_int",
     "SymDispatchMode", "FloorDiv", "guard_int", "guard_float", "guard_scalar", "wrap_node",
     "method_to_operator", "hint_int", "SYMPY_INTERP",
 ]
@@ -111,6 +111,20 @@ def hint_int(a):
 def has_hint(a):
     if isinstance(a, SymTypes):
         return a.node.has_hint()
+    return True
+
+def is_concrete_int(a: Union[int, SymInt]):
+    r""" Utility to check if underlying object
+    in SymInt is concrete value. Also returns
+    true if integer is passed in.
+
+    Args:
+        a (SymInt or int): Object to test if int
+    """
+    assert isinstance(a, SymInt) or isinstance(a, int)
+    if isinstance(a, SymInt):
+        return a.node.is_int()
+
     return True
 
 # Returns True if every size dim on the tensor has a hint
@@ -1170,7 +1184,7 @@ class ShapeGuardPrinter(StrPrinter):
         def repr_symbol_to_source():
             return repr({
                 symbol: [s.name() for s in sources]
-                for symbol, sources in self.symbol_to_source.items()
+                for symbol, sources in self.symbol_to_source
             })
 
         assert expr in self.symbol_to_source, (

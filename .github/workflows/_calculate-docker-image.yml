@@ -25,6 +25,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
         with:
           submodules: false
+          fetch-depth: 1
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux

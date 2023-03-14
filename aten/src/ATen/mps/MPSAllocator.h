@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <mutex>
 #include <set>
-#include <unordered_set>
 #include <mach/vm_page_size.h>
 #include <c10/util/flat_hash_map.h>
 

@@ -32,7 +32,7 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 import builtins
 
 __all__ = [
-    'typename', 'is_tensor', 'is_concrete_int', 'is_storage',
+    'typename', 'is_tensor', 'is_storage',
     'set_default_tensor_type', 'set_default_device',
     'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
     'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
@@ -431,20 +431,6 @@ def sym_min(a, b):
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
     return builtins.min(a, b)  # type: ignore[operator]
-
-def is_concrete_int(a: Union[builtins.int, SymInt]):
-    r""" Utility to check if underlying object
-    in SymInt is concrete value. Also returns
-    true if integer is passed in.
-
-    Args:
-        a (SymInt or int): Object to test if int
-    """
-    assert isinstance(a, SymInt) or isinstance(a, builtins.int)
-    if isinstance(a, SymInt):
-        return a.node.is_int()
-
-    return True
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.

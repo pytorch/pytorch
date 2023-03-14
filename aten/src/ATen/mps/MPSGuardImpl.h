@@ -4,7 +4,6 @@
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/Context.h>
 #include <ATen/mps/MPSStream.h>
 
 #ifdef __OBJC__

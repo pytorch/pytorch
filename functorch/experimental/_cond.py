@@ -15,6 +15,7 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     track_tensor_tree,
     unwrap_proxy,
+    maybe_disable_all_fake_tensor_modes,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -40,7 +41,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    with disable_proxy_modes_tracing():
+    with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
         true_graph = make_fx(true_fn)(*operands)
         false_graph = make_fx(false_fn)(*operands)
 
@@ -101,7 +102,8 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@cond.py_impl(DispatchKey.CompositeExplicitAutograd)
+@cond.py_impl(DispatchKey.CUDA)
+@cond.py_impl(DispatchKey.CPU)
 def cond_dense(pred, true_fn, false_fn, operands):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
@@ -111,7 +113,8 @@ def cond_dense(pred, true_fn, false_fn, operands):
         return false_fn(*operands)
 
 
-@cond.py_impl(DispatchKey.Autograd)
+@cond.py_impl(DispatchKey.AutogradCUDA)
+@cond.py_impl(DispatchKey.AutogradCPU)
 def cond_autograd(pred, true_fn, false_fn, *operands):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([true_fn, false_fn] + [operands])
@@ -162,7 +165,8 @@ def _has_potential_branch_input_mutation(branch, inputs):
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
+        with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
+            gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -190,7 +194,9 @@ def _has_potential_branch_input_alias(branch, inputs):
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
+        with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
+            gm = make_fx(branch)(*inputs)
+
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
         # functionalized
@@ -245,4 +251,3 @@ def cond_functionalize(interpreter, pred, true_fn, false_fn, inputs):
 cond.fallthrough(DispatchKey.PythonTLSSnapshot)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
 cond.fallthrough(DispatchKey.BackendSelect)
-cond.fallthrough(DispatchKey.AutocastCPU)

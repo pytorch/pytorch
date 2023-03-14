@@ -5,7 +5,6 @@
 #include <c10/core/CPUAllocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/FbcodeMaps.h>
 #include <c10/util/variant.h>
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/ir/graph_node_list.h>
@@ -25,11 +24,23 @@
 namespace torch {
 namespace jit {
 
+#ifdef FBCODE_CAFFE2
+template <typename Key, typename Value>
+using FastMap = folly::F14FastMap<Key, Value>;
+template <typename Key>
+using FastSet = folly::F14FastSet<Key>;
+#else
+template <typename Key, typename Value>
+using FastMap = std::unordered_map<Key, Value>;
+template <typename Key>
+using FastSet = std::unordered_set<Key>;
+#endif
+
 TORCH_API bool canEnableStaticRuntime(
     const std::shared_ptr<torch::jit::Graph>& graph);
 
 TORCH_API std::string dumpValueSet(
-    const c10::FastSet<const Value*>& value_set,
+    const FastSet<const Value*>& value_set,
     const char* set_name = "");
 
 TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
@@ -100,8 +111,8 @@ class ValueGroup {
   }
 
  private:
-  c10::FastSet<const Value*> output_aliases_;
-  c10::FastSet<const Value*> external_aliases_;
+  FastSet<const Value*> output_aliases_;
+  FastSet<const Value*> external_aliases_;
 };
 
 class TORCH_API ManagedTensorRanges {
@@ -110,7 +121,7 @@ class TORCH_API ManagedTensorRanges {
   ManagedTensorRanges(
       Block& block,
       const AliasDb& alias_db,
-      const c10::FastSet<const Value*>& managed_tensor_values);
+      const FastSet<const Value*>& managed_tensor_values);
 
   // If true, then this node is the last use of at least one
   // managed tensor. availableTensorValuesAfterNode(node) will return a vector
@@ -143,9 +154,9 @@ class TORCH_API ManagedTensorRanges {
 
   // Maps Node* to the set of managed tensors that are now available
   // for re-use after this node.
-  c10::FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
+  FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
   // Maps each Value* to its lifetime (start node index, end node index)
-  c10::FastMap<const Value*, Lifetime> value_lifetimes_{};
+  FastMap<const Value*, Lifetime> value_lifetimes_{};
 };
 
 struct TORCH_API StaticModuleOptions {
@@ -266,7 +277,7 @@ class BlockInfo {
 
   void set_nodes(
       std::vector<StaticNodeInfo> nodes,
-      const c10::FastMap<Node*, bool>& node_has_out_variant);
+      const FastMap<Node*, bool>& node_has_out_variant);
 
   const std::vector<StaticNodeInfo>& nodes() const {
     return nodes_;
@@ -346,10 +357,10 @@ class BlockInfo {
 
   ValueGroup value_group_;
 
-  c10::FastSet<const Node*> node_is_optimizable_container_type_;
-  c10::FastSet<const Value*> managed_tensor_values_;
-  c10::FastSet<const Value*> managed_output_tensor_values_;
-  c10::FastSet<const Value*> leaked_values_;
+  FastSet<const Node*> node_is_optimizable_container_type_;
+  FastSet<const Value*> managed_tensor_values_;
+  FastSet<const Value*> managed_output_tensor_values_;
+  FastSet<const Value*> leaked_values_;
 
   ManagedTensorRanges managed_tensor_ranges_{};
 
@@ -470,12 +481,12 @@ class TORCH_API StaticModule {
   size_t prepareBlockInfo(
       Block* block,
       const size_t start_idx,
-      c10::FastMap<const Value*, uint32_t>& value_to_index);
+      FastMap<const Value*, uint32_t>& value_to_index);
 
   void prepareFunctionsAndConstants(
       Block* block,
       const AliasDb& alias_db,
-      c10::FastMap<const Value*, uint32_t>& value_to_index);
+      FastMap<const Value*, uint32_t>& value_to_index);
 
   // Recursively traverse the graph and attach SR metadata
   // to the prim::fork nodes as additional attributes
@@ -485,7 +496,7 @@ class TORCH_API StaticModule {
   // Returns (number of nodes processed, number of blocks processed)
   size_t prepareStaticNodeInfos(
       Block* block,
-      const c10::FastMap<const Value*, uint32_t>& value_to_index,
+      const FastMap<const Value*, uint32_t>& value_to_index,
       const AliasDb& alias_db,
       size_t node_idx = 0);
 
@@ -520,7 +531,7 @@ class TORCH_API StaticModule {
   // includes it anyways to be consistent with the JIT interpreter.
   size_t num_inputs_;
   // See `BlockInfo` definition. The blocks are stored in depth-first order.
-  c10::FastMap<Block*, BlockInfo> block_infos_;
+  FastMap<Block*, BlockInfo> block_infos_;
   size_t value_buffer_size_ = 0;
 };
 

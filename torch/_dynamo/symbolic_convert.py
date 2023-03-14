@@ -834,8 +834,7 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
-        if inst.argval not in self.f_builtins:
-            raise NameError(f"name '{inst.argval}' is not defined")
+        assert inst.argval in self.f_builtins
         val = self.f_builtins[inst.argval]
 
         if callable(val):

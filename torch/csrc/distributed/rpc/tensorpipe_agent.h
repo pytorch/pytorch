@@ -314,8 +314,8 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // TODO: To achieve better performance we can have a pipe pool per
   // client that can be configured using RpcBackendOptions.
   struct ClientPipe {
-    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe)
-        : pipe_(std::move(pipe)) {}
+    // NOLINTNEXTLINE(modernize-pass-by-value)
+    explicit ClientPipe(std::shared_ptr<tensorpipe::Pipe> pipe) : pipe_(pipe) {}
     std::shared_ptr<tensorpipe::Pipe> pipe_;
     mutable std::mutex mutex_;
     bool inError_{false};
@@ -359,10 +359,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   struct TimeoutMessageMetadata {
     TimeoutMessageMetadata(
         uint64_t messageId_,
+        // NOLINTNEXTLINE(modernize-pass-by-value)
         std::shared_ptr<AtomicJitFuture> responseFuture_,
         std::chrono::milliseconds timeout_)
         : messageId(messageId_),
-          responseFuture(std::move(responseFuture_)),
+          responseFuture(responseFuture_),
           timeout(timeout_) {}
     uint64_t messageId;
     std::shared_ptr<AtomicJitFuture> responseFuture;

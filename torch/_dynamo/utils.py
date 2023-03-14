@@ -957,10 +957,11 @@ def same(
             log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        if relax_numpy_equality and not (
-            is_numpy_int_type(res) or is_numpy_float_type(res)
-        ):
-            ref = ref.item()
+        if relax_numpy_equality:
+            if is_numpy_int_type(ref):
+                ref = ref.item()
+            if is_numpy_int_type(res):
+                res = res.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
             log.error(f"Accuracy failed (numpy): {ref} != {res}")

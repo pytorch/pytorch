@@ -185,7 +185,6 @@ def get_ignored_functions() -> Set[Callable]:
         torch.sym_max,
         torch.sym_min,
         torch.sym_not,
-        torch.is_concrete_int,
         torch.tril_indices,
         torch.triu_indices,
         torch.vander,

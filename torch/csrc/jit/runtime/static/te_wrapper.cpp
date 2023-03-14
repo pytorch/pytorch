@@ -93,8 +93,8 @@ std::mutex& getNNCCacheMutex() {
   return nncCacheMutex;
 }
 
-c10::FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
-  static c10::FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
+FastMap<NodeKind, std::shared_ptr<TEWrapper>>& getNNCCache() {
+  static FastMap<NodeKind, std::shared_ptr<TEWrapper>> nncCache;
   return nncCache;
 }
 

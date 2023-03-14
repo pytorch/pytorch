@@ -8,6 +8,7 @@ from torch._ops import PyOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
+    maybe_disable_all_fake_tensor_modes,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -32,7 +33,7 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     if not all(isinstance(o, torch.Tensor) for o in args):
         raise ValueError("map() operands must be a list of tensors or modules")
 
-    with disable_proxy_modes_tracing():
+    with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
         body_graph = make_fx(f)(xs[0], *args)
 
     next_name = None
@@ -59,14 +60,16 @@ def trace_map(proxy_mode, func_overload, f, xs, *args):
     return track_tensor_tree(out, out_proxy, constant=None, tracer=proxy_mode.tracer)
 
 
-@map.py_impl(DispatchKey.CompositeExplicitAutograd)
+@map.py_impl(DispatchKey.CUDA)
+@map.py_impl(DispatchKey.CPU)
 def map_cpu(f, xs, *args):
     mode = _get_current_dispatch_mode()
     assert (mode is None), "Mode should never be enabled for CPU/CUDA key"
     return torch.stack([f(x, *args) for x in xs])
 
 
-@map.py_impl(DispatchKey.Autograd)
+@map.py_impl(DispatchKey.AutogradCUDA)
+@map.py_impl(DispatchKey.AutogradCPU)
 def map_autograd(f, xs, *args):
     # TODO: support autograd
     flat_operands, _ = tree_flatten([f, xs, args])
@@ -131,4 +134,3 @@ def map_functionalize(interpreter, f, xs, *args):
 map.fallthrough(DispatchKey.PythonTLSSnapshot)
 map.fallthrough(DispatchKey.ADInplaceOrView)
 map.fallthrough(DispatchKey.BackendSelect)
-map.fallthrough(DispatchKey.AutocastCPU)
