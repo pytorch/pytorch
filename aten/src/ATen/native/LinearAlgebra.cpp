@@ -1561,10 +1561,10 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
             } else {
               // For beta == 0, the r's value will be ignored, especially for nan value.
               if (beta == scalar_t{0}) {
-                r2[j] = alpha.to<opmath_t>() * acc_value;
+                r2[j] = static_cast<opmath_t>(alpha) * acc_value;
               } else {
-                r2[j] = r2[j] * beta.to<opmath_t>() +
-                    alpha.to<opmath_t>() * acc_value;
+                r2[j] = r2[j] * static_cast<opmath_t>(beta) +
+                    static_cast<opmath_t>(alpha) * acc_value;
               }
             }
           }
