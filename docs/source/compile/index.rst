@@ -25,6 +25,9 @@ co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-
        return x
    compiled_fn = torch.compile(fn(torch.randn(10).cuda()))
 
+If you happen to be running your model on an Ampere GPU, it's crucial to enable tensor cores. We will actually warn you to set
+`torch.set_float32_matmul_precision('high')`
+
 ::func::`torch.compile` works over ::class::`torch.nn.Module` as well as functions so you can pass in your entire training loop.
 
 The above example was for inference but you can follow this tutorial for an `example on training <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>__`
@@ -38,7 +41,9 @@ Optimizations can be passed in :func:`~torch.compile` with either a backend mode
 :func:`~torch._inductor.list_options()`` and :func:`~torch._inductor.list_mode_options`
 
 The default backend is `backend="inductor"` which will likely be the most reliable and performant option for most users and library maintainers,
-other backends are there for power users who don't mind more experimental community support.    
+other backends are there for power users who don't mind more experimental community support.   
+
+You can get the full list of community backends by running :func:`~torch._dynamo.list_backends``
 
 .. autosummary::
     :toctree: generated
