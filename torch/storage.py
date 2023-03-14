@@ -17,7 +17,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 _share_memory_lock = threading.Lock()
-_share_memory_map: _Dict[int, threading.Lock] = {}
+_share_memory_map: _Dict[int, threading.RLock] = {}
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase:
@@ -242,17 +242,14 @@ def _share_memory_lock_protected(fn):
     def wrapper(self, *args, **kwargs):
         to_free = None
         to_wait = None
-        # If the storage is already shared (which is the last thing done when
-        # moving to shared), this is a no-op so skip any locking logic
-        if not self.is_shared():
-            with _share_memory_lock:
-                key = self._cdata
-                if key in _share_memory_map:
-                    to_wait = _share_memory_map[key]
-                else:
-                    _share_memory_map[key] = threading.Lock()
-                    _share_memory_map[key].acquire()
-                    to_free = key
+        with _share_memory_lock:
+            key = self._cdata
+            if key in _share_memory_map:
+                to_wait = _share_memory_map[key]
+            else:
+                _share_memory_map[key] = threading.RLock()
+                _share_memory_map[key].acquire()
+                to_free = key
 
         # If we're already in the process of sharing the storage, wait
         # for it to be done.
