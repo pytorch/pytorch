@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 namespace at { namespace native {
 
