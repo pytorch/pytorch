@@ -149,4 +149,6 @@ def _create_1d_device_mesh(device_mesh: DeviceMesh, tp_mesh_dim: int = 0) -> Dev
     dim_mesh_1d = pg_ranks_by_dim[torch.any(pg_ranks_by_dim == cur_rank, 1), :]
 
     sub_pg = device_mesh.get_dim_groups()[tp_mesh_dim]
-    return DeviceMesh(device_mesh.device_type, dim_mesh_1d.squeeze(), [sub_pg])
+    mesh_1d = DeviceMesh(device_mesh.device_type, dim_mesh_1d.squeeze(), init_process_groups=False)
+    mesh_1d._dim_groups = [sub_pg]
+    return mesh_1d

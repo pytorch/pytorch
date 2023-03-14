@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import inspect
 import operator
 import unittest
@@ -1885,6 +1886,85 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         # To ensure dynamo.export is robust to wrapped functions
         # when it cannot use `inspect` to retrieve original signature
         # info.
+        def _fn(pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+            out = pos0
+            out += pos1
+            out += kw0
+            out += kw1
+            for arg in args:
+                out += arg
+            for kwarg in kwargs.values():
+                out += kwarg
+            return out
+
+        def wrapped_fn(*args, **kwargs):
+            return _fn(*args, **kwargs)
+
+        pos0 = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, torch.randn(4), torch.randn(4))
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4)}
+        expected_argument_names = [f"args_{i}" for i in range(len(args))] + list(
+            kwargs.keys()
+        )
+
+        self._test_export_preserving_original_signature(
+            wrapped_fn, expected_argument_names, *args, **kwargs
+        )
+
+    def test_export_with_functools_wrapped_method(self):
+        def test_decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+            @test_decorator
+            def method_to_test(self, pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+                out = pos0
+                out += pos1
+                out += kw0
+                out += kw1
+                for arg in args:
+                    out += arg
+                for kwarg in kwargs.values():
+                    out += kwarg
+                return out
+
+        pos0 = torch.randn(4)
+        pos1 = torch.randn(4)
+        unnamed_pos = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, pos1, unnamed_pos)
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4), "unnamed_kw": torch.randn(4)}
+        expected_argument_names = [
+            "pos0",
+            "pos1",
+            "args_0",  # 3rd unnamed positional argument
+        ] + list(kwargs.keys())
+        m = MyModule()
+
+        self._test_export_preserving_original_signature(
+            m.method_to_test, expected_argument_names, *args, **kwargs
+        )
+
+    def test_export_with_functools_wrapped_fn(self):
+        def test_decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        @test_decorator
         def _fn(pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
             out = pos0
             out += pos1

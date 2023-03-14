@@ -173,7 +173,7 @@ void sparse_mask_intersection_out_cuda_kernel(
     const Tensor& y) {
   using CUDAValueRhsProjKernel = CUDAValueSelectionIntersectionKernel<RhsProjOp>;
   _sparse_binary_op_intersection_kernel_out<CUDAKernelLauncher, CUDAValueRhsProjKernel>(
-      result, x, y, true
+      result, x, y
   );
 }
 
