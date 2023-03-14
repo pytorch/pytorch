@@ -32,8 +32,9 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_REMOTE_GPU, IS_SANDCASTLE, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
+
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -49,6 +50,15 @@ TEST_MULTIGPU = TEST_CUDA and torch.cuda.device_count() >= 2
 if not TEST_CUDA:
     print('CUDA not available, skipping tests', file=sys.stderr)
     TestCase = NoTest  # noqa: F811
+
+try:
+    import torchvision.models  # noqa: F401
+    from torchvision.models import resnet18  # noqa: F401
+
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (torch.cuda.get_allocator_backend() == "cudaMallocAsync")
 TEST_LARGE_TENSOR = TEST_CUDA
@@ -4974,10 +4984,11 @@ class TestCudaComm(TestCase):
             torch.cuda.memory._record_memory_history(False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history(True, _enable_expensive_cpp=True)
+            torch.cuda.memory._record_memory_history(True, record_context_cpp=True)
             x = torch.rand(311, 411, device='cuda')
 
             ss = torch.cuda.memory._snapshot()['segments']
@@ -4987,7 +4998,7 @@ class TestCudaComm(TestCase):
                     if 'history' in b:
                         for h in b['history']:
                             if h['real_size'] == 311 * 411 * 4:
-                                self.assertNotEqual(len(h['cpp_frames']), 0)
+                                self.assertTrue('::rand' in str(h['frames']))
                                 found_it = True
             self.assertTrue(found_it)
 
@@ -5010,15 +5021,17 @@ class TestCudaComm(TestCase):
         self.assertTrue('"elements_category": [' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_plots(self):
-        for record_context in (True, False):
+        for record_context, cpp in ((True, IS_LINUX), (True, False), (False, False)):
             try:
                 torch.cuda.memory.empty_cache()
                 torch.cuda.memory._record_memory_history(
                     True,
                     record_context=record_context,
                     trace_alloc_max_entries=1000000,
-                    trace_alloc_record_context=True)
+                    trace_alloc_record_context=True,
+                    record_context_cpp=cpp)
 
                 def run():
                     x = torch.rand(128, 128, device='cuda')
@@ -5028,13 +5041,42 @@ class TestCudaComm(TestCase):
                 ss = torch.cuda.memory._snapshot()
                 tplot = trace_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in tplot))
+                self.assertTrue(cpp == ("::rand" in tplot))
+
                 self.assertTrue(str(128 * 128 * 4) in tplot)
                 splot = segment_plot(ss)
                 self.assertTrue(record_context == ("test_memory_plots" in splot))
                 self.assertTrue(str(128 * 128 * 4) in splot)
+                self.assertTrue(cpp == ("::rand" in splot))
                 torch.cuda.memory._record_memory_history(False)
             finally:
                 torch.cuda.memory._record_memory_history(False)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    def test_memory_snapshot_script(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history(True)
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device='cuda')
+
+            x = foo()
+
+            ss = torch.cuda.memory._snapshot()['segments']
+            found_it = False
+            for seg in ss:
+                for b in seg['blocks']:
+                    if 'history' in b:
+                        for h in b['history']:
+                            if h['real_size'] == 311 * 411 * 4:
+                                self.assertTrue(h['frames'][0]['name'] == 'foo')
+                                found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.cuda.memory._record_memory_history(False)
 
     def test_allocator_settings(self):
         def power2_div(size, div_factor):
@@ -5183,6 +5225,290 @@ class TestCudaComm(TestCase):
     @unittest.skipIf(TEST_PYNVML, "pynvml is not available")
     def test_clock_speed(self):
         self.assertTrue(torch.cuda.clock_rate() >= 0)
+
+
+MIN_BLOCK_SIZE = 512
+SMALL_SIZE = 1048576
+SMALL_BUFFER = 2097152
+LARGE_BUFFER = 20971520
+
+def get_cudagraph_segments(pool_id):
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] == pool_id]
+
+def get_all_cudagraph_segments():
+    segments = torch.cuda.memory_snapshot()
+    return [segment for segment in segments if segment["segment_pool_id"] != (0, 0)]
+
+def cudagraphify(fn, inputs, pool=None):
+    torch.cuda.synchronize()
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream):
+        fn(*inputs)
+    stream.synchronize()
+    torch.cuda.current_stream().wait_stream(stream)
+    torch.cuda.synchronize()
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph, stream=stream, pool=pool):
+        static_outputs = fn(*inputs)
+
+    return graph, static_outputs
+
+def int8_cuda(size):
+    return torch.ones([size], device="cuda", dtype=torch.uint8)
+
+def live_blocks(pool_id):
+    blocks = 0
+    seg = get_cudagraph_segments(pool_id)
+    for segment in get_cudagraph_segments(pool_id):
+        for block in segment["blocks"]:
+            blocks += block["state"] == "active_allocated"
+    return blocks
+
+
+def tensor_metadata(x):
+    return {
+        "nbytes": x.untyped_storage().nbytes(),
+        "data_ptr": x.untyped_storage().data_ptr(),
+        "size": x.shape,
+        "stride": x.stride(),
+        "dtype": x.dtype,
+        "device": x.device,
+        "storage_offset": x.storage_offset(),
+    }
+
+
+def reconstruct_from_tensor_metadata(metadata):
+    s = torch._C._construct_storage_from_data_pointer(
+        metadata["data_ptr"], metadata["device"], metadata["nbytes"]
+    )
+    t = torch.empty([0], device=metadata["device"], dtype=metadata["dtype"])
+    t.set_(
+        source=s,
+        storage_offset=metadata["storage_offset"],
+        size=metadata["size"],
+        stride=metadata["stride"],
+    )
+    return t
+
+
+@unittest.skipIf(TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+class TestBlockStateAbsorption(TestCase):
+
+    def checkCheckpointedBlock(self, before_block, after_block):
+        for field in ("size", "state"):
+            self.assertEqual(before_block[field], after_block[field])
+
+    def checkCheckpointedState(self, before_segments, after_segments):
+        # after may contain additional segments, but all of the segments in before
+        # should be exactly equivalent to after
+        after_ptr_to_segment = {segment["address"] : segment for segment in after_segments}
+
+        for before_segment in before_segments:
+            self.assertTrue(before_segment["address"] in after_ptr_to_segment)
+            after_segment = after_ptr_to_segment[before_segment["address"]]
+
+            for field in ("device", "total_size", "allocated_size", "active_size", "segment_type", "segment_pool_id"):
+                self.assertEqual(before_segment[field], after_segment[field])
+
+            self.assertEqual(len(before_segment["blocks"]), len(after_segment["blocks"]))
+            for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
+                self.checkCheckpointedBlock(before_block, after_block)
+
+    def checkFunction(self, fn, inputs, pool=None):
+        graph, outputs = cudagraphify(fn, inputs, pool=pool)
+
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+        state = torch._C._cuda_getCheckpointState(device, pool_id)
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    def setUp(self):
+        super().setUp()
+        self.segment_length = len(get_all_cudagraph_segments())
+
+    def tearDown(self):
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_all_cudagraph_segments()), self.segment_length)
+
+        super().tearDown()
+
+    def test_simple(self):
+
+        def foo():
+            x = torch.zeros([SMALL_SIZE * 8], device="cuda", dtype=torch.uint8)
+            x = x + x
+            x1 = int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE) + int8_cuda(SMALL_SIZE)
+            y = int8_cuda(SMALL_SIZE) + x1
+            z = int8_cuda(SMALL_SIZE)
+            return x, y, z
+
+        self.checkFunction(foo, [])
+
+    def test_allocated_in_middle_of_segment(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5].add_(2)
+
+        self.checkFunction(foo, [])
+
+    def test_multiple_middle_allocations(self):
+
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[8]
+
+        self.checkFunction(foo, [])
+
+    def test_middle_allocations_contiguous(self):
+        def foo():
+            small_buffers = [int8_cuda(MIN_BLOCK_SIZE) for _ in range(11)]
+            return small_buffers[5], small_buffers[6]
+
+        self.checkFunction(foo, [])
+
+    def test_additional_free_following_checkpoint(self):
+
+        def foo():
+            return int8_cuda(MIN_BLOCK_SIZE),
+
+        def foo2():
+            return int8_cuda(MIN_BLOCK_SIZE),
+
+        graph, outputs = cudagraphify(foo, [])
+        pool_id = graph.pool()
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+
+
+        torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+
+        del outputs2
+
+        self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
+
+    # TODO: re-enable
+    # def test_additional_free_error(self):
+    #     def foo():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
+
+    #     def foo2():
+    #         return int8_cuda(MIN_BLOCK_SIZE),
+
+    #     graph, outputs = cudagraphify(foo, [])
+    #     pool_id = graph.pool()
+
+    #     segments_before_checkpoint = get_cudagraph_segments(pool_id)
+
+    #     state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        # graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
+        # with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
+        #     torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [], [])
+
+    def test_tensor_dies_after_checkpoint(self):
+
+        def foo():
+            return int8_cuda(MIN_BLOCK_SIZE), int8_cuda(MIN_BLOCK_SIZE)
+
+        graph, outputs = cudagraphify(foo, [])
+        pool_id = graph.pool()
+        device = outputs[0].device.index
+
+        segments_before_checkpoint = get_cudagraph_segments(pool_id)
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        output_data_ptrs = [output.data_ptr() for output in outputs]
+
+        del outputs
+
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+
+        self.assertEqual(live_blocks(pool_id), 2)
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
+        self.assertEqual(live_blocks(pool_id), 1)
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[1])
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    def test_assigning_back_deleter_fns_to_tensor(self):
+
+        def foo(x):
+            return int8_cuda(SMALL_BUFFER) + x, int8_cuda(SMALL_BUFFER) + x, int8_cuda(LARGE_BUFFER) + x
+
+        inp = torch.tensor([1], device="cuda")
+        graph, outputs = cudagraphify(foo, [inp])
+        pool_id = graph.pool()
+        graph.replay()
+
+        device = outputs[0].device.index
+
+        for i in range(len(outputs)):
+            self.assertTrue(outputs[i].mean(dtype=torch.float) == 2)
+
+        state = torch._C._cuda_getCheckpointState(outputs[0].device.index, pool_id)
+
+        output_ptrs = [output.untyped_storage().data_ptr() for output in outputs]
+        ten_metadata = [tensor_metadata(t) for t in outputs]
+
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        del outputs
+
+        self.assertEqual(live_blocks(pool_id), 0)
+
+        reconstructed_tensors = [reconstruct_from_tensor_metadata(metadata) for metadata in ten_metadata]
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 2)
+
+        inp.add_(1)
+        graph.replay()
+
+        for i in range(len(reconstructed_tensors)):
+            self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
+
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+
+        self.assertEqual(live_blocks(pool_id), 3)
+
+        reconstructed_tensors[0] = None
+        self.assertEqual(live_blocks(pool_id), 2)
+
+        reconstructed_tensors[1] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        # should not change, we did not pass it in to swap data ptrs
+        reconstructed_tensors[2] = None
+        self.assertEqual(live_blocks(pool_id), 1)
+
+        torch._C._cuda_cudaCachingAllocator_raw_delete(output_ptrs[2])
+
+        self.assertEqual(live_blocks(pool_id), 0)
+
+    @skipIfNoTorchVision
+    def test_resnet(self):
+        import torchvision
+        m = torchvision.models.resnet50()
+        m.eval()
+        m = m.cuda()
+
+        inp = torch.rand([1, 3, 255, 255], device="cuda")
+        self.checkFunction(m, [inp])
 
 
 instantiate_parametrized_tests(TestCuda)
