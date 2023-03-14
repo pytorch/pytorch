@@ -56,7 +56,7 @@ Features described in this documentation are classified by release status:
    compile/deep-dive
    compile/troubleshooting
    compile/faq
-   ir
+   compile/ir
 
 .. toctree::
    :maxdepth: 1
