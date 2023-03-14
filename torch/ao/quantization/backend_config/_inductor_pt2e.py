@@ -5,6 +5,8 @@ from torch.ao.quantization.backend_config import (
     ObservationType,
     BackendPatternConfig,
 )
+import itertools
+from torch.ao.quantization.utils import MatchAllNode
 
 weighted_op_quint8_dtype_config = DTypeConfig(
     input_dtype=torch.quint8,
@@ -36,6 +38,62 @@ def get_conv_configs():
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 1, "bias": 2})
     )
+
+    # Conv add ReLU case
+    def _conv_add_relu_root_node_getter_left(pattern):
+        relu, add_pattern = pattern
+        _, conv, _ = add_pattern
+        return conv
+    def _conv_add_relu_extra_inputs_getter_left(pattern):
+        """ get inputs pattern for extra inputs, inputs for root node
+        are assumed to be copied over from root node to the fused node
+        """
+        relu, add_pattern = pattern
+        _, conv, extra_input = add_pattern
+        return [extra_input]
+
+    conv_add_relu_optioins = itertools.product(
+        [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor],  # add op
+        [torch.ops.aten.relu.default, torch.ops.aten.relu_.default],  # relu op
+    )
+    for add_op, relu_op in conv_add_relu_optioins:
+        conv_configs.append(
+            BackendPatternConfig()
+                ._set_pattern_complex_format((relu_op, (add_op, torch.ops.aten.convolution.default, MatchAllNode)))  # noqa: E131
+                .set_observation_type(observation_type)
+                .set_dtype_configs(dtype_configs)
+                ._set_input_type_to_index({"weight": 1, "bias": 2})
+                ._set_root_node_getter(_conv_add_relu_root_node_getter_left)
+                ._set_extra_inputs_getter(_conv_add_relu_extra_inputs_getter_left)
+        )
+
+    def _conv_add_relu_root_node_getter_right(pattern):
+        relu, add_pattern = pattern
+        _, _, conv = add_pattern
+        return conv
+    def _conv_add_relu_extra_inputs_getter_right(pattern):
+        """ get inputs pattern for extra inputs, inputs for root node
+        are assumed to be copied over from root node to the fused node
+        """
+        relu, add_pattern = pattern
+        _, extra_input, conv = add_pattern
+        return [extra_input]
+
+    conv_add_relu_optioins_right = itertools.product(
+        [torch.ops.aten.add.Tensor, torch.ops.aten.add_.Tensor],  # add op
+        [torch.ops.aten.relu.default, torch.ops.aten.relu_.default],  # relu op
+    )
+    for add_op, relu_op in conv_add_relu_optioins_right:
+        conv_configs.append(
+            BackendPatternConfig()
+                ._set_pattern_complex_format((relu_op, (add_op, MatchAllNode, torch.ops.aten.convolution.default)))  # noqa: E131
+                .set_observation_type(observation_type)
+                .set_dtype_configs(dtype_configs)
+                ._set_input_type_to_index({"weight": 1, "bias": 2})
+                ._set_root_node_getter(_conv_add_relu_root_node_getter_right)
+                ._set_extra_inputs_getter(_conv_add_relu_extra_inputs_getter_right)
+        )
+
     return conv_configs
 
 def get_inductor_pt2e_backend_config():

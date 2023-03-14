@@ -44,6 +44,9 @@ def _default_root_node_getter(node_pattern):
         node_pattern = node_pattern[-1]
     return node_pattern
 
+def _default_extra_input_getter(node_pattern):
+    return []
+
 # Base Pattern Handler
 class QuantizeHandler(ABC):
     """ Base handler class for the quantizer patterns

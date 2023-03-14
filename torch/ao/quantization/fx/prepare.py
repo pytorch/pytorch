@@ -35,6 +35,7 @@ from .quantize_handler import (
     _default_root_node_getter,
     _get_pattern_to_quantize_handlers,
     QuantizeHandler,
+    _default_extra_input_getter,
 )
 
 from torch.ao.quantization.utils import (
@@ -90,6 +91,7 @@ from ..backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_module_to_qat_module,
     get_fusion_pattern_to_root_node_getter,
+    get_fusion_pattern_to_extra_inputs_getter,
 )
 from ..backend_config import (
     BackendConfig,
@@ -105,6 +107,7 @@ from torch._subclasses import FakeTensor
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union, Callable
 
+from torch.ao.quantization.utils import MatchAllNode
 
 __all__ = [
     "insert_observers_for_model",
@@ -1258,7 +1261,6 @@ def insert_observers_for_model(
 
     # TODO: change this to insert obs/fq by pattern instead of by node
     for node in nodes_before_observation:
-
         if node.op == 'placeholder':
             # if a graph input is in fp32, it does not need observation
             # if a graph input is in int8, we assume the observation happens
@@ -1343,6 +1345,50 @@ def insert_observers_for_model(
                         _maybe_insert_input_equalization_observers_for_node(
                             node, equalization_qconfig, model, named_modules, model.graph,
                             is_quantized_branch, backend_config)
+
+                        conv_add_rely_pattern_list = [(torch.ops.aten.relu.default, (torch.ops.aten.add.Tensor, torch.ops.aten.convolution.default, MatchAllNode)),
+                                                      (torch.ops.aten.relu_.default, (torch.ops.aten.add_.Tensor, torch.ops.aten.convolution.default, MatchAllNode)),]
+                        insert_quant_to_extra_node = True
+                        if pattern in conv_add_rely_pattern_list and insert_quant_to_extra_node:
+                            # 1. Get the extra input node and check if the extra input node is conv or not
+                            pattern_to_extra_inputs_getter = get_fusion_pattern_to_extra_inputs_getter(backend_config)
+                            extra_inputs_getter = pattern_to_extra_inputs_getter.get(pattern, _default_extra_input_getter)
+                            #import pdb;pdb.set_trace()
+                            extra_input_nodes = extra_inputs_getter(matched_node_pattern)
+                            if len(extra_input_nodes) is 1:
+                                extra_input_node = extra_input_nodes[0]
+                                if extra_input_node.target == torch.ops.aten.convolution.default:
+                                    # if there is one extra input which is conv
+                                    # 2. Get the input information from the extra input node through node_name_to_match_result_with_qconfig
+                                    (_,
+                                    extra_input_node_matched_node_pattern,
+                                    extra_input_node_pattern,
+                                    extra_input_node_qhandler,
+                                    extra_input_node_qconfig) = (
+                                        node_name_to_match_result_with_qconfig.get(extra_input_node.name, (None, None, None, None, None))  # type: ignore[assignment]
+                                    )
+                                    # 3. Insert observer to extra input node of conv's activation and weight
+                                    # this modifies node inplace
+                                    _maybe_insert_input_observers_for_node(
+                                        extra_input_node, extra_input_node_qconfig, model, named_modules, model.graph,
+                                        extra_input_node_qhandler,
+                                        prepare_custom_config,
+                                        backend_config)
+                                # 4. Insert observer between extra input node and add,
+                                # since oneDNN 2.X conv add relu requires int8 input for extra input node.
+                                # We can remove this after upgrade to oneDNN 3.X.
+                                def get_add_node(matched_node_pattern):
+                                    relu, add_pattern = matched_node_pattern
+                                    add, conv, _ = add_pattern
+                                    return add
+                                add_node = get_add_node(matched_node_pattern)
+                                _, _, _, _, add_node_qconfig = (
+                                    node_name_to_match_result_with_qconfig.get(add_node.name, (None, None, None, None, None))  # type: ignore[assignment]
+                                )
+                                new_obs_mod = add_node_qconfig.activation()
+                                new_obs_node = _insert_observer(
+                                    extra_input_node, new_obs_mod, model, named_modules, model.graph)
+                                add_node.replace_input_with(extra_input_node, new_obs_node)
 
                     is_last_node_of_pattern = node is last_node
                     is_general_tensor_value_op = \
