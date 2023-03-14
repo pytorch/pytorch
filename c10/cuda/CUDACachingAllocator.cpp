@@ -827,9 +827,9 @@ class DeviceCachingAllocator {
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       graph_pools_freeable;
 
-  // Maps a capturing stream to its assigned private pool,
-  // in case we want multiple captures to share the same pool
-  ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
+  // Indicates that a current stream should be allocated to a pool
+  // rather than the global memory.
+  ska::flat_hash_map<cudaStream_t, MempoolId_t> stream_to_pool_map;
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
@@ -1660,7 +1660,7 @@ class DeviceCachingAllocator {
   // See Note [Interaction with CUDA graph capture]
 
   // Called by CUDAGraph::capture_begin
-  void notifyCaptureBegin(CaptureId_t graph_id, MempoolId_t mempool_id) {
+  void beginAllocateStreamToPool(cudaStream_t stream, MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway++;
     auto it = graph_pools.find(mempool_id);
@@ -1675,24 +1675,25 @@ class DeviceCachingAllocator {
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
       it->second->use_count++;
     }
-    // Maps this graph_id to mempool_id and makes sure this graph_id wasn't
+
+    // Maps this stream to mempool_id and makes sure this graph_id wasn't
     // somehow assigned a mempool_id already. Keeps essential effect (insert)
     // out of macro.
-    bool inserted = capture_to_pool_map.insert({graph_id, mempool_id}).second;
+    bool inserted = stream_to_pool_map.insert({stream, mempool_id}).second;
     TORCH_INTERNAL_ASSERT(inserted);
   }
 
   // Called by CUDAGraph::capture_end
-  void notifyCaptureAboutToEnd(CaptureId_t graph_id) {
+  void endAllocateStreamToPool(cudaStream_t stream) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     captures_underway--;
-    auto it = capture_to_pool_map.find(graph_id);
-    TORCH_INTERNAL_ASSERT(it != capture_to_pool_map.end());
-    capture_to_pool_map.erase(it);
+    auto it = stream_to_pool_map.find(stream);
+    TORCH_INTERNAL_ASSERT(it != stream_to_pool_map.end());
+    stream_to_pool_map.erase(it);
   }
 
   // Called by CUDAGraph::reset
-  void notifyCaptureDestroy(MempoolId_t mempool_id) {
+  void releasePool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     // The instantiated cudaGraphExec_t has been destroyed. We can't blindly
     // delete and cudaFree the mempool its capture used, because
@@ -1877,16 +1878,8 @@ class DeviceCachingAllocator {
     // capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
     if (C10_UNLIKELY(captures_underway)) {
-      CaptureId_t id;
-      cudaStreamCaptureStatus status;
-      C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id));
-      if (status != cudaStreamCaptureStatus::cudaStreamCaptureStatusNone) {
-        TORCH_INTERNAL_ASSERT(
-            status !=
-            cudaStreamCaptureStatus::cudaStreamCaptureStatusInvalidated);
-        // Retrieves the private pool assigned to this capture.
-        auto it0 = capture_to_pool_map.find(id);
-        TORCH_INTERNAL_ASSERT(it0 != capture_to_pool_map.end());
+      auto it0 = stream_to_pool_map.find(stream);
+      if (it0 != stream_to_pool_map.end()) {
         auto it1 = graph_pools.find(it0->second);
         TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
         if (size <= kSmallSize) {
@@ -2617,25 +2610,23 @@ class NativeCachingAllocator : public CUDAAllocator {
     device_allocator[device]->resetPeakStats();
   }
   // CUDAGraph interactions
-  void notifyCaptureBegin(
+  void beginAllocateStreamToPool(
       int device,
-      CaptureId_t graph_id,
+      cudaStream_t stream,
       MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureBegin(
-        graph_id, std::move(mempool_id));
+    device_allocator[device]->beginAllocateStreamToPool(
+        stream, std::move(mempool_id));
   }
 
-  void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) override {
+  void endAllocateStreamToPool(int device, cudaStream_t stream) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureAboutToEnd(graph_id);
+    device_allocator[device]->endAllocateStreamToPool(stream);
   }
 
-  void notifyCaptureEnded(int device, CaptureId_t graph_id) override {} // no-op
-
-  void notifyCaptureDestroy(int device, MempoolId_t mempool_id) override {
+  void releasePool(int device, MempoolId_t mempool_id) override {
     assertValidDevice(device);
-    device_allocator[device]->notifyCaptureDestroy(std::move(mempool_id));
+    device_allocator[device]->releasePool(std::move(mempool_id));
   }
 
   void* raw_alloc(size_t nbytes) override {
