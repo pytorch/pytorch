@@ -771,10 +771,9 @@ def export(
         graph = make_fx(
             graph_with_interpreter,
             decomposition_table=decomposition_table,
-            tracing_mode=tracing_mode,
+            tracing_mode="real",
             _allow_non_fake_inputs=True,
-            _example_inputs=example_fake_inputs,
-        )(*graph_captured_input)
+        )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,

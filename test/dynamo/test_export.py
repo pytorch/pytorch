@@ -13,6 +13,7 @@ import torch._dynamo.testing
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.testing._internal import common_utils
 
 
@@ -2207,7 +2208,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 shapes = val.shape
                 # there should no symbols
                 for shape in shapes:
-                    self.assertTrue(torch.is_concrete_int(shape))
+                    self.assertTrue(is_concrete_int(shape))
 
         # this should be captured as static, as export won't generate any symbols.
         self.assertEqual(gm(torch.ones(2, 4)), torch.ones(2, 4).sin())
