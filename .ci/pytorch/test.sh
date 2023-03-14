@@ -854,6 +854,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
+  if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+    install_torchaudio cpu
+  else
+    install_torchaudio cuda
+  fi
   install_torchtext
   install_torchvision
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
