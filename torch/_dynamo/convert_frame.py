@@ -8,6 +8,7 @@ from typing import Dict, Optional, Set
 
 import torch
 from torch._logging.loggable_types import ByteCodeLogRec, GuardLogRec
+from torch._guards import tracing
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -307,7 +308,8 @@ def _compile(
             export,
             mutated_closure_cell_contents,
         )
-        tracer.run()
+        with tracing(tracer.output.tracing_context):
+            tracer.run()
         output = tracer.output
         assert output is not None
         assert output.output_instructions

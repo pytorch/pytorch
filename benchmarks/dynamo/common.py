@@ -208,11 +208,16 @@ CI_SKIP[CI("inductor", training=True)] = [
 
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
+    # torchbench
+    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    # timm_models
+    "botnet26t_256",  # sympy RecursionError
+    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -221,9 +226,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
-    "pnasnet5large",  # ceiling is not defined
-    "volo_d1_224",  # ceiling is not defined
+    "convit_base",  # TypeError: Cannot convert symbols to int
+    "pnasnet5large",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -231,7 +238,17 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # TODO: Fill this in
+    # torchbench
+    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
+    "yolov3",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    # timm_models
+    "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
+    "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "volo_d1_224",  # NameError: name 'ceiling' is not defined
 ]
 
 
@@ -1353,8 +1370,8 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception as e:
-                log.exception(f"Failed for {mode} {e}")
+            except Exception:
+                log.exception(f"Backend {mode} failed in warmup()")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1909,7 +1926,11 @@ def run(runner, args, original_dir=None):
     if args.unspecialize_int:
         torch._dynamo.config.specialize_int = False
     if args.ci:
-        args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
+        if args.accuracy:
+            # Run fewer iterations when checking accuracy
+            args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -1961,7 +1982,17 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.use_deterministic_algorithms(True)
+        if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
+            "pytorch_CycleGAN_and_pix2pix",
+            "pytorch_unet",
+            "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
+        }:
+            # some of the models do not support use_deterministic_algorithms
+            torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
