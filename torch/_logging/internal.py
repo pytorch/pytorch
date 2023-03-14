@@ -77,19 +77,19 @@ log_registry = LogRegistry()
 
 @dataclass
 class LogState:
-    log_qname_to_level: Dict[str, int] = field(default_factory=dict)
+    log_name_to_level: Dict[str, int] = field(default_factory=dict)
     enabled_artifact_names: Set[str] = field(default_factory=set)
-    enabled_settings: Set[str] = field(default_factory=set)
 
     # reset all logs in log_qname_to_level to default level
-    def reset(self):
-        pass
+    def clear(self):
+        self.log_name_to_level.clear()
+        self.enabled_artifact_names.clear()
 
-    def set_level(self, log_qname, level):
-        pass
+    def enable_log(self, name, level):
+        self.log_name_to_level[name] = level
 
     def enable_artifact(self, artifact_name):
-        pass
+        self.enabled_artifact_names.add(artifact_name)
 
 
 log_state = LogState()
@@ -97,27 +97,52 @@ log_state = LogState()
 # User API for setting log properties
 # ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
 # ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
-def set_logs(**kwargs):
-    log_state.reset()
+def set_logs(dynamo=DEFAULT_LOG_LEVEL,
+             aot=DEFAULT_LOG_LEVEL,
+             inductor=DEFAULT_LOG_LEVEL,
+             bytecode=False,
+             aot_forward_graph=False,
+             aot_backward_graph=False,
+             aot_joint_graph=False,
+             graph=False,
+             graph_code=False,
+             guards=False,
+             output_code=False,
+             schedule=False):
+    log_state.clear()
 
-    for key, val in kwargs.items():
-        if log_registry.is_artifact(key):
-            log_state.enable_artifact(key)
-        elif log_registry.is_log(key):
-            log_state.set_level(log_registry.name_to_log_qname[key])
-            if val not in logging._levelToName:
+    def _set_logs(**kwargs):
+        for key, val in kwargs.items():
+            if log_registry.is_artifact(key):
+                log_state.enable_artifact(key)
+            elif log_registry.is_log(key):
+                log_state.set_level(log_registry.name_to_log_qname[key])
+                if val not in logging._levelToName:
+                    raise ValueError(
+                        f"Unrecognized log level for log {key}: {val}, valid level values "
+                        f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
+                    )
+            else:
+                # Check if it is a qualified name log
+                # if so, check that its root logger is parent
+                # if so set its level appropriately
+                # if not, register it? (maybe)
                 raise ValueError(
-                    f"Unrecognized log level for log {key}: {val}, valid level values "
-                    f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
+                    f"Unrecognized log or artifact name passed to set_logs: {key}"
                 )
-        else:
-            # Check if it is a qualified name log
-            # if so, check that its root logger is parent
-            # if so set its level appropriately
-            # if not, register it? (maybe)
-            raise ValueError(
-                f"Unrecognized log or artifact name passed to set_logs: {key}"
-            )
+
+    _set_logs(dynamo=dynamo,
+              aot=aot,
+              inductor=inductor,
+              bytecode=bytecode,
+              aot_forward_graph=aot_forward_graph,
+              aot_backward_graph=aot_backward_graph,
+              aot_joint_graph=aot_joint_graph,
+              graph=graph,
+              graph_code=graph_code,
+              guards=guards,
+              output_code=output_code,
+              schedule=schedule)
 
 
 def loggable(setting_name, log_name, off_by_default=False):
@@ -196,8 +221,16 @@ def _parse_log_settings(settings):
 
         return clean_name, level
 
-    name_levels = [get_name_level_pair(name) for name in log_names]
-    return {name: level for name, level in name_levels}
+    log_state = LogState()
+    for name in log_names:
+        name, level = get_name_level_pair(name)
+        if log_registry.is_log(name):
+            assert level is not None
+            log_state.enable_log(name, level)
+        else:
+            log_state.enable_artifact(name)
+
+    return log_state
 
 
 class FilterByType(logging.Filter):
@@ -211,10 +244,10 @@ class FilterByType(logging.Filter):
         self.enabled_types = tuple(set(enabled_types))
 
 
-def _get_log_settings():
+def _get_log_state():
     log_setting = os.environ.get("TORCH_LOGS", None)
     if log_setting is None:
-        return {}
+        return log_state
     else:
         return _parse_log_settings(log_setting)
 
@@ -262,6 +295,14 @@ def _clear_handlers(log):
     for handler in to_remove:
         log.removeHandler(handler)
 
+def _parent_is_registered(log_qname):
+    logger = logging.getLogger(log_qname)
+    while logger.parent:
+        if log_registry.is_log(logger.name):
+            return True
+        logger = logger.parent
+
+    return False
 
 # initialize loggers log_names
 # each developer component should call this for their own logs
@@ -273,7 +314,7 @@ def init_logs(log_file_name=None):
         log.propagate = False
         _clear_handlers(log)
 
-    name_to_levels = _get_log_settings()
+    name_to_levels = _get_log_state()
     log_qname_to_enabled_types: DefaultDict[str, Set[type]] = collections.defaultdict(set)
     log_qname_to_level = dict()
 
