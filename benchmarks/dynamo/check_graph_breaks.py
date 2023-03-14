@@ -10,7 +10,7 @@ def get_field(csv, model_name: str, field: str, typ=float):
     return typ(csv.loc[csv["name"] == model_name][field])
 
 
-def check_graph_breaks(actual_csv, expected_csv, expected_filename, dynamic_csv=None):
+def check_graph_breaks(actual_csv, expected_csv, expected_filename):
 
     failed = []
     improved = []
@@ -73,11 +73,8 @@ def main():
 
     actual = pd.read_csv(args.actual)
     expected = pd.read_csv(args.expected)
-    dynamic = pd.read_csv(
-        "benchmarks/dynamo/ci_expected_accuracy/extra_dynamic_breaks.csv"
-    )
 
-    failed, msg = check_graph_breaks(actual, expected, dynamic, args.expected)
+    failed, msg = check_graph_breaks(actual, expected, args.expected)
     if failed:
         print(msg)
         sys.exit(1)

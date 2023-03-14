@@ -19,7 +19,7 @@ log_level = property(
 )
 
 # log compiled function + graphs at level INFO
-output_code = True
+output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
