@@ -680,7 +680,7 @@ class TypedStorage:
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
     def pin_memory(self):
-        """Coppies the  storage to pinned memory, if it's not already pinned."""
+        """Copies the  storage to pinned memory, if it's not already pinned."""
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.pin_memory())
 
