@@ -1,5 +1,5 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import hint_int, magic_methods, method_to_operator
 import torch
 import torch.fx as fx
 import operator
@@ -386,6 +386,11 @@ def min_cut_rematerialization_partition(
 
     default_recomputable_ops += pointwise_ops()
 
+    default_recomputable_ops += [
+        method_to_operator(m)
+        for m in magic_methods
+    ]
+
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
@@ -497,7 +502,7 @@ def min_cut_rematerialization_partition(
         if is_symint_node(node):
             weight = 1
         elif is_sym_node(node):
-            weight = 999999
+            weight = math.inf
         elif is_non_tensor_node:
             weight = math.inf
         else:
