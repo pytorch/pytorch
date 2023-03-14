@@ -35,6 +35,19 @@ def read_json_file(path):
 def read_json(path):
     with open(path) as f:
         return json.load(f)
+    
+def flatten_dict(nested_dict):
+    res = {}
+    if isinstance(nested_dict, dict):
+        for k in nested_dict:
+            flattened_dict = flatten_dict(nested_dict[k])
+            for key, val in flattened_dict.items():
+                key = list(key)
+                key.insert(0, k)
+                res[tuple(key)] = val
+    else:
+        res[()] = nested_dict
+    return res
 
 if __name__ == '__main__':
     # read json file
@@ -47,21 +60,34 @@ if __name__ == '__main__':
 
     team_to_times = defaultdict(lambda: 0)
     test_times = read_json_file("test_times.json")
+    flattened = flatten_dict(test_times)
+    # df = pd.DataFrame.from_dict(test_times, orient="index")
+    # print(df)
     oncalls_to_file = defaultdict(lambda: [])
-    for _, config in test_times.items():
-        for _, file_to_time in config.items():
+    configs = set()
+    modes = set()
+    for config_name, config in test_times.items():
+        configs.add(config_name)
+        for mode, file_to_time in config.items():
+            modes.add(mode)
             for test_file, time in file_to_time.items():
                 # print(time)
                 time = float(time)
                 oncalls = file_to_oncall[test_file]
                 for oncall in oncalls:
-                    team_to_times[oncall] += time
+                    team_to_times[(config_name, mode, oncall)] += time
     # print(team_to_times)
-    df = pd.DataFrame.from_dict(team_to_times, orient="index", columns=["time"])
-    df = df.sort_values(by=['time'])
-    df["in_minutes"] = df["time"] / 60
-    df["in_hours"] = df["in_minutes"] / 60
-    print(df)
+    final_dict = {i: [config_name, mode, oncall, time] for i, ((config_name, mode, oncall), time) in enumerate(team_to_times.items())}
+    df = pd.DataFrame.from_dict(final_dict, orient="index", columns=["config_name", "mode", "oncall", "time"])
+    df["time"] = df["time"] / 60 /  60 
+    df = df.groupby(["config_name", "oncall"])["time"].sum().reset_index()
+    df = df.sort_values(by=["config_name", 'time'])
+    df = df[(df["time"] > 1)]
+    # df["in_minutes"] = df["time"] / 60
+    # df["in_hours"] = df["in_minutes"] / 60
+    print(df.to_markdown())
+    # print(configs)
+    # print(modes)
     # pd.display(df)
     # print(oncalls_to_file)
     # print(json.dumps(oncalls_to_file, indent=4))

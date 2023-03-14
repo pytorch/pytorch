@@ -1,0 +1,14 @@
+                                        config_name  ...          time
+0     linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck  ...      5.737500
+1     linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck  ...  24032.760500
+2     linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck  ...     98.837500
+3     linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck  ...    331.009000
+4     linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck  ...   5041.751500
+...                                             ...  ...           ...
+2152                      cuda11.8-py3.10-gcc7-sm86  ...   1635.070000
+2153                      cuda11.8-py3.10-gcc7-sm86  ...    177.290667
+2154                      cuda11.8-py3.10-gcc7-sm86  ...   2953.392667
+2155                      cuda11.8-py3.10-gcc7-sm86  ...    253.033667
+2156                      cuda11.8-py3.10-gcc7-sm86  ...    135.102333
+
+[2157 rows x 4 columns]
