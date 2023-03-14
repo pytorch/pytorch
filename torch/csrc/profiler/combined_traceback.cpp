@@ -35,7 +35,7 @@ CapturedTraceback::~CapturedTraceback() {
 
 struct PyFrameHash {
   std::size_t operator()(const CapturedTraceback::PyFrame& f) const {
-    return std::hash<PyCodeObject*>()(f.code) ^ std::hash<int>()(f.lasti);
+    return std::hash<void*>()(f.code) ^ std::hash<int>()(f.lasti);
   }
 };
 
