@@ -1,5 +1,6 @@
 import sympy
 
+
 # The normal Python interpretation of the operators
 # NB: For magic methods this needs to use normal magic methods
 # so that test_magic_methods works

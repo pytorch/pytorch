@@ -132,7 +132,10 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    S3_RESOURCE.Object(f"{bucket_name}", f"{key}",).put(
+    S3_RESOURCE.Object(
+        f"{bucket_name}",
+        f"{key}",
+    ).put(
         Body=gzip.compress(body.getvalue().encode()),
         ContentEncoding="gzip",
         ContentType="application/json",

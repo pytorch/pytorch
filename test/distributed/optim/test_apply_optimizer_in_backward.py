@@ -89,6 +89,32 @@ class ApplyOverlappedOptimizerTest(unittest.TestCase):
     def test_apply_optimizer_in_backward_shared_params(self) -> None:
         self._test_apply_optimizer_in_backward(share_params=True)
 
+    def test_no_register_hook(self):
+        model_with_hook = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
+        initial_model = deepcopy(model_with_hook)
+        model_no_hook = deepcopy(model_with_hook)
+        _apply_optimizer_in_backward(
+            torch.optim.SGD,
+            model_with_hook.parameters(),
+            optimizer_kwargs={"lr": 0.03},
+        )
+        _apply_optimizer_in_backward(
+            torch.optim.SGD,
+            model_no_hook.parameters(),
+            optimizer_kwargs={"lr": 0.03},
+            register_hook=False,
+        )
+        inp = torch.randn(4, 10)
+        model_with_hook(inp).sum().backward()
+        model_no_hook(inp).sum().backward()
+
+        for p1, p2 in zip(model_with_hook.parameters(), initial_model.parameters()):
+            with self.assertRaises(AssertionError):
+                torch.testing.assert_allclose(p1, p2)
+
+        for p1, p2 in zip(model_no_hook.parameters(), initial_model.parameters()):
+            torch.testing.assert_allclose(p1, p2)
+
     def test_multiple_optim_for_params(self) -> None:
         model = nn.Sequential(nn.Linear(10, 10), nn.Linear(10, 10))
         opt_0_kwargs = {"lr": 0.03}

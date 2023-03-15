@@ -522,8 +522,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
             INST_NEXT;
           case INST(TYPECHECK): {
             INST_GUARD;
-            int num_inputs = inst.N, i = 0;
-            // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
+            unsigned num_inputs = inst.N, i = 0;
             TORCH_INTERNAL_ASSERT(stack.size() >= num_inputs && num_inputs > 0);
             // Check every input's shape against profiled (expected) shape.
             for (i = 0; i < num_inputs; i++) {

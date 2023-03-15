@@ -221,6 +221,13 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
+def pad_list(x):
+    if len(x) == 1:
+        return [x[0], x[0]]
+    else:
+        return x
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
