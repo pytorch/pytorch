@@ -197,6 +197,7 @@ USE_PYTEST_LIST = [
 ]
 
 WINDOWS_BLOCKLIST = [
+    "test_ops_jit",  # TODO: Broken on Windows https://github.com/pytorch/pytorch/issues/96858
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",

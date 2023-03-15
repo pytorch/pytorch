@@ -6581,6 +6581,27 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
+            x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True)
+
+            def func(x1, x2):
+                y = x1 + x2
+                return maxpool(y)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(x1, x2)
+                assert same(graph(x1, x2), func(x1, x2), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 2
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)

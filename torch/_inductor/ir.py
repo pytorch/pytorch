@@ -802,7 +802,6 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
-
             # N.B. This is a hack to generate the literal of the given type
             # Ideally, we should be fixing `def constant` in triton.py
             # but it breaks due to hardcoded dtypes in other places
@@ -1252,7 +1251,6 @@ class PermuteView(BaseView):
 class SqueezeView(BaseView):
     @classmethod
     def create(cls, x, *, dim=None):
-
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
@@ -2235,8 +2233,9 @@ class ComputedBuffer(Buffer):
             reduce_vars, reduce_size
         )
 
-        # remember the reordering order
-        self.iter_reordering_reindex = iter_reordering_reindex
+        # remember the reordering if not have loop collapse.
+        if len(iter_ranges) == len(index_vars):
+            self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -3827,7 +3826,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
