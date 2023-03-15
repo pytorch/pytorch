@@ -787,6 +787,8 @@ class FakeTensorOperatorInvariants(TestCase):
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
 
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_conv_c1_backward(self):
         class Repro(torch.nn.Module):
             def __init__(self):
