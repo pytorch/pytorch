@@ -138,6 +138,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    aot_mode=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -174,10 +175,13 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
+            if aot_mode:
+                return compiled_fn
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -189,9 +193,13 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+                compiled_fn,
+                example_inputs,
+                static_input_idxs=range(num_fixed),
+                device_index=next(iter(graph.device_idxs)),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -204,6 +212,10 @@ def compile_fx_inner(
                 elif complex_memory_overlap_inputs:
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
+                    )
+                elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
+                    developer_warning(
+                        "skipping cudagraphs due to multiple device indexes"
                     )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
@@ -255,13 +267,15 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 
 @dynamo_utils.dynamo_timed
-def cudagraphify(model, inputs, static_input_idxs=()):
+def cudagraphify(model, inputs, static_input_idxs=(), *, device_index: int):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
     )
 
     if config.triton.cudagraph_trees:
-        cudagraphify_fn = new_cudagraphify_impl
+        cudagraphify_fn = functools.partial(
+            new_cudagraphify_impl, device_index=device_index
+        )
     else:
         cudagraphify_fn = cudagraphify_impl
 
@@ -408,6 +422,7 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -418,7 +433,23 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                aot_mode=aot_mode,
             )
+
+    if aot_mode:
+        aot_config_patches = {
+            "cpp_wrapper": True,
+            "debug": True,
+            "triton.cudagraphs": False,
+        }
+        with config.patch(aot_config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                decompositions=decompositions,
+            )
+
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
@@ -476,17 +507,23 @@ def compile_fx(
             graph_id=graph_id,
         )
 
+    # Save and restore dynamic shapes setting for backwards, as it is
+    # sometimes done as a context manager which won't be set when we
+    # hit backwards compile
+    dynamic_shapes = dynamo_config.dynamic_shapes
+
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        fixed = count_tangents(model)
-        return inner_compile(
-            model,
-            example_inputs,
-            num_fixed=fixed,
-            cudagraphs=cudagraphs,
-            is_backward=True,
-            graph_id=graph_id,
-        )
+        with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
+            fixed = count_tangents(model)
+            return inner_compile(
+                model,
+                example_inputs,
+                num_fixed=fixed,
+                cudagraphs=cudagraphs,
+                is_backward=True,
+                graph_id=graph_id,
+            )
 
     with overrides.patch_functions():
         if decompositions is None:

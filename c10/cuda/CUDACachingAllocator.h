@@ -215,6 +215,14 @@ class CUDAAllocator : public Allocator {
   virtual void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) = 0;
   virtual void notifyCaptureEnded(int device, CaptureId_t graph_id) = 0;
   virtual void notifyCaptureDestroy(int device, MempoolId_t mempool_id) = 0;
+  virtual void allocateThreadToPrivatePool(int device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        "does not yet support allocateThreadToPrivatePool"
+        "If you need it, please file an issue describing your use case.");
+  }
+
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual void recordHistory(
       bool enabled,
@@ -306,6 +314,10 @@ inline CheckpointDelta setCheckpointPoolState(
     int device,
     std::shared_ptr<AllocatorState> pps) {
   return get()->setCheckpointPoolState(device, pps);
+}
+
+inline void allocateThreadToPrivatePool(int device, MempoolId_t mempool_id) {
+  return get()->allocateThreadToPrivatePool(device, mempool_id);
 }
 
 // CUDAGraph interactions

@@ -9,6 +9,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -22,6 +23,7 @@
 #include <mutex>
 #include <regex>
 #include <set>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -790,6 +792,7 @@ class DeviceCachingAllocator {
   // Most of the time it's zero, in which case malloc can avoid calling
   // cudaStreamGetCaptureInfo in the hot path.
   int captures_underway = 0;
+
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
@@ -830,6 +833,10 @@ class DeviceCachingAllocator {
   // Maps a capturing stream to its assigned private pool,
   // in case we want multiple captures to share the same pool
   ska::flat_hash_map<CaptureId_t, MempoolId_t> capture_to_pool_map;
+
+  // Maps a thread to a private pool in case we are allocating
+  // to a private pool but not capturing a cuda graph stream.
+  ska::flat_hash_map<std::thread::id, MempoolId_t> thread_to_pool_map;
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
@@ -1299,6 +1306,14 @@ class DeviceCachingAllocator {
     reset_peak_stat(stats.oversize_segments);
   }
 
+  void allocateThreadToPrivatePool(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    thread_to_pool_map[std::this_thread::get_id()] = mempool_id;
+    TORCH_CHECK(
+        graph_pools.count(mempool_id),
+        "Current api usage expects an existing pool. Please file an issue");
+  };
+
   /* Checkpoint the state of a private pool necessary to return it to its
    * current state */
   std::unique_ptr<PrivatePoolState> getCheckpointState(MempoolId_t id) {
@@ -1689,6 +1704,12 @@ class DeviceCachingAllocator {
     auto it = capture_to_pool_map.find(graph_id);
     TORCH_INTERNAL_ASSERT(it != capture_to_pool_map.end());
     capture_to_pool_map.erase(it);
+
+    auto thread_mapping_it =
+        thread_to_pool_map.find(std::this_thread::get_id());
+    if (thread_mapping_it != thread_to_pool_map.end()) {
+      thread_to_pool_map.erase(thread_mapping_it);
+    }
   }
 
   // Called by CUDAGraph::reset
@@ -1877,6 +1898,7 @@ class DeviceCachingAllocator {
     // capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
     if (C10_UNLIKELY(captures_underway)) {
+      MempoolId_t pool_id = {0, 0};
       CaptureId_t id;
       cudaStreamCaptureStatus status;
       C10_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &id));
@@ -1887,7 +1909,15 @@ class DeviceCachingAllocator {
         // Retrieves the private pool assigned to this capture.
         auto it0 = capture_to_pool_map.find(id);
         TORCH_INTERNAL_ASSERT(it0 != capture_to_pool_map.end());
-        auto it1 = graph_pools.find(it0->second);
+        pool_id = it0->second;
+      } else {
+        auto it0 = thread_to_pool_map.find(std::this_thread::get_id());
+        if (it0 != thread_to_pool_map.end()) {
+          pool_id = it0->second;
+        }
+      }
+      if (pool_id != MempoolId_t{0, 0}) {
+        auto it1 = graph_pools.find(pool_id);
         TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
         if (size <= kSmallSize) {
           return it1->second->small_blocks;
@@ -2555,6 +2585,11 @@ class NativeCachingAllocator : public CUDAAllocator {
     }
 
     return cpd;
+  }
+
+  void allocateThreadToPrivatePool(int device, MempoolId_t mempool_id)
+      override {
+    device_allocator[device]->allocateThreadToPrivatePool(mempool_id);
   }
 
   DataPtr allocate(size_t size) const override {
