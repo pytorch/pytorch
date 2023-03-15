@@ -41,17 +41,10 @@ def _export(
     )
 
     # Run FakeTensorProp on decomposed_module.
-    # If we use *args to infer shapes, the symbolic sizes would be reversed,
-    # so we use fake tensor inputs from symbolic fx.graph.
-    inputs = [
-        node.meta["val"]
-        for node in decomposed_module.graph.nodes
-        if node.op == "placeholder"
-    ]
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
     decomposed_module = passes.shape_inference_with_fake_tensor(
-        decomposed_module, *inputs
+        decomposed_module, *args
     )
 
     # We want to pass list of ints and floats to TorchScript graph correctly

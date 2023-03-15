@@ -39,11 +39,8 @@ def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *a
         decomposed_module, fake_parameters_and_buffers
     ):
         # Assign output types and shapes to each node.
-        # TODO(wechi): It's possible to get symbolic types (and shapes)
-        # for each node's output. Consider to set "tracing_mode=symbolic"
-        # when calling make_fx and then remove FakeTensorProp below.
-        fake_tensor_prop.FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(
-            *args
-        )
+        fake_tensor_prop.FakeTensorProp(
+            decomposed_module, fake_tensor_mode, override=False
+        ).propagate(*args)
 
     return decomposed_module
