@@ -1,9 +1,9 @@
-TorchDynamo Troubleshooting
+PyTorch 2.0 Troubleshooting
 ===========================
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
-TorchDynamo is still in active development, and many of the reasons for
+`torch.compile` is still in active development, and many of the reasons for
 graph breaks and excessive recompilation will be fixed with upcoming
 support for `tracing dynamic tensor
 shapes <https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing>`__,
@@ -706,6 +706,9 @@ Triton code or the C++ backend, the numerics from those downstream
 compilers can be different in subtle ways yet have dramatic impact on
 your training stability. So the accuracy debugger is very useful for us
 to detect bugs in our codegen or with a backend compiler.
+
+If you'd like to ensure that random number generation is the same across both torch
+and triton then you can enable ``torch._inductor.config.fallback_random = True``
 
 File an Issue
 ~~~~~~~~~~~~~
