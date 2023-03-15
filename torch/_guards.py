@@ -27,6 +27,7 @@ class GuardSource(enum.Enum):
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
+    SKIP = 7
 
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
