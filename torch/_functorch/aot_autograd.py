@@ -2873,8 +2873,12 @@ def aot_module_simplified(
                 new_source = AttrSource(base, param_name)
                 # Sanitize the name, just as dynamo does
                 new_name = new_source.name()
+                # BEGIN DUPLICATIVE LOGIC TO DEDUP
                 new_name = re.sub(r"\[(\d+)\]", r"_\g<1>", new_name)
                 new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_name)
+                if not new_name[0].isalpha():
+                    new_name = "sub" + new_name
+                # END DUPLICATIVE LOGIC TO DEDUP
                 # Invariant, this must always be here.
                 aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[new_name])
 
