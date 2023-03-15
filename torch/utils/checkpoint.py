@@ -10,7 +10,7 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states", "noop_context_fn"
+    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -193,37 +193,37 @@ def checkpoint(
 
     The non-reentrant variant improves upon the reentrant variant in several
     ways:
-      * Unlike the reentrant variant, the non-reentrant variant supports
-        stopping recomputation as soon as all needed intermediate activations
-        have been recomputed. This feature is enabled by default, but can be
-        disabled with :func:`set_checkpoint_early_stop` if it is problematic
-        for your particular application.
-      * Unlike the reentrant variant, the non-reentrant variant properly records
-        the autograd graph during forward, e.g. allowing you to perform backward
-        on that graph inside checkpointed regions, and allowing you to attach
-        hooks to the graph in a more fine-grained way. The reentrant variant
-        runs the forward in :func:`torch.no_grad`.
-      * Unlike the reentrant variant, the non-reentrant variant supports all
-        ways of performing backward. Reentrant checkpoint only supports the
-        :func:`torch.autograd.backward` API and only if its `inputs` argument is
-        not passed. :func:`torch.autograd.grad` is not supported.
-      * Unlike the reentrant variant, the non-reentrant variant  does not have
-        the restriction that at least one of the inputs and at least one of the
-        outputs needs to have ``requires_grad=True``. If this condition is
-        not met for reentrant checkpoint, the checkpointed part of the model
-        won't have gradients.
-      * Unlike the reentrant variant, the non-reentrant variant considers
-        Tensors passed as inputs or returned as outputs in nested structures
-        (e.g., custom objects, lists, dicts, etc) as participating in autograd.
-      * Unlike the reentrant variant, the non-reentrant variant supports the
-        checkpointed region containing tensors detached from the computational
-        graph. For the reentrant variant, if the checkpointed segment
-        contains tensors detached from the computational graph by `detach()` or
-        :func:`torch.no_grad`, the backward pass will raise an error. This is
-        because ``checkpoint`` makes all the outputs require gradients which
-        causes issues when a tensor is defined to have no gradient in the model.
-        To circumvent this, detach the tensors outside of the `checkpoint`
-        function.
+    * Unlike the reentrant variant, the non-reentrant variant supports
+      stopping recomputation as soon as all needed intermediate activations
+      have been recomputed. This feature is enabled by default, but can be
+      disabled with :func:`set_checkpoint_early_stop` if it is problematic
+      for your particular application.
+    * Unlike the reentrant variant, the non-reentrant variant properly records
+      the autograd graph during forward, e.g. allowing you to perform backward
+      on that graph inside checkpointed regions, and allowing you to attach
+      hooks to the graph in a more fine-grained way. The reentrant variant
+      runs the forward in :func:`torch.no_grad`.
+    * Unlike the reentrant variant, the non-reentrant variant supports all
+      ways of performing backward. Reentrant checkpoint only supports the
+      :func:`torch.autograd.backward` API and only if its `inputs` argument is
+      not passed. :func:`torch.autograd.grad` is not supported.
+    * Unlike the reentrant variant, the non-reentrant variant  does not have
+      the restriction that at least one of the inputs and at least one of the
+      outputs needs to have ``requires_grad=True``. If this condition is
+      not met for reentrant checkpoint, the checkpointed part of the model
+      won't have gradients.
+    * Unlike the reentrant variant, the non-reentrant variant considers
+      Tensors passed as inputs or returned as outputs in nested structures
+      (e.g., custom objects, lists, dicts, etc) as participating in autograd.
+    * Unlike the reentrant variant, the non-reentrant variant supports the
+      checkpointed region containing tensors detached from the computational
+      graph. For the reentrant variant, if the checkpointed segment
+      contains tensors detached from the computational graph by `detach()` or
+      :func:`torch.no_grad`, the backward pass will raise an error. This is
+      because ``checkpoint`` makes all the outputs require gradients which
+      causes issues when a tensor is defined to have no gradient in the model.
+      To circumvent this, detach the tensors outside of the `checkpoint`
+      function.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
