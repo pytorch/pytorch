@@ -1533,8 +1533,9 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
   int64_t js = result.size(2);
   int64_t ks = self.size(2);
 
-  scalar_t alpha = alpha_.to<scalar_t>();
-  scalar_t beta = beta_.to<scalar_t>();
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t alpha = alpha_.to<opmath_t>();
+  opmath_t beta = beta_.to<opmath_t>();
 
   auto r0 = result.accessor<scalar_t, 3>();
   auto s0 = self.accessor<scalar_t, 3>();
@@ -1560,11 +1561,10 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
               r2[j] = acc_value;
             } else {
               // For beta == 0, the r's value will be ignored, especially for nan value.
-              if (beta == scalar_t{0}) {
-                r2[j] = static_cast<opmath_t>(alpha) * acc_value;
+              if (beta == opmath_t{0}) {
+                r2[j] = alpha * acc_value;
               } else {
-                r2[j] = r2[j] * static_cast<opmath_t>(beta) +
-                    static_cast<opmath_t>(alpha) * acc_value;
+                r2[j] = r2[j] * beta + alpha * acc_value;
               }
             }
           }

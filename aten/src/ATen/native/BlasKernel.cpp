@@ -221,7 +221,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
         if (is_low_precision) {
           sum[i] += z * column_[i];
         } else {
-          y[i * incy] = z * column_[i];
+          y[i * incy] += z * column_[i];
         }
       }
     }

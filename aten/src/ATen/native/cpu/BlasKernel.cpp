@@ -54,14 +54,19 @@ auto sum(int64_t N, Func f) {
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, at::BFloat16>::value, void>::type
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_notrans_(
-    int64_t m, int64_t n, int64_t k,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     opmath_t alpha,
-    const scalar_t *a, int64_t lda,
-    const scalar_t *b, int64_t ldb,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
     opmath_t beta,
-    scalar_t *c, int64_t ldc) {
+    scalar_t* c,
+    int64_t ldc) {
   // c *= beta
   scale_(m, n, beta, c, ldc);
 
@@ -83,8 +88,9 @@ gemm_notrans_(
   }
 }
 
+// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, at::BFloat16>::value, void>::type
+typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_notrans_(
     int64_t m,
     int64_t n,
@@ -141,14 +147,19 @@ void gemm_transa_(
 }
 
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<!std::is_same<scalar_t, at::BFloat16>::value, void>::type
+typename std::enable_if<std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_transb_(
-    int64_t m, int64_t n, int64_t k,
+    int64_t m,
+    int64_t n,
+    int64_t k,
     opmath_t alpha,
-    const scalar_t *a, int64_t lda,
-    const scalar_t *b, int64_t ldb,
+    const scalar_t* a,
+    int64_t lda,
+    const scalar_t* b,
+    int64_t ldb,
     opmath_t beta,
-    scalar_t *c, int64_t ldc) {
+    scalar_t* c,
+    int64_t ldc) {
   // c *= beta
   scale_(m, n, beta, c, ldc);
 
@@ -170,8 +181,9 @@ gemm_transb_(
   }
 }
 
+// std::is_same<scalar_t, at::BFloat16> || std::is_same<scalar_t, at::Half>
 template <typename scalar_t, typename opmath_t>
-typename std::enable_if<std::is_same<scalar_t, at::BFloat16>::value, void>::type
+typename std::enable_if<!std::is_same<scalar_t, opmath_t>::value, void>::type
 gemm_transb_(
     int64_t m,
     int64_t n,
