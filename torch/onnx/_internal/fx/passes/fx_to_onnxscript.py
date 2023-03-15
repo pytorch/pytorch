@@ -168,8 +168,11 @@ def _fill_tensor_meta(
     for i, (onnxscript_value, expected_value) in enumerate(
         zip(flat_onnxscript_values, flat_expected_values)
     ):
-        # Only set shape for now as we don't need type information.
+        # Set shape and type so that custom's output has
+        # the right output schema even if shape inference is
+        # not provided.
         onnxscript_value.shape = tuple(expected_value.size())
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
