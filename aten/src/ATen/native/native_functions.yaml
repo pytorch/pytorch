@@ -2240,6 +2240,7 @@
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
+  tags: core
 
 - func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -4321,7 +4322,7 @@
   autogen: rand.generator_with_names_out
 
 - func: rand(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: rand
 
@@ -4403,7 +4404,7 @@
   autogen: randint_like.low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: randn
 
