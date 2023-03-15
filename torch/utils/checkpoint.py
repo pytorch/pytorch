@@ -184,52 +184,46 @@ def checkpoint(
     and instead recomputes them in backward pass. It can be applied on any part
     of a model.
 
-    Specifically, in the forward pass, :attr:`function` will run in
-    :func:`torch.no_grad` manner, i.e., not storing the intermediate
-    activations. Instead, the forward pass saves the inputs tuple and the
-    :attr:`function` parameter. In the backwards pass, the saved inputs and
-    :attr:`function` is retrieved, and the forward pass is computed on
-    :attr:`function` again, now tracking the intermediate activations, and then
-    the gradients are calculated using these activation values.
+    Currently there are two implementations of checkpointing that you can choose
+    between by specifying the :attr:`use_reentrant` parameter. In the future
+    however, we plan to deprecate ``use_reentrant=True`` (reentrant variant). It
+    is recommended that you use ``use_reentrant=False`` (non-reentrant variant).
+    Please file an issue if you have a use case that requires the reentrant
+    variant.
 
-    The output of :attr:`function` can contain non-Tensor values and gradient
-    recording is only performed for the Tensor values. Note that if the output
-    consists of nested structures (ex: custom objects, lists, dicts etc.)
-    consisting of Tensors, these Tensors nested in custom structures will not
-    be considered as part of autograd.
-
+    The non-reentrant variant improves upon the reentrant variant in several
+    ways:
+      * Unlike the reentrant variant, the non-reentrant variant properly records
+        the autograd graph during forward, e.g. allowing you to perform backward
+        on that graph inside checkpointed regions, and allowing you to attach
+        hooks to the graph in a more fine-grained way.
+      * Unlike the reentrant variant, the non-reentrant variant supports all
+        ways of performing backward. Reentrant checkpoint only supports the
+        :func:`torch.autograd.backward` API and only if its `inputs` argument is
+        not passed. :func:`torch.autograd.grad` is not supported.
+      * Unlike the reentrant variant, the non-reentrant variant  does not have
+        the restriction that at least one of the inputs and at least one of the
+        outputs needs to have ``requires_grad=True``. If this condition is
+        not met for reentrant checkpoint, the checkpointed part of the model
+        won't have gradients.
+      * Unlike the reentrant variant, the non-reentrant variant considers
+        Tensors passed as inputs or returned as outputs in nested structures
+        (e.g., custom objects, lists, dicts, etc) as participating in autograd.
+      * Unlike the reentrant variant, the non-reentrant variant supports the
+        checkpointed region containing tensors detached from the computational
+        graph. For the reentrant variant, if the checkpointed segment
+        contains tensors detached from the computational graph by `detach()` or
+        ``torch.no_grad()``, the backward pass will raise an error. This is
+        because ``checkpoint`` makes all the outputs require gradients which
+        causes issues when a tensor is defined to have no gradient in the model.
+        To circumvent this, detach the tensors outside of the `checkpoint`
+        function.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
         than the one during forward, e.g., due to some global variable, the
-        checkpointed version won't be equivalent, and unfortunately it can't be
-        detected.
-
-    .. warning::
-        If ``use_reentrant=True`` is specified, then if the checkpointed segment
-        contains tensors detached from the computational graph by `detach()` or
-        `torch.no_grad()`, the backward pass will raise an error. This is
-        because `checkpoint` makes all the outputs require gradients which
-        causes issues when a tensor is defined to have no gradient in the model.
-        To circumvent this, detach the tensors outside of the `checkpoint`
-        function. Note that the checkpointed segment can contain tensors
-        detached from the computational graph if ``use_reentrant=False`` is
-        specified.
-
-    .. warning::
-        If ``use_reentrant=True`` is specified, at least one of the inputs needs
-        to have :code:`requires_grad=True` if grads are needed for model inputs,
-        otherwise the checkpointed part of the model won't have gradients. At
-        least one of the outputs needs to have :code:`requires_grad=True` as
-        well. Note that this does not apply if ``use_reentrant=False`` is
-        specified.
-
-    .. warning::
-        If ``use_reentrant=True`` is specified, checkpointing currently only
-        supports :func:`torch.autograd.backward` and only if its `inputs`
-        argument is not passed. :func:`torch.autograd.grad`
-        is not supported. If ``use_reentrant=False`` is specified, checkpointing
-        will work with :func:`torch.autograd.grad`.
+        checkpointed version won't be equivalent, this may result in an error
+        being raised or result in silently incorrect gradients.
 
     Args:
         function: describes what to run in the forward pass of the model or
