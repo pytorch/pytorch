@@ -8,7 +8,7 @@ import torch
 import warnings
 from .._jit_internal import List, Tuple, is_tuple, is_list, Dict, is_dict, Optional, \
     is_optional, _qualified_name, Any, Future, is_future, _Await, is_await,\
-    is_ignored_fn, Union, is_union, check_args_exist
+    is_ignored_fn, Union, is_union, raise_error_container_parameter_missing
 from .._jit_internal import BroadcastingList1, BroadcastingList2, BroadcastingList3  # type: ignore[attr-defined]
 from ._state import _get_script_class
 
@@ -315,7 +315,17 @@ def is_tensor(ann):
 
     return False
 
-
+def check_args_exist(target_type) -> None:
+    if target_type is List:
+        raise_error_container_parameter_missing("List")
+    elif target_type is Tuple:
+        raise_error_container_parameter_missing("Tuple")
+    elif target_type is Dict:
+        raise_error_container_parameter_missing("Dict")
+    elif target_type is Optional:
+        raise_error_container_parameter_missing("Optional")
+    elif target_type is Union:
+        raise_error_container_parameter_missing("Union")
 
 def try_ann_to_type(ann, loc):
     if ann is inspect.Signature.empty:
