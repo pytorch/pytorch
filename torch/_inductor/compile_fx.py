@@ -138,6 +138,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    aot_mode=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -174,10 +175,13 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
+            if aot_mode:
+                return compiled_fn
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -256,18 +260,9 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 @dynamo_utils.dynamo_timed
 def cudagraphify(model, inputs, static_input_idxs=()):
-    from torch._inductor.cudagraph_trees import (
-        cudagraphify_impl as new_cudagraphify_impl,
-    )
-
-    if config.triton.cudagraph_trees:
-        cudagraphify_fn = new_cudagraphify_impl
-    else:
-        cudagraphify_fn = cudagraphify_impl
-
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
-        return cudagraphify_fn(model, inputs, static_input_idxs)
+        return cudagraphify_impl(model, inputs, static_input_idxs)
 
     compiled_fn = None
 
@@ -275,7 +270,8 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
+                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
+
         return compiled_fn(new_inputs)
 
     return run
@@ -294,28 +290,27 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     return static_input_idxs
 
 
-def static_input(x):
-    """
-    Copy and input while preserving strides
-    """
-    # TODO(jansel): figure out why this version doesn't work:
-    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-    )
-    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
-    return torch.as_strided(buffer, x.size(), x.stride())
-
-
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
+    def static_input(x):
+        """
+        Copy and input while preserving strides
+        """
+        # TODO(jansel): figure out why this version doesn't work:
+        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
+        needed_size = (
+            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+        )
+        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
+        return torch.as_strided(buffer, x.size(), x.stride())
+
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x).zero_() if idx not in static_input_idxs else x.detach()
+        static_input(x) if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
@@ -408,6 +403,7 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -418,7 +414,23 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                aot_mode=aot_mode,
             )
+
+    if aot_mode:
+        aot_config_patches = {
+            "cpp_wrapper": True,
+            "debug": True,
+            "triton.cudagraphs": False,
+        }
+        with config.patch(aot_config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                decompositions=decompositions,
+            )
+
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
@@ -476,17 +488,23 @@ def compile_fx(
             graph_id=graph_id,
         )
 
+    # Save and restore dynamic shapes setting for backwards, as it is
+    # sometimes done as a context manager which won't be set when we
+    # hit backwards compile
+    dynamic_shapes = dynamo_config.dynamic_shapes
+
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        fixed = count_tangents(model)
-        return inner_compile(
-            model,
-            example_inputs,
-            num_fixed=fixed,
-            cudagraphs=cudagraphs,
-            is_backward=True,
-            graph_id=graph_id,
-        )
+        with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
+            fixed = count_tangents(model)
+            return inner_compile(
+                model,
+                example_inputs,
+                num_fixed=fixed,
+                cudagraphs=cudagraphs,
+                is_backward=True,
+                graph_id=graph_id,
+            )
 
     with overrides.patch_functions():
         if decompositions is None:

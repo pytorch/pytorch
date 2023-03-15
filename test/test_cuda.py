@@ -4983,6 +4983,15 @@ class TestCudaComm(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(False)
 
+    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+        c = gather_traceback(True, True, True)
+        r, = symbolize_tracebacks([c])
+        r = str(r)
+        self.assertTrue("test_cuda.py" in r)
+        self.assertTrue("unwind" in r)
+
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
     def test_memory_snapshot_with_cpp(self):
@@ -5165,7 +5174,7 @@ class TestCudaComm(TestCase):
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
-    @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
+    @unittest.skipIf(not IS_LINUX, 'cpp traces only on linux')
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_cpp_memory_snapshot_pickle(self):
         from torch.utils.cpp_extension import load_inline
@@ -5175,28 +5184,45 @@ class TestCudaComm(TestCase):
             std::string data = torch::cuda::_memory_snapshot_pickled();
             return py::bytes(data);
         }
-        void record(bool e) {
-            torch::cuda::_record_memory_history(e);
+        void record(bool e, bool ctx) {
+            torch::cuda::_record_memory_history(e, ctx, 10, ctx, ctx);
         }
         """
         m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
-        try:
-            m.record(True)
-            t = torch.rand(311, 411, device='cuda')
-            mem = pickle.loads(m.do_snapshot())
-            found = False
-            for s in mem['segments']:
-                for b in s['blocks']:
-                    if b['state'] == 'active_allocated' and 'history' in b:
-                        history = b['history']
-                        if history and history[0]['real_size'] == 311 * 411 * 4:
-                            found = True
-            last_action = mem['device_traces'][0][-1]
-            self.assertTrue(last_action['action'] == 'alloc')
-            self.assertTrue(last_action['size'] == 311 * 411 * 4)
-            self.assertTrue(found)
-        finally:
-            m.record(False)
+        for ctx in (False, True):
+            try:
+                m.record(True, ctx)
+
+                @torch.jit.script
+                def the_script_fn():
+                    return torch.rand(311, 411, device='cuda')
+
+                def run():
+                    t = the_script_fn()
+                    return pickle.loads(m.do_snapshot())
+
+                mem = run()
+                found = False
+                for s in mem['segments']:
+                    for b in s['blocks']:
+                        if b['state'] == 'active_allocated' and 'history' in b:
+                            history = b['history']
+                            if history and history[0]['real_size'] == 311 * 411 * 4:
+                                if ctx:
+                                    frame_text = str(history[0]['frames'])
+                                    # C++ frame
+                                    self.assertTrue('::rand' in frame_text)
+                                    # script frame
+                                    self.assertTrue('the_script_fn' in frame_text)
+                                    # python frame
+                                    self.assertTrue('case.py' in frame_text)
+                                found = True
+                last_action = mem['device_traces'][0][-1]
+                self.assertTrue(last_action['action'] == 'alloc')
+                self.assertTrue(last_action['size'] == 311 * 411 * 4)
+                self.assertTrue(found)
+            finally:
+                m.record(False, False)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
     def test_notifies_oom(self):
@@ -5317,12 +5343,6 @@ class TestBlockStateAbsorption(TestCase):
             for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
                 self.checkCheckpointedBlock(before_block, after_block)
 
-    @staticmethod
-    def setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters=None):
-        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
-        storages_deleters = [] if not storages_deleters else [t.untyped_storage()._cdata for t in storages_deleters]
-        torch._C._cuda_setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters)
-
     def checkFunction(self, fn, inputs, pool=None):
         graph, outputs = cudagraphify(fn, inputs, pool=pool)
 
@@ -5332,7 +5352,7 @@ class TestBlockStateAbsorption(TestCase):
         segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
         state = torch._C._cuda_getCheckpointState(device, pool_id)
-        self.setCheckpointPoolState(device, state, [], [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
@@ -5402,7 +5422,7 @@ class TestBlockStateAbsorption(TestCase):
         graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-        self.setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+        torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
 
         del outputs2
 
@@ -5425,7 +5445,7 @@ class TestBlockStateAbsorption(TestCase):
 
         # graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         # with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-        #     self.setCheckpointPoolState(outputs[0].device.index, state, [], [])
+        #     torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [], [])
 
     def test_tensor_dies_after_checkpoint(self):
 
@@ -5443,7 +5463,7 @@ class TestBlockStateAbsorption(TestCase):
 
         del outputs
 
-        self.setCheckpointPoolState(device, state, [], [])
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
 
         self.assertEqual(live_blocks(pool_id), 2)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
@@ -5488,7 +5508,7 @@ class TestBlockStateAbsorption(TestCase):
         for i in range(len(reconstructed_tensors)):
             self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
 
-        self.setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+        torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
 
         self.assertEqual(live_blocks(pool_id), 3)
 
