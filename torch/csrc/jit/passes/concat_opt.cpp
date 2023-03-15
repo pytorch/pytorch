@@ -504,7 +504,7 @@ size_t determineUsageIdx(Value* value, Node* user) {
   const auto idx =
       std::find(user->inputs().begin(), user->inputs().end(), value) -
       user->inputs().begin();
-  TORCH_CHECK(idx != user->inputs().size());
+  TORCH_CHECK(idx != static_cast<decltype(idx)>(user->inputs().size()));
   return idx;
 }
 
