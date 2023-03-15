@@ -3,7 +3,7 @@ import io
 import torch
 from ._utils import _type, _cuda
 from torch.types import Storage
-from typing import Any, TypeVar, Type, Union, cast, Dict
+from typing import Any, TypeVar, Type, Union, cast
 import copy
 import collections
 from functools import lru_cache
