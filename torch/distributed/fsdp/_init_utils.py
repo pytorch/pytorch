@@ -284,6 +284,7 @@ def _init_core_state(
     cpu_offload: Optional[CPUOffload],
     limit_all_gathers: bool,
     use_orig_params: bool,
+    align_addresses: bool,
     backward_prefetch_limit: int,
     forward_prefetch_limit: int,
 ) -> _FSDPState:
@@ -303,6 +304,7 @@ def _init_core_state(
     state.cpu_offload = cpu_offload or CPUOffload()
     state.limit_all_gathers = limit_all_gathers
     state._use_orig_params = use_orig_params
+    state._align_addresses = align_addresses
     state.training_state = TrainingState.IDLE
     state._is_root = None
     _streams: Dict[str, torch.cuda.Stream] = {}
@@ -533,6 +535,7 @@ def _init_param_handle_from_params(
         state.mixed_precision.keep_low_precision_grads,
         state.process_group,
         state._use_orig_params,
+        state._align_addresses,
     )
     # TODO: Can simplify call `shard()` in the `FlatParamHandle` ctor
     handle.shard()

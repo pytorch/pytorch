@@ -69,6 +69,10 @@ class TestParityWithDDP(FSDPTest):
     PyTorch DDP vs. FullyShardedDataParallel.
     """
 
+    # @property
+    # def world_size(self):
+    #     return 2
+
     def _get_cuda_init_modes(self, cpu_offload: CPUOffload) -> List[CUDAInitMode]:
         modes = [
             CUDAInitMode.CUDA_AFTER,
@@ -138,6 +142,33 @@ class TestParityWithDDP(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
+    def test_nested_wrapped_model_single_iteration_mixed_precision_aligned(
+        self,
+        cpu_offload: CPUOffload,
+        sharding_strategy: Optional[ShardingStrategy],
+    ):
+        mixed_precision = MixedPrecision(
+            param_dtype=torch.float16,
+            buffer_dtype=torch.float16,
+            reduce_dtype=torch.float16,
+        )
+        config = self._get_subtest_config(cpu_offload)
+        config.pop("use_orig_params", None)
+        self.run_subtests(
+            config,
+            self._test_fsdp_parity,
+            NestedWrappedModule,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            num_iters=1,
+            mixed_precision=mixed_precision,
+            use_orig_params=True,
+            align_addresses=True,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(params, configs, subtest_name)
     def test_nested_always_wrap_model(
         self,
         cpu_offload: CPUOffload,
@@ -166,6 +197,27 @@ class TestParityWithDDP(FSDPTest):
             FSDPInitMode.RECURSIVE,
             cpu_offload=cpu_offload,
             sharding_strategy=sharding_strategy,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(params, configs, subtest_name)
+    def test_transformer_aligned(
+        self,
+        cpu_offload: CPUOffload,
+        sharding_strategy: Optional[ShardingStrategy],
+    ):
+        config = self._get_subtest_config(cpu_offload)
+        config.pop("use_orig_params", None)
+        self.run_subtests(
+            config,
+            self._test_fsdp_parity,
+            TransformerWithSharedParams,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            use_orig_params=True,
+            align_addresses=True,
+            num_iters=3,
         )
 
     @skip_if_lt_x_gpu(2)

@@ -593,6 +593,9 @@ def _sharded_pre_load_state_dict_hook(
 
     # Create a new flat_param from the loaded, non-sharded tensors.
     flat_param = _module_handles(fsdp_state, module)[0].flat_param
+    assert not fsdp_state._align_addresses, "Not yet implemented"
+    # TODO: Add alignment logic here. `nonsharded_tensors` does not contain
+    # the padding.
     loaded_flat_param = FlatParamHandle.flatten_params(
         nonsharded_tensors, requires_grad=False
     )

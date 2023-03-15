@@ -344,6 +344,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         limit_all_gathers: bool = False,
         use_orig_params: bool = False,
         ignored_parameters: Optional[Iterable[torch.nn.Parameter]] = None,
+        align_addresses: bool = False,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -381,6 +382,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 "forward_prefetch": forward_prefetch,
                 "limit_all_gathers": limit_all_gathers,
                 "use_orig_params": use_orig_params,
+                "align_addresses": align_addresses,
             }
             if sharding_strategy in HYBRID_SHARDING_STRATEGIES:
                 # Share root process groups with children to maintain
@@ -399,6 +401,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cpu_offload,
             limit_all_gathers,
             use_orig_params,
+            align_addresses,
             backward_prefetch_limit,
             forward_prefetch_limit,
         )

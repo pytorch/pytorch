@@ -10,6 +10,7 @@ from typing import (
     Iterator,
     List,
     NamedTuple,
+    no_type_check,
     Optional,
     Sequence,
     Set,
@@ -225,6 +226,7 @@ def _communicate_optim_state(
     return state
 
 
+@no_type_check
 def _unflatten_communicated_optim_state(
     fsdp_param_info: FSDPParamInfo,
     state: _ConsolidatedOptimState,
@@ -264,7 +266,13 @@ def _unflatten_communicated_optim_state(
         for state_name, flat_tensor in sorted_items(tensor_state):
             views_generated = state_name in flat_param_views
             if not views_generated:
-                views = FlatParamHandle._get_unflat_views(flat_param, flat_tensor)
+                # TODO: We need to skip padding here. Make sure that
+                # `_num_params` has consistent semantics (i.e. whether it
+                # includes padding or not).
+                assert not fsdp_state._align_addresses, "Not yet implemented"
+                views = FlatParamHandle._get_unflat_views(
+                    flat_param, flat_tensor, fsdp_state._align_addresses
+                )
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
@@ -398,6 +406,7 @@ def _flatten_optim_state_dict(
     return {"state": flat_osd_state, "param_groups": flat_osd_param_groups}
 
 
+@no_type_check
 def _flatten_optim_state(
     fsdp_param_info: FSDPParamInfo,
     unflat_osd_state: Dict[str, Dict[str, Any]],
