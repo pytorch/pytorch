@@ -86,7 +86,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -660,7 +660,7 @@ class VariableBuilder:
 
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
-            return UnspecializedNNModuleVariable(
+            return FSDPNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
             )
         else:
@@ -749,11 +749,16 @@ class VariableBuilder:
         tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
+        if getattr(value, "_dynamo_skip_guards", False):
+            guards = None
+            delattr(value, "_dynamo_skip_guards")
+        else:
+            guards = self.make_guards(GuardBuilder.TENSOR_MATCH)
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
+            guards=guards,
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
