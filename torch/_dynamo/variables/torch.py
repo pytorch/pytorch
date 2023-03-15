@@ -857,7 +857,7 @@ class TorchPyOperator(VariableTracker):
             # Register output to graph
             # Modeled off of compile_and_call_fx_graph
             # TODO: support non single Tensor output
-            assert isinstance(output, TensorVariable)
+            assert type(output) in (TensorVariable, TupleVariable, ListVariable)
             tx.output.guards.update(output.guards)
             tx.output.create_node(
                 "output", "output", (tx.output.create_arg((output.as_proxy(),))), {}
@@ -1014,6 +1014,70 @@ class TorchPyOperator(VariableTracker):
             example_value = r.new_empty(
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
+        elif self.value.__name__ == "while_loop":
+            cond_fun = args[0]
+            body_fun = args[1]
+            init_val = args[2]
+            assert type(cond_fun) in (UserFunctionVariable, NestedUserFunctionVariable)
+            assert type(body_fun) in (UserFunctionVariable, NestedUserFunctionVariable)
+            assert type(init_val) in (TupleVariable, ListVariable)
+            checkpoint = tx.copy_graphstate()
+
+            sub_args = init_val.unpack_var_sequence(tx)
+            assert all([type(arg) is TensorVariable for arg in sub_args])
+
+            graph_checkpoint, checkpoint = tx.output.graph, tx.copy_graphstate()
+
+            (
+                cond_r,
+                cond_graph,
+                cond_guards,
+                cond_nn_modules,
+                cond_cmp,
+            ) = speculate_subgraph(
+                cond_fun,
+                sub_args,
+                graph_checkpoint,
+                checkpoint,
+            )
+            (
+                body_r,
+                body_graph,
+                body_guards,
+                body_nn_modules,
+                body_cmp,
+            ) = speculate_subgraph(
+                body_fun,
+                sub_args,
+                graph_checkpoint,
+                checkpoint,
+            )
+
+            # Add guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= cond_guards
+            tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
+
+            cond_name = add_subgraph(
+                "cond_graph", torch.fx.GraphModule(cond_nn_modules, cond_graph)
+            )
+            body_name = add_subgraph(
+                "body_graph", torch.fx.GraphModule(body_nn_modules, body_graph)
+            )
+
+            # Make sure there is no side_effects in both subraphs
+            assert cond_cmp.output.side_effects.is_empty(), f"cond_fun has side_effects {cond_cmp.output.side_effects}"
+            assert body_cmp.output.side_effects.is_empty(), f"body_fun has side_effects {body_cmp.output.side_effects}"
+
+            cond_node = make_attr(cond_name)
+            body_node = make_attr(body_name)
+
+            p_args = (
+                cond_node,
+                body_node,
+                [a.as_proxy() for a in sub_args],
+            )
+
+            example_value = [proxy.node.meta["example_value"] for proxy in body_r.as_proxy()]
         else:
             unimplemented(f"PyOperator {self.value.__name__}")
 
