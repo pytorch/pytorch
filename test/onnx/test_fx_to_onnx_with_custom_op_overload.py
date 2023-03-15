@@ -26,7 +26,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             "torch_custom_op(Tensor x) -> Tensor"
         )
         def custom_op(x):
-            return x * 2 + 1
+            return x * 2.0 + 1.0
 
         CUSTOM_OPSET = onnxscript.values.Opset(domain="com.custom", version=1)
 
@@ -43,7 +43,7 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         )
 
         def f(x):
-            return 2 + custom_op(x) * 3
+            return 2.0 + custom_op(x) * 3.0
 
         onnx_model = fx.export_after_normalizing_args_and_kwargs(
             f, torch.randn(3), use_binary_format=False
@@ -51,6 +51,43 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
 
         self.assertIn("onnx_custom_op", str(onnx_model))
 
+    def test_simple_module(self):
+        class ToyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = torch.nn.Linear(2, 3)
+            def forward(self, tensor_x):
+                return self.layer(tensor_x)
+        toy_module = ToyModule()
+        # Step 1
+        @fx.custom_operator._register_onnx_custom_op_overload(
+            "torch_custom_module(Tensor x) -> Tensor"
+        )
+        def custom_op(x):
+            return toy_module(x)
+
+        CUSTOM_OPSET = onnxscript.values.Opset(domain="com.custom", version=1)
+
+        # Step 2
+        @onnxscript.script(opset=CUSTOM_OPSET)
+        def custom_module_exporter(x):
+            return CUSTOM_OPSET.onnx_custom_module(x)
+
+        # Step 3
+        fx.custom_operator._register_exporter_for_op_overload(
+            torch.ops.onnx_custom.torch_custom_module.default,
+            "custom_module",
+            custom_module_exporter,
+        )
+
+        def f(x):
+            return 2 + custom_op(x) * 3
+
+        onnx_model = fx.export_after_normalizing_args_and_kwargs(
+            f, torch.randn(1, 2), use_binary_format=False
+        )
+
+        self.assertIn("onnx_custom_module", str(onnx_model))
 
 if __name__ == "__main__":
     common_utils.run_tests()
