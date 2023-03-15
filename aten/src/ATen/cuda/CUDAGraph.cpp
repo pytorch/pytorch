@@ -313,7 +313,6 @@ TORCH_CHECK(has_graph_exec_,
   return mempool_id_;
 }
 
-
 CUDAGraph::~CUDAGraph() {
   reset();
 }

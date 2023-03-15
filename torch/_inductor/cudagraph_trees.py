@@ -231,7 +231,7 @@ class StorageWeakRefWrapper:
         assert isinstance(tensor, Tensor)
         stor = tensor.untyped_storage()
         self.ref = StorageWeakRef(stor)
-        self.data_ptr = stor.data_ptr()
+        self._data_ptr = stor.data_ptr()
 
     def __call__(self) -> Optional[StorageWeakRefPointer]:
         if self.ref is None:
@@ -245,13 +245,13 @@ class StorageWeakRefWrapper:
 
     def data_ptr(self) -> int:
         "NB: returns the data ptr even if the storage has expired"
-        return self.data_ptr()
+        return self._data_ptr
 
     def __repr__(self):
         if self.ref is None or self.ref.expired():
-            return f"StorageWeakRefWrapper to {self.data_ptr}; dead"
+            return f"StorageWeakRefWrapper to {self.data_ptr()}; dead"
         else:
-            return f"StorageWeakRefWrapper to {self.data_ptr}; alive"
+            return f"StorageWeakRefWrapper to {self.data_ptr()}; alive"
 
 
 def is_cuda_tensor(x):
@@ -336,11 +336,11 @@ class CUDAWarmupNode:
 
         # See: output_is_alias_of_static_inputs below. We should only be returning freshly created
         # storages in path_live_weakrefs.
-        existing_path_data_ptrs = {t.data_ptr for t in self.path_live_weakrefs() if t()}
+        existing_path_data_ptrs = {t.data_ptr() for t in self.path_live_weakrefs() if t()}
         non_cudagraph_inps = set()
-        for inp in new_inputs:
-            if inp.untyped_storage().data_ptr() not in existing_path_data_ptrs:
-                non_cudagraph_inps.add(inp.untyped_storage().data_ptr())
+        for i in range(len(new_inputs)):
+            if new_inputs[i].untyped_storage().data_ptr() not in existing_path_data_ptrs:
+                non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
 
         if config.triton.debug_cudagraph_trees:
             refs = list(self.path_live_weakrefs())
@@ -366,7 +366,7 @@ class CUDAWarmupNode:
 
         if config.triton.debug_cudagraph_trees:
             out_refs = self.path_live_weakrefs()
-            new_storages = [t for t in out_refs if t.data_ptr not in non_cudagraph_inps]
+            new_storages = [t for t in out_refs if t.data_ptr() not in non_cudagraph_inps]
             check_memory_pool(self.cuda_graphs_pool, new_storages)
 
         return out
@@ -692,7 +692,7 @@ class CUDAGraphNode:
                     continue
                 # dont need to check liveness of storage since the cuda graph managed
                 # memory is never released.
-                data_ptr = storage_weak_ref.data_ptr
+                data_ptr = storage_weak_ref.data_ptr()
                 if t.untyped_storage().data_ptr() == data_ptr:
                     return True
 
@@ -899,7 +899,7 @@ def check_memory_pool(pool_id, live_storages_ptrs: List[StorageWeakRefWrapper]):
     assert all([isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs])
     gc.collect()
 
-    unique_storages = {stor.data_ptr for stor in live_storages_ptrs if stor()}
+    unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}
     segments = get_cudagraph_segments(pool_id)
 
     for segment in segments:
