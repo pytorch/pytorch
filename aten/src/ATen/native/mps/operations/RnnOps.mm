@@ -17,7 +17,7 @@ namespace at::native {
 std::vector<long long> getTensorShape(MPSGraphTensor* mpsTensor) {
   std::vector<long long> output_dimensions = {};
   auto dims = mpsTensor.shape;
-  for (int i = 0; i < [dims count]; i++) {
+  for (NSUInteger i = 0; i < [dims count]; i++) {
     output_dimensions.push_back([dims[i] intValue]);
   }
   return output_dimensions;
