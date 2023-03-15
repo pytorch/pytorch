@@ -656,7 +656,7 @@ if(USE_CUDA)
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/jit/codegen/cuda/interface.cpp PROPERTIES COMPILE_FLAGS "-DUSE_CUDA=1")
 endif()
 
-if(USE_FLASH_ATTENTION)
+if(USE_FLASH_ATTENTION AND NOT MSVC)
   # Cutlass contains a sign-compare violation in its codebase to be fixed by https://github.com/NVIDIA/cutlass/pull/869
   set_source_files_properties(
     "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/nested/cuda/NestedTensorMatmul.cu"
