@@ -1212,24 +1212,15 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             device, stream, mempool_id);
       });
 
+  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
+    auto stream = at::cuda::getCurrentCUDAStream(device);
+    TORCH_CHECK(stream, "Expected stream capture to be under way");
+    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
+  });
 
-  m.def(
-      "_cuda_endAllocateCurrentStreamToPool",
-      [](int device) {
-        auto stream = at::cuda::getCurrentCUDAStream(device);
-        TORCH_CHECK(stream, "Expected stream capture to be under way");
-        c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(
-            device, stream);
-      });
-
-  
-  m.def(
-      "_cuda_releasePool",
-      [](int device, at::cuda::MempoolId_t mempool_id) {
-        c10::cuda::CUDACachingAllocator::releasePool(
-            device, mempool_id);
-      });
-
+  m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
+    c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+  });
 
   m.def(
       "_cuda_setCheckpointPoolState",
