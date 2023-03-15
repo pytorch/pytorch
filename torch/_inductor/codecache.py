@@ -120,9 +120,9 @@ class PersistentCache:
             1. Check global_cache[name][inputs][choice], return benchmark if cached.
             2. Check local_cache[name][inputs][choice], return benchmark if cached.
             3.
-                a. `max_autotune=True`: benchmark the choice, update
+                a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[name][inputs][choice], and return the benchmark.
-                b. `max_autotune=False`: don't benchmark the choice, return nothing.
+                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
         gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
@@ -145,7 +145,7 @@ class PersistentCache:
                         callback(choice_hash, cached=False)
             return hit
 
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not check_cache(
@@ -534,6 +534,52 @@ def cpp_compile_command(
     ).strip()
 
 
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, source_code):
+        from .codegen.wrapper import CppWrapperCodeGen
+
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = (
+                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
+                    if config.aot_codegen_output_prefix
+                    else f"{input_path[:-3]}.so"
+                )
+
+                output_header = f"{output_so[:-3]}.h"
+                with open(output_header, "w") as header_file:
+                    header_file.writelines("#include <torch/torch.h>\n\n")
+                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+
+                log.info(f"AOT-Inductor compiles code into: {output_so}")
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_so, vec_isa=picked_vec_isa
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+        return cls.cache[key]
+
+
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
@@ -596,7 +642,12 @@ class PyCodeCache:
         key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
-                code = compile(f.read(), path, "exec")
+                try:
+                    code = compile(f.read(), path, "exec")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to import {path}\n{type(e).__name__}: {e}"
+                    )
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key

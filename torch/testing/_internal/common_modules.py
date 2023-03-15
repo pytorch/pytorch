@@ -16,7 +16,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS)
+    freeze_rng_state, set_single_threaded_if_parallel_tbb, skipIfMps, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM)
 from types import ModuleType
 from typing import List, Tuple, Type, Set, Dict
 
@@ -1058,6 +1058,188 @@ def module_inputs_torch_nn_LSTM(module_info, device, dtype, requires_grad, train
 
     return samples
 
+def module_inputs_torch_nn_ReflectionPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((2, 3))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2)),
+            forward_input=FunctionInput(make_input((2, 3, 4))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ReflectionPad2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4)),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ReflectionPad3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((2, 3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 1, 2, 1, 2)),
+            forward_input=FunctionInput(make_input((3, 3, 3, 3, 3))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ReplicationPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2)),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ReplicationPad2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4)),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ReplicationPad3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4, 5, 6)),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6, 7))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ZeroPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2)),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ZeroPad2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((1, 2, 3))),
+            reference_fn=no_batch_dim_reference_fn
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4)),
+            forward_input=FunctionInput(make_input((1, 2, 3, 4))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ZeroPad3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4, 5, 6)),
+            forward_input=FunctionInput(make_input((1, 2, 3, 4, 5))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ConstantPad1d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1, 2),
+            forward_input=FunctionInput(make_input((3, 4))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2), 3),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ConstantPad2d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1, 3),
+            forward_input=FunctionInput(make_input((3, 4, 5))),
+            reference_fn=no_batch_dim_reference_fn
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4), 5),
+            forward_input=FunctionInput(make_input((1, 2, 3, 4))),
+        ),
+    ]
+
+def module_inputs_torch_nn_ConstantPad3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput(1, 3),
+            forward_input=FunctionInput(make_input((3, 4, 5, 6))),
+            reference_fn=no_batch_dim_reference_fn,
+        ),
+        ModuleInput(
+            constructor_input=FunctionInput((1, 2, 3, 4, 5, 6), 7),
+            forward_input=FunctionInput(make_input((1, 2, 1, 2, 1))),
+        ),
+    ]
+
+
+
 
 # All these operators share similar issues on cuDNN and MIOpen
 rnn_gru_lstm_module_info_decorators = (
@@ -1470,11 +1652,6 @@ module_db: List[ModuleInfo] = [
     ModuleInfo(torch.nn.TransformerEncoderLayer,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_TransformerEncoderLayer,
-               decorators=[
-                   DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
-                                'TestModule', 'test_non_contiguous_tensors',
-                                device_type='cpu', active_if=IS_WINDOWS),
-               ],
                skips=(
                    # No channels_last support for TransformerEncoderLayer currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
@@ -1551,5 +1728,77 @@ module_db: List[ModuleInfo] = [
                module_inputs_func=module_inputs_torch_nn_LSTM,
                skips=(
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),),
-               decorators=rnn_gru_lstm_module_info_decorators)
+               decorators=rnn_gru_lstm_module_info_decorators),
+    ModuleInfo(torch.nn.ReflectionPad1d,
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReflectionPad2d,
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad2d,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReflectionPad3d,
+               module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReplicationPad1d,
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReplicationPad2d,
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad2d,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ReplicationPad3d,
+               module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
+               skips=(
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_grad'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_gradgrad'),
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ZeroPad1d,
+               module_inputs_func=module_inputs_torch_nn_ZeroPad1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ZeroPad2d,
+               module_inputs_func=module_inputs_torch_nn_ZeroPad2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ZeroPad3d,
+               module_inputs_func=module_inputs_torch_nn_ZeroPad3d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ConstantPad1d,
+               module_inputs_func=module_inputs_torch_nn_ConstantPad1d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ConstantPad2d,
+               module_inputs_func=module_inputs_torch_nn_ConstantPad2d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               ),
+    ModuleInfo(torch.nn.ConstantPad3d,
+               module_inputs_func=module_inputs_torch_nn_ConstantPad3d,
+               skips=(
+                   DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),)
+               )
 ]

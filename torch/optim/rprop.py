@@ -192,8 +192,7 @@ def rprop(
     """
 
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach([params, grads, prevs, step_sizes],
-                                                  differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")

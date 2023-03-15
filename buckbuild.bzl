@@ -1463,6 +1463,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],
@@ -2105,7 +2106,6 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/prim_ops_registery.cpp",
             "torch/csrc/jit/runtime/operator.cpp",
             "torch/csrc/jit/runtime/slice_indices_adjust.cpp",
-            "torch/csrc/utils/cpp_stacktraces.cpp",
         ],
         header_namespace = "",
         exported_headers = [
