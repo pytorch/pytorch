@@ -25,9 +25,7 @@ import unittest
 test_classes = {}
 
 ALL_DYNAMIC_XFAILS = {
-    "MiscTests": [
-        "test_parsing_sdpa",
-    ],
+    "MiscTests": [],
     "ReproTests": [
         # Could not infer dtype of torch._C.SymIntNode
         "test_convert_boxes_to_pooler_format",

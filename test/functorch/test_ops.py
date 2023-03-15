@@ -11,6 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+from torch.testing._internal.common_utils import skipIfRocm
 import torch
 from torch import Tensor
 import functools
@@ -37,7 +38,6 @@ from common_utils import (
     loop,
     loop2,
     expectedFailureIf,
-    skipIfRocm,
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
@@ -1052,7 +1052,6 @@ class TestOperators(TestCase):
         xfail('cumprod'),
         xfail('masked_fill'),
         xfail('copysign'),
-        xfail('complex'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1069,7 +1068,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -1120,7 +1118,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('complex'),
         xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
