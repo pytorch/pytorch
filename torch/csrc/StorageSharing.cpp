@@ -191,7 +191,6 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   const auto& storage = THPStorage_Unpack(self);
   TORCH_CHECK(
       storage.device_type() == at::kCPU, "_share_fd_: only available on CPU");
-  c10::StorageImpl* self_storage_impl = storage.unsafeGetStorageImpl();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   at::MapAllocator* ctx;
   // Storage is already in shared memory, just return a handle
