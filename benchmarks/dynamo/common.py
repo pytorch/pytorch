@@ -145,6 +145,7 @@ CI_SKIP[CI("inductor", training=False)] = [
     "cait_m36_384",  # Accuracy
     "botnet26t_256",  # accuracy https://github.com/pytorch/pytorch/issues/93847
     "gluon_xception65",  # accuracy https://github.com/pytorch/pytorch/issues/93847
+    "xcit_large_24_p8_224",  # TIMEOUT
 ]
 
 CI_SKIP[CI("inductor", training=False, device="cpu")] = [
@@ -162,6 +163,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
     "hf_GPT2_large",  # Intermittent failure on CI
+    "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",
@@ -175,6 +177,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     # TIMM
     "cait_m36_384",  # Accuracy
     "pnasnet5large",  # OOM
+    "xcit_large_24_p8_224",  # OOM https://github.com/pytorch/pytorch/issues/95984
 ]
 
 CI_SKIP[CI("inductor", training=True)] = [
@@ -198,6 +201,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -207,12 +211,15 @@ CI_SKIP[CI("inductor", training=True)] = [
 CI_SKIP[CI("aot_eager", training=False, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=False)],
     # torchbench
-    "vision_maskrcnn",  # 'literal' is an illegal expression for augmented assignment
+    "vision_maskrcnn",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("aot_eager", training=True, dynamic=True)] = [
     *CI_SKIP[CI("aot_eager", training=True)],
     *CI_SKIP[CI("aot_eager", training=False, dynamic=True)],
+    # timm_models
+    "botnet26t_256",  # sympy RecursionError
+    "eca_botnext26ts_256",  # sympy RecursionError
 ]
 
 CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
@@ -221,9 +228,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
-    "pnasnet5large",  # ceiling is not defined
-    "volo_d1_224",  # ceiling is not defined
+    "convit_base",  # TypeError: Cannot convert symbols to int
+    "pnasnet5large",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -231,7 +240,11 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # TODO: Fill this in
+    # torchbench
+    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
+    # timm_models
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
+    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
 
@@ -1271,10 +1284,13 @@ class BenchmarkRunner:
             correct_rerun_result = self.run_n_iterations(
                 model_copy, clone_inputs(example_inputs)
             )
+            # Two eager runs should have exactly same result
             if not same(
                 correct_result,
                 correct_rerun_result,
-                fp64_ref=None,  # Two eager runs should be the same without comparing against fp64_output
+                fp64_ref=None,
+                cos_similarity=False,
+                tol=0,
                 equal_nan=self.equal_nan,
             ):
                 accuracy_status = "eager_variation"
@@ -1350,8 +1366,8 @@ class BenchmarkRunner:
                     total = psutil.virtual_memory().total
                     percentage = psutil.Process(os.getpid()).memory_percent()
                     peak_mem = percentage * total / 10**9
-            except Exception as e:
-                log.exception(f"Failed for {mode} {e}")
+            except Exception:
+                log.exception(f"Backend {mode} failed in warmup()")
                 return sys.exit(-1)
             dynamo_stats = get_dynamo_stats()
             dynamo_stats.subtract(start_stats)
@@ -1644,6 +1660,9 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
+        "--unspecialize-int", action="store_true", help="Run with specialize_int=False."
+    )
+    parser.add_argument(
         "--use-eval-mode",
         action="store_true",
         help="sets model.eval() to reduce randomness",
@@ -1753,8 +1772,8 @@ def parse_args(args=None):
     parser.add_argument(
         "--timeout",
         type=int,
-        default=1200,
-        help="timeout (ms) for benchmarking.",
+        default=1800,
+        help="timeout (second) for benchmarking.",
     )
 
     parser.add_argument(
@@ -1900,8 +1919,14 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
+    if args.unspecialize_int:
+        torch._dynamo.config.specialize_int = False
     if args.ci:
-        args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
+        if args.accuracy:
+            # Run fewer iterations when checking accuracy
+            args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -1953,9 +1978,22 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
+        if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
+            "pytorch_CycleGAN_and_pix2pix",
+            "pytorch_unet",
+            "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
+        }:
+            # some of the models do not support use_deterministic_algorithms
+            torch.use_deterministic_algorithms(True)
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
-        torch.backends.cudnn.deterministic = True
+        torch.backends.cuda.matmul.allow_tf32 = False
 
         # Remove randomeness when torch manual seed is called
         patch_torch_manual_seed()

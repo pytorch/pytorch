@@ -1051,6 +1051,11 @@ class TestVmapAPI(TestCase):
         y = reshape_dim_outof(-1, 6, x)
         self.assertEqual(y, x.reshape(12, 12, 6, 2))
 
+        # Case: `0` sized dim.
+        x = torch.randn(12, 12, 0)
+        y = reshape_dim_outof(-1, 6, x)
+        self.assertEqual(y.shape, torch.Size((12, 12, 6, 0)))
+
     def test_batch_rule_does_not_need_to_handle_no_batched_input(self):
         def f(x, y):
             res = torch.dot(y, torch.ones(2))
@@ -3596,7 +3601,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('complex'),
         xfail('copysign'),
         xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -4259,6 +4263,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         # IndexError: Dimension out of range (expected to be in range of [-1, 0], but got -2)
         # https://github.com/pytorch/pytorch/runs/8110653462?check_suite_focus=true
         # but it passes locally
+        xfail('linalg.diagonal'),
         skip('linalg.matrix_norm', ''),
         skip('linalg.ldl_solve', ''),
     })
