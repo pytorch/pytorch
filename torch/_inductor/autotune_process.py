@@ -1,5 +1,6 @@
 import dataclasses
 import queue
+import time
 import warnings
 from typing import Any, Dict, List
 
@@ -14,6 +15,7 @@ from torch._inductor.select_algorithm import ChoiceCaller
 from .utils import do_bench
 from .virtualized import V
 
+DEBUG = False
 EXIT_HANDLER_REGISTERED = False
 
 # Used to synchronize between parent and child processes
@@ -154,12 +156,23 @@ class BenchmarkRequest:
     output_tensor: TensorMeta
 
     def benchmark(self) -> float:
+        if DEBUG:
+            start_ts = time.time()
+
         mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
         run = getattr(mod, self.kernel_name).run
+
+        if DEBUG:
+            load_elapse = time.time() - start_ts
+            start_ts = time.time()
 
         # create args and out tensor
         input_tensors = [x.to_tensor() for x in self.input_tensors]
         output_tensor = self.output_tensor.to_tensor()
+
+        if DEBUG:
+            create_tensor_elapse = time.time() - start_ts
+            start_ts = time.time()
 
         def worker():
             return run(
@@ -171,7 +184,16 @@ class BenchmarkRequest:
                 num_warps=self.num_warps,
             )
 
-        return do_bench(worker)[0]
+        out = do_bench(worker)[0]
+        torch.cuda.synchronize()  # shake out any CUDA errors
+
+        if DEBUG:
+            bench_elapse = time.time() - start_ts
+            print(
+                f"InChidProcess {self.module_cache_key}: load {load_elapse}, "
+                + f"create tensor {create_tensor_elapse}, bench {bench_elapse}"
+            )
+        return out
 
 
 def benchmark_in_sub_process(
