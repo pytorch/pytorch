@@ -208,13 +208,12 @@ class CUDAAllocator : public Allocator {
   virtual void resetAccumulatedStats(int device) = 0;
   virtual void resetPeakStats(int device) = 0;
   virtual SnapshotInfo snapshot() = 0;
-  virtual void notifyCaptureBegin(
+  virtual void beginAllocateStreamToPool(
       int device,
-      CaptureId_t graph_id,
+      cudaStream_t stream,
       MempoolId_t mempool_id) = 0;
-  virtual void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureEnded(int device, CaptureId_t graph_id) = 0;
-  virtual void notifyCaptureDestroy(int device, MempoolId_t mempool_id) = 0;
+  virtual void endAllocateStreamToPool(int device, cudaStream_t stream) = 0;
+  virtual void releasePool(int device, MempoolId_t mempool_id) = 0;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) = 0;
   virtual void recordHistory(
       bool enabled,
@@ -309,15 +308,15 @@ inline CheckpointDelta setCheckpointPoolState(
 }
 
 // CUDAGraph interactions
-inline void notifyCaptureBegin(
+inline void beginAllocateStreamToPool(
     int device,
-    CaptureId_t graph_id,
+    cudaStream_t stream,
     MempoolId_t mempool_id) {
-  return get()->notifyCaptureBegin(device, graph_id, mempool_id);
+  return get()->beginAllocateStreamToPool(device, stream, mempool_id);
 }
 
-inline void notifyCaptureAboutToEnd(int device, CaptureId_t graph_id) {
-  return get()->notifyCaptureAboutToEnd(device, graph_id);
+inline void endAllocateStreamToPool(int device, cudaStream_t stream) {
+  return get()->endAllocateStreamToPool(device, stream);
 }
 
 inline void recordHistory(
@@ -336,12 +335,8 @@ inline void attachOutOfMemoryObserver(OutOfMemoryObserver observer) {
   return get()->attachOutOfMemoryObserver(observer);
 }
 
-inline void notifyCaptureEnded(int device, CaptureId_t graph_id) {
-  return get()->notifyCaptureEnded(device, graph_id);
-}
-
-inline void notifyCaptureDestroy(int device, MempoolId_t mempool_id) {
-  return get()->notifyCaptureDestroy(device, mempool_id);
+inline void releasePool(int device, MempoolId_t mempool_id) {
+  return get()->releasePool(device, mempool_id);
 }
 // Not part of CUDA_ALLOCATOR_BACKEND_INTERFACE
 inline std::shared_ptr<void> getIpcDevPtr(std::string handle) {

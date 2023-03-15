@@ -1232,7 +1232,6 @@ def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
 
 # Defined in torch/csrc/Module.cpp
 def _rename_privateuse1_backend(backend: str) -> None: ...
-def _get_privateuse1_backend_name() -> str: ...
 
 # Defined in torch/csrc/Generator.cpp
 class Generator:
@@ -1416,7 +1415,7 @@ class _TensorBase(metaclass=_TensorMeta):
     _version: _int
     _base: Optional[Tensor]
     _cdata: _int
-    grad_fn: _Node
+    grad_fn: Optional[_Node]
     _grad_fn: Any
     _grad: Optional[Tensor]
     grad: Optional[Tensor]
@@ -1831,9 +1830,3 @@ def _current_autograd_node() -> _Node: ...
 
 class _OutOfMemoryError: ...
 class _DistBackendError(RuntimeError): ...
-
-# Defined in torch/csrc/profiler/init.cpp
-class CapturedTraceback:
-    pass
-def gather_traceback(python: _bool, script: _bool, cpp: _bool) -> CapturedTraceback: ...
-def symbolize_tracebacks(tracebacks: List[CapturedTraceback]) -> List[Dict[str, Any]]: ...
