@@ -134,7 +134,8 @@ static PyObject* THPStorage_resize_(PyObject* _self, PyObject* number_arg) {
         size_bytes_i,
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    at::native::resize_bytes_cuda(self->cdata->unsafeGetStorageImpl(), size_bytes);
+    at::native::resize_bytes_cuda(
+        self->cdata->unsafeGetStorageImpl(), size_bytes);
 #endif
   } else {
     TORCH_CHECK(
@@ -155,9 +156,7 @@ static PyObject* THPStorage_fill_(PyObject* _self, PyObject* number_arg) {
       "fill_ expects int, "
       "but got %s",
       THPUtils_typename(number_arg));
-  storage_fill(
-      *(self->cdata),
-      THPByteUtils_unpackReal(number_arg));
+  storage_fill(*(self->cdata), THPByteUtils_unpackReal(number_arg));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
@@ -390,7 +389,8 @@ PyObject* THPStorage_writeFile(PyObject* _self, PyObject* args) {
       fd != -1,
       "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_writeFileRaw(self->cdata->unsafeGetStorageImpl(), fd, save_size, element_size);
+  THPStorage_writeFileRaw(
+      self->cdata->unsafeGetStorageImpl(), fd, save_size, element_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -438,8 +438,8 @@ static PyObject* THPStorage_setFromFile(PyObject* _self, PyObject* args) {
         offset == Py_None,
         "_set_from_file: offset is NYI for filelike objects");
 
-    auto self_storage =
-        c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata->unsafeGetStorageImpl());
+    auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
+        self->cdata->unsafeGetStorageImpl());
     auto storage = THPStorage_readFileRaw<PyObject*>(
         file, std::move(self_storage), element_size);
     if (!storage.defined()) {
@@ -459,8 +459,8 @@ static PyObject* THPStorage_setFromFile(PyObject* _self, PyObject* args) {
       fd != -1,
       "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  auto self_storage =
-      c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata->unsafeGetStorageImpl());
+  auto self_storage = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
+      self->cdata->unsafeGetStorageImpl());
   auto storage = THPStorage_readFileRaw<int>(fd, self_storage, element_size);
   if (!storage.defined())
     return nullptr;
@@ -494,18 +494,20 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
 
   // TODO: I don't know if this is right
 
-  //if (ptr) {
+  // if (ptr) {
   //  c10::raw::intrusive_ptr::incref(ptr);
   //}
-  //if (self->cdata) {
+  // if (self->cdata) {
   //  c10::raw::intrusive_ptr::decref(self->cdata);
   //}
 
   self->cdata.~MaybeOwned<c10::Storage>();
-  //self->cdata = c10::MaybeOwned<c10::Storage>::owned(c10::Storage(c10::intrusive_ptr<c10::StorageImpl>(ptr)));
-  //self->cdata = c10::MaybeOwned<c10::Storage>::owned(c10::Storage(std::copy(ptr)));
-  self->cdata = c10::MaybeOwned<c10::Storage>::owned(c10::Storage(
-      c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr)));
+  // self->cdata =
+  // c10::MaybeOwned<c10::Storage>::owned(c10::Storage(c10::intrusive_ptr<c10::StorageImpl>(ptr)));
+  // self->cdata =
+  // c10::MaybeOwned<c10::Storage>::owned(c10::Storage(std::copy(ptr)));
+  self->cdata = c10::MaybeOwned<c10::Storage>::owned(
+      c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr)));
 
   Py_INCREF(self);
   return (PyObject*)self;

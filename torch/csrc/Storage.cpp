@@ -33,7 +33,8 @@ PyObject* THPStorage_New(c10::Storage storage) {
   PyTypeObject* type = (PyTypeObject*)THPStorageClass;
   PyObject* obj = type->tp_alloc(type, 0);
   if (obj) {
-    ((THPStorage*)obj)->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
+    ((THPStorage*)obj)->cdata =
+        c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
   }
   return obj;
 }
@@ -125,10 +126,10 @@ static PyObject* THPStorage_pynew(
   if (r.idx == 0) {
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-                      c10::StorageImpl::use_byte_size_t(),
-                      0,
-                      allocator,
-                      /*resizable=*/true));
+            c10::StorageImpl::use_byte_size_t(),
+            0,
+            allocator,
+            /*resizable=*/true));
     return (PyObject*)self.release();
 
     // torch.Storage(size, *, ...)
@@ -136,10 +137,10 @@ static PyObject* THPStorage_pynew(
     int64_t size = r.toInt64(0);
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-                      c10::StorageImpl::use_byte_size_t(),
-                      size,
-                      allocator,
-                      /*resizable=*/true));
+            c10::StorageImpl::use_byte_size_t(),
+            size,
+            allocator,
+            /*resizable=*/true));
     return (PyObject*)self.release();
 
     // torch.Storage(sequence, *, ...)
@@ -158,10 +159,10 @@ static PyObject* THPStorage_pynew(
         THPUtils_typename(sequence));
     self->cdata = c10::MaybeOwned<c10::Storage>::owned(
         c10::make_intrusive<c10::StorageImpl>(
-                      c10::StorageImpl::use_byte_size_t(),
-                      length,
-                      allocator,
-                      /*resizable=*/true));
+            c10::StorageImpl::use_byte_size_t(),
+            length,
+            allocator,
+            /*resizable=*/true));
     THPObjectPtr item;
     try {
       for (Py_ssize_t i = 0; i < length; i++) {
@@ -204,9 +205,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     int64_t nindex = THPUtils_unpackLong(index);
     if (nindex < 0)
       nindex += storage.nbytes();
-    if (nindex < 0 ||
-        nindex >=
-            static_cast<int64_t>(storage.nbytes())) {
+    if (nindex < 0 || nindex >= static_cast<int64_t>(storage.nbytes())) {
       PyErr_SetString(
           PyExc_IndexError,
           fmt::format(

@@ -156,7 +156,8 @@ at::Storage createStorageGetType(
   const auto& storage = THPStorage_Unpack(untyped_storage_obj);
   c10::DeviceType device_type = storage.device().type();
   auto type_properties = get_type_properties(device_type, at::kByte);
-  return type_properties->unsafeStorageFromTH(storage.unsafeGetStorageImpl(), true);
+  return type_properties->unsafeStorageFromTH(
+      storage.unsafeGetStorageImpl(), true);
 }
 
 at::Storage createStorage(PyObject* obj) {

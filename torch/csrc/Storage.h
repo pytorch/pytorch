@@ -16,7 +16,8 @@ struct MaybeOwnedTraits<c10::Storage> {
     // NOTE: this can be implemented without the special
     // unsafe_borrow_t Tensor constructor as
     //
-    // return borrow_type(c10::intrusive_ptr<at::TensorImpl, at::UndefinedTensorImpl>::rec    laim(from.unsafeGetTensorImpl()));
+    // return borrow_type(c10::intrusive_ptr<at::TensorImpl,
+    // at::UndefinedTensorImpl>::rec    laim(from.unsafeGetTensorImpl()));
     //
     // but that hurts inlining due to the nullptr check in the
     // Tensor(c10::intrusive_ptr<...>) constructor. We already know
@@ -24,7 +25,7 @@ struct MaybeOwnedTraits<c10::Storage> {
     // we needn't do the check again. (using __builtin_assume can
     // avoid this, but wouldn't be portable to MSVC.)
 
-    //return borrow_type(borrow_type::unsafe_borrow_t{}, from);
+    // return borrow_type(borrow_type::unsafe_borrow_t{}, from);
     return borrow_type(from);
   }
 
@@ -33,7 +34,7 @@ struct MaybeOwnedTraits<c10::Storage> {
     // See above note: this can be implemented with public API
     // similarly to createBorrow(), but that would hurt inlining.
 
-    //lhs = borrow_type(borrow_type::unsafe_borrow_t{}, rhs);
+    // lhs = borrow_type(borrow_type::unsafe_borrow_t{}, rhs);
     lhs = borrow_type(rhs);
   }
 
@@ -74,7 +75,7 @@ struct ExclusivelyOwnedTraits<c10::Storage> {
   }
 
   // TODO: Not sure yet if I need this
-  //static void destroyOwned(c10::Storage& x) {
+  // static void destroyOwned(c10::Storage& x) {
   //  return ExclusivelyOwnedTraits<c10::StorageBase>::destroyOwned(x);
   //}
 
@@ -106,11 +107,11 @@ void THPStorage_postInit(PyObject* module);
 
 extern PyTypeObject THPStorageType;
 
-inline const c10::Storage& THPStorage_Unpack(THPStorage* storage){
+inline const c10::Storage& THPStorage_Unpack(THPStorage* storage) {
   return *storage->cdata;
 }
 
-inline const c10::Storage& THPStorage_Unpack(PyObject* obj){
+inline const c10::Storage& THPStorage_Unpack(PyObject* obj) {
   return THPStorage_Unpack(reinterpret_cast<THPStorage*>(obj));
 }
 
