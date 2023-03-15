@@ -26,4 +26,4 @@ pip_install "onnx-script@git+https://github.com/microsoft/onnx-script@29241e15f5
 
 # Cache the transfomers model to be used later by ONNX tests. By default, the model
 # is cached at ~/.cache/huggingface/hub/
-conda_run python -c 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2");'
+conda_run python -c "import transformers; transformers.AutoModel.from_pretrained('sshleifer/tiny-gpt2');"
