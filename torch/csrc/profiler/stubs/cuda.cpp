@@ -39,7 +39,7 @@ struct CUDAMethods : public ProfilerStubs {
   void record(int* device, ProfilerEventStub* event, int64_t* cpu_ns)
       const override {
     if (device) {
-      TORCH_CUDA_CHECK(cudaGetDevice(device));
+      TORCH_CUDA_CHECK(c10::cuda::GetDevice(device));
     }
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     CUevent_st* cuda_event_ptr;
