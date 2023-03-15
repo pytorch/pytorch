@@ -1941,8 +1941,6 @@ def run(runner, args, original_dir=None):
     if args.specialize_int:
         torch._dynamo.config.specialize_int = True
     if args.ci:
-        if args.inductor and args.accuracy:
-            torch._inductor.config.compile_threads = 1
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
