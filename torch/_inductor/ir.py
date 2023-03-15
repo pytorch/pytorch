@@ -2075,7 +2075,9 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        return str(V.graph.sizevars.simplify(self.shape))
+        from torch._inductor.codegen.wrapper import pexpr
+
+        return pexpr(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass

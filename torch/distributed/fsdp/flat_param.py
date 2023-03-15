@@ -1942,16 +1942,21 @@ class FlatParamHandle:
         if hasattr(flat_param, "_cpu_grad"):
             grad = flat_param._cpu_grad  # type: ignore[attr-defined]
         elif hasattr(flat_param, "_saved_grad_shard"):
+            # In the post-backward hook, the sharded gradient is still in
+            # `_saved_grad_shard`.
             grad = flat_param._saved_grad_shard  # type: ignore[attr-defined]
         else:
-            # If in the forward, then there may be an accumulated gradient,
-            # which will be in `.grad`
+            # If in IDLE or in FORWARD states, then there may be an
+            # (accumulated) gradient. If accessed in IDLE, then this should
+            # be due to re-registering the original parameters (e.g. in state
+            # dict load).
             _p_assert(
                 flat_param.grad is None
                 or not self.uses_sharded_strategy
-                or self._training_state == HandleTrainingState.FORWARD,
+                or self._training_state
+                in (HandleTrainingState.FORWARD, HandleTrainingState.IDLE),
                 "Sharded strategies should use `_cpu_grad` or `_saved_grad_shard` "
-                "unless in FORWARD (for the post-forward reshard)",
+                "unless in IDLE or FORWARD",
             )
             grad = flat_param.grad
         return grad

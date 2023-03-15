@@ -23,7 +23,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
-from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -33,6 +32,11 @@ from torch._dynamo.testing import (
 )
 
 from torch._dynamo.utils import ifunspec
+from torch.ao.quantization import MinMaxObserver
+from torch.ao.quantization.fake_quantize import FakeQuantize
+from torch.ao.quantization.qconfig import QConfig
+from torch.ao.quantization.quantize_fx import prepare_qat_fx
+from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -55,6 +59,20 @@ class MyPickledModule(torch.nn.Module):
 
     def forward(self, x, y):
         return x * x * x + y + self.z
+
+
+# These are used for test_{cond/map}_with_quantization
+default_symmetric_fake_quant = FakeQuantize.with_args(
+    observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=torch.quint8
+)
+default_weight_symmetric_fake_quant = FakeQuantize.with_args(
+    observer=MinMaxObserver, qscheme=torch.per_tensor_symmetric, dtype=torch.qint8
+)
+uniform_qconfig_8bit = QConfig(
+    activation=default_symmetric_fake_quant,
+    weight=default_weight_symmetric_fake_quant.with_args,
+)
+qconfig_dict = {"object_type": [(torch.nn.Linear, uniform_qconfig_8bit)]}
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
@@ -2021,7 +2039,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # warmup
         opt_fn(x)
 
-        enable_cache_lookup_profiler(True)
+        # whenver we enter the profiler context, hooks are automatically registered
         with torch.autograd.profiler.profile() as prof:
             res = opt_fn(x)
         events = list(
@@ -2036,8 +2054,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
         )
 
-        enable_cache_lookup_profiler(False)
         with torch.autograd.profiler.profile() as prof:
+            # just make sure the disable functionality works
+            _enable_dynamo_cache_lookup_profiler(False)
             res = opt_fn(x)
         events = list(
             filter(
@@ -3007,9 +3026,60 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         b = opt_fn(torch.tensor(True), torch.tensor([0.25, 0.25]))
         self.assertTrue(same(torch.sin(torch.tensor([0.25, 0.25])), b))
 
-    @unittest.expectedFailure
+    def test_cond_with_quantization(self):
+        from functorch.experimental.control_flow import cond
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                example_inputs = (torch.randn(5, 5),)
+                self.model = torch.nn.Linear(5, 5)
+                self.quantized_model = prepare_qat_fx(
+                    self.model, qconfig_dict, example_inputs=example_inputs
+                )
+
+            def forward(self, pred, x):
+                def true_fn(x):
+                    return x.sin() + self.quantized_model(x)
+
+                def false_fn(x):
+                    return x.cos() + self.model(x)
+
+                return cond(pred, true_fn, false_fn, [x])
+
+        module = MyModule()
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(module)
+        x = torch.rand((5, 5))
+        pred = torch.tensor(True)
+        self.assertTrue(same(module(pred, x), opt_m(pred, x)))
+        pred = torch.tensor(False)
+        self.assertTrue(same(module(pred, x), opt_m(pred, x)))
+
+    def test_map_with_quantization(self):
+        from functorch.experimental.control_flow import map
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                example_inputs = (torch.randn(5, 5),)
+                self.model = torch.nn.Linear(5, 5)
+                self.quantized_model = prepare_qat_fx(
+                    self.model, qconfig_dict, example_inputs=example_inputs
+                )
+
+            def forward(self, x):
+                def body(x):
+                    return x.sin() + self.quantized_model(x)
+
+                return map(body, x)
+
+        module = MyModule()
+        opt_m = torch._dynamo.optimize("eager", nopython=True)(module)
+        x = torch.rand((5, 5))
+        self.assertTrue(same(module(x), opt_m(x)))
+
     def test_cond_side_effects(self):
-        from functorch.experimental.cond import cond
+        from functorch.experimental.control_flow import cond
 
         c = 0
 
@@ -3046,8 +3116,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         mod = Module()
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "Graph state change detected",
+            TypeError, "missing 1 required positional argument"
         ):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
