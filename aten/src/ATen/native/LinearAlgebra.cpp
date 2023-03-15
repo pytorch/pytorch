@@ -1564,7 +1564,7 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
               if (beta == opmath_t{0}) {
                 r2[j] = alpha * acc_value;
               } else {
-                r2[j] = r2[j] * beta + alpha * acc_value;
+                r2[j] = static_cast<opmath_t>(r2[j]) * beta + alpha * acc_value;
               }
             }
           }
