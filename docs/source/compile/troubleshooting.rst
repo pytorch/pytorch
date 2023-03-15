@@ -708,7 +708,7 @@ your training stability. So the accuracy debugger is very useful for us
 to detect bugs in our codegen or with a backend compiler.
 
 If you'd like to ensure that random number generation is the same across both torch
-and triton then you can enable `torch._inductor.config.fallback_random = True`
+and triton then you can enable ``torch._inductor.config.fallback_random = True``
 
 File an Issue
 ~~~~~~~~~~~~~
