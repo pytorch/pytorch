@@ -3,7 +3,6 @@ import torch
 from ..utils import has_triton
 
 if has_triton():
-
     import triton
 
     class _conv1x1:
