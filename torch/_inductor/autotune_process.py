@@ -53,6 +53,9 @@ class TuningProcess:
             and self.response_queue is not None
         )
 
+    def clear(self):
+        self.process = self.request_queue = self.response_queue = None
+
     def initialize(self):
         """
         Create child process, request/response queues and do the warm up.
@@ -197,6 +200,9 @@ def benchmark_in_sub_process(
             warnings.warn(
                 f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
             )
+
+            tuning_process.clear()
+
             # return a large value to this choice will be ignored
             return float("inf")
 

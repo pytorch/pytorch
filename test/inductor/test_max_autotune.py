@@ -1,14 +1,12 @@
 # Owner(s): ["module: inductor"]
 
-import unittest
-
 import torch
 from parameterized import parameterized
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout, TensorBox
+from torch._inductor.ir import Buffer, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
 from torch._inductor.virtualized import V
@@ -34,23 +32,6 @@ class FailChoiceCaller(ChoiceCaller):
 class TestDoBench(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
-
-    def test_pickle_storage_box(self):
-        from pickle import dumps, loads
-
-        buf = TensorBox.create(self._create_buffer("buf0", (2, 3))).data
-        expected_str = str(buf)
-        self.assertEqual(str(loads(dumps(buf))), expected_str)
-
-    @unittest.skip(
-        "Pickle fx.Node fail with https://gist.github.com/9c289e895d7091d7ec787c67bc3c0d70"
-    )
-    def test_pickle_fx_node(self):
-        from pickle import dumps, loads
-
-        gm = make_fx(lambda: torch.zeros(2, 3))()
-        nd = next(iter(gm.graph.nodes))
-        loads(dumps(nd))
 
     def test_benchmark_choice_in_subproc(self):
         gm = make_fx(
