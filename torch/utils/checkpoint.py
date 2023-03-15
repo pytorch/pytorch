@@ -193,23 +193,28 @@ def checkpoint(
 
     The non-reentrant variant improves upon the reentrant variant in several
     ways:
+
     * Unlike the reentrant variant, the non-reentrant variant properly records
       the autograd graph during forward, e.g. allowing you to perform backward
       on that graph inside checkpointed regions, and allowing you to attach
       hooks to the graph in a more fine-grained way. The reentrant variant
       runs the forward in :func:`torch.no_grad`.
+
     * Unlike the reentrant variant, the non-reentrant variant supports all
       ways of performing backward. Reentrant checkpoint only supports the
       :func:`torch.autograd.backward` API and only if its `inputs` argument is
       not passed. :func:`torch.autograd.grad` is not supported.
+
     * Unlike the reentrant variant, the non-reentrant variant  does not have
       the restriction that at least one of the inputs and at least one of the
       outputs needs to have ``requires_grad=True``. If this condition is
       not met for reentrant checkpoint, the checkpointed part of the model
       won't have gradients.
+
     * Unlike the reentrant variant, the non-reentrant variant considers
       Tensors passed as inputs or returned as outputs in nested structures
       (e.g., custom objects, lists, dicts, etc) as participating in autograd.
+
     * Unlike the reentrant variant, the non-reentrant variant supports the
       checkpointed region containing tensors detached from the computational
       graph. For the reentrant variant, if the checkpointed segment
@@ -470,6 +475,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # out = checkpoint(fn)(inp)
 #
 # In the code above fn is computed (potentially partially) 4 times in total.
+<<<<<<< HEAD
 #   1. Don't save x and y since we are inside a checkpoint.
 #   2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
 #   3. If early stop is enabled, stop at (2)
@@ -480,6 +486,18 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #      We save x and w, however.
 #   7. Continue with returning
 #
+=======
+#
+# 1. Don't save x and y since we are inside a checkpoint.
+# 2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
+# 3. If early stop is enabled, stop at (2)
+# 4. Continue original forward at (4), not saving x and w.
+# 5. (5) triggers a recompute of fn
+# 6. During recompute, we see that in the original graph, gx has already
+#    cleared x and y since backward is run at (3) without retain_graph=True
+#    We save x and w, however.
+# 7. Continue with returning
+>>>>>>> eef5549ccea (fixup)
 
 # NB: This is temporary and should be removed in a follow up PR. Early stopping
 #     is currently disabled by default. Since some nested test cases require
