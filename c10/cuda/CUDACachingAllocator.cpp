@@ -9,7 +9,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/llvmMathExtras.h>
 
-#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/Exception.h>
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -23,7 +22,6 @@
 #include <mutex>
 #include <regex>
 #include <set>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -792,7 +790,6 @@ class DeviceCachingAllocator {
   // Most of the time it's zero, in which case malloc can avoid calling
   // cudaStreamGetCaptureInfo in the hot path.
   int captures_underway = 0;
-
   // See free() for this thing's purpose
   std::vector<Block*> needs_events_deferred_until_no_capture;
   // outstanding cuda events
