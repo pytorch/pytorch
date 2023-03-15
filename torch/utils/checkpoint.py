@@ -475,18 +475,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # out = checkpoint(fn)(inp)
 #
 # In the code above fn is computed (potentially partially) 4 times in total.
-<<<<<<< HEAD
-#   1. Don't save x and y since we are inside a checkpoint.
-#   2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
-#   3. If early stop is enabled, stop at (2)
-#   4. Continue original forward at (4), not saving x and w.
-#   5. (5) triggers a recompute of fn
-#   6. During recompute, we see that in the original graph, gx has already
-#      cleared x and y since backward is run at (3) without retain_graph=True
-#      We save x and w, however.
-#   7. Continue with returning
-#
-=======
 #
 # 1. Don't save x and y since we are inside a checkpoint.
 # 2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
@@ -497,7 +485,6 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #    cleared x and y since backward is run at (3) without retain_graph=True
 #    We save x and w, however.
 # 7. Continue with returning
->>>>>>> eef5549ccea (fixup)
 
 # NB: This is temporary and should be removed in a follow up PR. Early stopping
 #     is currently disabled by default. Since some nested test cases require
