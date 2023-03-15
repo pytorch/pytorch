@@ -188,7 +188,7 @@ void CUDAGraph::capture_end() {
   size_t numCUDAGraphNodes = 0;
   AT_CUDA_CHECK(cudaGraphGetNodes(graph_, NULL, &numCUDAGraphNodes));
   if (numCUDAGraphNodes == 0) {
-      TORCH_WARN("The CUDA Graph is empty. This ususally means that the graph was ",
+      TORCH_WARN("The CUDA Graph is empty. This usually means that the graph was ",
                  "attempted to be captured on wrong device or stream.");
   }
 
@@ -287,7 +287,7 @@ void CUDAGraph::reset() {
   // If capture_begin, the capture, or capture_end failed at some point, this CUDAGraph, the generator,
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
-  // a Juptyer notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
+  // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::notifyCaptureDestroy(capture_dev_, mempool_id_);
