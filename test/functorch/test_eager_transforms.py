@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
 )
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial

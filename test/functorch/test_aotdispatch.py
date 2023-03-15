@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     compare_equal_outs_and_grads,
     outs_and_grads,
+    skipIfRocm,
 )
 import torch
 import torch.nn as nn
@@ -2438,8 +2439,6 @@ aot_autograd_failures = {
 
     skip('as_strided_scatter'),
     skip('as_strided', 'partial_views'),  # flaky
-
-    skip('pinv', 'singular'),  # likely just needs tolerances adjusted
 
     # Too annoying to generate random inputs
     xfail('cholesky'),
