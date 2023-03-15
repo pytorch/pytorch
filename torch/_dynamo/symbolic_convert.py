@@ -557,7 +557,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            getattr(self, inst.opname)(inst)
+            with TracingContext.current_loc(self.f_code.co_filename, self.lineno):
+                getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -834,7 +835,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
-        assert inst.argval in self.f_builtins
+        if inst.argval not in self.f_builtins:
+            raise NameError(f"name '{inst.argval}' is not defined")
         val = self.f_builtins[inst.argval]
 
         if callable(val):

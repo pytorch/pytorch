@@ -177,6 +177,7 @@ class TestCommon(TestCase):
             "aten.min.dim_min",
             "aten.min.names_dim",
             "aten.min.names_dim_min",
+            "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
             "aten.isin.Tensor_Tensor_out",
