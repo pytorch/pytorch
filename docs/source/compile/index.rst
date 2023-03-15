@@ -5,7 +5,7 @@ torch.compile
 
 :func:`~torch.compile` was introduced in PyTorch 2.0 `PyTorch 2.0 <https://pytorch.org/get-started/pytorch-2.0/>`__
 
-Our default and supported backend is :module:`~torch._inductor` with benchmarks `showing 30% to 2x speedups and 10% memory compression <https://github.com/pytorch/pytorch/issues/93794>`__
+Our default and supported backend is `inductor` with benchmarks `showing 30% to 2x speedups and 10% memory compression <https://github.com/pytorch/pytorch/issues/93794>`__
 on real world models for both training and inference with a single line of code.
 
 .. note::
