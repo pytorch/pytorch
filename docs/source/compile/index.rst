@@ -3,7 +3,7 @@
 torch.compile
 ====================
 
-:func:`~torch.compile` was introduced in PyTorch 2.0 `PyTorch 2.0 <https://pytorch.org/get-started/pytorch-2.0/>`__
+:func:`~torch.compile` was introduced in `PyTorch 2.0 <https://pytorch.org/get-started/pytorch-2.0/>`__
 
 Our default and supported backend is `inductor` with benchmarks `showing 30% to 2x speedups and 10% memory compression <https://github.com/pytorch/pytorch/issues/93794>`__
 on real world models for both training and inference with a single line of code.
@@ -25,18 +25,18 @@ co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-
    compiled_fn = torch.compile(fn(torch.randn(10).cuda()))
 
 If you happen to be running your model on an Ampere GPU, it's crucial to enable tensor cores. We will actually warn you to set
-`torch.set_float32_matmul_precision('high')`
+``torch.set_float32_matmul_precision('high')``
 
 :func:`~torch.compile` works over :class:`~torch.nn.Module` as well as functions so you can pass in your entire training loop.
 
-The above example was for inference but you can follow this tutorial for an `example on training <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>__`
+The above example was for inference but you can follow this tutorial for an `example on training <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
 
 
 Optimizations
 -------------
 
 Optimizations can be passed in :func:`~torch.compile` with either a backend mode parameter or as passes. To understand what are the available options you can run
-:func:`~torch._inductor.list_options`` and :func:`~torch._inductor.list_mode_options`
+``torch._inductor.list_options`` and ``torch._inductor.list_mode_options()``
 
 The default backend is `inductor` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.
