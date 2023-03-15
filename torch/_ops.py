@@ -127,6 +127,12 @@ class OperatorBase:
 
         return inner
 
+    def fx_behavior(self, fn):
+        raise NotImplementedError()
+
+    def create_proxy(self, fn, args, kwargs):
+        raise NotImplementedError()
+
     def name(self):
         raise NotImplementedError()
 
@@ -196,6 +202,7 @@ class PyOperator(OperatorBase):
         # Make _OPNamespace not scream, this whole name based association needs a good hard look
         self.__name__ = name
         pyop_namespace[name] = self
+        self.fx_override = None
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
     def fallthrough(self, dispatch_key):
@@ -248,6 +255,18 @@ class PyOperator(OperatorBase):
 
     def name(self):
         return self.name
+
+    def fx_behavior(self, fn):
+        assert self.fx_override is None
+        self.fx_override = fn
+
+        def inner(fn):
+            return self.fx_override
+
+        return inner
+
+    def create_proxy(self, fn, args, kwargs):
+        self.fx_override(self, fn, args, kwargs)
 
 
 def _to_flat_tuple(args, kwargs):

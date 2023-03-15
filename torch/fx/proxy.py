@@ -4,6 +4,7 @@ import sys
 import torch
 import inspect
 import operator
+import types
 import traceback
 import collections
 
@@ -259,6 +260,8 @@ class TracerBase:
             return a.node
         elif isinstance(a, base_types) or a is None or a is ...:
             return a
+        elif isinstance(a, types.FunctionType):
+            breakpoint()
         raise NotImplementedError(f"argument of type: {type(a)}")
 
     @compatibility(is_backward_compatible=True)
@@ -441,8 +444,11 @@ class Proxy:
             return tracer.create_proxy('call_method', orig_method.__name__, args, kwargs)
         else:
             if isinstance(orig_method, torch._ops.PyOperator):
-                # TODO: Define how to symbolically trace PyOperators
-                raise RuntimeError("Unable to symbolically trace PyOperators")
+                try:
+                    return orig_method.create_proxy(tracer, args, kwargs)
+                    # tracer.create_proxy('call_function', orig_method, args, kwargs)
+                except Exception as e:
+                    raise RuntimeError("Unable to symbolically trace PyOperators")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 
