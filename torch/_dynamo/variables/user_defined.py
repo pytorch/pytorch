@@ -331,6 +331,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                if (
+                    torch._dynamo.config.skip_fsdp_param_guards
+                    and getattr(value, "_is_fsdp_managed_module", False)
+                    and isinstance(source, AttrSource)
+                    and source.member in value._parameters
+                ):
+                    # Skip guarding on an FSDP-managed modules' parameters
+                    # since FSDP will ensure them to be consistent across
+                    # invocations of the compiled code
+                    subobj._dynamo_skip_guards = True
                 return VariableBuilder(tx, source)(subobj).add_options(options)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable(subobj, **options)
