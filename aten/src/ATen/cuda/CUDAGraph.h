@@ -26,7 +26,6 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   MempoolId_t pool();
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
-  CaptureId_t id();
 
   protected:
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
