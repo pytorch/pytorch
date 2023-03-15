@@ -5624,18 +5624,18 @@ for shape in [(1,), ()]:
 
         def context_fn():
             return verbose_mode, contextlib.nullcontext()
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
-        self.assertEqual(verbose_mode.operators, ['sin.default'])
+        out = checkpoint(lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn)
+        self.assertEqual(verbose_mode.operators, ['exp.default'])
 
         verbose_mode.operators = []
 
         def context_fn():
             return contextlib.nullcontext(), verbose_mode
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
+        out = checkpoint(lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn)
         out.backward()
         self.assertEqual(
             verbose_mode.operators,
-            ['detach.default', 'detach.default', 'detach.default', 'detach.default', 'sin.default']
+            ['exp.default', 'detach.default', 'detach.default']
         )
 
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
