@@ -273,7 +273,6 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         ortho_fparams: Optional[Dict[str, float]] = None,
         ortho_bparams: Optional[Dict[str, bool]] = None,
     ) -> Tuple[Tensor, Tensor]:
-
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
         A = A.contiguous() if (not A.is_sparse) else A
@@ -360,7 +359,6 @@ def lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
     eigenvalue problem using matrix-free LOBPCG methods.
@@ -598,7 +596,6 @@ def _lobpcg(
     ortho_fparams: Optional[Dict[str, float]] = None,
     ortho_bparams: Optional[Dict[str, bool]] = None,
 ) -> Tuple[Tensor, Tensor]:
-
     # A must be square:
     assert A.shape[-2] == A.shape[-1], A.shape
     if B is not None:
@@ -707,7 +704,6 @@ class LOBPCG:
         method: str,
         tracker: None,
     ) -> None:
-
         # constant parameters
         self.A = A
         self.B = B
@@ -833,7 +829,6 @@ class LOBPCG:
             self.call_tracker()
 
         while not self.stop_iteration():
-
             self.update()
 
             if not torch.jit.is_scripting() and self.tracker is not None:

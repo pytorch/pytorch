@@ -266,4 +266,9 @@ C10_API void reportOutOfMemoryToProfiler(
     size_t total_reserved,
     Device device);
 
+// used to hold traceback information in allocators
+struct GatheredContext {
+  virtual ~GatheredContext() = default;
+};
+
 } // namespace c10
