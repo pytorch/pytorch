@@ -22,9 +22,11 @@
 #include <torch/csrc/autograd/saved_variable.h>
 #include <torch/csrc/autograd/utils/python_arg_parsing.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -766,6 +768,14 @@ static PyObject* len_torch_dispatch_stack(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(THPVariable_Check(tensor), "tensor must be a Tensor");
+  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -799,6 +809,7 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
+    {"_increment_version", THPModule_increment_version, METH_O, nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,
