@@ -8600,7 +8600,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_kldiv_loss(self):
-
         x = torch.rand(5).log()
         y = torch.rand(5)
         self._kldiv_loss(x, y)
@@ -12832,7 +12831,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
-
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
 
         class GridSampleModule(torch.nn.Module):
