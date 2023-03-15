@@ -43,6 +43,8 @@ from .utils import (
 )
 from .virtualized import ops, V
 
+import torch._dynamo.config as dynamo_config
+
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
@@ -863,7 +865,8 @@ class Reduction(Loops):
                 ranges,
             )
 
-        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
+        split_reduction = is_triton(device) and reduction_type not in {"argmax", "argmin"}
+        if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -893,6 +896,8 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
+        elif split_reduction and dynamo_config.dynamic_shapes:
+            log.warning("Could not do split reduction due to dynamic shapes; performance may be worse")
 
         return TensorBox.create(
             Reduction(
