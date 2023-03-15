@@ -36,7 +36,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* _self, PyObject* noargs) {
   auto self = (THPStorage*)_self;
   c10::DeviceType device_type = self->cdata->device_type();
   if (device_type == at::kCPU) {
-    c10::StorageImpl* storage = self->cdata;
+    c10::StorageImpl* storage = self->cdata->unsafeGetStorageImpl();
     THManagedMapAllocator* ctx =
         THManagedMapAllocator::fromDataPtr(storage->data_ptr());
     if (ctx) {
@@ -53,7 +53,7 @@ static PyObject* THPStorage_sharedIncref(PyObject* _self, PyObject* noargs) {
   auto self = (THPStorage*)_self;
   c10::DeviceType device_type = self->cdata->device_type();
   if (device_type == at::kCPU) {
-    c10::StorageImpl* storage = self->cdata;
+    c10::StorageImpl* storage = self->cdata->unsafeGetStorageImpl();
     THManagedMapAllocator* ctx =
         THManagedMapAllocator::fromDataPtr(storage->data_ptr());
     if (ctx) {
@@ -91,7 +91,7 @@ static PyObject* THPStorage_shareFilename(PyObject* _self, PyObject* noargs) {
       reinterpret_cast<THPStorage*>(_self)->cdata->device_type() == at::kCPU,
       "_share_filename_: only available on CPU");
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* self_storage_impl = self->cdata;
+  c10::StorageImpl* self_storage_impl = self->cdata->unsafeGetStorageImpl();
   THManagedMapAllocator* ctx =
       THManagedMapAllocator::fromDataPtr(self_storage_impl->data_ptr());
   // Storage is already in shared memory, just return a handle
@@ -198,7 +198,7 @@ static PyObject* THPStorage_shareFd(PyObject* _self, PyObject* noargs) {
       reinterpret_cast<THPStorage*>(_self)->cdata->device_type() == at::kCPU,
       "_share_fd_: only available on CPU");
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* self_storage_impl = self->cdata;
+  c10::StorageImpl* self_storage_impl = self->cdata->unsafeGetStorageImpl();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   at::MapAllocator* ctx;
   // Storage is already in shared memory, just return a handle
@@ -282,7 +282,7 @@ static PyObject* THPStorage_shareCuda(PyObject* _self, PyObject* noargs) {
       reinterpret_cast<THPStorage*>(_self)->cdata->device_type() == at::kCUDA,
       "_share_cuda_: only available on CUDA");
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* storage = self->cdata;
+  c10::StorageImpl* storage = self->cdata->unsafeGetStorageImpl();
 
   if (storage->received_cuda()) {
     AT_ERROR(
@@ -568,7 +568,7 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
 static PyObject* THPStorage_weakRef(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto self = (THPStorage*)_self;
-  c10::StorageImpl* storage = self->cdata;
+  c10::StorageImpl* storage = self->cdata->unsafeGetStorageImpl();
   return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
   END_HANDLE_TH_ERRORS
 }
@@ -614,7 +614,7 @@ PyObject* THPStorage_sharedFd(PyObject* _self, PyObject* noargs) {
   auto self = (THPStorage*)_self;
   at::MapAllocator* ctx = nullptr;
   if (self->cdata->device_type() == at::kCPU) {
-    c10::StorageImpl* storage = self->cdata;
+    c10::StorageImpl* storage = self->cdata->unsafeGetStorageImpl();
     ctx = at::MapAllocator::fromDataPtr(storage->data_ptr());
   }
 
