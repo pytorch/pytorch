@@ -694,6 +694,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if config.autotune_in_subproc:
             from .autotune_process import tuning_process_pool
+
             tuning_process_pool.initialize()
 
         autotune_start_ts = time.time()
@@ -737,9 +738,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
             expected = out_extern.clone()
 
-        if DEBUG:
-            print(f"{len(choices)} tuning requests:")
-
         def benchmark_in_current_process(choices):
             timings = {}
             for choice in choices:
@@ -752,7 +750,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 else:
                     # triton templates want the base pointer for sliced tensors
                     result = choice.benchmark(*example_inputs, out=out)
-    
+
                 if VERIFY:
                     torch.testing.assert_close(out_extern, expected, **VERIFY)
                 torch.cuda.synchronize()  # shake out any CUDA errors
@@ -770,6 +768,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
             timings = benchmark_in_current_process(extern_choices)
             from . import autotune_process
+
             timings.update(autotune_process.benchmark_in_sub_process(triton_choices))
             return timings
 
@@ -799,7 +798,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def log_results(name, input_nodes, timings, elapse):
-        if not config.max_autotune or not PRINT_AUTOTUNE:
+        if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
             [

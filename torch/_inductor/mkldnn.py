@@ -542,6 +542,22 @@ def create_unary_module(node: torch.fx.node):
     return unary_map[node.target](*(node.args[1:]), **(node.kwargs))
 
 
+def computation_module_used_once(computation_node, gm: torch.fx.GraphModule):
+    assert (
+        computation_node.op == "call_module"
+        and isinstance(computation_node.target, str)
+        and computation_node in gm.graph.nodes
+    )
+    for n in gm.graph.nodes:
+        if (
+            isinstance(n.target, str)
+            and n != computation_node
+            and n.target == computation_node.target
+        ):
+            return False
+    return True
+
+
 def fuse_unary(gm: torch.fx.GraphModule):
     modules = dict(gm.named_modules())
 
@@ -557,6 +573,8 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 if (
                     len(node.args[0].users) > 1
                 ):  # Output of computation_node is used by other nodes
+                    continue
+                if not computation_module_used_once(node.args[0], gm):
                     continue
                 computation_node = modules[node.args[0].target]
                 if node.op == "call_function" or node.op == "call_method":
@@ -652,6 +670,8 @@ def fuse_binary(gm: torch.fx.GraphModule):
                     index_pointwise = index_dict["index_pointwise"]
                     if check_node_kind(node.args[index_node], modules, node_kind):
                         if len(node.args[index_node].users) > 1:
+                            continue
+                        if not computation_module_used_once(node.args[index_node], gm):
                             continue
                         computation_node = modules[node.args[index_node].target]
                         if computation_node.training:

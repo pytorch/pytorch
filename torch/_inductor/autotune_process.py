@@ -1,21 +1,19 @@
+import atexit
 import dataclasses
 import queue
 import time
 import warnings
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-import atexit
 import torch
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
-from torch._inductor import ir, config
+from torch._inductor import config, ir
 from torch._inductor.codecache import PyCodeCache
 
-from torch._inductor.select_algorithm import ChoiceCaller
 from .utils import do_bench
 from .virtualized import V
-from typing import Optional
 
 DEBUG = False
 
@@ -27,6 +25,7 @@ class Ping:
 class Pong:
     pass
 
+
 @dataclasses.dataclass
 class TuningProcess:
     process: multiprocessing.Process = None
@@ -36,7 +35,7 @@ class TuningProcess:
 
     @staticmethod
     def process_main(request_queue, response_queue, dev_id):
-        print("enter child process main")
+        print(f"enter child process main for dev {dev_id}")
         torch.cuda.set_device(dev_id)
         while True:
             obj = request_queue.get()
@@ -99,11 +98,13 @@ class TuningProcess:
     def __hash__(self):
         return id(self)
 
+
 class TuningProcessPool:
     """
     Tuning process pool maintaining one process for each GPU. Recreate crashed
     process.
     """
+
     def __init__(self):
         self.avail_procs = set()
         self.all_procs = []
@@ -117,15 +118,16 @@ class TuningProcessPool:
         Not putting this in __init__ so we don't need create subprocess when
         importing the module.
         """
-        if len(self.all_procs) > 0: # already initialized
+        if len(self.all_procs) > 0:  # already initialized
             return
 
         ngpu = torch.cuda.device_count()
         assert ngpu > 0
+        print(f"Createing {ngpu} autotuning sub process one for each GPU")
         self.all_procs = [TuningProcess() for _ in range(ngpu)]
         for dev_id in range(ngpu):
             self.all_procs[dev_id].initialize(dev_id)
-    
+
         self.avail_procs = set(self.all_procs)
 
     def has_avail_proc(self):
@@ -142,8 +144,10 @@ class TuningProcessPool:
         for proc in self.all_procs:
             proc.terminate()
 
+
 if config.autotune_in_subproc:
     tuning_process_pool = TuningProcessPool()
+
 
 @dataclasses.dataclass
 class TensorMeta:
@@ -174,7 +178,7 @@ class TensorMeta:
         return rand_strided(
             self.sizes,
             self.strides,
-            # device=self.device, # don't use the device since we may benchmark on another GPU
+            # don't use self.device since we may benchmark on diferent GPU
             device="cuda",
             dtype=self.dtype,
             extra_size=self.offset,
@@ -234,52 +238,19 @@ class BenchmarkRequest:
         if DEBUG:
             bench_elapse = time.time() - start_ts
             print(
-                f"InChidProcess {self.module_cache_key}: load {load_elapse}, "
+                f"InChidProcess-{torch.cuda.current_device()} {self.module_cache_key}: load {load_elapse}, "
                 + f"create tensor {create_tensor_elapse}, bench {bench_elapse}"
             )
         return out
 
 
-def benchmark_one_in_sub_process(
-    choice: ChoiceCaller,
-) -> float:
-    """
-    Do benchmarking in subprocess and return the perf number (latency).
-    """
-    assert choice.bmreq is not None
-    tuning_process.initialize()
-    assert tuning_process.valid()
-
-    tuning_process.request_queue.put(choice.bmreq)
-
-    while True:
-        try:
-            timing = tuning_process.response_queue.get(timeout=1.0)
-        except queue.Empty:
-            status = tuning_process.process.exitcode
-            if status is None:
-                # child process is still running
-                continue
-            # child process fail
-            assert status != 0
-
-            warnings.warn(
-                f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
-            )
-
-            tuning_process.clear()
-
-            # return a large value to this choice will be ignored
-            return float("inf")
-
-        return timing
-
-def benchmark_in_sub_process(
-    choices
-):
+def benchmark_in_sub_process(choices):
     timings = {}
     if len(choices) == 0:
         return timings
+
+    if DEBUG:
+        print(f"Tuning {len(choices)} choices in sub processes")
 
     pending_tasks = {}  # map choice to proc
     reqlist = [choice.bmreq for choice in choices]
@@ -304,7 +275,9 @@ def benchmark_in_sub_process(
                     # still running
                     continue
                 # otherwise a crash happens
-                assert status != 0, f"Child process should be crashed but get status code {status}"
+                assert (
+                    status != 0
+                ), f"Child process should be crashed but get status code {status}"
                 warnings.warn(
                     f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
                 )
@@ -316,10 +289,13 @@ def benchmark_in_sub_process(
                 proc.initialize()
 
                 # fall through
-                
 
             timings[choice] = timing
             tuning_process_pool.return_proc(proc)
-        pending_tasks = {choice: proc for choice, proc in pending_tasks.items() if choice not in timings}
+        pending_tasks = {
+            choice: proc
+            for choice, proc in pending_tasks.items()
+            if choice not in timings
+        }
 
     return timings

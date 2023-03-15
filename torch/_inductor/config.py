@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -48,7 +51,15 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
-ignore_max_autotune_cache = os.environ.get("TORCHINDUCTOR_IGNORE_MAX_AUTOTUNE_CACHE") == "1"
+# enable slow autotuning passes to select pointwise/reductions algorithms
+max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# enable slow autotuning passes to select gemm algorithms
+max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+ignore_max_autotune_cache = (
+    os.environ.get("TORCHINDUCTOR_IGNORE_MAX_AUTOTUNE_CACHE") == "1"
+)
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -179,7 +190,6 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
-
     # Use cudagraphs on output code
     cudagraphs = False
 
@@ -211,9 +221,10 @@ class triton:
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)
-    # "torch": Maps to the fx node in the Dynamo graph (module name, method name, etc.)
-    # "aten": Maps to the highest-level aten op (i.e. pre-decompositions)
-    descriptive_names = "aten"
+    # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
+    # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    # "inductor_node": Maps to the node name in the FX graph passed to Inductor
+    descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
@@ -258,6 +269,12 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+_save_config_ignore = {
+    # workaround: "Can't pickle <function ...>"
+    "trace.upload_tar",
+}
 
 
 from .._dynamo.config_utils import install_config_module
