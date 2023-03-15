@@ -2486,7 +2486,6 @@ def _cudnn_rnn(
     batch_sizes,
     dropout_state,
 ):
-
     is_input_packed = len(batch_sizes) != 0
     if is_input_packed:
         seq_length = len(batch_sizes)
@@ -2773,7 +2772,6 @@ import torch._refs.special
 
 
 def activate_meta():
-
     activate_meta_table = {}
 
     # For a given op, we pick the most specific decomp function from

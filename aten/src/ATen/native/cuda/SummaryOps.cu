@@ -258,7 +258,7 @@ bool CUDA_tensor_histogram(
     memType = CUDAHistogramMemoryType::SHARED;
   } else if (
       nbins < THRESH_NUMBER_BINS_FOR_GLOBAL_MEM &&
-      multiBlockMem < (maxGlobalMem / 2)) {
+      multiBlockMem < static_cast<size_t>(maxGlobalMem / 2)) {
     // check against half of free mem to be extra safe
     // due to cached allocator, we may anyway have slightly more free mem
     memType = CUDAHistogramMemoryType::MULTI_BLOCK;

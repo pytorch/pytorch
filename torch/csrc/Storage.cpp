@@ -169,11 +169,12 @@ static PyObject* THPStorage_pynew(
         item = PySequence_GetItem(sequence, i);
         // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
         uint8_t value = THPByteUtils_unpackReal(item.get());
+        const auto& storage = THPStorage_Unpack(self);
         if (allocator == c10::GetDefaultCPUAllocator()) {
-          self->cdata->unsafe_data<uint8_t>()[i] = value;
+          storage.unsafe_data<uint8_t>()[i] = value;
         } else {
           // TODO: this might be slow - consider batched updates?
-          storage_set(THPStorage_Unpack(self), i, value);
+          storage_set(storage, i, value);
         }
       }
     } catch (const std::exception& e) {
@@ -232,11 +233,12 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
       return nullptr;
     }
 
-    uint8_t* data = self->cdata->data<uint8_t>();
+    const auto& storage = THPStorage_Unpack(self);
+    uint8_t* data = storage.data<uint8_t>();
 
-    at::StorageImpl* old_storage = self->cdata->unsafeGetStorageImpl();
-    c10::raw::intrusive_ptr::incref(old_storage);
-    auto new_storage = c10::make_intrusive<at::StorageImpl>(
+    at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
+    c10::raw::intrusive_ptr::incref(old_storage_impl);
+    auto new_storage_impl = c10::make_intrusive<at::StorageImpl>(
         c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
         slicelength * sizeof(quantized_t),
@@ -245,15 +247,15 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
 #endif
         at::DataPtr(
             static_cast<void*>(data + start),
-            old_storage,
+            old_storage_impl,
             [](void* s) {
               c10::raw::intrusive_ptr::decref(static_cast<at::StorageImpl*>(s));
             },
-            old_storage->device()),
-        old_storage->allocator(),
+            old_storage_impl->device()),
+        old_storage_impl->allocator(),
         /* resizable */ false);
 
-    PyObject* _ret = THPStorage_New(std::move(new_storage));
+    PyObject* _ret = THPStorage_New(std::move(new_storage_impl));
     return _ret;
   }
   PyErr_Format(

@@ -178,7 +178,6 @@ class TestInductorConfig(TestCase):
         a(torch.randn(10))
 
     def test_api_options(self):
-
         reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
         self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
 
