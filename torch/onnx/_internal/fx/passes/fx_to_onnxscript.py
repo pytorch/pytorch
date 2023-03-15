@@ -182,7 +182,7 @@ def _fill_tensor_meta(
         onnxscript_value.shape = tuple(expected_value.size())
         # FIXME(titaiwang): type promotion is not supported yet,
         # so set dtype will break onnx shape inference.
-        # onnxscript_value.dtype = expected_value.dtype
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:
