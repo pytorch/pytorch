@@ -446,9 +446,8 @@ class Proxy:
             if isinstance(orig_method, torch._ops.PyOperator):
                 try:
                     return orig_method.create_proxy(tracer, args, kwargs)
-                    # tracer.create_proxy('call_function', orig_method, args, kwargs)
                 except Exception as e:
-                    raise RuntimeError("Unable to symbolically trace PyOperators")
+                    raise RuntimeError(f"Unable to symbolically trace PyOperator {orig_method.name()}")
             return tracer.create_proxy('call_function', orig_method, args, kwargs,
                                        name=tracer.graph._target_to_str(orig_method.__name__))
 
