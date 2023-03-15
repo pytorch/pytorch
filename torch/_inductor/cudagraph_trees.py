@@ -747,10 +747,10 @@ class CUDAGraphNode:
         for depth, outputs_liveness in enumerate(expected_liveness):
             for output_idx, output_liveness in enumerate(outputs_liveness):
                 # tensor can die early, but it can't be alive when it should be dead
-                assert output_liveness or not self.path_weakrefs[depth][output_idx]()
+                assert output_liveness or not is_live(self.path_weakrefs[depth][output_idx])
 
         for depth, output_index in newly_dead:
-            assert not self.path_weakrefs[depth][output_index]()
+            assert not is_live(self.path_weakrefs[depth][output_index])
 
     def debug_check_invariants_before_invocation(self):
         self.debug_assert_invariants(
