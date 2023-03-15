@@ -155,14 +155,14 @@ class DTensorPlanner(DTensorTestBase):
                         ),
                     ),
                     (
-                        'submesh_sdt', 
+                        'submesh_sdt',
                         DTensor(
                             local_tensor=tensor([8., 9.], device='cuda:0'),
                             device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         ),
                     ),
-                    (   
+                    (
                         'submesh_rdt',
                         DTensor(
                             local_tensor=tensor([12., 13., 14., 15.], device='cuda:0'),
@@ -214,7 +214,7 @@ class DTensorPlanner(DTensorTestBase):
                         )
                     ),
                     (
-                        'submesh_sdt', 
+                        'submesh_sdt',
                         DTensor(
                             local_tensor=tensor([80., 90.], device='cuda:0'),
                             device_mesh=DeviceMesh:([0, 2]),
