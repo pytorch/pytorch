@@ -155,28 +155,28 @@ static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
     std::make_shared<c10::cuda::CUDADriverAPI>();
 
 // Wrappers for raw CUDA device management functions
-cudaError_t GetDeviceCount(int *dev_count) {
+cudaError_t GetDeviceCount(int* dev_count) {
   return cudaGetDeviceCount(dev_count);
 }
 
-cudaError_t GetDevice(int *device) {
+cudaError_t GetDevice(int* device) {
   *device = CUDA_LAST_SAVED_DEVICE;
   return cudaSuccess;
 }
 
 cudaError_t SetDevice(int device) {
-  TORCH_CHECK(device >=0, "device id must be positive!");
+  TORCH_CHECK(device >= 0, "device id must be positive!");
   int curdev = -1;
   CUDA_LAST_SAVED_DEVICE = device;
   cudaGetDevice(&curdev);
-  if(device != curdev) {
+  if (device != curdev) {
     return cudaSetDevice(device);
   }
   return cudaSuccess;
 }
 
 cudaError_t MaybeSetDevice(int device) {
-  if(driver_api->hasPrimaryContext(device)) {
+  if (driver_api->hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
   CUDA_LAST_SAVED_DEVICE = device;

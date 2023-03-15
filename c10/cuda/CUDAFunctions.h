@@ -35,9 +35,9 @@ C10_CUDA_API void device_synchronize();
 C10_CUDA_API void warn_or_error_on_sync();
 
 // Raw CUDA device management functions
-C10_CUDA_API cudaError_t GetDeviceCount(int *dev_count);
+C10_CUDA_API cudaError_t GetDeviceCount(int* dev_count);
 
-C10_CUDA_API cudaError_t GetDevice(int *device);
+C10_CUDA_API cudaError_t GetDevice(int* device);
 
 C10_CUDA_API cudaError_t SetDevice(int device);
 
