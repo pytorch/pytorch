@@ -15,9 +15,12 @@ class ExportOptions:
     Attributes:
         opset_version: The export ONNX version.
         use_binary_format: Whether to Return ModelProto in binary format.
-        decomposition_table: The decomposition table for graph ops. Default is for torch ops, including aten and prim.
-        op_level_debug: Whether to export the model with op level debug information with onnxruntime evaluator.
-        dynamic_axes: Whether to export the model with dynamic axes. This would set the shape of input and nodes all to dynamic.
+        decomposition_table: The decomposition table for graph ops.
+            Default is for torch ops, including aten and prim.
+        op_level_debug: Whether to export the model with op level debug
+            information with onnxruntime evaluator.
+        dynamic_axes: Whether to export the model with dynamic axes. This would set
+            the shape of input and nodes all to dynamic by following symbolic fx graph.
     """
 
     opset_version: int = _constants.ONNX_DEFAULT_OPSET

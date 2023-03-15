@@ -39,11 +39,19 @@ def _export(
     decomposed_module = passes.decompose(
         module, export_options.decomposition_table, export_options.dynamic_axes, *args
     )
+
     # Run FakeTensorProp on decomposed_module.
+    # If we use *args to infer shapes, the symbolic sizes would be reversed,
+    # so we use fake tensor inputs from symbolic fx.graph.
+    inputs = [
+        node.meta["val"]
+        for node in decomposed_module.graph.nodes
+        if node.op == "placeholder"
+    ]
     # Symbolic output of the i-th node can be accessed via
     # decomposed_module.graph.nodes[i].meta["val"]
     decomposed_module = passes.shape_inference_with_fake_tensor(
-        decomposed_module, *args
+        decomposed_module, *inputs
     )
 
     # We want to pass list of ints and floats to TorchScript graph correctly
@@ -125,7 +133,8 @@ def export_after_normalizing_args_and_kwargs(
         op_level_debug: Whether to export the model with op level debug information
             with onnxruntime evaluator.
         dynamic_axes: Whether to export the model with dynamic axes. This would set
-            the shape of input and nodes all to dynamic.
+            the shape of input and nodes all to dynamic by following symbolic fx graph.
+
         kwargs: the keyword arguments to pass to `fn`.
 
     Returns:

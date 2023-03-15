@@ -177,8 +177,10 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
-        input_x = torch.randn(3, 4)
-        input_y = torch.randn(3, 4)
+        x = x[1:, :]
+        y = y[1:, :]
+        input_x = torch.randn(1, 4)
+        input_y = torch.randn(1, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
