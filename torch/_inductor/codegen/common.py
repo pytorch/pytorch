@@ -9,6 +9,8 @@ from itertools import chain
 import sympy
 from sympy.printing.printer import Printer
 
+import torch
+
 from .. import metrics
 from ..utils import (
     DeferredLineBase,
@@ -50,6 +52,11 @@ class ExprPrinter(Printer):
         # Pow() confuses triton
         base, exp = expr.args
         base = self._print(base)
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for sqrt/floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
         assert exp.is_integer
         exp = int(exp)
         if exp > 0:
@@ -91,6 +98,10 @@ class PythonPrinter(ExprPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"math.floor({self.paren(self._print(expr.args[0]))})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
 
 
 class OpOverrides:
@@ -305,9 +316,14 @@ class KernelArgs:
 
         # TODO(jansel): replace this with data from scheduler
         buffer_types = {x.get_name(): x.get_dtype() for x in V.graph.buffers}
-        buffer_types.update(
-            {name: val.get_dtype() for name, val in V.graph.graph_inputs.items()}
-        )
+        for name, val in V.graph.graph_inputs.items():
+            if isinstance(val, sympy.Expr):
+                if val.is_integer:
+                    buffer_types[name] = torch.int64
+                else:
+                    buffer_types[name] = torch.float64
+            else:
+                buffer_types[name] = val.get_dtype()
         buffer_types.update(
             {name: val.dtype for name, val in V.graph.constants.items()}
         )
@@ -320,7 +336,7 @@ class KernelArgs:
             inner = inplaced.inner_name
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.input_buffers.items():
@@ -328,7 +344,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"const {cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"const {cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"const {cpp_dtype}*")
         for outer, inner in self.output_buffers.items():
@@ -336,7 +352,7 @@ class KernelArgs:
                 continue
             dtype = buffer_types[outer]
             cpp_dtype = DTYPE_TO_CPP[dtype]
-            arg_defs.append(f"{cpp_dtype}* __restrict__ {inner}")
+            arg_defs.append(f"{cpp_dtype}* {inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
@@ -544,8 +560,10 @@ class Kernel(CodeGen):
     def set_current_node(self, node):
         prior = self.current_node
         self.current_node = node
-        yield
-        self.current_node = prior
+        try:
+            yield
+        finally:
+            self.current_node = prior
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
@@ -559,11 +577,13 @@ class Kernel(CodeGen):
         self.compute = cb
         self.stores = sb
         self.cse = cse.clone()
-        yield
-        self.loads = loads
-        self.compute = compute
-        self.stores = stores
-        self.cse = cse
+        try:
+            yield
+        finally:
+            self.loads = loads
+            self.compute = compute
+            self.stores = stores
+            self.cse = cse
 
     def load(self, name: str, index: sympy.Expr):
         raise NotImplementedError()

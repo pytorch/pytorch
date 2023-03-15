@@ -1,3 +1,4 @@
+import contextlib
 import dataclasses
 import enum
 import logging
@@ -8,12 +9,7 @@ from typing import Callable, Generic, List, NamedTuple, Optional, Set, TypeVar
 
 log = logging.getLogger(__name__)
 
-# TODO(voz): Stolen pattern, not sure why this is the case,
-# but mypy complains.
-try:
-    import sympy  # type: ignore[import]
-except ImportError:
-    log.warning("No sympy found")
+import sympy
 
 """
 torch._guards is the definitional source of truth for general purpose guard structures.
@@ -330,6 +326,20 @@ class TracingContext:
     def __init__(self, fake_mode):
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
+        self.frame_summary_stack = []
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_frame(frame_summary):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Frame context manager must be called within an ongoing trace."
+        tc.frame_summary_stack.append(frame_summary)
+        try:
+            yield
+        finally:
+            tc.frame_summary_stack.pop()
 
 
 """
@@ -356,19 +366,16 @@ class Source:
     def reconstruct(self, codegen):
         raise NotImplementedError()
 
-    def guard_source(self):
+    def guard_source(self) -> GuardSource:
         raise NotImplementedError()
 
-    def name(self):
+    def name(self) -> str:
         raise NotImplementedError()
 
-    def make_guard(self, fn, is_volatile=False):
+    def make_guard(self, fn, is_volatile=False) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
             raise NotImplementedError()
         return Guard(self.name(), self.guard_source(), fn, is_volatile)
 
-    def is_nn_module(self):
-        return self.guard_source() in (
-            GuardSource.LOCAL_NN_MODULE,
-            GuardSource.GLOBAL_NN_MODULE,
-        )
+    def is_nn_module(self) -> bool:
+        return self.guard_source().is_nn_module()

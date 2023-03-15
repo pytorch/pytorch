@@ -57,13 +57,13 @@ TORCH_CUDA_CU_API TensorView* variance(
 TORCH_CUDA_CU_API TensorView* variance(
     TensorView* x,
     const std::vector<int>& dims,
-    int64_t correction,
+    double correction,
     bool keepdim);
 
 TORCH_CUDA_CU_API VarMeanResult variance_mean(
     TensorView* x,
     const std::vector<int>& dims,
-    int64_t correction,
+    double correction,
     bool keepdim);
 
 TORCH_CUDA_CU_API TensorView* standard_deviation(
