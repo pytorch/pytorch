@@ -379,6 +379,7 @@ from torch._decomp import register_decomposition
 
 infer_aten_op = object()
 
+
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
     type_promotion_kind,
@@ -556,7 +557,6 @@ def exp2(a):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-
     assert isinstance(a, TensorLike)
     assert isinstance(value, Number)
 
@@ -1118,7 +1118,6 @@ def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
 ) -> Tensor:
-
     if isinstance(a, Number) and isinstance(b, Number):
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
@@ -1167,6 +1166,7 @@ def float_power(
 #
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
 
 # TODO: add docstring
 @_make_elementwise_binary_reference(
@@ -1800,6 +1800,7 @@ def clamp_max(
 #
 # Conditional references
 #
+
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
@@ -4092,7 +4093,6 @@ def new_empty(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4275,7 +4275,6 @@ def empty_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
