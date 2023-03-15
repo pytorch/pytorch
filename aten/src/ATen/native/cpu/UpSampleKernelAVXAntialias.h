@@ -212,7 +212,6 @@ void ImagingResampleHorizontal(
   }
 }
 
-template<int num_channels>
 void ImagingResampleVertical(
     const at::Tensor & unpacked_output,
     const at::Tensor & unpacked_input,
@@ -246,7 +245,7 @@ void ImagingResampleVertical(
 
   auto xout = unpacked_output.size(2);
   auto yout = unpacked_output.size(1);
-  TORCH_INTERNAL_ASSERT(num_channels == unpacked_input.size(0));
+  const auto num_channels = unpacked_input.size(0);
 
   auto xout_stride = xout * num_channels;
   for (const auto yy : c10::irange(yout)) {
@@ -382,21 +381,13 @@ void upsample_avx_bilinear_uint8(
     if (need_vertical) {
       unpacked_output = (is_rgb_or_rgba) ? output[i] : buffer_vert;
 
-      if (is_rgb_or_rgba && num_channels == 3) {
-        ImagingResampleVertical<3>(
+      ImagingResampleVertical(
           unpacked_output,
           unpacked_input,
           ksize_vert,
           vert_indices_weights,
-          vert_weights_precision);
-      } else {
-        ImagingResampleVertical<4>(
-            unpacked_output,
-            unpacked_input,
-            ksize_vert,
-            vert_indices_weights,
-            vert_weights_precision);
-      }
+          vert_weights_precision
+      );
     }
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
