@@ -1867,12 +1867,12 @@ class DeviceCachingAllocator {
 
   void insert_events(Block* block) {
     int prev_device;
-    C10_CUDA_CHECK(cudaGetDevice(&prev_device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&prev_device));
 
     stream_set streams(std::move(block->stream_uses));
     AT_ASSERT(block->stream_uses.empty());
     for (auto& stream : streams) {
-      C10_CUDA_CHECK(cudaSetDevice(stream.device_index()));
+      C10_CUDA_CHECK(c10::cuda::SetDevice(stream.device_index()));
 
       EventPool::Event event =
           create_event_internal(static_cast<int>(stream.device_index()));
@@ -1882,7 +1882,7 @@ class DeviceCachingAllocator {
       cuda_events[stream].emplace_back(std::move(event), block);
     }
 
-    C10_CUDA_CHECK(cudaSetDevice(prev_device));
+    C10_CUDA_CHECK(c10::cuda::SetDevice(prev_device));
   }
 
   void insert_events_deferred_until_no_capture() {
@@ -2077,9 +2077,9 @@ class NativeCachingAllocator : public CUDAAllocator {
         fraction,
         ". Please set within (0, 1).");
     int activated_device;
-    C10_CUDA_CHECK(cudaGetDevice(&activated_device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&activated_device));
     if (activated_device != device) {
-      C10_CUDA_CHECK(cudaSetDevice(device));
+      C10_CUDA_CHECK(c10::cuda::SetDevice(device));
     }
     device_allocator[device]->setMemoryFraction(fraction);
   }
@@ -2090,7 +2090,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       size_t alloc_trace_max_entries,
       bool alloc_trace_record_context) override {
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->recordHistory(
         enabled,
         std::move(context_recorder),
@@ -2100,7 +2100,7 @@ class NativeCachingAllocator : public CUDAAllocator {
 
   void attachOutOfMemoryObserver(OutOfMemoryObserver observer) override {
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     device_allocator[device]->attachOutOfMemoryObserver(std::move(observer));
   }
 
@@ -2154,7 +2154,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         size < one_exa_bytes,
         "CUDA out of memory. Tried to allocate more than 1EB memory.");
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     if (forceUncachedAllocator()) {
       // Deliberately don't use cudaMallocMaybeCapturing here, to force an error
@@ -2233,7 +2233,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, cuda::getCurrentCUDAStream(device));
     return r;
@@ -2244,7 +2244,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       return nullptr;
     }
     int device;
-    C10_CUDA_CHECK(cudaGetDevice(&device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
     void* r = nullptr;
     malloc(&r, device, nbytes, stream);
     return r;
@@ -2291,7 +2291,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         &dev, *ipc_handle, cudaIpcMemLazyEnablePeerAccess));
     // devPtr has to be deleted in same device when created.
     int curr_device;
-    C10_CUDA_CHECK(cudaGetDevice(&curr_device));
+    C10_CUDA_CHECK(c10::cuda::GetDevice(&curr_device));
     auto sp =
         std::shared_ptr<void>(dev, [handle, curr_device, this](void* ptr) {
           cuda::CUDAGuard device_guard(curr_device);

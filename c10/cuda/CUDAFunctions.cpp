@@ -1,3 +1,4 @@
+#include <c10/cuda/CUDADriverAPI.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
 
@@ -16,7 +17,7 @@ int32_t driver_version() {
 
 int device_count_impl(bool fail_if_no_driver) {
   int count;
-  auto err = C10_CUDA_ERROR_HANDLED(cudaGetDeviceCount(&count));
+  auto err = C10_CUDA_ERROR_HANDLED(c10::cuda::GetDeviceCount(&count));
   if (err == cudaSuccess) {
     return count;
   }
@@ -123,12 +124,12 @@ DeviceIndex device_count_ensure_non_zero() {
 
 DeviceIndex current_device() {
   int cur_device;
-  C10_CUDA_CHECK(cudaGetDevice(&cur_device));
+  C10_CUDA_CHECK(c10::cuda::GetDevice(&cur_device));
   return static_cast<DeviceIndex>(cur_device);
 }
 
 void set_device(DeviceIndex device) {
-  C10_CUDA_CHECK(cudaSetDevice(static_cast<int>(device)));
+  C10_CUDA_CHECK(c10::cuda::SetDevice(static_cast<int>(device)));
 }
 
 void device_synchronize() {
@@ -147,6 +148,39 @@ void warn_or_error_on_sync() {
   } else if (warning_state().get_sync_debug_mode() == SyncDebugMode::L_WARN) {
     TORCH_WARN("called a synchronizing CUDA operation");
   }
+}
+
+static int CUDA_LAST_SAVED_DEVICE = 0;
+static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
+    std::make_shared<c10::cuda::CUDADriverAPI>();
+
+// Wrappers for raw CUDA device management functions
+cudaError_t GetDeviceCount(int *dev_count) {
+  return cudaGetDeviceCount(dev_count);
+}
+
+cudaError_t GetDevice(int *device) {
+  *device = CUDA_LAST_SAVED_DEVICE;
+  return cudaSuccess;
+}
+
+cudaError_t SetDevice(int device) {
+  TORCH_CHECK(device >=0, "device id must be positive!");
+  int curdev = -1;
+  CUDA_LAST_SAVED_DEVICE = device;
+  cudaGetDevice(&curdev);
+  if(device != curdev) {
+    return cudaSetDevice(device);
+  }
+  return cudaSuccess;
+}
+
+cudaError_t MaybeSetDevice(int device) {
+  if(driver_api->hasPrimaryContext(device)) {
+    return c10::cuda::SetDevice(device);
+  }
+  CUDA_LAST_SAVED_DEVICE = device;
+  return cudaSuccess;
 }
 
 } // namespace cuda
