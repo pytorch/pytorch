@@ -2720,7 +2720,21 @@ class CommonTemplate:
     def test_max_pool2d3(self):
         def fn(x):
             # with padding
-            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [1, 1])
+            return (
+                aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [1, 1]),
+                aten.max_pool2d_with_indices(
+                    x,
+                    [
+                        3,
+                    ],
+                    [
+                        2,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
 
         self.common(
             fn,
@@ -2791,7 +2805,21 @@ class CommonTemplate:
 
     def test_avg_pool2d3(self):
         def fn(x):
-            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1])
+            return (
+                aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1]),
+                aten.avg_pool2d(
+                    x,
+                    [
+                        3,
+                    ],
+                    [
+                        2,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
 
         self.common(
             fn,
