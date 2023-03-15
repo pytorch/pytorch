@@ -4,19 +4,20 @@ import time
 import warnings
 from typing import Any, Dict, List
 
+import atexit
 import torch
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
-from torch._inductor import ir
+from torch._inductor import ir, config
 from torch._inductor.codecache import PyCodeCache
 
 from torch._inductor.select_algorithm import ChoiceCaller
 from .utils import do_bench
 from .virtualized import V
+from typing import Optional
 
 DEBUG = False
-EXIT_HANDLER_REGISTERED = False
 
 # Used to synchronize between parent and child processes
 class Ping:
@@ -26,16 +27,17 @@ class Ping:
 class Pong:
     pass
 
-
 @dataclasses.dataclass
 class TuningProcess:
     process: multiprocessing.Process = None
     request_queue: multiprocessing.Queue = None
     response_queue: multiprocessing.Queue = None
+    dev_id: Optional[int] = None
 
     @staticmethod
-    def process_main(request_queue, response_queue):
+    def process_main(request_queue, response_queue, dev_id):
         print("enter child process main")
+        torch.cuda.set_device(dev_id)
         while True:
             obj = request_queue.get()
 
@@ -58,13 +60,17 @@ class TuningProcess:
     def clear(self):
         self.process = self.request_queue = self.response_queue = None
 
-    def initialize(self):
+    def initialize(self, dev_id=None):
         """
         Create child process, request/response queues and do the warm up.
         """
         if self.valid():
             return
 
+        if dev_id is not None:
+            self.dev_id = dev_id
+
+        assert self.dev_id is not None and self.dev_id >= 0
         # cuda runtime does not work with "fork", use "spawn" to start processes.
         ctx = multiprocessing.get_context("spawn")
         self.request_queue = ctx.Queue()
@@ -75,18 +81,10 @@ class TuningProcess:
             args=(
                 self.request_queue,
                 self.response_queue,
+                self.dev_id,
             ),
         )
         self.process.start()
-
-        # register the exit handler for the parent process so it will terminate
-        # the child processes
-        global EXIT_HANDLER_REGISTERED
-        if not EXIT_HANDLER_REGISTERED:
-            EXIT_HANDLER_REGISTERED = True
-            import atexit
-
-            atexit.register(lambda: self.terminate())
 
         # wait for the initialization to be done
         self.request_queue.put(Ping())
@@ -98,9 +96,54 @@ class TuningProcess:
             self.request_queue.put(None)
             self.process.join()
 
+    def __hash__(self):
+        return id(self)
 
-tuning_process = TuningProcess()
+class TuningProcessPool:
+    """
+    Tuning process pool maintaining one process for each GPU. Recreate crashed
+    process.
+    """
+    def __init__(self):
+        self.avail_procs = set()
+        self.all_procs = []
 
+        # register the exit handler for the parent process so it will terminate
+        # the child processes
+        atexit.register(lambda: self.teardown())
+
+    def initialize(self):
+        """
+        Not putting this in __init__ so we don't need create subprocess when
+        importing the module.
+        """
+        if len(self.all_procs) > 0: # already initialized
+            return
+
+        ngpu = torch.cuda.device_count()
+        assert ngpu > 0
+        self.all_procs = [TuningProcess() for _ in range(ngpu)]
+        for dev_id in range(ngpu):
+            self.all_procs[dev_id].initialize(dev_id)
+    
+        self.avail_procs = set(self.all_procs)
+
+    def has_avail_proc(self):
+        return len(self.avail_procs) > 0
+
+    def allocate_proc(self):
+        assert self.has_avail_proc()
+        return self.avail_procs.pop()
+
+    def return_proc(self, proc):
+        self.avail_procs.add(proc)
+
+    def teardown(self):
+        for proc in self.all_procs:
+            proc.terminate()
+
+if config.autotune_in_subproc:
+    tuning_process_pool = TuningProcessPool()
 
 @dataclasses.dataclass
 class TensorMeta:
@@ -131,7 +174,8 @@ class TensorMeta:
         return rand_strided(
             self.sizes,
             self.strides,
-            device=self.device,
+            # device=self.device, # don't use the device since we may benchmark on another GPU
+            device="cuda",
             dtype=self.dtype,
             extra_size=self.offset,
         )
@@ -196,7 +240,7 @@ class BenchmarkRequest:
         return out
 
 
-def benchmark_in_sub_process(
+def benchmark_one_in_sub_process(
     choice: ChoiceCaller,
 ) -> float:
     """
@@ -229,3 +273,53 @@ def benchmark_in_sub_process(
             return float("inf")
 
         return timing
+
+def benchmark_in_sub_process(
+    choices
+):
+    timings = {}
+    if len(choices) == 0:
+        return timings
+
+    pending_tasks = {}  # map choice to proc
+    reqlist = [choice.bmreq for choice in choices]
+    nextreqidx = 0
+    while nextreqidx < len(reqlist) or len(pending_tasks) > 0:
+        while nextreqidx < len(reqlist) and tuning_process_pool.has_avail_proc():
+            proc = tuning_process_pool.allocate_proc()
+            bmreq = reqlist[nextreqidx]
+
+            proc.request_queue.put(bmreq)
+            pending_tasks[choices[nextreqidx]] = proc
+            nextreqidx += 1
+
+        for choice, proc in pending_tasks.items():
+            try:
+                # small timeout so the parent process does not stuck too long if
+                # the child process is still busy doing its work.
+                timing = proc.response_queue.get(timeout=0.001)
+            except queue.Empty:
+                status = proc.process.exitcode
+                if status is None:
+                    # still running
+                    continue
+                # otherwise a crash happens
+                assert status != 0, f"Child process should be crashed but get status code {status}"
+                warnings.warn(
+                    f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
+                )
+
+                timing = float("inf")
+
+                # must reinitialize proc
+                proc.clear()
+                proc.initialize()
+
+                # fall through
+                
+
+            timings[choice] = timing
+            tuning_process_pool.return_proc(proc)
+        pending_tasks = {choice: proc for choice, proc in pending_tasks.items() if choice not in timings}
+
+    return timings

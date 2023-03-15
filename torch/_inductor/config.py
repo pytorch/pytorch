@@ -48,6 +48,8 @@ reordering = False
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
+ignore_max_autotune_cache = os.environ.get("TORCHINDUCTOR_IGNORE_MAX_AUTOTUNE_CACHE") == "1"
+
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 

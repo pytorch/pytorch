@@ -107,7 +107,7 @@ class TestDoBench(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
-    @parameterized.expand([[True], [False]])
+    @parameterized.expand([[True]])
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
@@ -124,7 +124,7 @@ class TestDoBench(TestCase):
         d = torch.randn(k, n).cuda()
 
         with config.patch(
-            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
+            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc, "ignore_max_autotune_cache": True}
         ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 

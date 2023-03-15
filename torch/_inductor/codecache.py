@@ -130,6 +130,8 @@ class PersistentCache:
 
         def check_cache(cache, callback=None):
             """Check if `cache` contains data for all the choices"""
+            if config.ignore_max_autotune_cache:
+                return False
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
@@ -152,8 +154,8 @@ class PersistentCache:
                 self.get_global_cache(), callback=gc_log
             ):
                 # re-benchmark everything to try to get consistent numbers from the same machine
+                timings.update(benchmark(choices))
                 for choice in choices:
-                    timings[choice] = benchmark(choice)
                     local_cache.setdefault(name, {})
                     local_cache[name].setdefault(inputs, {})
                     local_cache[name][inputs][choice.hash_key()] = timings[choice]
