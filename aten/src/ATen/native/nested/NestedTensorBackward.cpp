@@ -221,6 +221,14 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
         c10::nullopt /* device */,
         c10::nullopt /* pin_memory */,
         at::MemoryFormat::Contiguous);
+  } else {
+    dInput = at::native::zeros_like(
+        input_buffer,
+        c10::nullopt /* dtype */,
+        c10::nullopt /* layout */,
+        c10::nullopt /* device */,
+        c10::nullopt /* pin_memory */,
+        at::MemoryFormat::Contiguous);
   }
   if (grad_input_mask[1]) {
     dgamma = M > 0 ? at::native::empty_like(

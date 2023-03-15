@@ -207,7 +207,7 @@ void computeRepeatIndices(index_t* repeat_ptr,
       [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
       MTLSize gridSize = MTLSizeMake(size, 1, 1);
       NSUInteger threadsPerThreadgroup_ = pipelineState.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > size) {
+      if (threadsPerThreadgroup_ > static_cast<NSUInteger>(size)) {
         threadsPerThreadgroup_ = size;
       }
       MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);
