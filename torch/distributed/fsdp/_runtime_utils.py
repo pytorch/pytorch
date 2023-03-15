@@ -215,7 +215,9 @@ def _share_state_and_init_handle_attrs(
     attr_name_to_values: Dict[str, Set[Any]] = {}
     for attr_name in HOMOGENEOUS_ATTR_NAMES:
         attr_name_to_values[attr_name] = set()
-    for fsdp_state in traversal_utils._get_fsdp_states(root_module):
+    root_state._all_fsdp_states = traversal_utils._get_fsdp_states(root_module)
+    root_state._all_handles = root_state._exec_order_data.all_handles  # share reference
+    for fsdp_state in root_state._all_fsdp_states:
         for attr_name in HOMOGENEOUS_ATTR_NAMES:
             _p_assert(
                 hasattr(fsdp_state, attr_name),
@@ -519,13 +521,11 @@ def _root_pre_forward(
         return args, kwargs
     if state.forward_prefetch:
         handles_keys = []
-        if _is_composable(state):
-            # TODO: This assumes singleton handles keys.
-            handles_keys = [tuple(handle) for handle in state._handles]
-        else:
-            for fsdp_module in traversal_utils._get_fsdp_states(state):
-                handles_key = tuple(fsdp_module._handles)
-                handles_keys.append(handles_key)
+        for fsdp_state in state._all_fsdp_states:
+            # TODO: Forward prefetch assumes singleton handles key. For the
+            # composable path, `_handles` may have more than one handle,
+            # whereas for the wrapper path, it has at most one handle.
+            handles_keys.extend((handle,) for handle in fsdp_state._handles)
         for handles_key in handles_keys:
             state._needs_pre_forward_unshard[handles_key] = True
     _wait_for_computation_stream(
@@ -533,7 +533,7 @@ def _root_pre_forward(
         state._streams["unshard"],
         state._streams["pre_unshard"],
     )
-    _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+    _clear_grads_if_needed(state._all_handles)
 
     # Prepares the forward inputs by moving them to ``compute_device``
     # TODO: Do not use the side stream for tensor copies for now; investigate
@@ -611,7 +611,7 @@ def _pre_backward_hook(
         # after all backward calls complete
         if state._is_root and not state._post_backward_callback_queued:
             _register_post_backward_final_callback(state, module)
-            _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+            _clear_grads_if_needed(state._all_handles)
         elif _handles_key:
             allowed_states = [TrainingState.IDLE]
             if _is_composable(state):
@@ -906,7 +906,7 @@ def _post_backward_final_callback(
             torch.cuda.current_stream().synchronize()
     root_state._exec_order_data.next_iter()
 
-    for fsdp_state in traversal_utils._get_fsdp_states(module):
+    for fsdp_state in state._all_fsdp_states:
         _catch_all_reshard(fsdp_state)
         _finalize_params(fsdp_state)
         fsdp_state._ran_pre_backward_hook.clear()
@@ -1217,6 +1217,12 @@ def _register_post_backward_hooks(
     We register the post-backward hook only once in the *first* forward that a
     ``FlatParameter`` participates in. This relies on the ``AccumulateGrad``
     object being preserved through multiple forwards.
+
+    NOTE: We follow this heuristic to prefer the *first* forward to target the
+    parameter mixed precision case, where there are *separate*
+    ``AccumulateGrad`` objects across the different forwards. (Without
+    parameter mixed precision, the ``AccumulateGrad`` objects are the same.) If
+    we instead prefer the *last* forward, then the hook runs early.
     """
     # If there is no gradient computation, then there is no need for
     # post-backward logic
@@ -1234,7 +1240,7 @@ def _register_post_backward_hooks(
             "The `grad_fn` is needed to access the `AccumulateGrad` and "
             "register the post-backward hook",
         )
-        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
         assert acc_grad is not None
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)

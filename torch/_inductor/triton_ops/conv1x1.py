@@ -3,7 +3,6 @@ import torch
 from ..utils import has_triton
 
 if has_triton():
-
     import triton
 
     class _conv1x1:
@@ -26,7 +25,7 @@ if has_triton():
             shape_w = w.shape
             shape_bias = bias.shape if bias is not None else None
 
-            # indicies for the layout
+            # indices for the layout
             xn, xc, xh, xw = 0, 1, 2, 3
             yn, yc, yh, yw = 0, 1, 2, 3
             wn, wc, wh, ww = 0, 1, 2, 3

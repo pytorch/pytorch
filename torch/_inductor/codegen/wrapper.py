@@ -4,13 +4,23 @@ import dataclasses
 import functools
 import hashlib
 from itertools import count
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
+
+import sympy
+from sympy import Expr
 
 from torch._dynamo.utils import dynamo_timed
 
 from .. import codecache, config, ir
 from ..codecache import code_hash, cpp_compile_command, get_code_path
-from ..utils import cache_on_self, has_triton, sympy_dot, sympy_product
+from ..utils import (
+    cache_on_self,
+    get_benchmark_name,
+    has_triton,
+    sympy_dot,
+    sympy_product,
+    sympy_symbol,
+)
 from ..virtualized import V
 from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
 
@@ -40,8 +50,8 @@ def make_buffer_reuse(old, new, del_func, declare, ending, as_strided):
 
     return (
         f"{declare}{new.get_name()} = {as_strided}({old.get_name()}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_size())}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(new.get_stride())}){del_line}{ending}"
+        f"{V.graph.wrapper_code.codegen_shape_tuple(new.get_size())}, "
+        f"{V.graph.wrapper_code.codegen_shape_tuple(new.get_stride())}){del_line}{ending}"
     )
 
 
@@ -52,8 +62,8 @@ def make_buffer_allocation(buffer):
     stride = tuple(buffer.get_stride())
     return (
         f"{buffer.get_name()} = empty_strided("
-        f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
+        f"{V.graph.wrapper_code.codegen_shape_tuple(shape)}, "
+        f"{V.graph.wrapper_code.codegen_shape_tuple(stride)}, "
         f"device='{device.type}', dtype={dtype})"
     )
 
@@ -67,8 +77,8 @@ def make_cpp_buffer_allocation(buffer):
     stride = tuple(buffer.get_stride())
     return (
         f"auto {buffer.get_name()} = at::empty_strided("
-        f"{V.graph.sizevars.codegen_shape_tuple(shape)}, "
-        f"{V.graph.sizevars.codegen_shape_tuple(stride)}, "
+        f"{V.graph.wrapper_code.codegen_shape_tuple(shape)}, "
+        f"{V.graph.wrapper_code.codegen_shape_tuple(stride)}, "
         f"{DTYPE_TO_ATEN[dtype]}); "
     )
 
@@ -267,42 +277,12 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call = IndentedBuffer()
         self.kernels = {}
         self.lines = []
-        self.header.splice(
-            f"""
-                from ctypes import c_void_p, c_long
-                import torch
-                import math
-                import random
-                from torch import empty_strided, as_strided, device
-                from {codecache.__name__} import AsyncCompile
-                from torch._inductor.select_algorithm import extern_kernels
+        self.need_seed = False
+        self.declare = ""
+        self.ending = ""
+        self.as_strided = "as_strided"
 
-                aten = torch.ops.aten
-                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
-                async_compile = AsyncCompile()
-
-            """
-        )
-
-        if has_triton():
-            self.header.splice(
-                """
-                import triton
-                import triton.language as tl
-                from torch._inductor.triton_ops.autotune import grid
-                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-                """
-            )
-
-            if config.triton.convolution != "aten":
-                self.header.splice(
-                    """
-                    from torch._inductor.triton_ops.conv_perf_model import early_config_prune
-                    from torch._inductor.triton_ops.conv_perf_model import estimate_conv_time
-                    from torch._inductor.triton_ops.autotune import conv_heuristics
-                    """
-                )
-
+        self.set_header()
         self.write_prefix()
 
         for name, value in V.graph.constants.items():
@@ -326,6 +306,34 @@ class WrapperCodeGen(CodeGen):
 
         self.add_import_once = add_import_once
         self._metas = {}
+
+    def set_header(self):
+        self.header.splice(
+            f"""
+                from ctypes import c_void_p, c_long
+                import torch
+                import math
+                import random
+                from torch import empty_strided, as_strided, device
+                from {codecache.__name__} import AsyncCompile
+                from torch._inductor.select_algorithm import extern_kernels
+
+                aten = torch.ops.aten
+                assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+                async_compile = AsyncCompile()
+
+            """
+        )
+
+        if has_triton():
+            self.header.splice(
+                """
+                import triton
+                import triton.language as tl
+                from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+                from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                """
+            )
 
     def add_meta_once(self, meta):
         meta = repr(meta)
@@ -361,11 +369,11 @@ class WrapperCodeGen(CodeGen):
                 self.prefix.writeline(
                     f"torch.randint(2**31, size=(), dtype=torch.int64, out={name})"
                 )
-            V.graph.sizevars.codegen(self.prefix, V.graph.graph_inputs)
+            self.codegen_inputs(self.prefix, V.graph.graph_inputs)
 
     def append_precomputed_sizes_to_prefix(self):
         with self.prefix.indent():
-            V.graph.sizevars.codegen_precomputed_sizes(self.prefix)
+            self.codegen_precomputed_sizes(self.prefix)
 
     def write_get_cuda_stream(self, index):
         name = f"stream{index}"
@@ -388,7 +396,6 @@ class WrapperCodeGen(CodeGen):
         if name in V.graph.removed_buffers or name in self.allocated:
             return
         self.allocated.add(name)
-
         if isinstance(
             buffer,
             (ir.ExternKernelAlloc, ir.MultiOutput),
@@ -504,6 +511,9 @@ class WrapperCodeGen(CodeGen):
                     "with record_function('inductor_wrapper_call'):"
                 )
                 stack.enter_context(self.wrapper_call.indent())
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("start_graph()")
+
             while (
                 self.lines
                 and isinstance(self.lines[-1], MemoryPlanningLine)
@@ -536,6 +546,10 @@ class WrapperCodeGen(CodeGen):
             output_refs = self.get_output_refs()
             if config.triton.debug_sync_graph:
                 self.wrapper_call.writeline("torch.cuda.synchronize()")
+
+            if config.profile_bandwidth:
+                self.wrapper_call.writeline("end_graph()")
+
             self.generate_return(output_refs)
 
         self.append_precomputed_sizes_to_prefix()
@@ -550,22 +564,92 @@ class WrapperCodeGen(CodeGen):
 
         return result.getvalue()
 
-    def add_benchmark_harness(self, output):
-        """
-        Append a benchmark harness to generated code for debugging
-        """
-        if not config.benchmark_harness:
-            return
+    def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
+        """Assign all symbolic shapes to locals"""
+        if self.need_seed:
+            code.writeline(
+                "seed = torch.randint(2**31, size=(), dtype=torch.int32).item()"
+            )
 
+        @functools.lru_cache(None)
+        def sizeof(name):
+            code.writeline(f"{self.declare}{name}_size = {name}.size(){self.ending}")
+            return f"{name}_size"
+
+        @functools.lru_cache(None)
+        def strideof(name):
+            code.writeline(
+                f"{self.declare}{name}_stride = {name}.stride(){self.ending}"
+            )
+            return f"{name}_stride"
+
+        # Assign all symbolic shapes needed to local variables
+        needed = set(V.graph.sizevars.var_to_val.keys()) - set(
+            V.graph.sizevars.replacements.keys()
+        )
+
+        def is_expr(x):
+            return isinstance(x[1], sympy.Expr)
+
+        graph_inputs_expr = list(filter(is_expr, graph_inputs.items()))
+        graph_inputs_tensors = list(
+            filter(lambda x: not is_expr(x), graph_inputs.items())
+        )
+
+        for name, shape in graph_inputs_expr:
+            shape = V.graph.sizevars.simplify(shape)
+            if shape in needed:
+                needed.remove(shape)
+                code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
+
+        for name, value in graph_inputs_tensors:
+            shapes = value.get_size()
+            for dim, shape in enumerate(shapes):
+                shape = V.graph.sizevars.simplify(shape)
+                if shape in needed:
+                    needed.remove(shape)
+                    code.writeline(
+                        f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
+                    )
+
+        for name, value in graph_inputs_tensors:
+            shapes = value.get_stride()
+            for dim, shape in enumerate(shapes):
+                shape = V.graph.sizevars.simplify(shape)
+                if shape in needed:
+                    needed.remove(shape)
+                    code.writeline(
+                        f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
+                    )
+
+    def codegen_precomputed_sizes(self, code: IndentedBuffer):
+        for sym, expr in V.graph.sizevars.inv_precomputed_replacements.items():
+            code.writeline(f"{self.declare}{sym} = {pexpr(expr)}")
+
+    def codegen_sizevar(self, x: Expr) -> str:
+        return pexpr(V.graph.sizevars.simplify(x))
+
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_sizevar, shape))
+        if len(parts) == 0:
+            return "()"
+        if len(parts) == 1:
+            return f"({parts[0]}, )"
+        return f"({', '.join(parts)})"
+
+    def benchmark_compiled_module(self, output):
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
-                f"{V.graph.sizevars.codegen_benchmark_shape_tuple(shape)}, "
-                f"{V.graph.sizevars.codegen_benchmark_shape_tuple(stride)}, "
+                f"{self.codegen_shape_tuple(shape)}, "
+                f"{self.codegen_shape_tuple(stride)}, "
                 f"device='{device}', dtype={dtype})"
             )
 
-        output.writelines(["", "", 'if __name__ == "__main__":'])
+        def add_expr_input(name, val):
+            output.writeline(f"{name} = {val}")
+
+        output.writelines(["", "", "def benchmark_compiled_module():"])
         with output.indent():
             output.splice(
                 """
@@ -581,18 +665,54 @@ class WrapperCodeGen(CodeGen):
                 )
 
             for name, value in V.graph.graph_inputs.items():
-                shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
-                stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
-                add_fake_input(
-                    name, shape, stride, value.get_device(), value.get_dtype()
-                )
+                if isinstance(value, sympy.Expr):  # Don't need to add symbolic
+                    add_expr_input(name, V.graph.sizevars.size_hint(value))
+                else:
+                    shape = [V.graph.sizevars.size_hint(x) for x in value.get_size()]
+                    stride = [V.graph.sizevars.size_hint(x) for x in value.get_stride()]
+                    add_fake_input(
+                        name, shape, stride, value.get_device(), value.get_dtype()
+                    )
 
             output.writeline(
                 f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
             )
 
-    def define_kernel(self, name: str, kernel: str):
-        self.header.splice(f"\n\n{name} = {kernel}")
+    def add_benchmark_harness(self, output):
+        """
+        Append a benchmark harness to generated code for debugging
+        """
+        if not config.benchmark_harness:
+            return
+
+        self.benchmark_compiled_module(output)
+
+        output.writelines(["", "", 'if __name__ == "__main__":'])
+        with output.indent():
+            output.writelines(
+                [
+                    "import argparse",
+                    "from torch._inductor.utils import benchmark_all_kernels",
+                    "",
+                    "parser = argparse.ArgumentParser()",
+                    'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
+                    'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    "args = parser.parse_args()",
+                    "",
+                    "if args.benchmark_kernels:",
+                ]
+            )
+            with output.indent():
+                output.writeline(
+                    f"benchmark_all_kernels('{get_benchmark_name()}', args.benchmark_all_configs)"
+                )
+            output.writeline("else:")
+            with output.indent():
+                output.writeline("benchmark_compiled_module()")
+
+    def define_kernel(self, name: str, kernel: str, metadata: str = None):
+        metadata_comment = f"{metadata}\n" if metadata else ""
+        self.header.splice(f"\n\n{metadata_comment}{name} = {kernel}")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
         return
@@ -623,10 +743,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
     """
 
     call_func_id = count()
+    decl_str = None
 
     def __init__(self):
-        self._call_func_id = next(CppWrapperCodeGen.call_func_id)
         super().__init__()
+        self._call_func_id = next(CppWrapperCodeGen.call_func_id)
+        self.declare = "auto "
+        self.ending = ";"
+        self.as_strided = "at::as_strided"
+
+    def seed(self):
+        """
+        Seed is a special variable used to hold the rng seed for a graph.
+
+        Note this is only used by the CPU backend, we put seeds in a
+        1-element tensor for the CUDA backend.
+        """
+        self.need_seed = True
+        return sympy_symbol("seed")
 
     @cache_on_self
     def get_output_refs(self):
@@ -641,6 +775,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
             else x.codegen_reference()
             for x in V.graph.graph_outputs
         ]
+
+    def call_func_name(self):
+        return f"call_{self._call_func_id}"
 
     def write_prefix(self):
         self.prefix.splice(
@@ -664,21 +801,25 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
             """
         )
-        with self.wrapper_call.indent():
-            inputs_len = len(V.graph.graph_inputs.keys())
-            output_refs = self.get_output_refs()
-            if output_refs:
-                if len(output_refs) == 1:
-                    output_types = "at::Tensor"
-                else:
-                    output_types = "std::vector<at::Tensor>"
-            else:
-                output_types = "void"
 
-            inputs_types = "std::vector<at::Tensor>"
-            self.wrapper_call.writeline(
-                f"{output_types} call_{self._call_func_id}({inputs_types} args) {{"
-            )
+    def write_wrapper_decl(self):
+        inputs_len = len(V.graph.graph_inputs.keys())
+        output_refs = self.get_output_refs()
+        if output_refs:
+            if len(output_refs) == 1:
+                output_types = "at::Tensor"
+            else:
+                output_types = "std::vector<at::Tensor>"
+        else:
+            output_types = "void"
+
+        inputs_types = "std::vector<at::Tensor>"
+
+        CppWrapperCodeGen.decl_str = (
+            f"{output_types} {self.call_func_name()}({inputs_types} args)"
+        )
+        self.prefix.splice(f"{CppWrapperCodeGen.decl_str} {{")
+        with self.wrapper_call.indent():
             if inputs_len != 0:
                 inputs_keys_str = ", ".join(V.graph.graph_inputs.keys())
                 self.wrapper_call.writeline(f"at::Tensor {inputs_keys_str};")
@@ -690,7 +831,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
                 self.wrapper_call.writeline(
                     f"{name} = at::randint(std::pow(2, 31), {{}}, at::ScalarType::Long);"
                 )
-            V.graph.sizevars.codegen(self.wrapper_call, V.graph.graph_inputs)
+            self.codegen_inputs(self.wrapper_call, V.graph.graph_inputs)
+
+    def generate(self):
+        self.write_wrapper_decl()
+        return super().generate()
 
     def write_allocate_line(self, buffer):
         self.writeline(CppAllocateLine(buffer))
@@ -740,18 +885,24 @@ class CppWrapperCodeGen(WrapperCodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({});".format(name, ", ".join(call_args))
 
+    def return_end_str(self):
+        return "\n}\n'''\n)"
+
     def generate_return(self, output_refs):
         if output_refs:
             if len(output_refs) == 1:
-                self.wrapper_call.writeline("return " + output_refs[0] + "; }''' )")
+                self.wrapper_call.writeline(
+                    f"return {output_refs[0]};{self.return_end_str()}"
+                )
             else:
                 self.wrapper_call.writeline(
                     "return std::vector<at::Tensor>({"
                     + ", ".join(output_refs)
-                    + "}); }''' )"
+                    + "});"
+                    + self.return_end_str()
                 )
         else:
-            self.wrapper_call.writeline("return; }''' )")
+            self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
     def generate_end(self, result):
         shared = codecache.get_shared()
@@ -801,3 +952,44 @@ class CppWrapperCodeGen(WrapperCodeGen):
         else:
             args.insert(0, f"{codegen_reference}")
         self.writeline(f"{cpp_kernel}({', '.join(args)});")
+
+    def codegen_shape_tuple(self, shape: Tuple[Expr, ...]) -> str:
+        parts = list(map(self.codegen_sizevar, shape))
+        if len(parts) == 0:
+            return "{}"
+        if len(parts) == 1:
+            return f"{{{parts[0]}, }}"
+        return f"{{{', '.join(parts)}}}"
+
+
+class CppAotWrapperCodeGen(CppWrapperCodeGen):
+    """
+    The AOT-version outer wrapper that calls the kernels in C++
+    """
+
+    def set_header(self):
+        return
+
+    def write_prefix(self):
+        self.prefix.splice("\n#include <ATen/ATen.h>")
+
+    def call_func_name(self):
+        return "aot_inductor_entry"
+
+    def define_kernel(self, name: str, kernel: str):
+        self.header.splice(f"\n{kernel}\n")
+
+    def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
+        return
+
+    def wrap_kernel_call(self, name, call_args):
+        return f"{name}({', '.join(call_args)});"
+
+    def return_end_str(self):
+        return "\n}"
+
+    def generate_end(self, result):
+        return
+
+    def add_benchmark_harness(self, output):
+        return

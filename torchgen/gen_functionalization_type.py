@@ -73,6 +73,7 @@ MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION = (
 # - gen_composite_view_copy_kernel
 #     Generates view_copy() composite kernels for all view_copy operators.
 
+
 # Generates the body of the default composite C++ kernel for a {view}_copy NativeFunction
 # See Note [view_copy NativeFunctions]
 @dataclass(frozen=True)
@@ -439,7 +440,7 @@ def get_mutable_redispatch_return_names(
 ) -> Tuple[List[str], List[str]]:
     aliased_returns = []
     non_aliased_returns = []
-    for (i, name) in enumerate(f.func.aliased_return_names()):
+    for i, name in enumerate(f.func.aliased_return_names()):
         if name is not None:
             aliased_returns.append(name)
         else:
@@ -482,7 +483,7 @@ def wrap_propagate_mutations_and_return(
     # First, take all of the newly created outputs from the inner call and wrap them into functional tensors
     updates = []
     non_aliased_wrapped_ret_names = []
-    for (i, inner_ret) in enumerate(
+    for i, inner_ret in enumerate(
         non_aliased_inner_rets[: len(non_aliased_outer_rets)]
     ):
         ret_name = f"output_{i}"
@@ -494,11 +495,12 @@ def wrap_propagate_mutations_and_return(
 
     # Next, take all of the mutated outputs from the inner call corresponding to mutated inputs,
     # and propogate the mutations
-    for (outer_arg, inner_ret) in zip(
+    for outer_arg, inner_ret in zip(
         mutable_arg_names, non_aliased_inner_rets[len(non_aliased_outer_rets) :]
     ):
         updates.append(
             f"""\
+  at::functionalization::impl::propagate_xla_data({outer_arg}, {inner_ret});
   at::functionalization::impl::replace_({outer_arg}, {inner_ret});
   at::functionalization::impl::commit_update({outer_arg});
   at::functionalization::impl::sync({outer_arg});"""
@@ -541,6 +543,11 @@ def emit_inplace_functionalization_body(
         for a in f.func.arguments.flat_all
         if a.type.is_tensor_like() and a.annotation is None
     ]
+    non_mutated_tensor_names = [
+        a.name
+        for a in f.func.arguments.flat_all
+        if a.type == BaseType(BaseTy.Tensor) and a.annotation is None
+    ]
     # all mutable inputs must be functional tensors in order to participate in functionalization
     check_all_mutated_args_are_functional = " && ".join(
         ["true"]
@@ -554,6 +561,14 @@ def emit_inplace_functionalization_body(
         + [
             f"at::functionalization::impl::isFunctionalTensor({a})"
             for a in non_mutated_names
+        ]
+    )
+
+    check_any_non_mutated_tensors_are_xla = " || ".join(
+        ["false"]
+        + [
+            f"{a}.device().type() == c10::DeviceType::XLA"
+            for a in non_mutated_tensor_names
         ]
     )
     # These are used in the cases where we don't functionalize and redispatch to the inplace op
@@ -619,7 +634,9 @@ def emit_inplace_functionalization_body(
       }}
       {unwrap_tensor_args_str}
       if (!({check_all_mutated_args_are_functional})) {{
-        if (({check_any_non_mutated_args_are_functional})) {{
+        // We want to disable this check if there are any XLA tensors.
+        // cpu_tensor.copy_(xla_tensor) is valid code.
+        if (!({check_any_non_mutated_tensors_are_xla}) && ({check_any_non_mutated_args_are_functional})) {{
          // case 1: trying to mutate a non functional tensor with a functional tensor is an error
          TORCH_INTERNAL_ASSERT(false,
            "mutating a non-functional tensor with a functional tensor is not allowed.",
@@ -644,6 +661,7 @@ def emit_inplace_functionalization_body(
 # The below functions generate RegisterFunctionalization.cpp
 # These files provide the kernels that run the functionalization pass, which can be opted into
 # per backend (e.g. XLA or Vulkan), or as a composable transform (functionalize() in functorch).
+
 
 # See Note [Functionalization Pass: View Inverses].
 def gen_functionalization_view_inverse_declaration(

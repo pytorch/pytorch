@@ -56,6 +56,11 @@ std::vector<Tensor> not_implemented_list(
 at::Tensor handle_r_to_c(ScalarType self_st, Tensor gradient_result);
 at::Tensor maybe_multiply(const at::Tensor& t, const at::Scalar& s);
 int64_t _safe_size(IntArrayRef sizes, IntArrayRef dim);
+bool chunk_grad_outputs_efficient_attention(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    bool is_causal);
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,
@@ -320,21 +325,21 @@ at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor var_jvp(
     const at::Tensor& self_t,
     const at::Tensor& self_p,
     const at::Tensor& result,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor std_backward(
     const at::Tensor& result,
     const at::Tensor& grad,
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    c10::optional<int64_t> correction,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 Tensor mean_backward(
     const Tensor& grad,
@@ -347,7 +352,7 @@ Tensor var_mean_backward(
     const Tensor& gmean,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 Tensor std_mean_backward(
     const Tensor& gstd,
@@ -355,7 +360,7 @@ Tensor std_mean_backward(
     const Tensor& self,
     const Tensor& std,
     at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
+    const c10::optional<c10::Scalar>& correction,
     bool keepdim);
 at::Tensor masked_scatter_backward(
     const at::Tensor& grad,

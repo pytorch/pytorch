@@ -1,22 +1,33 @@
-import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union, Tuple
-import sys
 import builtins
-import itertools
-import operator
-import math
+import collections
 import functools
+import itertools
+import logging
+import math
+import operator
+import sys
+import textwrap
 import threading
+import traceback
 from contextlib import contextmanager
 from functools import lru_cache
-import traceback
-import collections
-import textwrap
-import logging
+from typing import cast, Dict, List, Optional, Set, Type, Union
+
+import torch
 
 # NB: The sym_* functions are used via getattr() and must be imported here.
-from torch import SymInt, SymFloat, SymBool, sym_not, sym_float, sym_max, sym_min  # noqa: F401
-from torch._guards import ShapeGuard, Source
+from torch import (  # noqa: F401
+    sym_float,
+    sym_max,
+    sym_min,
+    sym_not,
+    SymBool,
+    SymFloat,
+    SymInt,
+)
+from torch._guards import ShapeGuard, Source, TracingContext
+from torch.utils._sympy.interp import sympy_interp
+from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
 SymTypes = (SymInt, SymFloat, SymBool)
 
@@ -106,6 +117,81 @@ def hint_int(a):
     assert type(a) is int, a
     return a
 
+def has_hint(a):
+    if isinstance(a, SymTypes):
+        return a.node.has_hint()
+    return True
+
+# Returns True if every size dim on the tensor has a hint
+# TODO: Should this include strides too?  For now it doesn't matter,
+# that's quite an obscure case
+def tensor_has_hints(t):
+    return all(has_hint(s) for s in t.size())
+
+def definitely_true(a):
+    """
+    Returns True only if we can tell that a is True, possibly introducing
+    a guard in the process.  If a depends on some unbacked SymInt, we may
+    return False even though there may exist a possible value of the SymInt
+    that would cause the expression to return True.
+
+    When is it appropriate to use definitely_true?  First, if you can use
+    a higher level combinator like parallel_or/parallel_and, prefer using
+    those instead, they are definitely safe (modulo short-circuiting).
+    Second, it can be used if the program would behave equivalently if
+    definitely_true always returned False (parallel_or/parallel_and are
+    examples of this pattern, modulo short-circuiting).  Finally, it even
+    be OK if the program wouldn't behave equivalently, so long as the
+    change is semantics preserving.  It can be semantics preserving if
+    the program errors in more cases than it did previously (but otherwise
+    behaves identically), or if it changes some quantity in a way that
+    doesn't matter (e.g., strides often fall in this bucket.)
+    """
+    if isinstance(a, SymBool):
+        if a.node.has_hint():
+            return guard_bool(a)
+        else:
+            return False
+    return bool(a)
+
+def definitely_false(a):
+    """
+    Returns True only if we can tell that a is False, possibly introducing
+    a guard in the process.  If a depends on some unbacked SymInt, we may
+    return False even though there may exist a possible value of the SymInt
+    that would cause the expression a to be False.  See definitely_true
+    for more usage guidance.
+    """
+    if isinstance(a, SymBool):
+        if a.node.has_hint():
+            return not guard_bool(a)
+        else:
+            return False
+    return not bool(a)
+
+# TODO: could improve parallel_or/parallel_and by avoiding guards
+# if there exists a quantity that can be handled un-guardedly.  However,
+# for backed SymInts, avoiding guards doesn't really matter in practice,
+# so I chose not to do it.
+
+def parallel_or(*args):
+    """
+    Evaluate the logical OR of several arguments, avoiding guarding on
+    unbacked SymInts if another argument is definitely True.
+    """
+    if any(definitely_true(args) for a in args):
+        return True
+    return any(args)
+
+def parallel_and(*args):
+    """
+    Evaluate the logical FALSE of several arguments, avoiding guarding on
+    unbacked SymInts if another argument is definitely False.
+    """
+    if any(definitely_false(args) for a in args):
+        return False
+    return all(args)
+
 def guard_scalar(a):
     if isinstance(a, (SymBool, bool)):
         return guard_bool(a)
@@ -115,6 +201,54 @@ def guard_scalar(a):
         return guard_float(a)
     else:
         raise AssertionError(f"unrecognized scalar {a}")
+
+# inclusive both ways
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
+    if min is None:
+        min = -sympy.oo
+    if max is None:
+        max = sympy.oo
+    if not isinstance(a, SymInt):
+        assert min <= a <= max
+        return
+    if isinstance(a.node.expr, sympy.Integer):
+        assert min <= int(a.node.expr) <= max
+        return
+    # TODO: Turn this into a runtime assert too
+    assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    r = a.node.shape_env.var_to_range[a.node.expr]
+    a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
+        builtins.max(r.lower, min), builtins.min(r.upper, max)
+    )
+
+
+def constrain_unify(a, b):
+    """
+    Given two SymInts, constrain them so that they must be equal.  NB:
+    this will not work with SymInts that represent nontrivial expressions
+    (yet!)
+    """
+    # TODO: Maybe dedupe this with _maybe_guard_eq?
+    if not isinstance(a, SymInt):
+        if not isinstance(b, SymInt):
+            assert a == b
+        else:
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            shape_env = b.node.shape_env
+            shape_env.replacements[b.node.expr] = sympy.Integer(a)
+    else:
+        # TODO: Actually, we can support this as long as one of them is a symbol.
+        # NB: We can't actually do "unification" as our operators are not
+        # injective
+        assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+        shape_env = a.node.shape_env
+        if not isinstance(b, SymInt):
+            shape_env.replacements[a.node.expr] = sympy.Integer(b)
+        else:
+            assert a.node.shape_env is b.node.shape_env
+            assert isinstance(b.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+            new_var = shape_env._find(a.node.expr)
+            shape_env.replacements[b.node.expr] = new_var
 
 def guard_bool(a):
     if isinstance(a, SymBool):
@@ -220,7 +354,13 @@ class SymNode:
     # simplify it into a hint
     def _update_hint(self):
         if self._hint_expr.free_symbols <= self.shape_env.replacements.keys():
-            self._hint = self.pytype(self.shape_env.replace(self._hint_expr))
+            new_hint = self.shape_env.replace(self._hint_expr)
+            # NB: unification constraints could result in a replacement that
+            # doesn't actually solve the hint!  Check for this.
+            if new_hint.free_symbols:
+                self._hint_expr = new_hint
+                return
+            self._hint = self.pytype(new_hint)
             self._hint_expr = None
 
     @property
@@ -236,7 +376,7 @@ class SymNode:
         if self._hint is None:
             self._update_hint()
             if self._hint is None:
-                raise self.shape_env._make_data_dependent_error(self._hint_expr)
+                raise self.shape_env._make_data_dependent_error(self._hint_expr, self.expr)
             else:
                 return self._hint
         else:
@@ -380,11 +520,8 @@ class SymNode:
     def is_non_overlapping_and_dense(self, sizes, strides):
         return self.is_non_overlapping_and_dense_indicator(sizes, strides).eq(to_node(self, 1))  # type: ignore[attr-defined]
 
-    # Today we error on calling int on a symbolic shape, as this is a very accessible footgun.
     def int_(self):
-        if len(self.expr.free_symbols) == 0:
-            return int(self.expr)
-        raise RuntimeError(f"Trying to extract a concrete int out of a symbolic int {self.expr}")
+        return self.guard_int("", 0)  # NB: uses Python backtrace
 
     # You can manually trigger a guard with this function
     def guard_int(self, file, line):
@@ -421,134 +558,133 @@ class SymNode:
         return self.guard_bool("", 0)
 
 
-if True:  # TODO: unindent
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class Pow(sympy.Function):
-        @classmethod
-        def eval(cls, base, exp):
-            if exp.is_zero:
-                return sympy.Integer(1)
-            elif base.is_zero and exp < 0:
-                raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
-            else:
-                return base ** exp
+# Overloaded to be compatible with regular Python.
+# https://github.com/pytorch/pytorch/issues/90900
+class Pow(sympy.Function):
+    @classmethod
+    def eval(cls, base, exp):
+        if exp.is_zero:
+            return sympy.Integer(1)
+        elif base.is_zero and exp < 0:
+            raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
+        else:
+            return base ** exp
 
-    # Overloaded to be compatible with regular Python.
-    # https://github.com/pytorch/pytorch/issues/90900
-    class TrueDiv(sympy.Function):
-        @classmethod
-        def eval(cls, base, divisor):
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
-            else:
-                return base / divisor
+# Overloaded to be compatible with regular Python.
+# https://github.com/pytorch/pytorch/issues/90900
+class TrueDiv(sympy.Function):
+    @classmethod
+    def eval(cls, base, divisor):
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
+        else:
+            return base / divisor
 
-    class FloorDiv(sympy.Function):
-        """
-        We maintain this so that:
-        1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
-        2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
-        """
-        nargs = (2,)
-        precedence = 50  # precedence of mul  # noqa: F811
+class FloorDiv(sympy.Function):
+    """
+    We maintain this so that:
+    1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
+    2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
+    """
+    nargs = (2,)
+    precedence = 50  # precedence of mul  # noqa: F811
 
-        # Default return type for SymPy assumptions.
-        # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
-        is_real = True
+    # Default return type for SymPy assumptions.
+    # https://docs.sympy.org/latest/guides/assumptions.html#implementing-assumptions-handlers
+    is_real = True
 
-        @property
-        def base(self):
-            return self.args[0]
+    @property
+    def base(self):
+        return self.args[0]
 
-        @property
-        def divisor(self):
-            return self.args[1]
+    @property
+    def divisor(self):
+        return self.args[1]
 
-        def _sympystr(self, printer):
-            base = printer.parenthesize(self.base, self.precedence)
-            divisor = printer.parenthesize(self.divisor, self.precedence)
-            return f"{base}//{divisor}"
+    def _sympystr(self, printer):
+        base = printer.parenthesize(self.base, self.precedence)
+        divisor = printer.parenthesize(self.divisor, self.precedence)
+        return f"{base}//{divisor}"
 
-        # SymPy assumptions based on argument types.
-        def _eval_is_real(self):
-            return fuzzy_or([self.base.is_real, self.divisor.is_real])
+    # SymPy assumptions based on argument types.
+    def _eval_is_real(self):
+        return fuzzy_or([self.base.is_real, self.divisor.is_real])
 
-        def _eval_is_integer(self):
-            return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
+    def _eval_is_integer(self):
+        return fuzzy_and([self.base.is_integer, self.divisor.is_integer])
 
-        # Automatic evaluation.
-        # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
-        @classmethod
-        def eval(cls, base, divisor):
-            def check_supported_type(x):
-                if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
-                    raise TypeError(
-                        f"unsupported operand type(s) for //: "
-                        f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                        f", expected integer or real")
+    # Automatic evaluation.
+    # https://docs.sympy.org/latest/guides/custom-functions.html#best-practices-for-eval
+    @classmethod
+    def eval(cls, base, divisor):
+        def check_supported_type(x):
+            if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+                raise TypeError(
+                    f"unsupported operand type(s) for //: "
+                    f"'{type(base).__name__}' and '{type(divisor).__name__}'"
+                    f", expected integer or real")
 
-            check_supported_type(base)
-            check_supported_type(divisor)
+        check_supported_type(base)
+        check_supported_type(divisor)
 
-            # We don't provide the same error message as in Python because SymPy
-            # makes it difficult to check the types.
-            if divisor.is_zero:
-                raise ZeroDivisionError("division by zero")
+        # We don't provide the same error message as in Python because SymPy
+        # makes it difficult to check the types.
+        if divisor.is_zero:
+            raise ZeroDivisionError("division by zero")
 
-            if base.is_zero:
-                return sympy.S.Zero
-            if base.is_integer and divisor == 1:
-                return base
-            if base.is_real and divisor == 1:
-                return sympy.floor(base)
-            if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
-                return base // divisor
-            if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
-                return sympy.floor(base / divisor)
-            if isinstance(base, FloorDiv):
-                return FloorDiv(base.args[0], base.args[1] * divisor)
+        if base.is_zero:
+            return sympy.S.Zero
+        if base.is_integer and divisor == 1:
+            return base
+        if base.is_real and divisor == 1:
+            return sympy.floor(base)
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
+            return base // divisor
+        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+            return sympy.floor(base / divisor)
+        if isinstance(base, FloorDiv):
+            return FloorDiv(base.args[0], base.args[1] * divisor)
 
-            if isinstance(base, sympy.Add):
-                for a in base.args:
-                    gcd = sympy.gcd(a, divisor)
-                    if gcd == divisor:
-                        return FloorDiv(base - a, divisor) + a / gcd
+        if isinstance(base, sympy.Add):
+            for a in base.args:
+                gcd = sympy.gcd(a, divisor)
+                if gcd == divisor:
+                    return FloorDiv(base - a, divisor) + a / gcd
 
-            gcd = sympy.gcd(base, divisor)
-            if gcd != 1:
-                return FloorDiv(
-                    sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
-                )
+        gcd = sympy.gcd(base, divisor)
+        if gcd != 1:
+            return FloorDiv(
+                sympy.simplify(base / gcd), sympy.simplify(divisor / gcd)
+            )
 
-    # TODO: As an indicator, this != 0 implies == 1 (and vice versa).
-    # Because we do not have the ability to guard on the stride permutation
-    # at the moment, it is hard to make further inferences when this is true,
-    # as although we know the tensor is contiguous in *some* layout, we don't
-    # know which one (however, you could, for example, make the inference that
-    # reshaping this to a 1D tensor can be guard-free.)
-    class IsNonOverlappingAndDenseIndicator(sympy.Function):
-        is_integer = True
+# TODO: As an indicator, this != 0 implies == 1 (and vice versa).
+# Because we do not have the ability to guard on the stride permutation
+# at the moment, it is hard to make further inferences when this is true,
+# as although we know the tensor is contiguous in *some* layout, we don't
+# know which one (however, you could, for example, make the inference that
+# reshaping this to a 1D tensor can be guard-free.)
+class IsNonOverlappingAndDenseIndicator(sympy.Function):
+    is_integer = True
 
-        @classmethod
-        def eval(cls, *args):
-            assert len(args) % 2 == 0
-            dim = len(args) // 2
-            # TODO: it is possible to make progress evaluating this guard
-            # even if not all of the inputs are known.  For example, a 2D
-            # tensor with non-0/1 sizes but strides (0, 1) is definitely
-            # false, because we know its numel > 1 but it's broadcasted
-            # in dim 0.
-            if all(isinstance(a, sympy.Integer) for a in args):
-                size_args = args[0:dim]
-                stride_args = args[dim:]
-                return eval_is_non_overlapping_and_dense(
-                    [int(a) for a in size_args],
-                    [int(a) for a in stride_args]
-                )
-            return None
+    @classmethod
+    def eval(cls, *args):
+        assert len(args) % 2 == 0
+        dim = len(args) // 2
+        # TODO: it is possible to make progress evaluating this guard
+        # even if not all of the inputs are known.  For example, a 2D
+        # tensor with non-0/1 sizes but strides (0, 1) is definitely
+        # false, because we know its numel > 1 but it's broadcasted
+        # in dim 0.
+        if all(isinstance(a, sympy.Integer) for a in args):
+            size_args = args[0:dim]
+            stride_args = args[dim:]
+            return eval_is_non_overlapping_and_dense(
+                [int(a) for a in size_args],
+                [int(a) for a in stride_args]
+            )
+        return None
 
-    IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
+IndicatorTypes = (IsNonOverlappingAndDenseIndicator,)
 
 @lru_cache(256)
 def safe_expand(r):
@@ -577,6 +713,12 @@ reflectable_magic_methods = {
 
 def error():
     raise AssertionError("shouldn't be hit")
+
+
+def get_debugging_stack(num_frames_to_cut=2):
+    # cut this frame and the caller's frame by default
+    return ''.join(traceback.format_list(traceback.extract_stack()[:-num_frames_to_cut]))
+
 
 def floor_ceil_helper(a, fn):
     if isinstance(a, sympy.Mul):
@@ -854,6 +996,8 @@ def _make_node_magic(method, func):
             return to_node(self, _handle_sym_dispatch(op, (wrap_node(self),), {}))
         # TODO: consider constant prop here
         expr = self.shape_env.replace(self.expr)
+        if method == "floor" or method == "ceiling":
+            expr = self.shape_env._simplify_floor_div(expr)
 
         try:
             out = func(expr)
@@ -1023,53 +1167,77 @@ def _lru_cache(fn, maxsize=None):
     return wrapper
 
 
-if True:  # TODO: unindent
-    # This stub exists so we can easily add metadata to sympy symbols
-    # NB: This inherits from Dummy, not Symbol, because Symbols with the same
-    # name get interned.  This is bad for us as we want the metadata
-    # to vary across different invocations and not leak.
-    class Symbol(sympy.Dummy):
-        __slots__: List[str] = ['sources', 'stack']
-        sources: List[Source]
-        stack: Optional[str]
+class ShapeGuardPrinter(StrPrinter):
+    def __init__(
+        self,
+        symbol_to_source,
+        source_ref,
+        var_to_sources,
+    ):
+        super().__init__()
+        self.symbol_to_source = symbol_to_source
+        self.source_ref = source_ref
+        self.var_to_sources = var_to_sources
 
-        def __new__(cls, *args, **kwargs):
-            self = super().__new__(cls, *args, **kwargs)
-            self.sources = []
-            self.stack = None
-            return self
+    def _print_Symbol(self, expr) -> str:
+        assert isinstance(expr, sympy.Symbol), str(type(expr))
+
+        def repr_symbol_to_source():
+            return repr({
+                symbol: [s.name() for s in sources]
+                for symbol, sources in self.symbol_to_source.items()
+            })
+
+        assert expr in self.symbol_to_source, (
+            f"{expr} (could be from {[s.name() for s in self.var_to_sources[expr]]}) "
+            f"not in {repr_symbol_to_source()}.  If this assert is failing, it could be "
+            "due to the issue described in https://github.com/pytorch/pytorch/pull/90665"
+        )
+        return self.source_ref(self.symbol_to_source[expr][0])
 
 
-    class ShapeGuardPrinter(StrPrinter):
-        def __init__(
-            self,
-            symbol_to_source,
-            source_ref,
-        ):
-            super().__init__()
-            self.symbol_to_source = symbol_to_source
-            self.source_ref = source_ref
-
-        def _print_Symbol(self, expr) -> str:
-            assert isinstance(expr, Symbol), str(type(expr))
-            assert expr in self.symbol_to_source, (
-                f"{expr} (could be from {[s.name() for s in expr.sources]}) "
-                f"not in {self.symbol_to_source}"
-            )
-            return self.source_ref(self.symbol_to_source[expr][0])
+class LoggingShapeGuardPrinter(ShapeGuardPrinter):
+    def __init__(self, var_to_sources):
+        super().__init__(var_to_sources, lambda n: n.name(), var_to_sources)
 
 
 TLS = threading.local()
 
 
 class ShapeEnv:
-    def __init__(self, allow_scalar_outputs=True, strict_mark_dyn=False, assume_static_by_default=False):
+    def __init__(
+        self, *,
+        allow_scalar_outputs=True,
+        allow_dynamic_output_shape_ops=True,
+        strict_mark_dyn=False,
+        assume_static_by_default=False,
+        # The following options affect decisions we make about eager
+        # specialization.  Disabling them will increase trace time (as we do
+        # more symbolic reasoning) and can also harm the quality of generated
+        # code (because inductor may not be able to specialize for bounds
+        # being equal--although if we later respecialize because of a guard,
+        # your code may be just as good as it was before.)
+        #
+        # When True, eagerly specialize input sizes which have 0/1.
+        specialize_zero_one=True,
+        # When True, assume input sizes which have the same size are
+        # symbolically equal.
+        duck_shape=True,
+    ):
         # Not directly used by ShapeEnv; indirectly used by FakeTensor
         self.allow_scalar_outputs = allow_scalar_outputs
+        self.allow_dynamic_output_shape_ops = allow_dynamic_output_shape_ops
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
         self.var_to_val: Dict["sympy.Symbol", "sympy.Integer"] = {}
+        # Maps symbolic ints to their min/max range.  These ranges
+        # are conservative: the int MUST fall in the range, but the
+        # range may contain ints which may not actually appear in
+        # practice
+        self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
+        self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
+        self.var_to_stack: Dict["sympy.Symbol", str] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1077,23 +1245,15 @@ class ShapeEnv:
         self.divisible: Set["sympy.Expr"] = set()
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
-        self.val_to_var: Dict[int, "sympy.Expr"] = {0: sympy.Integer(0), 1: sympy.Integer(1)}
+        self.val_to_var: Dict[int, "sympy.Expr"] = {}
+        if specialize_zero_one:
+            self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
         self.unbacked_symint_counter = itertools.count()
-        # A bunch of facts involving unbacked symints that we can
-        # attempt replacements with.  This is very dumb and should
-        # be replaced with a proper entailment mechanism.
-        #
-        # The dictionary is indexed in the following way.  Suppose you have
-        # a replacement s0 + s1 to e2.  We arbitrarily pick a symbol in
-        # the source expression and place this substitution in the list of
-        # that key; e.g., {s0: (s0 + s1, e2)}.  We will only attempt this
-        # substitution if s0 is present in the guard we're attempting to
-        # evaluate.  The choice of key is arbitrary, since we will check
-        # for both s0 and s1 substitutions if s0 + s1 is in the key.
-        self.expr_subs: Dict["sympy.Symbol", List[Tuple["sympy.Expr", "sympy.Expr"]]] = collections.defaultdict(list)
         self.strict_mark_dyn = strict_mark_dyn
         self.assume_static_by_default = assume_static_by_default
+        self.specialize_zero_one = specialize_zero_one
+        self.duck_shape = duck_shape
 
     def _suppress_guards_tls(self):
         return getattr(TLS, "suppress_guards", False)
@@ -1186,13 +1346,15 @@ class ShapeEnv:
         return SymInt(SymNode(sym, self, int, hint))
 
     def create_unbacked_symfloat(self):
-        symbol = Symbol(f"f{next(self.unbacked_symfloat_counter)}")
-        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges.unknown()
         return SymFloat(SymNode(symbol, self, float, None))
 
     def create_unbacked_symint(self):
-        symbol = Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
-        symbol.stack = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        symbol = sympy.Symbol(f"i{next(self.unbacked_symint_counter)}", integer=True)
+        self.var_to_stack[symbol] = ''.join(traceback.format_list(traceback.extract_stack()[:-1]))
+        self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
@@ -1205,25 +1367,34 @@ class ShapeEnv:
             from torch._dynamo.source import NegateSource
             return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        if dyn or (val not in self.val_to_var):
+        if dyn or val not in self.val_to_var or not self.duck_shape:
             # If a value is never before seen, or dynamic, we want to create an expression
-            sympy_expr = Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
+            sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
+            # Do the appending later, because we always want to populate this
+            self.var_to_sources[sympy_expr] = []
 
             if not dyn:
-                # Only non dynamic goes here
+                # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
                 self.val_to_var[val] = sympy_expr
 
-        if not dyn:
+            # We also infer that it must be not 0/1
+            lower = 2 if self.specialize_zero_one else 0
+            # NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
+            # as a sentinel sometimes.  Your sizevar isn't going to be
+            # anywhere near the max 64-bit integer anyway.
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sys.maxsize - 1)
+
+        if not dyn and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.duck_int(val)
         else:
             r = sympy_expr
 
-        if isinstance(r, Symbol):
-            r.sources.append(source)
+        if isinstance(r, sympy.Symbol):
+            self.var_to_sources[r].append(source)
         return r
 
     # Given a concrete integer value, return the duck sized symbol associated
@@ -1232,6 +1403,7 @@ class ShapeEnv:
     # This has some pretty tricky preconditions associated with it, so if
     # you are in a binding context, you probably wanted create_symbol instead.
     def duck_int(self, val):
+        assert self.duck_shape
         assert val in self.val_to_var, (
             "Direct call to duck_int MUST only duck size an integer values "
             "that have already produced by inputs (allocated "
@@ -1397,12 +1569,12 @@ class ShapeEnv:
             for source, expr in input_guards:
                 # Small optimization
                 if (
-                    isinstance(expr, Symbol) and
+                    isinstance(expr, sympy.Symbol) and
                     expr in symbol_to_source and
                     source == symbol_to_source[expr][0]
                 ):
                     continue
-                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(expr)
+                sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
 
         # 2. Every guard must evaluate to True (but remember many guards
@@ -1412,7 +1584,7 @@ class ShapeEnv:
                 continue
             g = self.simplify(g)
             try:
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref).doprint(g)
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
                 if self.strict_mark_dyn:
                     _verify(g, guard_expr)
@@ -1420,13 +1592,31 @@ class ShapeEnv:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
 
-        # 3. Every symbol must not be equal to 0/1
+        # 3. Every symbol must be within its value range (this handles 0/1
+        # specialization too).  NB: because we never update value ranges
+        # except in case of explicit user annotation, these are not included
+        # in simplified.  However, when we start updating value ranges
+        # these should probably get reported in tests too
         if not _simplified:
-            for sources in symbol_to_source.values():
+            for symbol, sources in symbol_to_source.items():
                 assert sources
-                # We must assert that each symbol is not zero or one, as we make
-                # negative inferences on shape variables
-                exprs.append(f"{source_ref(sources[0])} != 0 and {source_ref(sources[0])} != 1")
+                assert symbol.is_integer
+                r = self.var_to_range[symbol]
+                bounds = []
+                if r.lower != -sympy.oo:
+                    bounds.append(str(r.lower))
+                bounds.append(source_ref(sources[0]))
+                # NB: This looks like an off-by-one error but it's not: the
+                # upper bound may be sys.maxsize - 1 because we intentionally
+                # exclude sys.maxsize from our bounds to deal with direct
+                # == INT_MAX guards, but it's still dumb to actually test it.
+                # Note that you can be off by a pretty large constant and it
+                # won't matter because sizes in practice will be no where near
+                # the 64-bit limit.
+                if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
+                    bounds.append(str(r.upper))
+                if len(bounds) > 1:
+                    exprs.append(" <= ".join(bounds))
 
         return exprs
 
@@ -1504,34 +1694,52 @@ class ShapeEnv:
         return shape_groups
 
     @_lru_cache
-    def _maybe_evaluate_static(self, expr: "sympy.Expr") -> "Optional[sympy.Expr]":
+    def _maybe_evaluate_static(self, expr: "sympy.Expr", *, unbacked_only: bool = False) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
         """
         expr = self.simplify(expr)
-        # Simplifies assuming that shape vars > 1 (since we cache on 0/1 shape values)
+
+        # Simplify making use of value range lower bound
         symbols = list(expr.free_symbols)
-        new_shape_env = {
-            k: sympy.Symbol(f"shape_{idx}", positive=True, integer=True) + 1
-            for idx, k in enumerate(symbols)
-            # Do not assume unbacked symints are > 1
-            if k in self.var_to_val
-        }
+        new_shape_env = {}
+        new_range_env = {}
+        for idx, k in enumerate(symbols):
+            vr = self.var_to_range[k]
+            # Don't do anything if we don't have a nontrivial lower bound
+            # Also don't do anything if we asked only to simplify unbacked
+            # SymInt
+            if vr.lower == -sympy.oo or (unbacked_only and k in self.var_to_val):
+                new_range_env[k] = vr
+                continue
+            # Positive means >= 1
+            # Positive - 1 means >= 0
+            # Positive + lower - 1 means >= lower
+            # The new symbol 's' is "too low", so when we substitute it in
+            # we have to increase it by offset (and conversely, the new
+            # variables have to have their value range bounds adjusted as
+            # well)
+            s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
+            offset = vr.lower - 1
+            new_shape_env[k] = s + offset
+            new_range_env[s] = ValueRangeAnalysis.sub(vr, offset)
+
         new_expr = expr.xreplace(new_shape_env)
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
         new_expr = safe_expand(new_expr.xreplace(floor_div_replace))
+        # TODO: when unbacked_only, can sometimes early return even when there
+        # are still free symbols
         if len(list(new_expr.free_symbols)) == 0:
             return new_expr
 
-        # Attempt expr_subs on the original expression
-        for s in new_expr.free_symbols:
-            new_expr = new_expr.subs(self.expr_subs[s])
-        if len(list(new_expr.free_symbols)) == 0:
-            return new_expr
+        # Check if the range can solve it statically
+        out = sympy_interp(ValueRangeAnalysis, new_range_env, new_expr)
+        if out.is_singleton():
+            return out.lower
 
-        return None
+        return new_expr if unbacked_only else None
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
@@ -1551,15 +1759,39 @@ class ShapeEnv:
     @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
         expr = self.replace(expr)
+        # TODO it would seem that this pass is not necessary given the
+        # below replacement of // with /, but for nested FloorDivs
+        # the non-recursive replacement doesn't work, and
+        # recursive makes it hard to look up divisibility,
+        # because existing divisibility info has FloorDiv in it, not /
+        # for now just do a separate pass to catch common nested case
         if expr.has(FloorDiv):
             self._update_divisible()
             div_replacements = {}
             for atom in expr.atoms(FloorDiv):
                 base, divisor = atom.args
-                if self.replace(base % divisor) in self.divisible:
-                    div_replacements[atom] = sympy.floor(base / divisor)
+                if isinstance(divisor, FloorDiv):
+                    base1, divisor1 = divisor.args
+                    if self.replace(base % divisor) in self.divisible and \
+                            base == base1 and self.replace(base1 % divisor1) in self.divisible:
+                        div_replacements[atom] = divisor1
             expr = expr.xreplace(div_replacements)
             expr = safe_expand(expr)
+        if expr.has(FloorDiv):
+            div_replacements = {}
+            pows = expr.atoms(sympy.Pow)
+            rationals = expr.atoms(sympy.Rational).difference(expr.atoms(sympy.Integer))
+            for fd in expr.atoms(FloorDiv):
+                base, divisor = fd.args
+                if self.replace(base % divisor) in self.divisible:
+                    div_replacements[fd] = base / divisor
+            new_expr = expr.xreplace(div_replacements)
+            new_expr = safe_expand(new_expr)
+            new_pows = new_expr.atoms(sympy.Pow)
+            new_rationals = new_expr.atoms(sympy.Rational).difference(new_expr.atoms(sympy.Integer))
+            # divisions simplified away
+            if new_pows.issubset(pows) and new_rationals.issubset(rationals):
+                expr = new_expr
         return expr
 
     @lru_cache(256)
@@ -1571,30 +1803,42 @@ class ShapeEnv:
         """
         result_expr = safe_expand(expr).xreplace(self.var_to_val)
         if len(result_expr.free_symbols) != 0:
-            for s in result_expr.free_symbols:
-                result_expr = result_expr.subs(self.expr_subs[s])
-            if len(list(result_expr.free_symbols)) == 0:
-                return result_expr
-            raise self._make_data_dependent_error(result_expr)
+            r = self._maybe_evaluate_static(result_expr)
+            if r is not None:
+                return r
+            raise self._make_data_dependent_error(result_expr, expr)
         return result_expr
 
-    def _make_data_dependent_error(self, expr):
+    def _make_data_dependent_error(self, expr, unhinted_expr):
         # TODO: in a Dynamo context, having user code, and having the
         # name of the local, will be much better
-        accesses = '\n\n'.join(
-            f"Data dependent variable '{s}' allocated at:\n{s.stack}"
-            for s in expr.free_symbols
-        )
+        for s in expr.free_symbols:
+            log.debug(f"Data dependent variable '{s}' allocated at:\n{self.var_to_stack[s]}")
         return GuardOnDataDependentSymNode(
-            f"\n\n{accesses}\n"
-            "GuardOnDataDependentSymNode: It appears that you're trying to get "
-            "a value out of symbolic int/float "
+            "It appears that you're trying to get a value out of symbolic int/float "
             "whose value is data-dependent (and thus we do not know the true value.)  "
-            f"The expression we were trying to evaluate is {expr}.  "
+            f"The expression we were trying to evaluate is {expr} (unhinted: {unhinted_expr}).  "
             "Scroll up to see where each of these data-dependent accesses originally occurred."
             # TODO: Help text about how to use our runtime tests to fix this
             # problem
         )
+
+    def _set_replacement(self, a: "sympy.Symbol", expr: "sympy.Expr") -> None:
+        """
+        Adds or updates a replacement for a symbol.
+        Use this instead of `self.replacements[a] = expr`.
+        """
+        if torch._dynamo.config.print_specializations and isinstance(expr, (sympy.Integer, sympy.Float)):
+            # specializing to a constant, which is likely unexpected
+
+            # NOTE(avik): It is possible that we try logging the same specialization multiple times, e.g.,
+            # when adding a to self.replacements, and again when simplifying an expression containing a.
+            # Thus to avoid duplication, checking whether a is in self.replacements isn't enough; if it is,
+            # it must not already map to `expr`. Fortunately this check is cheap because `expr` is a constant.
+            if a not in self.replacements or expr != self.replacements[a]:
+                log.warning(f"Specializing {self.var_to_sources[a][0].name()} to {expr}")
+                log.debug("SPECIALIZATION", stack_info=True)
+        self.replacements[a] = expr
 
     @_lru_cache
     def _find(self, a: "sympy.Symbol") -> "sympy.Expr":
@@ -1609,7 +1853,7 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self.replacements[a] = self.replacements[a].xreplace(cur_replace)
+        self._set_replacement(a, self.replacements[a].xreplace(cur_replace))
         return self.replacements[a]
 
     @lru_cache(256)
@@ -1631,7 +1875,7 @@ class ShapeEnv:
                 return
         free = list(expr.free_symbols)
 
-        assert len(free) > 0, "The expression should not be static by this point"
+        assert len(free) > 0, f"The expression should not be static by this point: {expr}"
         # In case of really gnarly expression, we don't blow up
         if len(free) > 5:
             return
@@ -1640,13 +1884,16 @@ class ShapeEnv:
         rhs = expr.rhs
         if not expr.has(sympy.Mod):
             try:
+                floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
+                if len(floor_div_atoms) > 0 and any([a.divisor != 1 for a in floor_div_atoms]):
+                    raise NotImplementedError
                 solutions = sympy.solve(lhs - rhs, free[0], dict=True)
                 if len(solutions) != 1:
                     return
                 solution = solutions[0][free[0]]
                 if all(t.is_integer for t in sympy.preorder_traversal(solution)):
                     new_var = self._find(solution)
-                    self.replacements[cast(sympy.Symbol, free[0])] = new_var
+                    self._set_replacement(cast(sympy.Symbol, free[0]), new_var)
             except NotImplementedError:
                 pass
             except RecursionError:
@@ -1661,6 +1908,37 @@ class ShapeEnv:
                 pass
         return
 
+    @_lru_cache
+    def _simplify_floor_div(self, expr):
+        floor_divs = tuple(expr.atoms(FloorDiv))
+        # we expect floor_divs to be exact,
+        # and thus add the guards for the exact floordivs,
+        # even if tracing doesn't require them otherwise
+        for fd in reversed(floor_divs):
+            base, divisor = fd.args
+            mod_expr = sympy.Mod(base, divisor)
+            eq_expr = sympy.Eq(mod_expr, 0)
+            # add necessary mod guards
+            self.evaluate_expr(eq_expr)
+        return self.simplify(expr)
+
+    def _add_guard(self, expr: "sympy.Expr") -> None:
+        stack = get_debugging_stack()
+        guard = ShapeGuard(expr, stack)
+        if torch._dynamo.config.print_guards:
+            if log.level <= logging.WARNING:
+                # reusing flag that prints guards
+                frame_summaries = TracingContext.get().frame_summary_stack
+                # frame_summaries describes a stack of functions
+                # TODO(avik): It would be better to describe a stack of function calls instead
+                current_loc = TracingContext.get().loc_in_frame
+                # current_loc describes a line in the current frame
+                user_stack = ''.join(traceback.format_list([*frame_summaries, current_loc]))
+                expr = LoggingShapeGuardPrinter(self.var_to_sources).doprint(expr)
+                log.warning(f"Adding shape guard {expr} at \n{user_stack}")
+            log.debug("SHAPE GUARD", stack_info=True)
+        self.guards.append(guard)
+
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
         """
@@ -1669,9 +1947,18 @@ class ShapeEnv:
         if len(expr.free_symbols) == 0:
             return expr
         expr = self.simplify(expr)
+
         static_expr = self._maybe_evaluate_static(expr)
         if static_expr is not None:
             return static_expr
+
+        if not (expr.free_symbols <= self.var_to_val.keys()):
+            # TODO: dedupe this with _maybe_evaluate_static
+            # Attempt to eliminate the unbacked SymInt
+            new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
+            if not (new_expr.free_symbols <= self.var_to_val.keys()):
+                raise self._make_data_dependent_error(expr.xreplace(self.var_to_val), expr)
+            expr = new_expr
 
         if hint is None:
             concrete_val = self.size_hint(expr)
@@ -1684,19 +1971,23 @@ class ShapeEnv:
             # is not actually necessary to save a guard for the equality,
             # as we will implicitly generate a guard when we match that
             # input against the symbol
+        elif isinstance(concrete_val, sympy.Integer):
+            # WARNING: we cannot actually do simplifications on guards
+            # on floating point values, because Sympy generally does not
+            # think expressions on integers can ever be equal to floating
+            # point (e.g., sympy.Eq(s0/6, 0.5) evaluates to False).  Without
+            # very clear algebraic laws that hold for floating point, such
+            # simplifications are error prone anyway, so be sure not to
+            # maybe_guard_eq in those cases.
+            self._maybe_guard_eq(sympy.Eq(expr, concrete_val), True)
 
-        # TODO: optimize this; avoid formatting traces until we need them
-        # NB: drop two frames; evaluate_expr and the Sym* function that
-        # actually called us
         if not self._suppress_guards_tls():
-            stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append(ShapeGuard(expr, stack))
+                self._add_guard(expr)
             elif concrete_val is sympy.false:
-                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
+                self._add_guard(sympy.Not(expr))
             else:
-                self.guards.append(
-                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
+                self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
         return concrete_val
 
 def _should_allocate(user_marked_dynamic, assume_static_by_default):

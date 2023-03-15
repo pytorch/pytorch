@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: pt2"]
 
 import itertools
+import sys
 
 import sympy
 from torch.testing._internal.common_utils import (
@@ -50,6 +51,8 @@ CONSTANTS = [
     2**24,
     2**32,
     2**37 - 1,
+    sys.maxsize - 1,
+    sys.maxsize,
 ]
 # less constants for N^2 situations
 LESS_CONSTANTS = [-1, 0, 1, 2, 100]
@@ -106,6 +109,9 @@ class TestValueRanges(TestCase):
                 r = getattr(ValueRangeAnalysis, fn)(ValueRanges.wrap(v))
                 self.assertEqual(r.lower, r.upper)
                 self.assertEqual(ref_r, r.lower)
+
+    def test_pow_half(self):
+        ValueRangeAnalysis.pow(ValueRanges.unknown(), ValueRanges.wrap(0.5))
 
     @parametrize("fn", BINARY_OPS)
     def test_binary_ref(self, fn):

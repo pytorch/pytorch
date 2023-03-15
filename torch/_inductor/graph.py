@@ -12,13 +12,18 @@ import torch
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.experimental.symbolic_shapes import (
+    magic_methods,
+    method_to_operator,
+    ShapeEnv,
+    SymTypes,
+)
 from torch.utils._mode_utils import no_dispatch
 
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -32,7 +37,7 @@ from .lowering import (
     make_fallback,
     needs_realized_inputs,
 )
-from .sizevars import CppSizeVarAllocator, SizeVarAllocator
+from .sizevars import SizeVarAllocator
 from .utils import (
     convert_shape_to_inductor,
     gather_origins,
@@ -58,6 +63,11 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
+
+
+def is_magic_method(op):
+    magic_ops = {method_to_operator(m) for m in magic_methods}
+    return op in magic_ops
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -104,8 +114,10 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        aot_mode=False,
     ):
         super().__init__(gm)
+        self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
             shape_env = ShapeEnv()
             self.reuse_shape_env = False
@@ -132,6 +144,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
+        self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -144,6 +157,13 @@ class GraphLowering(torch.fx.Interpreter):
     @property
     def fake_mode(self):
         return V.fake_mode
+
+    def get_buffer(self, buffer_name: str):
+        if buffer_name in self.name_to_buffer:
+            return self.name_to_buffer[buffer_name]
+        if buffer_name in self.graph_inputs:
+            return self.graph_inputs[buffer_name]
+        return None
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
@@ -268,7 +288,11 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)
+        if isinstance(example, SymTypes):
+            expr = example.node.expr
+            self.graph_inputs[target] = expr
+            return expr
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
         # the buffer should be static but us passing in a fake tensor with
@@ -298,43 +322,43 @@ class GraphLowering(torch.fx.Interpreter):
         return tensor
 
     def call_function(self, target, args, kwargs):
-        with ir.IRNode.current_origins(gather_origins(args, kwargs)):
-            if target is operator.getitem and isinstance(args[0], (list, tuple)):
-                return super().call_function(target, args, kwargs)
+        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+            return super().call_function(target, args, kwargs)
 
-            if hasattr(target, "_inductor_lowering_function"):
-                # passthrough lowerings from .pattern_matcher
-                return target(*args, **kwargs)
+        if hasattr(target, "_inductor_lowering_function"):
+            # passthrough lowerings from .pattern_matcher
+            return target(*args, **kwargs)
 
-            if target not in lowerings:
-                base_name = target.name().split(".")[0]
-                if base_name in FALLBACK_ALLOW_LIST:
-                    make_fallback(target)
-                elif config.implicit_fallbacks:
-                    error = (
-                        MissingOperatorWithDecomp
-                        if get_decompositions([target])
-                        else MissingOperatorWithoutDecomp
-                    )
-                    log.info(
-                        "Creating implicit fallback for:\n%s",
-                        error.operator_str(target, args, kwargs),
-                    )
-                    make_fallback(target)
-                elif get_decompositions([target]):
-                    # There isn't a good way to dynamically patch this in
-                    # since AOT Autograd already ran.  The error message tells
-                    # the user how to fix it.
-                    raise MissingOperatorWithDecomp(target, args, kwargs)
-                else:
-                    raise MissingOperatorWithoutDecomp(target, args, kwargs)
+        if target not in lowerings:
+            base_name = target.name().split(".")[0]
+            if base_name in FALLBACK_ALLOW_LIST:
+                make_fallback(target)
+            elif config.implicit_fallbacks:
+                error = (
+                    MissingOperatorWithDecomp
+                    if get_decompositions([target])
+                    else MissingOperatorWithoutDecomp
+                )
+                log.info(
+                    "Creating implicit fallback for:\n%s",
+                    error.operator_str(target, args, kwargs),
+                )
+                make_fallback(target)
+            elif get_decompositions([target]):
+                # There isn't a good way to dynamically patch this in
+                # since AOT Autograd already ran.  The error message tells
+                # the user how to fix it.
+                raise MissingOperatorWithDecomp(target, args, kwargs)
+            else:
+                raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
-            try:
-                out = lowerings[target](*args, **kwargs)
-                return out
-            except Exception as e:
-                log.exception("Error from lowering")
-                raise LoweringException(e, target, args, kwargs) from e
+        try:
+            out = lowerings[target](*args, **kwargs)
+            return out
+        except Exception as e:
+            raise LoweringException(e, target, args, kwargs).with_traceback(
+                e.__traceback__
+            ) from None
 
     def get_attr(self, target, args, kwargs):
         # this is a constant
@@ -375,6 +399,9 @@ class GraphLowering(torch.fx.Interpreter):
         ), result
         self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
         for name, value in self.graph_inputs.items():
+            assert isinstance(value, (TensorBox, sympy.Expr))
+            if not isinstance(value, TensorBox):
+                continue
             value.realize()
             assert isinstance(value, TensorBox)
             value = value.data
@@ -398,11 +425,20 @@ class GraphLowering(torch.fx.Interpreter):
             buf.decide_layout()
 
     def run_node(self, n: torch.fx.Node):
-        with ir.IRNode.current_origins({n}):
+        origins = {n}
+        if n.op == "call_function":
+            args, kwargs = self.fetch_args_kwargs_from_env(n)
+            origins |= gather_origins(args, kwargs)
+        with ir.IRNode.current_origins(origins):
             if n.op == "call_function" and n.target in layout_constraints:
                 args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
+            elif is_magic_method(n.target):
+                if isinstance(n.meta["val"], torch.SymInt):
+                    result = n.meta["val"].node.expr
+                else:
+                    result = super().run_node(n)
             else:
                 result = super().run_node(n)
 
@@ -447,11 +483,24 @@ class GraphLowering(torch.fx.Interpreter):
                         #
                         # When we do a better job selecting layout, we should
                         # revisit this.
-                        if user.target in (
+                        need_fixed_layout = [
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
-                        ):
+                            torch.ops.aten._int_mm.default,
+                        ]
+                        if torch._C.has_mkldnn:
+                            need_fixed_layout += [
+                                torch.ops.mkldnn._convolution_pointwise.default,
+                                torch.ops.mkldnn._convolution_pointwise.binary,
+                                torch.ops.mkldnn._convolution_pointwise_.binary,
+                                torch.ops.mkldnn._convolution_transpose_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.default,
+                                torch.ops.mkldnn._linear_pointwise.binary,
+                            ]
+                            if torch._C.has_mkl:
+                                need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
+                        if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
@@ -506,11 +555,13 @@ class GraphLowering(torch.fx.Interpreter):
         if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
-                self.sizevars = CppSizeVarAllocator(self._shape_env)
-                self.wrapper_code = CppWrapperCodeGen()
+                self.wrapper_code = (
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                )
                 return
+            else:
+                assert not self.aot_mode, "Model does not support AOT compilation"
         self.wrapper_code = WrapperCodeGen()
-        return
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -576,14 +627,25 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
-        if dynamo_config.output_code:
-            log.info("Output code: %s", mod.__file__)
+        if config.benchmark_kernel:
+            print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
         V.debug.rename(os.path.splitext(mod.__file__)[0] + ".debug")
         return mod
 
     def compile_to_fn(self):
-        return self.compile_to_module().call
+        if self.aot_mode:
+            from .codecache import AotCodeCache
+
+            code = self.codegen()
+            if config.debug:
+                print(code)
+
+            # return the generated .so file path
+            output_path = AotCodeCache.compile(code)
+            return lambda dummy: output_path
+        else:
+            return self.compile_to_module().call
 
     def get_output_names(self):
         assert self.graph_outputs is not None

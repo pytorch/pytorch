@@ -61,7 +61,7 @@ if has_triton():
         BLOCK_N: tl.constexpr,
         # reduction tiling parameter for matmul
         BLOCK_K: tl.constexpr,
-        # Super-blocking for better L2 peformance
+        # Super-blocking for better L2 performance
         GROUP_H: tl.constexpr,
     ):
         """
@@ -129,7 +129,6 @@ if has_triton():
         # allocate accumulator
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
         for crs in range(0, CRS, BLOCK_K):
-
             # ------ matrix multiplication ------
             acc += tl.dot(matrix_x, matrix_w)
             # ------ update ptrs ------
@@ -248,7 +247,7 @@ if has_triton():
         BLOCK_N: tl.constexpr,
         # reduction tiling parameter for matmul
         BLOCK_K: tl.constexpr,
-        # Super-blocking for better L2 peformance
+        # Super-blocking for better L2 performance
         GROUP_H: tl.constexpr,
     ):
         """
@@ -306,7 +305,6 @@ if has_triton():
         # allocate accumulator
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
         for crs in range(0, CRS, BLOCK_K):
-
             # ------ matrix multiplication ------
             acc += tl.dot(matrix_x, matrix_w)
             # ------ update ptrs ------
@@ -373,7 +371,7 @@ if has_triton():
     class _conv:
         kernel = _kernel_delta_x_hwc
 
-        # for the contigous order of w ptr, what"s the corresponding
+        # for the contiguous order of w ptr, what"s the corresponding
         # ptr changes for x in a sliding window
         @staticmethod
         def _delta_x_ptr_hwc(
@@ -465,7 +463,7 @@ if has_triton():
             shape_w = w.shape
             shape_bias = bias.shape if bias is not None else None
 
-            # indicies for the layout
+            # indices for the layout
             xn, xc, xh, xw = 0, 1, 2, 3
             yn, yc, yh, yw = 0, 1, 2, 3
             wn, wc, wh, ww = 0, 1, 2, 3

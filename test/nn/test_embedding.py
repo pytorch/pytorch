@@ -5,8 +5,8 @@ import itertools
 from itertools import product
 
 import torch
-from torch.testing._internal.common_utils import run_tests, set_default_dtype, \
-    instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks
+from torch.testing._internal.common_utils import run_tests, set_default_dtype, skipIfTorchDynamo, \
+    instantiate_parametrized_tests, parametrize as parametrize_test, _assertGradAndGradgradChecks, IS_JETSON
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_device_type import onlyNativeDeviceTypes, dtypes, \
@@ -399,6 +399,7 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     # with an offset array. Compare against an equivalent 2D input that uses
     # padding indices to fill in the gaps indicated by the offset array
 
+    @skipIfTorchDynamo("see https://github.com/pytorch/pytorch/pull/95621")
     @onlyNativeDeviceTypes
     @dtypes(torch.float32, torch.float64)
     @dtypesIfCUDA(torch.half, torch.bfloat16)
@@ -1172,6 +1173,8 @@ class TestEmbeddingNNDeviceType(NNTestCase):
     @dtypesIfCUDA(*itertools.product((torch.int, torch.long), (torch.int, torch.long),
                                      (torch.float, torch.double, torch.half)))
     def test_embedding_bag_device(self, device, dtypes):
+        if IS_JETSON and torch.bfloat16 in dtypes and device == "cpu":
+            self.skipTest("bfloat16 not supported with Jetson cpu")
         with set_default_dtype(torch.double):
             self._test_EmbeddingBag(device, 'sum', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])
             self._test_EmbeddingBag(device, 'mean', False, wdtype=dtypes[2], dtype=dtypes[0], odtype=dtypes[1])

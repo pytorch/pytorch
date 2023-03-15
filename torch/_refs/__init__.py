@@ -276,6 +276,7 @@ __all__ = [
     "arange",
     "empty",
     "empty_like",
+    "empty_permuted",
     "empty_strided",
     "eye",
     "full",
@@ -377,6 +378,7 @@ from torch._decomp import register_decomposition
 #
 
 infer_aten_op = object()
+
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
@@ -555,7 +557,6 @@ def exp2(a):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-
     assert isinstance(a, TensorLike)
     assert isinstance(value, Number)
 
@@ -1117,7 +1118,6 @@ def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
 ) -> Tensor:
-
     if isinstance(a, Number) and isinstance(b, Number):
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
@@ -1166,6 +1166,7 @@ def float_power(
 #
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
 
 # TODO: add docstring
 @_make_elementwise_binary_reference(
@@ -1445,12 +1446,27 @@ def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_rhs_python_scalar=False,
 )
 def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    # Nb. this implementation does nto distribute the gradients evenly when a == b
-    mask = a >= b
+    # Nb. this implementation does not distribute the gradients evenly when a == b
+    mask = torch.real(a) >= torch.real(b)
     max_ = torch.where(mask, a, b)
     min_ = torch.where(mask, b, a)
-    inf_mask = torch.logical_and(torch.isinf(a), a == b)
-    return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
+    inf_mask = torch.logical_and(
+        torch.logical_not(torch.isfinite(torch.real(a))), torch.real(a) == torch.real(b)
+    )
+    if utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype):
+        # are you wondering what this bunch of codes are for? edge cases!
+        neg_min_mask = torch.real(min_) < 0
+        inf_vals = torch.where(
+            neg_min_mask, min_, torch.log(torch.exp(min_) + torch.exp(max_))
+        )
+        non_nan_vals = torch.where(
+            inf_mask, inf_vals, max_ + torch.log1p(torch.exp(min_ - max_))
+        )
+        # the type for full_like does not include tensor yet
+        nan_mask = torch.isnan(min_)
+        return torch.where(nan_mask, complex(float("nan"), float("nan")), non_nan_vals)  # type: ignore[call-overload]
+    else:
+        return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
 # TODO: add docstring
@@ -1603,7 +1619,13 @@ def sub(
                 )
             )
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, torch.Tensor):
+            b = prims.mul(b, alpha)
+        else:
+            # Carefully not to use prims.mul if b is a scalar / symint.
+            # prims.mul always returns a tensor,
+            # which will mess with type promotion.
+            b = b * alpha
 
     return prims.sub(a, b)
 
@@ -1778,6 +1800,7 @@ def clamp_max(
 #
 # Conditional references
 #
+
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
@@ -2285,7 +2308,7 @@ def var(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2314,7 +2337,7 @@ def std(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ) -> TensorLikeType:
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2387,7 +2410,7 @@ def std_mean(
     *,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     correction = utils.set_correction(unbiased, correction)
@@ -2412,7 +2435,7 @@ def var_mean(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: Optional[int] = None,
+    correction: Optional[NumberType] = None,
 ):
     dim, unbiased = _dim_var_dispatch(dim, unbiased)
     v = var(a, dim, unbiased, keepdim, correction=correction)
@@ -2807,7 +2830,6 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
     return tuple(result)
 
 
-# Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
 # Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
 # a 0D tensor is flattened, in which case it's returned in 1D)
 # CompositeImplicitAutograd - don't register decomp
@@ -2821,12 +2843,12 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim + 1)
+    new_shape, new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
     if new_shape is not None:
-        return prims.collapse_view(a, start_dim, end_dim + 1)
+        return prims.collapse_view(a, start_dim, end_dim)
 
     # Makes a copy if it can't make a view
-    return prims.collapse(a, start_dim, end_dim + 1)
+    return prims.collapse(a, start_dim, end_dim)
 
 
 @register_decomposition(aten.flip)
@@ -3226,7 +3248,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end + 1)
+            new_shape, new_strides = prims._collapse_view_helper(a_, idx, end)
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -3281,6 +3303,11 @@ def roll(
     if a.numel() == 0:
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return clone(a)
+
+    if a.dim() == 0 and len(dims) > 0:
+        raise IndexError(
+            f"Dimension specified as {dims[0]} but tensor has no dimensions"
+        )
 
     len_shifts = len(shifts)
     len_dims = len(dims)
@@ -4037,6 +4064,25 @@ def empty(
     )
 
 
+@out_wrapper()
+def empty_permuted(
+    shape,
+    physical_layout,
+    dtype: Optional[torch.dtype] = None,
+    layout: torch.layout = torch.strided,
+    device: Optional[torch.device] = None,
+    requires_grad: bool = False,
+    pin_memory: bool = False,
+) -> TensorLikeType:
+    return prims.empty_permuted(
+        shape,
+        physical_layout,
+        dtype=dtype,
+        device=device,
+        requires_grad=requires_grad,
+    )
+
+
 @register_decomposition(aten.new_empty)
 def new_empty(
     a: TensorLikeType,
@@ -4047,7 +4093,6 @@ def new_empty(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4230,7 +4275,6 @@ def empty_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4249,10 +4293,13 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
+    logical_to_physical_perm = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
+    # identity perm is [2, 1, 0]
+    return torch.empty_permuted(
         a.shape,
-        strides,
+        logical_to_physical_perm,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4318,7 +4365,9 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
-        length = math.ceil((xend - xstart) / xstep)
+        # Uses floordiv to avoid ceil in inductor.
+        sgn = (xstep > 0) - (xstep < 0)
+        length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
 

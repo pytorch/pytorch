@@ -59,6 +59,7 @@ void foreach_tensor_list_op_(TensorList tensors1, TensorList tensors2, const Sca
                                                    /* res_arg_index */ 0>(),
                           Op<opmath_t>(),
                           alpha.to<opmath_t>());
+    increment_version(tensors1);
 }
 
 template<template<class> class Op>

@@ -6,11 +6,14 @@ from _pytest.config.argparsing import Parser
 from _pytest.config import filename_arg
 from _pytest.config import Config
 from _pytest._code.code import ReprFileLocation
+from _pytest.python import Module
 from typing import Union
 from typing import Optional
+from types import MethodType
 import xml.etree.ElementTree as ET
 import functools
 import pytest
+import sys
 
 # a lot of this file is copied from _pytest.junitxml and modified to get rerun info
 
@@ -18,6 +21,7 @@ xml_key = StashKey["LogXMLReruns"]()
 
 
 def pytest_addoption(parser: Parser) -> None:
+    parser.addoption("--use-main-module", action='store_true')
     group = parser.getgroup("terminal reporting")
     group.addoption(
         "--junit-xml-reruns",
@@ -167,3 +171,11 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config):
                     terminalreporter._outrep_summary(rep)
                     terminalreporter._handle_teardown_sections(rep.nodeid)
     yield
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
+    if parent.config.getoption("--use-main-module"):
+        mod = Module.from_parent(parent, path=module_path)
+        mod._getobj = MethodType(lambda x: sys.modules['__main__'], mod)
+        return mod

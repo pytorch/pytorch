@@ -178,9 +178,7 @@ inductor_expected_failures_single_sample["cpu"] = {
     "masked.var": {f16},
     "masked_scatter": {f16, f32, f64},
     "masked_select": {b8, f16, f32, f64, i32, i64},
-    ("max", "reduction_no_dim"): {f16},
     ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_no_dim"): {f16},
     ("min", "reduction_with_dim"): {b8},
     "multinomial": {f32, f64},
     "nanquantile": {f32, f64},
@@ -224,7 +222,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     "var": {f16},
     "var_mean": {f16},
     "view_as_complex": {f16},
-    ("norm", "inf"): {f16},
     "fft.fft": {b8, f16, f32, f64, i32, i64},
     "fft.fft2": {b8, f16, f32, f64, i32, i64},
     "fft.fftn": {b8, f16, f32, f64, i32, i64},
@@ -429,6 +426,7 @@ torch._dynamo.variables.torch.tensor_dunder_fns.append(
 inductor_override_kwargs = {
     # the return value of empty is undefined
     "empty": {"assert_equal": False},
+    "empty_permuted": {"assert_equal": False},
     "empty_like": {"assert_equal": False},
     "new_empty": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
@@ -471,6 +469,7 @@ inductor_all_samples = {
     "mT",
     "mH",
     "rsub",
+    "triu",
 }
 
 
@@ -598,7 +597,6 @@ class TestInductorOpInfo(TestCase):
                     )
 
         except Exception as e:
-
             if test_expect is ExpectedTestResult.XFAILURE:
                 raise e
 
