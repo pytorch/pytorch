@@ -2056,18 +2056,6 @@ class DistributedDataParallel(Module, Joinable):
 
     @staticmethod
     def _get_data_parallel_params(module, named_params=False):
-        """
-        Returns a generator of parameters managed by a given DDP unit (namely
-        filtering out parameters ignored via _set_params_and_buffers_to_ignore_for_model
-        function).
-        If named_params is True, it returns (name, param) tuples.
-
-        Example usage:
-            >>> DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
-            >>>    module=model, params_and_buffers_to_ignore=...)
-            >>> model = DDP(mode)
-            >>> data_parallel_params = DistributedDataParallel._get_data_parallel_params(module=model)
-        """
         for param in (module.parameters() if not named_params else module.named_parameters()):
             if not hasattr(param, '_ddp_ignored'):
                 yield param
