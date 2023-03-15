@@ -555,7 +555,7 @@ Tensor to_dense_backward(const Tensor& grad, const Tensor& input_, c10::optional
 
 Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   AT_ASSERT(input_.layout() == c10::kStrided);
-  return grad.to_dense();
+  return grad.to_dense(input_.scalar_type());
 }
 
 Tensor to_dense(const Tensor& tensor, c10::optional<c10::ScalarType> dtype, c10::optional<bool> masked_grad) {
