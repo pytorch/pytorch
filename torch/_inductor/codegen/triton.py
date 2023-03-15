@@ -14,11 +14,13 @@ import torch
 
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
+from ..codecache import get_code_path
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
     instance_descriptor,
+    next_power_of_2,
     sympy_product,
     sympy_subs,
     sympy_symbol,
@@ -661,9 +663,6 @@ class TritonKernel(Kernel):
         hint = V.graph.sizevars.size_hint(self.numels[-1])
         if hint > threshold:
             return False
-
-        from triton import next_power_of_2
-
         # will need to recompile if we cross a larger power of 2 boundary
         V.graph.sizevars.guard_leq(self.numels[-1], next_power_of_2(hint))
         return True
@@ -697,11 +696,13 @@ class TritonKernel(Kernel):
                 # and write out a reduction loop
                 self.codegen_body()
             self.inside_reduction = False
-            yield
-            if not self.persistent_reduction:
-                # flush out any code before opening the next loop
-                self.codegen_body()
-            self.inside_reduction = True
+            try:
+                yield
+                if not self.persistent_reduction:
+                    # flush out any code before opening the next loop
+                    self.codegen_body()
+            finally:
+                self.inside_reduction = True
 
         return ctx()
 
@@ -849,6 +850,10 @@ class TritonKernel(Kernel):
         Compute the index and mask to pass to tl.load() or tl.store()
         """
         index = self.simplify_indexing(index)
+        index = sympy_subs(index, V.graph.sizevars.precomputed_replacements)
+        # if simple replacements didn't get rid of floor/ceil, try full subs
+        if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
+            index = index.subs(V.graph.sizevars.precomputed_replacements)
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
@@ -860,7 +865,7 @@ class TritonKernel(Kernel):
                 # indirect indexing
                 cse_var = self.cse.varname_map[var.name]
                 mask_vars.update(cse_var.mask_vars)
-            elif var.name.startswith("s"):
+            elif var.name.startswith(("s", "ps")):
                 pass
             else:
                 # var is one of xN, yN or rN
@@ -914,6 +919,14 @@ class TritonKernel(Kernel):
             # Masks are superfluous if we only have one element
             if V.graph.sizevars.maybe_guard_equals(tree.numel, 1):
                 mask_vars.discard(f"{tree.prefix}mask")
+                continue
+            # Masks are superfluous if numel is a multiple of BLOCK
+            # (We use the fact that BLOCK is required by triton to be a power of 2)
+            if tree.prefix.upper() not in config.triton.max_block:
+                continue
+            max_block = config.triton.max_block[tree.prefix.upper()]
+            if V.graph.sizevars.maybe_guard_multiple_of(tree.numel, max_block):
+                mask_vars.discard(f"{tree.prefix}mask")
 
     def var_ranges(self):
         return dict(
@@ -946,10 +959,12 @@ class TritonKernel(Kernel):
             mask = self.cse.generate(self.compute, f"{mask} & {prior}")
 
         self._load_mask = mask
-        with self.swap_buffers(self.compute, self.compute):
-            # TODO(jansel): do we need a reshape here?
-            yield mask
-        self._load_mask = prior
+        try:
+            with self.swap_buffers(self.compute, self.compute):
+                # TODO(jansel): do we need a reshape here?
+                yield mask
+        finally:
+            self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1163,6 +1178,72 @@ class TritonKernel(Kernel):
         self.stores.clear()
         self.suffix.clear()
 
+    def codegen_kernel_benchmark(self):
+        result = IndentedBuffer()
+        argdefs, call_args, signature = self.args.python_argdefs()
+
+        result.writelines(["", "", "def get_args():"])
+        with result.indent():
+            for arg_name in call_args:
+                buf = V.graph.get_buffer(arg_name)
+                if buf:
+                    result.writeline(
+                        f"{arg_name} = rand_strided({tuple(buf.get_size())}, {tuple(buf.get_stride())}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
+                    )
+                elif arg_name in V.graph.constants:
+                    # note that random seed is put in V.graph.constants
+                    const_tensor = V.graph.constants[arg_name]
+                    result.writeline(
+                        f"{arg_name} = rand_strided({tuple(const_tensor.size())}, {tuple(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # noqa: B950 line too long
+                    )
+                else:
+                    raise KeyError(
+                        f"Don't find the buffer or const tensor for {arg_name}"
+                    )
+            result.writeline(f"return {', '.join(call_args)},")
+
+        result.writelines(["\n", "\n", "def call(args):"])
+        grid = []
+        extra_args = []
+        with result.indent():
+            index = V.graph.scheduler.current_device.index
+            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            with result.indent():
+                result.writeline(
+                    f"torch.cuda.set_device({index})"
+                )  # no-op to ensure context
+                for tree in self.range_trees:
+                    expr = pexpr(tree.numel)
+                    if tree.prefix != "r" or self.inside_reduction:
+                        extra_args.append(expr)
+                    if tree.prefix != "r":
+                        grid.append(expr)
+
+                stream_name = f"stream{index}"
+                result.writeline(f"{stream_name} = get_cuda_stream({index})")
+                extra_args_str = ", ".join(map(str, extra_args)) + ", "
+                result.writeline(
+                    f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                )
+
+        result.writelines(["\n", "\n", "if __name__ == '__main__':"])
+        with result.indent():
+            result.writeline("from torch._inductor.utils import get_num_bytes")
+            result.writeline("from triton.testing import do_bench")
+            result.writeline("")
+
+            result.writeline("args = get_args()")
+            result.writeline(
+                "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
+            )
+            result.writeline("num_gb = get_num_bytes(*args) / 1e9")
+            result.writeline("gb_per_s = num_gb / (ms / 1e3)")
+            result.writeline(
+                'print(f"{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s")'
+            )
+
+        return result
+
     def codegen_kernel(self, name=None):
         from triton import next_power_of_2
 
@@ -1190,6 +1271,15 @@ class TritonKernel(Kernel):
                     from torch._inductor.utils import instance_descriptor
                 """
             )
+            if config.benchmark_kernel:
+                code.splice(
+                    """
+                        from torch._dynamo.testing import rand_strided
+                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                        import torch
+                        from torch._inductor.triton_ops.autotune import grid
+                    """
+                )
 
         argdefs, _, signature = self.args.python_argdefs()
         # maps actual expression to SizeArg if its in sizevars replacements
@@ -1269,21 +1359,13 @@ class TritonKernel(Kernel):
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
 
+        if config.benchmark_kernel:
+            code.splice(self.codegen_kernel_benchmark())
+
         if name is not None:
             return code.getvalue()
 
-        wrapper = IndentedBuffer()
-        wrapper.writeline("async_compile.triton('''")
-        wrapper.splice(code.getvalue(), strip=True)
-        wrapper.writeline("''')")
-        return wrapper.getvalue()
-
-    def codegen_template_wrapper(self, src_code):
-        wrapper = IndentedBuffer()
-        wrapper.writeline("async_compile.triton('''")
-        wrapper.splice(src_code, strip=True)
-        wrapper.writeline("''')")
-        return wrapper.getvalue()
+        return code.getvalue()
 
     def codegen_static_numels(self, code):
         """
@@ -1560,18 +1642,25 @@ class TritonScheduling:
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule)
-                if config.triton.descriptive_kernel_names
+                if config.triton.descriptive_names
                 else ""
             )
             kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
-            subs_name = kernel_name if config.triton.ordered_kernel_names else "triton_"
+            subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
             # not use BracesBuffer, so we have no good indicator of a C++ buffer atm.
             src_code = src_code.replace("#pragma CMT", "#")
-            wrapper.define_kernel(kernel_name, src_code)
+
+            _, _, kernel_path = get_code_path(src_code, "py", extra="")
+            compile_wrapper = IndentedBuffer()
+            compile_wrapper.writeline("async_compile.triton('''")
+            compile_wrapper.splice(src_code, strip=True)
+            compile_wrapper.writeline("''')")
+
+            wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), kernel_path)
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):
@@ -1588,7 +1677,7 @@ class TritonScheduling:
             for node in epilogue_nodes:
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
-        src_code = kernel.codegen_template_wrapper(render())
+        src_code = render()
         kernel_name = self.define_kernel(src_code, [template_node, *epilogue_nodes])
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()

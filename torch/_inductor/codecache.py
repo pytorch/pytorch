@@ -20,7 +20,7 @@ from ctypes import cdll
 from functools import partial
 from threading import Thread
 from time import sleep, time
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List
 
 import torch
 
@@ -79,9 +79,9 @@ class PersistentCache:
         self.global_cache_path = config.global_cache_path
 
         if torch.cuda.is_available():
-            self.dinfo = repr(
-                torch.cuda.get_device_properties(torch.cuda.current_device())
-            )
+            self.dinfo = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).name
             self.vinfo = torch.version.cuda
 
     def get_local_cache(self):
@@ -111,7 +111,7 @@ class PersistentCache:
         choices,
         name: str,
         inputs: str,
-        benchmark: Callable[[Any], Tuple[Dict, bool]],
+        benchmark: Callable[[Any], float],
     ):
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -124,51 +124,45 @@ class PersistentCache:
                     local_cache[name][inputs][choice], and return the benchmark.
                 b. `max_autotune=False`: don't benchmark the choice, return nothing.
         """
-        local_cache, benchmarked = self.get_local_cache(), False
-        global_cache, gc_log = self.get_global_cache(), partial(
-            global_cache_log, self.dinfo, self.vinfo, name, inputs
-        )
 
+        gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
         timings = {}
-        for choice in choices:
-            choice_hash = choice.hash_key()
 
-            if (
-                name in global_cache
-                and inputs in global_cache[name]
-                and choice_hash in global_cache[name][inputs]
+        def check_cache(cache, callback=None):
+            """Check if `cache` contains data for all the choices"""
+            hit = True
+            for choice in choices:
+                choice_hash = choice.hash_key()
+                if choice_hash in cache.get(name, {}).get(inputs, {}):
+                    # cache hit
+                    timings[choice] = cache[name][inputs][choice_hash]
+                    if callback:
+                        callback(choice_hash, cached=True)
+                else:
+                    # cache miss
+                    hit = False
+                    if callback:
+                        callback(choice_hash, cached=False)
+            return hit
+
+        if config.max_autotune:
+            local_cache = self.get_local_cache()
+            # check local cache first since it is data specific to the current machine
+            if not check_cache(local_cache) and not check_cache(
+                self.get_global_cache(), callback=gc_log
             ):
-                # global cache hit
-                timings[choice] = global_cache[name][inputs][choice_hash]
-                gc_log(choice_hash, cached=True)
-                continue
-            # global cache miss
-            gc_log(choice_hash, cached=False)
+                # re-benchmark everything to try to get consistent numbers from the same machine
+                for choice in choices:
+                    timings[choice] = benchmark(choice)
+                    local_cache.setdefault(name, {})
+                    local_cache[name].setdefault(inputs, {})
+                    local_cache[name][inputs][choice.hash_key()] = timings[choice]
 
-            if (
-                name in local_cache
-                and inputs in local_cache[name]
-                and choice_hash in local_cache[name][inputs]
-            ):
-                # local cache hit
-                timings[choice] = local_cache[name][inputs][choice_hash]
-                continue
-            # local cache miss
-            if not config.max_autotune:
-                continue
-
-            # benchmark the choice
-            if name not in local_cache:
-                local_cache[name] = {}
-            if inputs not in local_cache[name]:
-                local_cache[name][inputs] = {}
-            local_cache[name][inputs][choice_hash], benchmarked = (
-                benchmark(choice),
-                True,
-            )
-
-        if benchmarked:
-            self.update_local_cache(local_cache)
+                self.update_local_cache(local_cache)
+        else:
+            # only check global cache, not local one
+            check_cache(self.get_global_cache(), callback=gc_log)
+            # may have a partial cache hit, where not everything is benchmarked
 
         return timings
 
@@ -190,10 +184,10 @@ def code_hash(code):
 
 
 def get_code_path(source_code, ext, extra):
-    basename = extra + code_hash(source_code)
+    basename = code_hash(source_code + extra)
     subdir = os.path.join(cache_dir(), basename[1:3])
     path = os.path.join(subdir, f"{basename}.{ext}")
-    return basename, subdir, path
+    return extra + basename, subdir, path
 
 
 def write(source_code, ext, extra=""):
@@ -540,6 +534,52 @@ def cpp_compile_command(
     ).strip()
 
 
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, source_code):
+        from .codegen.wrapper import CppWrapperCodeGen
+
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = (
+                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
+                    if config.aot_codegen_output_prefix
+                    else f"{input_path[:-3]}.so"
+                )
+
+                output_header = f"{output_so[:-3]}.h"
+                with open(output_header, "w") as header_file:
+                    header_file.writelines("#include <torch/torch.h>\n\n")
+                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+
+                log.info(f"AOT-Inductor compiles code into: {output_so}")
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_so, vec_isa=picked_vec_isa
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+        return cls.cache[key]
+
+
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
@@ -602,7 +642,12 @@ class PyCodeCache:
         key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
-                code = compile(f.read(), path, "exec")
+                try:
+                    code = compile(f.read(), path, "exec")
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Failed to import {path}\n{type(e).__name__}: {e}"
+                    )
                 mod = types.ModuleType(f"{__name__}.{key}")
                 mod.__file__ = path
                 mod.key = key
