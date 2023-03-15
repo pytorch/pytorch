@@ -34,6 +34,7 @@ default_compiler_flags = [
     "-DTH_INDEX_BASE=0",
     "-DMAGMA_V2",
     "-DNO_CUDNN_DESTROY_HANDLE",
+    "-DUSE_EXPERIMENTAL_CUDNN_V8_API",  # enable cudnn v8 api
     "-DUSE_FBGEMM",
     "-DUSE_QNNPACK",
     "-DUSE_PYTORCH_QNNPACK",
