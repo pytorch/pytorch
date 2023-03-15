@@ -42,6 +42,7 @@ time python test/run_test.py --verbose -i distributed/_shard/sharded_optim/test_
 
 # DTensor/TP tests
 time python test/run_test.py --verbose -i distributed/tensor/parallel/test_2d_parallel
+time python test/run_test.py --verbose -i distributed/tensor/parallel/test_tp_examples
 
 # Other tests
 time python test/run_test.py --verbose -i test_cuda_primary_ctx
