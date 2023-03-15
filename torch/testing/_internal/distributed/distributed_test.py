@@ -4925,7 +4925,7 @@ class DistributedTest:
 
             # test named_params=False, just check if returns the expected
             # no of parameters.
-            num_ddp_params = len(list(model.parameters())) -1;
+            num_ddp_params = len(list(model.parameters())) - 1
             count = 0
             dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(model, named_params=False)
             for _ in dp_params:
