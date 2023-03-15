@@ -254,12 +254,10 @@ def create_default_local_load_plan(
     for fqn, obj in state_dict.items():
         md = metadata.state_dict_metadata[fqn]
         # Since DTensor supports submesh, adding extra check to ensure _create_read_items()
-        # gets called only when the current rank is part of the mesh.
-        if (
-            isinstance(obj, DTensor)
-            and obj.device_mesh.get_coordinate() is not None
-        ):
-            requests += _create_read_items(fqn, md, obj)
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
+        if isinstance(obj, DTensor):
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_read_items(fqn, md, obj)
         else:
             requests += _create_read_items(fqn, md, obj)
 
@@ -292,12 +290,13 @@ def create_default_local_save_plan(
     requests = []
     for fqn, obj in state_dict.items():
         # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
-        # gets called only when the current rank is part of the mesh.
+        # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if (
             isinstance(obj, DTensor)
             and obj.device_mesh.get_coordinate() is not None
         ):
-            requests += _create_write_items(fqn, obj)
+            if obj.device_mesh.get_coordinate() is not None:
+                requests += _create_write_items(fqn, obj)
         elif isinstance(obj, (ShardedTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
 
