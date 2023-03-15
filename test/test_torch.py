@@ -734,8 +734,73 @@ class TestTorchDeviceType(TestCase):
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='mean').shape)
                 self.assertEqual((), torch.nn.functional.multi_margin_loss(input, target, reduction='sum').shape)
 
+    # Test that `torch._check_tensor_all` raises errors in the correct cases
+    def test_check_tensor_all(self, device):
+        default_message = 'Expected cond to be True'
+        check_fn = torch._check_tensor_all
+        expected_error = RuntimeError
+
+        # cond must be a tensor
+        with self.assertRaisesRegex(TypeError, 'cond must be a tensor'):
+            check_fn(True)
+
+        # cond tensor must be boolean
+        with self.assertRaisesRegex(TypeError, 'cond tensor must have dtype torch.bool'):
+            check_fn(torch.ones(1, device=device))
+
+        test_sizes = [
+            (),
+            (1,),
+            (10,),
+            (1, 1),
+            (1, 10),
+            (10, 1),
+            (10, 10),
+            (1, 1, 1),
+            (10, 1, 1),
+            (1, 10, 1),
+            (10, 10, 10),
+        ]
+        for size in test_sizes:
+            t_all_true = torch.ones(size, dtype=torch.bool, device=device)
+            t_all_false = torch.zeros(size, dtype=torch.bool, device=device)
+
+            # Should not raise error
+            check_fn(t_all_true)
+
+            with self.assertRaisesRegex(expected_error, default_message):
+                check_fn(t_all_false)
+
+            if t_all_true.numel() > 1:
+                t_all_true_but_one = t_all_true.clone()
+                # Choose a random element to set to false
+                idx = (random.choice(range(dim_size)) for dim_size in size)
+                t_all_true_but_one[(..., *idx)] = False
+
+                with self.assertRaisesRegex(expected_error, default_message):
+                    check_fn(t_all_true_but_one)
+
+            # Test a simple failure message
+            message = 'message'
+            with self.assertRaisesRegex(expected_error, message):
+                check_fn(t_all_false, lambda: message)
+
+            # Test message with tensor
+            def message():
+                return torch.arange(4)
+
+            with self.assertRaisesRegex(expected_error, re.escape(str(message()))):
+                check_fn(t_all_false, message)
+
+            # Test format string message
+            def message():
+                return f"{'test'} {[1, 2, 'a', True]} {True} {100} {torch.arange(4)}"
+
+            with self.assertRaisesRegex(expected_error, re.escape(str(message()))):
+                check_fn(t_all_false, message)
+
     # Test that `TORCH_CHECK_TENSOR_ALL` raises errors that propagate from C++ to Python
-    def test_check_tensor(self, device):
+    def test_check_tensor_internal(self, device):
         test_sizes = [
             (),
             (1,),
@@ -5682,6 +5747,52 @@ class TestTorch(TestCase):
             reference[0.0, ..., 0.0:2.0] = 1
         with self.assertRaises(IndexError):
             reference[0.0, :, 0.0] = 1
+
+    # Test `torch._check*` functions
+    def test_check(self):
+        test_cases = [
+            # check function, expected error
+            (torch._check, RuntimeError),
+            (torch._check_index, IndexError),
+            (torch._check_value, ValueError),
+            (torch._check_type, TypeError),
+            (torch._check_not_implemented, NotImplementedError),
+        ]
+
+        for check_fn, expected_error in test_cases:
+            # cond=True should not raise an error
+            check_fn(True)
+
+            # Test default failure message for cond=False
+            default_message = 'Expected cond to be True'
+            with self.assertRaisesRegex(expected_error, default_message):
+                check_fn(False)
+
+            # Test a simple failure message
+            message = 'message'
+            with self.assertRaisesRegex(expected_error, message):
+                check_fn(False, lambda: message)
+
+            # Test message with tensor
+            def message():
+                return torch.arange(4)
+
+            with self.assertRaisesRegex(expected_error, re.escape(str(message()))):
+                check_fn(False, message)
+
+            # Test format string message
+            def message():
+                return f"{'test'} {[1, 2, 'a', True]} {True} {100} {torch.arange(4)}"
+
+            with self.assertRaisesRegex(expected_error, re.escape(str(message()))):
+                check_fn(False, message)
+
+            # Test incorrect `cond` arg type
+            with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
+                check_fn('wrong type')
+
+            with self.assertRaisesRegex(TypeError, 'cond must be a bool'):
+                check_fn(torch.tensor(True))
 
     # FIXME: move to indexing test suite
     def test_index_add(self):

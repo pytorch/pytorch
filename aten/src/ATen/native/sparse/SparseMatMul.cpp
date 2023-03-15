@@ -4,7 +4,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/StridedRandomAccessor.h>
 #include <ATen/native/CompositeRandomAccessor.h>
