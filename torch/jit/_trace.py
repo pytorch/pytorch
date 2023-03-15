@@ -893,6 +893,8 @@ def trace(
                 example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
             )
 
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
     return traced
 
 

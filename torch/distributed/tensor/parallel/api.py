@@ -68,7 +68,7 @@ def parallelize_module(  # type: ignore[return]
 
     Example::
         >>> # xdoctest: +SKIP("distributed")
-        >>> from torch.distributed._tensor.parallel import parallelize_module, PairwiseParallel
+        >>> from torch.distributed.tensor.parallel import parallelize_module, PairwiseParallel
         >>>
         >>> # Define the module.
         >>> m = Model(...)
@@ -91,7 +91,7 @@ def parallelize_module(  # type: ignore[return]
         if _is_mha_for_pairwise_parallel(module):
             return _parallelize_multihead_attn(module, device_mesh)
         elif _is_mlp_for_pairwise_parallel(module):
-            return _parallelize_mlp(module, device_mesh)
+            return _parallelize_mlp(module, device_mesh, parallelize_plan)
         else:
             for n, m in module.named_children():
                 module.register_module(

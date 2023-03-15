@@ -69,6 +69,10 @@ RTYPE_TO_CPP = {
 
 
 def reduction_init(reduction_type, dtype):
+    if dtype in (torch.float16, torch.bfloat16):
+        # Since load promotes all half-precision inputs to float, the initial
+        # constant for reduction must be promoted as well
+        dtype = torch.float32
     if reduction_type in ("sum", "any"):
         return 0
     if reduction_type in {"max", "argmax"}:
@@ -139,20 +143,6 @@ def argmax_argmin_prefix(reduction_type, src_dtype, tmpvar):
     return prefix
 
 
-def float16_reduction_prefix(rtype):
-    # TODO: This user-defined reduction uses float16 accumulation for sum. To reduce numerical
-    # errors, float32 accumulation should be used instead.
-    assert rtype in (
-        "sum",
-        "any",
-    ), f"float16 user-defined reduction only supports 'sum' and 'any' but got {rtype}"
-    prefix = [
-        f"#pragma omp declare reduction({RTYPE_TO_CPP[rtype]}:{DTYPE_TO_CPP[torch.float16]}:"
-        + f"omp_out = omp_out {RTYPE_TO_CPP[rtype]} omp_in)"
-    ]
-    return prefix
-
-
 def parallel_num_threads():
     threads = config.cpp.threads
     if threads < 1:
@@ -186,6 +176,25 @@ class CppPrinter(ExprPrinter):
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} / {div})"
+
+    def _print_Pow(self, expr):
+        # Uses float constants to perform FP div
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp.is_integer
+        exp = int(exp)
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        elif exp < 0:
+            return "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+        else:  # exp == 0
+            return "1"
+
+    def _print_Rational(self, expr):
+        # Uses float constants to perform FP div
+        if expr.q == 1:
+            return f"{expr.p}"
+        return f"{expr.p}.0/{expr.q}.0"
 
 
 cexpr = CppPrinter().doprint
@@ -363,11 +372,11 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def logical_and(a, b):
-        return f"{a} && {b}"
+        return f"({a} != 0) & ({b} != 0)"
 
     @staticmethod
     def logical_or(a, b):
-        return f"{a} || {b}"
+        return f"({a} != 0) | ({b} != 0)"
 
     @staticmethod
     def tan(a):
@@ -395,6 +404,14 @@ class CppVecOverrides(OpOverrides):
     @staticmethod
     def asin(x):
         return f"{x}.asin()"
+
+    @staticmethod
+    def cosh(x):
+        return f"{x}.cosh()"
+
+    @staticmethod
+    def sinh(x):
+        return f"{x}.sinh()"
 
     @staticmethod
     def log10(x):
@@ -495,7 +512,7 @@ class CppVecOverrides(OpOverrides):
 
     @staticmethod
     def square(a):
-        return f"{a}.pow(2)"
+        return f"{a} * {a}"
 
     @staticmethod
     def where(a, b, c):
@@ -536,27 +553,29 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx.is_masked_load
 
         code = BracesBuffer()
-
         var = V.kernel.cse.newvar()
-        if other == float("-inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity());"
-            )
-        elif other == float("inf"):
-            code.writeline(
-                f"auto {var} = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());"
-            )
-        else:
-            code.writeline(f"auto {var} = at::vec::Vectorized<float>({other!r});")
-
+        code.writeline(f"auto {var} = [&]")
         with V.kernel.swap_buffers(code), code.indent():
             result = body()
-            zero_val = "at::vec::Vectorized<float>(0)"
-            float_mask = f"to_float_mask({mask})"
-            blendv = f"decltype({result})::blendv({var}, {result}, {float_mask} != {zero_val})"
-            code.writeline(f"{var} = {blendv};")
+            code.writeline(f"return {result};")
+        code.writeline(";")
         V.kernel.compute.splice(code)
-        return var
+
+        if other == float("-inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(-std::numeric_limits<float>::infinity())"
+            )
+        elif other == float("inf"):
+            other_code = (
+                "at::vec::Vectorized<float>(std::numeric_limits<float>::infinity())"
+            )
+        else:
+            other_code = f"at::vec::Vectorized<float>({other!r})"
+
+        type = f"decltype({var}())"
+        zero_val = "at::vec::Vectorized<float>(0)"
+        float_mask = f"to_float_mask({mask})"
+        return f"{type}::blendv({other_code}, {var}(), {float_mask} != {zero_val})"
 
     @staticmethod
     def index_expr(expr, dtype):
@@ -694,6 +713,14 @@ class CppOverrides(OpOverrides):
         return f"std::acosh({x})"
 
     @staticmethod
+    def cosh(x):
+        return f"std::cosh({x})"
+
+    @staticmethod
+    def sinh(x):
+        return f"std::sinh({x})"
+
+    @staticmethod
     def asin(x):
         return f"std::asin({x})"
 
@@ -793,7 +820,7 @@ class CppOverrides(OpOverrides):
         if other == float("-inf"):
             other_code = f"-std::numeric_limits<{type}>::infinity()"
         elif other == float("inf"):
-            other_code = "std::numeric_limits<{type}>::infinity()"
+            other_code = f"std::numeric_limits<{type}>::infinity()"
         elif isinstance(other, bool):
             other_code = f"static_cast<{type}>({str(other).lower()})"
         else:
@@ -819,8 +846,7 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def sigmoid(x):
-        x = ops.exp(f"-{x}")
-        return f"1 / (1 + {x})"
+        return f"decltype({x})(1) / (decltype({x})(1) + std::exp(-{x}))"
 
     @staticmethod
     def sign(x):
@@ -908,13 +934,14 @@ class CppKernel(Kernel):
                 ],
             )
         else:
-            if dtype == torch.float16:
-                self.reduction_prefix.writelines(
-                    float16_reduction_prefix(reduction_type)
+            if dtype in (torch.float16, torch.bfloat16):
+                self.reduction_prefix.writeline(
+                    f"float {tmpvar} = {reduction_init(reduction_type, dtype)};"
                 )
-            self.reduction_prefix.writeline(
-                f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
-            )
+            else:
+                self.reduction_prefix.writeline(
+                    f"{DTYPE_TO_CPP[dtype]} {tmpvar} = {reduction_init(reduction_type, dtype)};"
+                )
             self.stores.writeline(
                 None, f"{reduction_combine(reduction_type, tmpvar, value)};"
             )
@@ -1372,12 +1399,12 @@ class CppVecKernelChecker(CppVecKernel):
     def __init__(self, args, num_threads, tiling_factor):
         super().__init__(args, num_threads, tiling_factor)
 
-        # Since this kernel is only for checker but does not genreate any
+        # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
         metrics.generated_kernel_count -= 1
         metrics.generated_cpp_vec_kernel_count -= 1
 
-        # Used to recorde the graph wrapper code as the wrapper_code status could be
+        # Used to record the graph wrapper code as the wrapper_code status could be
         # changed during graph run.
         self._orig_wrapper_code = None
 
@@ -1543,7 +1570,7 @@ class CppVecKernelChecker(CppVecKernel):
             if _node.op in skip_io_nodes:
                 continue
 
-            if _node.target not in ["load", "get_index"]:
+            if _node.target not in ["load", "get_index", "constant"]:
                 # The body contains non load node
                 is_load_only = False
                 break
@@ -1552,6 +1579,23 @@ class CppVecKernelChecker(CppVecKernel):
                 _, name, _ = _node.args
                 load_dtype = V.graph.get_dtype(name)
                 is_load_only = True
+
+            # Support "constant" node
+            if _node.target == "constant":
+                _, _, load_dtype = _node.args
+
+                # Create and record the context
+                opt_ctx = OptimizationContext()
+                opt_ctx.dtype = load_dtype
+                opt_ctx.ops_name = _node.target
+                _node.meta[OptimizationContext.key] = opt_ctx
+
+                # TODO: Support BF16 and FP16
+                if load_dtype in [torch.float32, torch.int32]:
+                    is_load_only = True
+                else:
+                    is_load_only = False
+                    break
 
         return is_load_only, load_dtype
 
@@ -1562,11 +1606,11 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
-        # Recorde the graph wrapper code. The wrapper_code status could be
+        # Record the graph wrapper code. The wrapper_code status could be
         # changed during graph run. Regarding this checker, we also need to
         # run the graph but we don't expect to change any status that would
-        # impact the code generation. Hence, we record the graph wapper code
-        # and replace it with a dummy warpper_code and then restore to the
+        # impact the code generation. Hence, we record the graph wrapper code
+        # and replace it with a dummy wrapper_code and then restore to the
         # original one as long as the checker is finished.
         self._orig_wrapper_code = V.graph.wrapper_code
         V.graph.wrapper_code = WrapperCodeGen()
@@ -1878,7 +1922,6 @@ class CppKernelProxy(CppKernel):
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-
             with CppVecKernelChecker(
                 deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
             ) as vec_checker:

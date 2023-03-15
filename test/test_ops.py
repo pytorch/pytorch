@@ -19,7 +19,6 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
     all_types_and_complex_and,
 )
-from test_proxy_tensor import xfail, skip, skipOps
 
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -50,6 +49,9 @@ from torch.testing._internal.common_methods_invocations import (
     ops_and_refs,
     python_ref_db,
     BinaryUfuncInfo,
+    xfail,
+    skip,
+    skipOps
 )
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
@@ -175,6 +177,7 @@ class TestCommon(TestCase):
             "aten.min.dim_min",
             "aten.min.names_dim",
             "aten.min.names_dim_min",
+            "aten.min.unary_out",
             # not pointwise
             "aten.isin.Tensor_Tensor",
             "aten.isin.Tensor_Tensor_out",
@@ -1050,7 +1053,10 @@ class TestCommon(TestCase):
                 if isinstance(
                     expected_forward, torch.Tensor
                 ) and dtype in op.supported_backward_dtypes(torch.device(device).type):
-                    output_process_fn_grad(expected_forward).sum().backward()
+                    out = output_process_fn_grad(expected_forward).sum()
+                    if out.dtype.is_complex:
+                        out = out.abs()
+                    out.backward()
                     expected_grad = tensor.grad
 
                 # Test eager consistency
@@ -1095,7 +1101,10 @@ class TestCommon(TestCase):
                     if expected_grad is not None and (
                         variant not in inplace_ops or op.supports_inplace_autograd
                     ):
-                        output_process_fn_grad(variant_forward).sum().backward()
+                        out = output_process_fn_grad(variant_forward).sum()
+                        if out.dtype.is_complex:
+                            out = out.abs()
+                        out.backward()
                         self.assertEqual(expected_grad, tensor.grad)
 
         _test_consistency_helper(samples, variants)
@@ -1563,8 +1572,8 @@ class TestMathBits(TestCase):
                     if isinstance(sample.input, torch.Tensor)
                     else sample.input[0]
                 )
-                expected_forward.sum().backward(retain_graph=True)
-                forward_with_mathview.sum().backward(retain_graph=True)
+                expected_forward.sum().abs().backward(retain_graph=True)
+                forward_with_mathview.sum().abs().backward(retain_graph=True)
                 if tensor.grad is not None:
                     cloned1_tensor = (
                         cloned1 if isinstance(cloned1, torch.Tensor) else cloned1[0]
@@ -1725,6 +1734,7 @@ class TestRefsOpsInfo(TestCase):
     skip_ref_ops = {
         '_refs.bitwise_right_shift',
         '_refs.copy_to',
+        '_refs.empty_permuted',
         '_refs.empty_strided',
         '_refs.equal',
         '_refs.full',
@@ -1837,6 +1847,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.round',  # missing "decimals"
         '_refs.scalar_tensor',  # missing "layout"
         # other
+        '_refs.empty',  # intentional; direct empty is faster and has less guards
+        '_refs.empty_permuted',  # intentional; direct empty is faster and has less guards
         '_refs.expand_as',
         '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         '_refs.copy_to',  # torch._C._jit_get_operation: No such operator aten::copy_to
@@ -1854,7 +1866,9 @@ class TestRefsOpsInfo(TestCase):
         elif inplace:
             self.assertNotIn(op, self.ref_db_names, msg=f"{op} is an in-place operation and should not have an OpInfo")
         else:
-            self.assertIn(op, self.ref_db_names)
+            # Intentionally don't use assertIn to avoid printing the
+            # (very large) container
+            self.assertTrue(op in self.ref_db_names, msg="{op} not in ref_db_names")
 
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_decomp_table(self, op):

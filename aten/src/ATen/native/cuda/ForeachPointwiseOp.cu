@@ -66,6 +66,7 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
                               Op<opmath_t>(),
                               scalar.to<opmath_t>());
     });
+    increment_version(input);
 }
 
 template<template<class> class Op>
@@ -86,6 +87,7 @@ void foreach_pointwise_op_(TensorList input, TensorList tensors1, TensorList ten
                                                                      /* res_arg_index */ 0>(),
                                         Op<opmath_t>());
     });
+    increment_version(input);
 }
 
 template<template<class> class Op>

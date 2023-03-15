@@ -39,6 +39,8 @@ from torchgen.api.autograd import (
 )
 
 from torchgen.api.types import (
+    ArrayRefCType,
+    BaseCppType,
     BaseCType,
     Binding,
     DispatcherSignature,
@@ -185,6 +187,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "fliplr",
     "flipud",
     "rot90",
+    "nanmean",
+    "nansum",
     "transpose",
     "permute",
     "squeeze",
@@ -245,6 +249,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "log10",
     "log1p",
     "log2",
+    "logaddexp",
     "logcumsumexp",
     "reciprocal",
     "tan",
@@ -545,6 +550,10 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # _nested_tensor_size() should never actually be called with requires_grad=True tensor
     "_nested_tensor_size",
     "_nested_tensor_strides",
+    # Functional collectives keep an internal ref through the Work object
+    "all_reduce",
+    "all_gather_into_tensor",
+    "wait_tensor",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -1222,6 +1231,10 @@ def emit_body(
                 expr = f"std::string({expr})"
             elif type == OptionalCType(BaseCType(stringT)):
                 expr = f"{expr}.has_value() ? c10::optional<std::string>(std::string({expr}.value())) : c10::nullopt"
+            elif type == ArrayRefCType(
+                elem=BaseCType(type=BaseCppType(ns="at", name="Scalar"))
+            ):
+                expr = expr + ".vec()"
             guard = guard_for(arg)
             if guard is None:
                 if stmts_prepend:

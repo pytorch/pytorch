@@ -96,8 +96,6 @@ def _disallowed_function_ids():
         torch.autograd.grad,
         torch.clear_autocast_cache,
         torch.cuda.current_device,
-        torch.cuda.amp.autocast_mode.autocast,
-        torch.cpu.amp.autocast_mode.autocast,
         torch.distributions.constraints.is_dependent,
         torch.distributions.normal.Normal,
         torch.inference_mode,
@@ -107,7 +105,6 @@ def _disallowed_function_ids():
         torch.set_autocast_cpu_enabled,
         torch.set_autocast_enabled,
         torch.set_autocast_gpu_dtype,
-        torch.autograd.profiler.profile,
         warnings.warn,
         torch._C._dynamo.eval_frame.unsupported,
     ]
@@ -263,7 +260,7 @@ def is_allowed(obj):
 
 
 def torch_get_name(obj, default):
-    """Convert a torch.* funcion to a string"""
+    """Convert a torch.* function to a string"""
     return _allowed_function_ids.get_name(id(obj), default)
 
 
