@@ -520,7 +520,7 @@ void IRParser::parseOperator(Block* b) {
   const FunctionSchema* schema = n->maybeSchema();
 
   // Register outputs.
-  int idx = 0;
+  unsigned idx = 0;
   for (const VarWithType& v : outs) {
     vmap[v.name] = n->outputs()[idx];
     if (schema && !schema->is_varret()) {
