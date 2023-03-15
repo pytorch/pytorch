@@ -24,9 +24,6 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
     _pop_mode_temporarily,
     _get_current_dispatch_mode,
-    _len_torch_dispatch_stack,
-    _pop_mode,
-    _push_mode
 )
 
 from torch._subclasses import FakeTensor
@@ -219,26 +216,6 @@ def maybe_disable_fake_tensor_mode():
         return _pop_mode_temporarily()
     else:
         return nullcontext()
-
-
-@contextlib.contextmanager
-def maybe_disable_all_fake_tensor_modes():
-    mode_len = _len_torch_dispatch_stack()
-    old_modes = [_pop_mode() for _ in range(mode_len)]
-
-    for mode in reversed(old_modes):
-        if not isinstance(mode, FakeTensorMode):
-            _push_mode(mode)
-    try:
-        yield
-    finally:
-        # TODO kinda inefficient, but much easier to think about
-        mode_len = _len_torch_dispatch_stack()
-        for _ in range(mode_len):
-            _pop_mode()
-
-        for mode in reversed(old_modes):
-            _push_mode(mode)
 
 
 @dataclass
@@ -733,26 +710,10 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
 
             return x
 
-        def extract_and_fixup_fake_mode_from_inp(x):
-            nonlocal fake_tensor_mode
-            if isinstance(x, FakeTensor) and isinstance(fake_tensor_mode, nullcontext):
-                fake_tensor_mode = x.fake_mode
-                if _allow_non_fake_inputs:
-                    new_fake_mode = FakeTensorMode(
-                        allow_fallback_kernels=x.fake_mode.allow_fallback_kernels,
-                        allow_non_fake_inputs=True,
-                        shape_env=x.fake_mode.shape_env,
-                    )
-                    fake_tensor_mode = new_fake_mode
-
-            if isinstance(x, FakeTensor):
-                x.fake_mode = fake_tensor_mode
-            return x
-
         sym_mode = proxy_mode.sym_mode
 
         wrap_fn_map = {
-            "real": extract_and_fixup_fake_mode_from_inp,
+            "real": lambda x: x,
             "fake": wrap_fake,
             "symbolic": wrap_fake,
         }
