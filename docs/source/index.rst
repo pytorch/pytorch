@@ -46,7 +46,6 @@ Features described in this documentation are classified by release status:
    :glob:
    :maxdepth: 1
    :caption: torch.compile
-   :hidden:
 
    compile/index
    compile/get-started
