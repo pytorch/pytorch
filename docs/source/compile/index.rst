@@ -1,20 +1,19 @@
-.. automodule:: torch
 .. currentmodule:: torch
 
 torch.compile
 ====================
 
-:func::`~torch.compile` was introduced in PyTorch 2.0 `PyTorch 2.0 <https://pytorch.org/get-started/pytorch-2.0/>`__
+:func:`~torch.compile` was introduced in PyTorch 2.0 `PyTorch 2.0 <https://pytorch.org/get-started/pytorch-2.0/>`__
 
-Our default and supported backend is ::module::`~torch._inductor` with benchmarks `showing 30% to 2x speedups and 10% memory compression <https://github.com/pytorch/pytorch/issues/93794>`__
+Our default and supported backend is :module:`~torch._inductor` with benchmarks `showing 30% to 2x speedups and 10% memory compression <https://github.com/pytorch/pytorch/issues/93794>`__
 on real world models for both training and inference with a single line of code.
 
 .. note::
     The :func:`~torch.compile` API is experimental and subject to change.
 
-The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html> `
+The simplest possible interesting program is the below which we go over in a lot more detail in `getting started <https://pytorch.org/docs/master/compile/get-started.html>`__
 showing how to use :func:`~torch.compile` to speed up inference on a variety of real world models from both TIMM and HuggingFace which we
-co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>__`
+co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-models/>`__
 
 .. code:: python
 
@@ -28,22 +27,21 @@ co-announced `here <https://pytorch.org/blog/Accelerating-Hugging-Face-and-TIMM-
 If you happen to be running your model on an Ampere GPU, it's crucial to enable tensor cores. We will actually warn you to set
 `torch.set_float32_matmul_precision('high')`
 
-::func::`torch.compile` works over ::class::`torch.nn.Module` as well as functions so you can pass in your entire training loop.
+:func:`~torch.compile` works over :class:`~torch.nn.Module` as well as functions so you can pass in your entire training loop.
 
 The above example was for inference but you can follow this tutorial for an `example on training <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>__`
 
-Gotchas: Dynamic shape support, distributed training, export, custom backends
 
 Optimizations
 -------------
 
 Optimizations can be passed in :func:`~torch.compile` with either a backend mode parameter or as passes. To understand what are the available options you can run
-:func:`~torch._inductor.list_options()`` and :func:`~torch._inductor.list_mode_options`
+:func:`~torch._inductor.list_options`` and :func:`~torch._inductor.list_mode_options`
 
-The default backend is `backend="inductor"` which will likely be the most reliable and performant option for most users and library maintainers,
+The default backend is `inductor` which will likely be the most reliable and performant option for most users and library maintainers,
 other backends are there for power users who don't mind more experimental community support.
 
-You can get the full list of community backends by running :func:`~torch._dynamo.list_backends``
+You can get the full list of community backends by running :func:`~torch._dynamo.list_backends`
 
 .. autosummary::
     :toctree: generated
@@ -59,10 +57,9 @@ odds are you will find the right tool to solve your problem in our guides.
 
 .. WARNING::
     A few features are still very much in development and not likely to work for most users. Please do not use these features
-    in production code and if you're a library maintainer please do not expose these options to your users.
-    - Dynamic shapes
-    - Distributed training
-    - Model export
+    in production code and if you're a library maintainer please do not expose these options to your users
+    Dynamic shapes ``dynamic=true`` and max autotune ``mode="max-autotune"`` which can be passed in to :func:`~torch.compile`.
+    Distributed training has some quirks which you can follow in the troubleshooting guide below. Model export is not ready yet.
 
 .. toctree::
    :maxdepth: 1
