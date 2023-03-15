@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import partial
 import torch
+import types
 from torch.multiprocessing.reductions import StorageWeakRef
 
 import torch.utils._pytree as pytree
@@ -154,6 +155,21 @@ def cond_python_dispatcher(*args):
     _ = ExcludeDispatchKeyGuard(DispatchKeySet(DispatchKey.PythonDispatcher))
     return cond(*args)
 
+@cond.fx_behavior
+def custom_fx_behavior(self, tracer, args, kwargs):
+    # predicate, true_fn, false_fn, args
+    assert len(args) == 4
+    # at this point, predicate must be a proxy
+    assert isinstance(args[0], torch.fx.proxy.Proxy)
+    # true_fn and false_fn must be functions
+    assert isinstance(args[1], types.FunctionType)
+    assert isinstance(args[2], types.FunctionType)
+    # at this point, the args must be a proxies
+    assert all(isinstance(x, torch.fx.proxy.Proxy) for x in args[3])
+
+    true_fn_proxy = tracer.create_proxy('call_function', args[1], tuple(args[3]), kwargs={})
+    false_fn_proxy = tracer.create_proxy('call_function', args[2], tuple(args[3]), kwargs={})
+    return tracer.create_proxy('call_function', self, (true_fn_proxy, false_fn_proxy), kwargs={})
 
 def _has_potential_branch_input_mutation(branch, inputs):
     """
