@@ -9,6 +9,15 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+def op_count(op, gm):
+    count = 0
+    for mod in gm.children():
+        count += op_count(op, mod)
+    for node in gm.graph.nodes:
+        if node.target == op:
+            count += 1
+    return count
+
 class TestControlFlow(TestCase):
     def test_cond_no_trace(self):
         def true_fn(x):
@@ -97,6 +106,82 @@ class TestControlFlow(TestCase):
             val = val + 1
             total_iter -= 1
         self.assertEqual(res_scalar, (0, val))
+
+    def test_while_loop_no_trace_functionalize(self):
+        def cond_fun(iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def body_fun(iter, val):
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(cond_fun, body_fun, input)
+
+        iter = torch.tensor(5)
+        val = torch.randn(2, 3)
+        input = (iter, val)
+        res_eager = f(input)
+        ff = torch.func.functionalize(f, remove="mutations")
+        ff_no_view = torch.func.functionalize(f, remove="mutations_and_views")
+        res_ff = ff(input)
+        res_ff_no_view = ff_no_view(input)
+        while iter > 0:
+            val = val + 1
+            iter -= 1
+        expected = (iter, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_no_view, expected)
+
+    def test_while_loop_no_trace_nested_functionalize(self):
+        def inner_fun(iter, val):
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def inner_cond_fun(iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_cond_fun(iter, inner_iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_fun(iter, inner_iter, val):
+            _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
+            # clone inner_iter to avoid aliasing input
+            return (iter - 1, inner_iter.clone(), val)
+
+        iter = torch.tensor(2)
+        inner_iter = torch.tensor(5)
+        total_iter = iter * inner_iter
+        input = (iter, inner_iter, torch.zeros(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(outter_cond_fun, outter_fun, input)
+
+        res_eager = f(input)
+
+        ff = torch.func.functionalize(f, remove="mutations")
+        ff_no_view = torch.func.functionalize(f, remove="mutations_and_views")
+        res_ff = ff(input)
+        res_ff_no_view = ff_no_view(input)
+
+        val = input[2]
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+
+        expected = (0, inner_iter, val)
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_no_view, expected)
 
 
 class TestControlFlowTraced(TestCase):
@@ -885,6 +970,109 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res_eager, expected)
         self.assertEqual(res_symbolic, expected)
         self.assertEqual(res_real, expected)
+    
+    def test_trace_functionalize_while_loop(self):
+        def cond_fun(iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def body_fun(iter, val):
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(cond_fun, body_fun, input)
+
+        iter = torch.tensor(5)
+        val = torch.randn(2, 3)
+        input = (iter, val)
+
+        res_eager = f(input)
+
+        ff = torch.func.functionalize(f, remove="mutations_and_views")
+        res_ff = ff(input)
+
+        gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
+        res_ff_symbolic = gm_symbolic(input)
+
+        gm_real = make_fx(ff, tracing_mode="real")(input)
+        res_ff_real = gm_real(input)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_real), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_real), 0)
+
+
+        while iter > 0:
+            val = val + 1
+            iter -= 1
+        expected = (iter, val)
+
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_symbolic, expected)
+        self.assertEqual(res_ff_real, expected)
+
+    def test_trace_functionalize_nested_while_loop(self):
+        def inner_fun(iter, val):
+            val_ = val.view(3, 2) + 2
+            val_.add_(-1)
+            return (iter - 1, val_.view(2, 3))
+
+        def inner_cond_fun(iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_cond_fun(iter, inner_iter, val):
+            iter_ = iter.view(1) + 1
+            iter_.add_(-1)
+            return iter_ > 0
+
+        def outter_fun(iter, inner_iter, val):
+            _, val = control_flow.while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
+            # clone inner_iter to avoid aliasing input
+            return (iter - 1, inner_iter.clone(), val)
+
+        iter = torch.tensor(2)
+        inner_iter = torch.tensor(5)
+        total_iter = iter * inner_iter
+        input = (iter, inner_iter, torch.zeros(2, 3))
+
+        def f(input):
+            return control_flow.while_loop(outter_cond_fun, outter_fun, input)
+
+        ff = torch.func.functionalize(f, remove="mutations_and_views")
+        gm_symbolic = make_fx(ff, tracing_mode="symbolic")(input)
+        gm_real = make_fx(ff, tracing_mode="real")(input)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_symbolic), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_symbolic), 0)
+
+        self.assertEqual(op_count(torch.ops.aten.view.default, gm_real), 0)
+        self.assertEqual(op_count(torch.ops.aten.add_.Tensor, gm_real), 0)
+
+
+        res_eager = f(input)
+        res_ff = ff(input)
+        res_ff_symbolic = gm_symbolic(input)
+        res_ff_real = gm_real(input)
+
+
+        val = input[2]
+        while total_iter > 0:
+            val = val + 1
+            total_iter -= 1
+
+        expected = (0, inner_iter, val)
+
+        self.assertEqual(res_eager, expected)
+        self.assertEqual(res_ff, expected)
+        self.assertEqual(res_ff_symbolic, expected)
+        self.assertEqual(res_ff_real, expected)
 
 if __name__ == '__main__':
     run_tests()
