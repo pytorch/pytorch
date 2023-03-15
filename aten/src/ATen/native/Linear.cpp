@@ -38,22 +38,23 @@
 
 namespace at { namespace native {
 
+// Parse environment variable "TORCH_LINEAR_FLATTEN_3D"
 static inline bool parseLinearFlatten3d() {
   // Uninitialized value
   static int value = -1;
   if (value == -1) {
-    const char* env_str = std::getenv("LINEAR_FLATTEN_3D");
+    const char* env_str = std::getenv("TORCH_LINEAR_FLATTEN_3D");
     if (env_str != nullptr && strcmp(env_str, "1") == 0) {
       value = 1;
     } else {
       value = 0;
     }
   }
-  return value;
+  return bool(value);
 }
 
 // `_flatten_3d_linear` flattens the first two dimensions of the input tensor
-// before passing it to linear operation if it is 3D
+// before passing it to linear operation, if the input tensor is 3D
 static inline Tensor _flatten_3d_linear(const Tensor& input, const Tensor& weight, const Tensor& bias) {
     const auto input_sizes = input.sym_sizes();
     const auto result = at::addmm(bias, input.view_symint({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
