@@ -2063,10 +2063,10 @@ class DistributedDataParallel(Module, Joinable):
         If named_params is True, it returns (name, param) tuples.
 
         Example usage:
-            >>> DDP._set_params_and_buffers_to_ignore_for_model(
+            >>> DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
             >>>    module=model, params_and_buffers_to_ignore=...)
             >>> model = DDP(mode)
-            >>> data_parallel_params = DDP._get_data_parallel_params(module=model)
+            >>> data_parallel_params = DistributedDataParallel._get_data_parallel_params(module=model)
         """
         for param in (module.parameters() if not named_params else module.named_parameters()):
             if not hasattr(param, '_ddp_ignored'):
