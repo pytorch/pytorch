@@ -259,22 +259,26 @@ def is_cuda_tensor(x):
 
 
 @contextlib.contextmanager
-def _use_cuda_memory_pool_manager(device, existing_graph, mem_pool):
+def _use_cuda_memory_pool_manager(device, mem_pool):
     """
     Context manager to use cuda graph pool for new allocations. If you use this manager
     all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
-    existing_graph should already have been used in a capture, and the mem_pool must already exist.
+    existing_graph should already have been used in a capture, and the mem_pool must already exist,
+    because this manager will not preserve a reference to the pool which keeps it alive.
     """
-    with torch.cuda.device(device):
-        capture_id = existing_graph.id()
-        torch._C._cuda_allocateThreadToPrivatePool(device, mem_pool)
-        torch._C._cuda_notifyCaptureBegin(device, capture_id, mem_pool)
+    with torch.device(device):
+        torch.cuda.synchronize()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        stream_context = torch.cuda.stream(stream)
+        stream_context.__enter__()
+        torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
         try:
             yield
         finally:
-            torch._C._cuda_notifyCaptureAboutToEnd(device, capture_id)
-            torch._C._cuda_notifyCaptureEnded(device, capture_id)
-            torch._C._cuda_notifyCaptureDestroy(device, mem_pool)
+            torch._C._cuda_endAllocateCurrentStreamToPool(device)
+            torch._C._cuda_releasePool(device, mem_pool)
+            stream_context.__exit__(None, None, None)
 
 
 def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
@@ -345,7 +349,7 @@ class CUDAWarmupNode:
         with torch.cuda.device(
             self.device_index
         ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
-            self.device_index, self.existing_cuda_graph, self.cuda_graphs_pool
+            self.device_index, self.cuda_graphs_pool
         ):
             out = self.wrapped_function.model(new_inputs)
 

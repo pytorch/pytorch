@@ -183,7 +183,6 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
-
     # Use cudagraphs on output code
     cudagraphs = False
 
