@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Optional
 
 import torch.fx
@@ -20,16 +22,20 @@ class FakeTensorProp(torch.fx.Interpreter):
     Args:
          module (GraphModule): The module to be executed
          mode (Optional[FakeTensorMode]): The dispatch mode used to execute computation indicated by each FX Node.
+         override (bool): Whether to override the `val` attribute of each Node with the fake tensor result.
+             If False, only the Nodes without `val` will be assigned the fake tensor result.
     """
-    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None):
+    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None, override: bool = True):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
+        self._override = override
 
     def run_node(self, n: Node):
         result = super().run_node(n)
-        n.meta['val'] = result
+        if self._override or "val" not in n.meta:
+            n.meta['val'] = result
         return result
 
     def propagate(self, *args):
