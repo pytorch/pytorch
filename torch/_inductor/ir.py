@@ -1521,10 +1521,10 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
-        as_strided = V.graph.sizevars.as_strided
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
+        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
+        as_strided = V.graph.wrapper_code.as_strided
         if offset != "0":
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
@@ -2715,8 +2715,8 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
-            size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
-            stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
+            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
