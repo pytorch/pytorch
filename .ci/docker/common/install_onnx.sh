@@ -30,11 +30,11 @@ IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
 as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
-conda_install pytorch cpuonly -c pytorch-nightly
+pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
 # Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
 # so echo the command to a file and run the file instead
 conda_run python "${IMPORT_SCRIPT_FILENAME}"
 
 # Cleaning up
-as_jenkins conda uninstall -y -n py_$ANACONDA_PYTHON_VERSION pytorch
+conda_run pip uninstall -y torch
 rm "${IMPORT_SCRIPT_FILENAME}" || true
