@@ -5168,6 +5168,19 @@ class TestCudaComm(TestCase):
     @unittest.skipIf(IS_WINDOWS, 'Windows CI does not like the load_inline')
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_cpp_memory_snapshot_pickle(self):
+        def power2_div(size, div_factor):
+            pow2 = 1
+            while pow2 < size:
+                pow2 = pow2 * 2
+            if pow2 == size:
+                return pow2
+            step = pow2 / 2 / div_factor
+            ret = pow2 / 2
+            while ret < size:
+                ret = ret + step
+            return ret
+
+
         from torch.utils.cpp_extension import load_inline
         source = """
         #include <torch/csrc/cuda/memory_snapshot.h>
@@ -5181,7 +5194,9 @@ class TestCudaComm(TestCase):
         """
         m = load_inline(name='snapshot', cpp_sources=[source], functions=['do_snapshot', 'record'])
         try:
+            nbytes = 311 * 411 * 4
             m.record(True)
+            torch.cuda.memory._set_allocator_settings("roundup_power2_divisions:4")
             t = torch.rand(311, 411, device='cuda')
             mem = pickle.loads(m.do_snapshot())
             found = False
@@ -5189,11 +5204,16 @@ class TestCudaComm(TestCase):
                 for b in s['blocks']:
                     if b['state'] == 'active_allocated' and 'history' in b:
                         history = b['history']
-                        if history and history[0]['real_size'] == 311 * 411 * 4:
+                        if history and history[0]['real_size'] == nbytes:
                             found = True
             last_action = mem['device_traces'][0][-1]
             self.assertTrue(last_action['action'] == 'alloc')
-            self.assertTrue(last_action['size'] == 311 * 411 * 4)
+            self.assertTrue(last_action['size'] == nbytes)
+            if not TEST_CUDAMALLOCASYNC:
+                # not supported with the cudaMallocAsync backend
+                self.assertTrue(last_action['rounded_by'] == power2_div(nbytes, 4) - nbytes)
+
+            self.assertTrue(last_action['rounded_by'] >= 0)
             self.assertTrue(found)
         finally:
             m.record(False)

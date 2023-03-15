@@ -800,6 +800,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
   py::str large_s = "large";
   py::str small_s = "small";
   py::str size_s = "size";
+  py::str rounded_by_s = "rounded_by";
   py::str state_s = "state";
   py::str active_allocated_s = "active_allocated";
   py::str active_pending_free_s = "active_pending_free";
@@ -910,6 +911,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* noargs) {
       trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
           te.addr_;
       trace_entry[size_s] = te.size_;
+      trace_entry[rounded_by_s] = te.rounded_by_;
       trace_entry[stream_s] = int64_t(te.stream_);
       trace.append(trace_entry);
     }

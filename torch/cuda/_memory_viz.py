@@ -296,7 +296,7 @@ def trace(data):
 
         for count, e in enumerate(entries):
             if e['action'] == 'alloc':
-                addr, size = e['addr'], e['size']
+                addr, size, rounded_b = e['addr'], e['size'], e['rounded_by']
                 n = _name()
                 seg_name, seg_addr = find_segment(addr)
                 if seg_name is None:
@@ -304,7 +304,7 @@ def trace(data):
                     offset = addr
                 else:
                     offset = addr - seg_addr
-                out.write(f'{n} = {seg_name}[{offset}:{Bytes(size)}]\n')
+                out.write(f'{n} = {seg_name}[{offset}:{Bytes(size)}/{Bytes(rounded_b)}]\n')
                 allocation_addr_to_name[addr] = (n, size, count)
                 count += size
             elif e['action'] == 'free_requested':
@@ -334,8 +334,11 @@ def trace(data):
                     del segment_addr_to_name[name]
             elif e['action'] == 'oom':
                 size = e['size']
+                rounded_by = e['rounded_by']
                 free = e['device_free']
-                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
+                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, \
+                rounded by {Bytes(rounded_by)} for a total of {Bytes(size + rounded_by)}, \
+                {Bytes(free)} free in CUDA\n')
             else:
                 out.write(f'{e}\n')
         out.write(f"TOTAL MEM: {Bytes(count)}")

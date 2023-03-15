@@ -51,6 +51,7 @@ std::string _memory_snapshot_pickled() {
   IValue large_s = "large";
   IValue small_s = "small";
   IValue size_s = "size";
+  IValue rounded_by_s = "rounded_by";
   IValue state_s = "state";
   IValue active_allocated_s = "active_allocated";
   IValue active_pending_free_s = "active_pending_free";
@@ -159,6 +160,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(
           TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
       trace_entry.insert(size_s, (int64_t)te.size_);
+      trace_entry.insert(rounded_by_s, (int64_t)te.rounded_by_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       trace.push_back(trace_entry);
     }

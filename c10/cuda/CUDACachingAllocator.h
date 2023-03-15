@@ -154,18 +154,23 @@ struct TraceEntry {
       Action action,
       int64_t addr,
       size_t size,
+      size_t rounded_by,
       cudaStream_t stream,
       std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         addr_(addr),
         context_(std::move(context)),
         stream_(stream),
-        size_(size) {}
+        size_(size),
+        rounded_by_(rounded_by) {}
   Action action_;
   int64_t addr_; // for OOM, this is the amount of free bytes reported by cuda
   std::shared_ptr<GatheredContext> context_;
   cudaStream_t stream_;
   int64_t size_;
+  int64_t rounded_by_; // currently only used by ALLOC and FREE_REQUESTED to
+                       // determine block padding as opposed to size_ which
+                       // measures the original size requested
 };
 
 struct SnapshotInfo {
