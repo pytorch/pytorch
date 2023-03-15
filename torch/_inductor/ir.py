@@ -335,12 +335,6 @@ class IRNode:
     def __post_init__(self):
         self.origins = set(self._current_origins)
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        # can not pickle an fx.Node, so ignore them
-        state["origins"] = set()
-        return state
-
     def common_repr(self):
         origins = f"origins={getattr(self, 'origins', '')}"
         if len(origins) > 64:
@@ -3865,18 +3859,6 @@ class MutableBox(IRNode):
         if callable(fn):
             return fn
         raise AttributeError(f"{type(self.data).__name__}.{name} not callable")
-
-    def __getstate__(self):
-        """
-        The __getattr__ method confuses pickle and cause indefinite recursion
-        when picking a MutableBox. Define __getstate__/__setstate__ explicitly
-        to resolve that. Check this SO post for more details:
-        https://stackoverflow.com/questions/50888391/pickle-of-object-with-getattr-method-in-python-returns-typeerror-object-no
-        """
-        return self.data
-
-    def __setstate__(self, data):
-        self.data = data
 
     def __str__(self):
         if isinstance(self.data, MutableBox):

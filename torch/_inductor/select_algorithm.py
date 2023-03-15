@@ -17,7 +17,7 @@ import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
-from . import codecache, config, ir
+from . import config, ir
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -316,69 +316,6 @@ def _jinja2_env():
         return None
 
 
-class MakeKernelRender:
-    """
-    This is previously a local function in TritonTemplate.generate. Change to a
-    class to make it pickle'able.
-    """
-
-    def __init__(self, kernel_options, source, kwargs):
-        self.kernel_options = kernel_options
-        self.source = source
-        self.kwargs = kwargs
-
-    def __call__(self, out_node):
-        kernel = TritonTemplateKernel(
-            kernel_name="KERNEL_NAME",
-            output_node=out_node,
-            use_jit=False,
-            **self.kernel_options,
-        )
-        template = TritonTemplate._template_from_string(self.source)
-        render = functools.partial(
-            template.render,
-            **kernel.template_env(),
-            **self.kwargs,
-        )
-        return kernel, render
-
-
-class TritonTemplateCallFunction:
-    """
-    This is previously a local function in TritonTemplate.generate. Change to a
-    class to make it pickle'able.
-    """
-
-    def __init__(
-        self, code, extra, kernel_name, kwargs, extra_args, num_stages, num_warps, grid
-    ):
-        self.code = code
-        self.extra = extra
-        self.kernel_name = kernel_name
-        self.kwargs = kwargs
-        self.extra_args = extra_args
-        self.num_stages = num_stages
-        self.num_warps = num_warps
-        self.grid = grid
-        self.run = None
-
-    def __call__(self, *args, out):
-        if self.run is None:
-            mod = PyCodeCache.load(self.code, self.extra)
-
-            # set run only when used so we don't need pickle it.
-            # Pickle run fail with error: TypeError: cannot pickle 'PyCapsule' object
-            self.run = getattr(mod, self.kernel_name).run
-        return self.run(
-            *args,
-            out,
-            *self.extra_args,
-            grid=self.grid(*out.size(), self.kwargs),
-            num_stages=self.num_stages,
-            num_warps=self.num_warps,
-        )
-
-
 class TritonTemplate:
     index_counter = itertools.count()
     all_templates = dict()
@@ -390,22 +327,10 @@ class TritonTemplate:
             return env.from_string(source)
         return None
 
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        # jinja template can not be pickled. Remove it from the state here.
-        # It will be recreated in __setstate__
-        del state["template"]
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self.template = self._template_from_string(self.source)
-
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__()
         self.name = name
         self.grid = grid
-        self.source = source
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         self.all_templates[name] = self
@@ -422,7 +347,6 @@ class TritonTemplate:
         epilogue_fn=identity,
         **kwargs,
     ):
-        input_nodes = simplify_ir_nodes_for_pickling(input_nodes)
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -480,6 +404,8 @@ class TritonTemplate:
                 )
                 + "-"
             )
+            mod = PyCodeCache.load(code, extra)
+            run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
@@ -492,25 +418,54 @@ class TritonTemplate:
         )
         assert not extra_args, "TODO: dynamic shapes"
 
-        call = TritonTemplateCallFunction(
-            code,
-            extra,
-            kernel_name,
-            kwargs,
-            extra_args,
-            num_stages,
-            num_warps,
-            self.grid,
-        )
+        def call(*args, out):
+            return run(
+                *args,
+                out,
+                *extra_args,
+                grid=self.grid(*out.size(), kwargs),
+                num_stages=num_stages,
+                num_warps=num_warps,
+            )
 
-        key, path = codecache.write(code, "py", extra)
-        call.key = key
-        call.__file__ = path
+        call.key = mod.key
+        call.__file__ = mod.__file__
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
         setattr(template_kernels, kernel_hash_name, call)
 
-        make_kernel_render = MakeKernelRender(kernel_options, self.source, kwargs)
+        def make_kernel_render(out_node):
+            kernel = TritonTemplateKernel(
+                kernel_name="KERNEL_NAME",
+                output_node=out_node,
+                use_jit=False,
+                **kernel_options,
+            )
+            render = functools.partial(
+                self.template.render,
+                **kernel.template_env(),
+                **kwargs,
+            )
+            return kernel, render
+
+        # create the BenchmarkRequest if we do autotuning in subprocess
+        bmreq = None
+        if config.autotune_in_subproc:
+            from .autotune_process import BenchmarkRequest, TensorMeta
+
+            # the request we will send to sub process to do the benchmarking
+            grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+            bmreq = BenchmarkRequest(
+                module_path=mod.__file__,
+                module_cache_key=mod.key,
+                kernel_name=kernel_name,
+                grid=grid,
+                extra_args=extra_args,
+                num_stages=num_stages,
+                num_warps=num_warps,
+                input_tensors=TensorMeta.from_irnodes(input_nodes),
+                output_tensor=TensorMeta.from_irnodes(layout),
+            )
 
         return TritonTemplateCaller(
             kernel_hash_name,
@@ -518,6 +473,7 @@ class TritonTemplate:
             layout,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
+            bmreq,
         )
 
     @staticmethod
@@ -569,40 +525,12 @@ class ExternKernelChoice:
         )
 
 
-def simplify_ir_nodes_for_pickling(ir_nodes):
-    """
-    Basically convert a ComputedBuffer to Buffer since we don't care about
-    computation function calculating the inputs for the benchmark.
-    The inputs for benchmark are randomly generated instead.
-
-    The computation function in ComputedBuffer can not be handled by pickle.
-    """
-    if isinstance(ir_nodes, tuple):
-        ir_nodes = list(ir_nodes)  # make it mutable
-
-    for i, storage_box in enumerate(ir_nodes):
-        if not isinstance(storage_box, ir.StorageBox):
-            continue
-        buf = storage_box.data
-        if isinstance(buf, ir.ComputedBuffer):
-            # don't change the orignal storage_box since they are still
-            # used in other places
-            ir_nodes[i] = ir.TensorBox.create(
-                ir.Buffer(
-                    buf.name,
-                    buf.layout,
-                )
-            ).data
-
-    return ir_nodes
-
-
 class ChoiceCaller:
     def __init__(self, name, input_nodes, layout):
         super().__init__()
         self.name = name
         self.layout = layout
-        self.input_nodes = simplify_ir_nodes_for_pickling(input_nodes)
+        self.input_nodes = input_nodes
 
     def benchmark(self, *args, out):
         algo = self.to_callable()
@@ -622,10 +550,13 @@ class ChoiceCaller:
 
 
 class TritonTemplateCaller(ChoiceCaller):
-    def __init__(self, name, input_nodes, layout, make_kernel_render, debug_extra):
+    def __init__(
+        self, name, input_nodes, layout, make_kernel_render, debug_extra, bmreq
+    ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
+        self.bmreq = bmreq
 
     def __str__(self):
         return (
@@ -766,7 +697,6 @@ class AlgorithmSelectorCache(PersistentCache):
             # do the optional warmup
             tuning_process.initialize()
             assert tuning_process.valid()
-            tuning_process.sync_template_kernels()
 
         autotune_start_ts = time.time()
         timings = self.lookup(
@@ -823,30 +753,16 @@ class AlgorithmSelectorCache(PersistentCache):
             return result[0]
 
         def benchmark_in_sub_process(choice):
-            out.zero_()
-
+            # only benchmark triton kernel in sub process for now.
+            # ATen/Extern kernel are still benchmarked in the current process.
             if isinstance(choice, ExternKernelCaller):
-                inputs = example_inputs_extern
-                output = out_extern
-            else:
-                inputs = example_inputs
-                output = out
-
-            if VERIFY:
-                expected_output = expected
-            else:
-                expected_output = None
+                return benchmark_in_current_process(choice)
 
             from . import autotune_process
 
-            timing = autotune_process.autotune(
+            return autotune_process.benchmark_in_sub_process(
                 choice,
-                inputs,
-                output,
-                expected_output,
             )
-            torch.cuda.synchronize()  # shake out any CUDA errors
-            return timing
 
         benchmark = (
             benchmark_in_sub_process
@@ -889,6 +805,7 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
