@@ -934,8 +934,9 @@ class TorchPyOperator(VariableTracker):
                 false_cmp,
             ) = speculate_branch(False)
 
-            if true_cmp != false_cmp:
-                unimplemented(true_cmp.diff(false_cmp))
+            true_tracked_fakes = true_cmp.output.tracked_fakes
+            false_tracked_fakes = false_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
@@ -995,11 +996,9 @@ class TorchPyOperator(VariableTracker):
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
-            if parent_cmp != body_cmp:
-                diff = parent_cmp.diff(body_cmp)
-                raise unimplemented(
-                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
-                )
+            parent_tracked_fakes = parent_cmp.output.tracked_fakes
+            body_tracked_fakes = body_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
