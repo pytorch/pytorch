@@ -123,9 +123,9 @@ _context = engine.background_context
 
 
 @contextlib.contextmanager
-def create_export_diagnostic_context() -> Generator[
-    infra.DiagnosticContext, None, None
-]:
+def create_export_diagnostic_context() -> (
+    Generator[infra.DiagnosticContext, None, None]
+):
     """Create a diagnostic context for export.
 
     This is a workaround for code robustness since diagnostic context is accessed by

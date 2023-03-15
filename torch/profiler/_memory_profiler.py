@@ -660,7 +660,6 @@ class MemoryProfile:
 
     @property
     def timeline(self) -> Tuple[Tuple[int, Action, TensorAndID, int], ...]:
-        t0 = min(event.start_time_ns for event in self._op_tree.dfs())
         allocation_times: Dict[Tuple[TensorKey, bool], int] = {}
         for event in self._op_tree.dfs():
             if event.typed[0] == _EventType.Allocation:
@@ -668,7 +667,7 @@ class MemoryProfile:
                 key = TensorKey.from_allocation(alloc_fields)
                 if key is not None:
                     is_allocation = alloc_fields.alloc_size > 0
-                    allocation_times[(key, is_allocation)] = event.start_time_ns - t0
+                    allocation_times[(key, is_allocation)] = event.start_time_ns
 
         snapshot = self._category_snapshot()
         last_version = {key: version for key, version in sorted(snapshot.keys())}
@@ -686,7 +685,7 @@ class MemoryProfile:
                     events.append((t, Action.CREATE, (key, 0)))
 
                 elif edge.mutated:
-                    t = node._event.start_time_ns - t0
+                    t = node._event.start_time_ns
                     version = edge.input_version
                     assert version is not None
                     events.append((t, Action.INCREMENT_VERSION, (key, version)))
@@ -973,9 +972,14 @@ class MemoryProfileTimeline:
             index = _CATEGORY_TO_INDEX[category] + 1
             sizes[-1][index] += delta
 
+        t_min = -1
         for t, action, (key, version), numbytes in self.timeline:
             if key.device != device:
                 continue
+
+            # Save the smallest timestamp to populate pre-existing allocs.
+            if t_min == -1 or (t < t_min and t > 0):
+                t_min = t
 
             # Handle timestep
             if not times:
@@ -1000,6 +1004,7 @@ class MemoryProfileTimeline:
             else:
                 raise ValueError(f"Unknown action: {action}")
 
+        times = [t_min if t < 0 else t for t in times]
         return times, sizes
 
     def export_memory_timeline(self, path, device) -> None:
