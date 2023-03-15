@@ -1189,7 +1189,7 @@ class _TensorBase(metaclass=_TensorMeta):
     _version: _int
     _base: Optional[Tensor]
     _cdata: _int
-    grad_fn: _Node
+    grad_fn: Optional[_Node]
     _grad_fn: Any
     _grad: Optional[Tensor]
     grad: Optional[Tensor]
