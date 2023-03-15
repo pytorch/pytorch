@@ -193,32 +193,37 @@ def checkpoint(
 
     The non-reentrant variant improves upon the reentrant variant in several
     ways:
-    * Unlike the reentrant variant, the non-reentrant variant properly records
-      the autograd graph during forward, e.g. allowing you to perform backward
-      on that graph inside checkpointed regions, and allowing you to attach
-      hooks to the graph in a more fine-grained way. The reentrant variant
-      runs the forward in :func:`torch.no_grad`.
-    * Unlike the reentrant variant, the non-reentrant variant supports all
-      ways of performing backward. Reentrant checkpoint only supports the
-      :func:`torch.autograd.backward` API and only if its `inputs` argument is
-      not passed. :func:`torch.autograd.grad` is not supported.
-    * Unlike the reentrant variant, the non-reentrant variant  does not have
-      the restriction that at least one of the inputs and at least one of the
-      outputs needs to have ``requires_grad=True``. If this condition is
-      not met for reentrant checkpoint, the checkpointed part of the model
-      won't have gradients.
-    * Unlike the reentrant variant, the non-reentrant variant considers
-      Tensors passed as inputs or returned as outputs in nested structures
-      (e.g., custom objects, lists, dicts, etc) as participating in autograd.
-    * Unlike the reentrant variant, the non-reentrant variant supports the
-      checkpointed region containing tensors detached from the computational
-      graph. For the reentrant variant, if the checkpointed segment
-      contains tensors detached from the computational graph by `detach()` or
-      :func:`torch.no_grad`, the backward pass will raise an error. This is
-      because ``checkpoint`` makes all the outputs require gradients which
-      causes issues when a tensor is defined to have no gradient in the model.
-      To circumvent this, detach the tensors outside of the `checkpoint`
-      function.
+      * Unlike the reentrant variant, the non-reentrant variant supports
+        stopping recomputation as soon as all needed intermediate activations
+        have been recomputed. This feature is enabled by default, but can be
+        disabled with :func:`set_checkpoint_early_stop` if it is problematic
+        for your particular application.
+      * Unlike the reentrant variant, the non-reentrant variant properly records
+        the autograd graph during forward, e.g. allowing you to perform backward
+        on that graph inside checkpointed regions, and allowing you to attach
+        hooks to the graph in a more fine-grained way. The reentrant variant
+        runs the forward in :func:`torch.no_grad`.
+      * Unlike the reentrant variant, the non-reentrant variant supports all
+        ways of performing backward. Reentrant checkpoint only supports the
+        :func:`torch.autograd.backward` API and only if its `inputs` argument is
+        not passed. :func:`torch.autograd.grad` is not supported.
+      * Unlike the reentrant variant, the non-reentrant variant  does not have
+        the restriction that at least one of the inputs and at least one of the
+        outputs needs to have ``requires_grad=True``. If this condition is
+        not met for reentrant checkpoint, the checkpointed part of the model
+        won't have gradients.
+      * Unlike the reentrant variant, the non-reentrant variant considers
+        Tensors passed as inputs or returned as outputs in nested structures
+        (e.g., custom objects, lists, dicts, etc) as participating in autograd.
+      * Unlike the reentrant variant, the non-reentrant variant supports the
+        checkpointed region containing tensors detached from the computational
+        graph. For the reentrant variant, if the checkpointed segment
+        contains tensors detached from the computational graph by `detach()` or
+        :func:`torch.no_grad`, the backward pass will raise an error. This is
+        because ``checkpoint`` makes all the outputs require gradients which
+        causes issues when a tensor is defined to have no gradient in the model.
+        To circumvent this, detach the tensors outside of the `checkpoint`
+        function.
 
     .. warning::
         If :attr:`function` invocation during backward does anything different
@@ -479,15 +484,32 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 #      cleared x and y since backward is run at (3) without retain_graph=True
 #      We save x and w, however.
 #   7. Continue with returning
-#
 
-# NB: This is temporary and should be removed in a follow up PR. Early stopping
-#     is currently disabled by default. Since some nested test cases require
-#     ealry stopping to pass, _set_checkpoint_early_stop can be used to enable.
-_enable_checkpoint_early_stop = False
+_enable_checkpoint_early_stop = True
 
 @contextlib.contextmanager
-def _set_checkpoint_early_stop(enable):
+def set_checkpoint_early_stop(enable: bool):
+    """Context manager that sets whether checkpoint should stop recomputation
+    early.
+
+    By default, non-reentrant checkpoint stops recomputation as soon as it
+    has computed all needed Tensors. This context manager can be used to disable
+    that feature if it is problematic for your specific application.
+
+    This context manager only needs to be active when forward is run. It does
+    need to be active when recomputation actually occurs during backward.
+
+    Example::
+
+    >>> # xdoctest: +SKIP(failing)
+    >>> message = "saved tensors default hooks are disabled"
+    >>> with set_checkpoint_early_stop(False):
+    ...     # Any checkpoint under this context manager will respect this
+    ...     # context manager, even if its backward is performed outside.
+    ...     out = checkpoint(fn, inputs)
+    ...
+    >>> out.backward()
+    """
     global _enable_checkpoint_early_stop
     try:
         prev = _enable_checkpoint_early_stop
@@ -535,7 +557,7 @@ class _NoopSaveInputs(torch.autograd.Function):
         raise AssertionError("Did not expect to backward on this graph")
 
 class _CheckpointFrame():
-    def __init__(self, recompute_fn):
+    def __init__(self, recompute_fn, early_stop):
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -548,6 +570,9 @@ class _CheckpointFrame():
         # https://github.com/pytorch/pytorch/pull/90105#discussion_r1135889885
         self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
         self.is_recomputed: DefaultDict[int, bool] = defaultdict(bool)
+
+        # See Rule 5
+        self.early_stop = early_stop
 
 # See Rule 5
 class _StopRecomputationError(Exception):
@@ -573,7 +598,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
-            if _enable_checkpoint_early_stop and \
+            if target_frame.early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
             # See Rule 6: [ Basic case ] above
@@ -607,7 +632,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 try:
                     with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
                         frame.recompute_fn(*args)
-                        if _enable_checkpoint_early_stop:
+                        if frame.early_stop:
                             raise AssertionError("if early stop is enabled, we don't expect to reach here")
                 except _StopRecomputationError:
                     pass
@@ -689,7 +714,7 @@ def _checkpoint_without_reentrant(
                  recompute_context:
                 fn(*args, **kwargs)
 
-    new_frame = _CheckpointFrame(recompute_fn)
+    new_frame = _CheckpointFrame(recompute_fn, _enable_checkpoint_early_stop)
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 

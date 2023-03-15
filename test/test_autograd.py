@@ -10676,7 +10676,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint(self, early_stop):
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             x = torch.randn((), requires_grad=True)
 
             def f(x):
@@ -10702,7 +10702,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_two_children(self, early_stop):
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             grad, sum, c = self.grad, self.sum, self.checkpoint
 
             def f(x):
@@ -10741,7 +10741,7 @@ class TestNestedCheckpoint(TestCase):
         def f(x):
             return x.sin()
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out, _unused1, _unused2 = checkpoint(fn, k, a, b, f, use_reentrant=False)
         actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10761,7 +10761,7 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(2., requires_grad=True)
         b = torch.tensor(3., requires_grad=True)
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, blah=b, use_reentrant=False)
             actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10782,7 +10782,7 @@ class TestNestedCheckpoint(TestCase):
 
         a = torch.tensor(1., requires_grad=True)
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, use_reentrant=False)
         # The hook is registered on the original graph
         out.grad_fn.next_functions[0][0].register_hook(hook)
@@ -10804,10 +10804,41 @@ class TestNestedCheckpoint(TestCase):
             x.backward(retain_graph=True)
 
         a = torch.tensor(1., requires_grad=True)
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             x, out = checkpoint(fn, a, use_reentrant=False)
         out.grad_fn.register_hook(hook)
         out.backward(retain_graph=True)
+
+    def test_nested_checkpoint_set_early_stop(self):
+        counter = [0]
+
+        def clone(x):
+            counter[0] += 1
+            return x.clone()
+
+        def fn(x):
+            # Since clone does not save anything, it is not recomputed iff
+            # early stop is enabled.
+            return clone(x.sin().cos())
+
+        # Early stopping is enabled by default
+        a = torch.tensor(1., requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Try using the context manager to set early stopping to False.
+        # Expect early stopping to be disabled for all checkpoints ran under
+        # the context manager, even though context manager is no longer active
+        # when backward/recomputation is performed.
+        counter = [0]
+        a = torch.tensor(1., requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn, a, use_reentrant=False)
+
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
