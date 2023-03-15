@@ -630,6 +630,7 @@ macro(cuda_unset_include_and_libraries)
   unset(CUDA_cublas_LIBRARY CACHE)
   unset(CUDA_cublas_device_LIBRARY CACHE)
   unset(CUDA_cublasemu_LIBRARY CACHE)
+  unset(CUDA_cublasLt_LIBRARY CACHE)
   unset(CUDA_cufft_LIBRARY CACHE)
   unset(CUDA_cufftemu_LIBRARY CACHE)
   unset(CUDA_cupti_LIBRARY CACHE)
@@ -767,13 +768,17 @@ endif()
 # FAST_NVCC
 if(USE_FAST_NVCC AND CUDA_NVCC_EXECUTABLE AND NOT CUDA_NVCC_EXECUTABLE_ORIGIN)
   set(CUDA_NVCC_EXECUTABLE_ORIGIN "${CUDA_NVCC_EXECUTABLE}")
+  set(EXTENSION "sh")
+  if (MSVC)
+    set(EXTENSION "bat")
+  endif()
   set(FAST_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/fast_nvcc.py")
-  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh")
-  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.sh"
+  configure_file(${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.${EXTENSION}.in "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.${EXTENSION}")
+  file(COPY "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/tmp/wrap_nvcc.${EXTENSION}"
     DESTINATION "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/"
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
   )
-  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.sh")
+  set(CUDA_NVCC_EXECUTABLE "${PROJECT_SOURCE_DIR}/tools/fast_nvcc/wrap_nvcc.${EXTENSION}")
 endif()
 mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
@@ -963,6 +968,7 @@ endif()
 
 find_cuda_helper_libs(cufft)
 find_cuda_helper_libs(cublas)
+find_cuda_helper_libs(cublasLt)
 # cusparse showed up in version 3.2
 find_cuda_helper_libs(cusparse)
 find_cuda_helper_libs(curand)
@@ -993,7 +999,7 @@ if (CUDA_BUILD_EMULATION)
   set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublasemu_LIBRARY})
 else()
   set(CUDA_CUFFT_LIBRARIES ${CUDA_cufft_LIBRARY})
-  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+  set(CUDA_CUBLAS_LIBRARIES ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
 endif()
 
 ########################
@@ -1962,7 +1968,7 @@ macro(CUDA_ADD_CUBLAS_TO_TARGET target)
   if (CUDA_BUILD_EMULATION)
     target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublasemu_LIBRARY})
   else()
-    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY})
+    target_link_libraries(${target} ${CUDA_LINK_LIBRARIES_KEYWORD} ${CUDA_cublas_LIBRARY} ${CUDA_cublas_device_LIBRARY} ${CUDA_cublasLt_LIBRARY})
   endif()
 endmacro()
 
