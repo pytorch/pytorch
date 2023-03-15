@@ -201,24 +201,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _efficient_attention_backward(
   bool grad_kv_needs_init = causal && N > M;
   at::Tensor grad_q, grad_k, grad_v;
   int8_t gQKV_strideM_multiplier = 1;
-  if (chunk_grad_outputs) {
-    // Create one big contiguous chunk
-    // This is because q, k and v usually come from a single
-    // output of a linear layer that is chunked.
-    // Creating the gradients with the right layout saves us
-    // a `torch.cat` call in the backward pass
-    at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
-    grad_q = chunk.select(2, 0);
-    grad_k = chunk.select(2, 1);
-    grad_v = chunk.select(2, 2);
-    gQKV_strideM_multiplier=3;
-  } else {
-    grad_q = at::empty(query.sizes(), query.options());
-    grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
-                                : at::empty(key.sizes(), key.options());
-    grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
-                                : at::empty(value.sizes(), value.options());
-  }
+  grad_q = at::empty(query.sizes(), query.options());
+  grad_k = grad_kv_needs_init ? at::zeros(key.sizes(), key.options())
+                              : at::empty(key.sizes(), key.options());
+  grad_v = grad_kv_needs_init ? at::zeros(value.sizes(), value.options())
+                              : at::empty(value.sizes(), value.options());
+
 
   auto launchKernel = [&](auto _k, int computeCapability) {
     using Kernel = decltype(_k);
