@@ -69,6 +69,7 @@ def fully_shard(
         cpu_offload,
         limit_all_gathers,
         use_orig_params,
+        False,
         backward_prefetch_limit,
         forward_prefetch_limit,
     )

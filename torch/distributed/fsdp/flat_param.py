@@ -428,7 +428,7 @@ class FlatParamHandle:
         assert len(params) > 0 and params[0] is not None
         device = params[0].device
         sharded_dtype = params[0].dtype
-        unsharded_dtype_size = get_dtype_size(self._fwd_bwd_param_dtype)
+        unsharded_dtype_size = _get_dtype_size(self._fwd_bwd_param_dtype)
         assert ALIGNMENT % unsharded_dtype_size == 0
         aligned_numel = ALIGNMENT // unsharded_dtype_size
         total_numel = 0
@@ -2220,7 +2220,7 @@ def _safe_setattr_tensor_or_param(
 
 
 @functools.lru_cache(8)
-def get_dtype_size(dtype):
+def _get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
