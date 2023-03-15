@@ -768,12 +768,17 @@ def export(
             with torch.fx.traceback.preserve_node_meta():
                 return torch.fx.Interpreter(graph).run(*args)
 
-        graph = make_fx(
-            graph_with_interpreter,
-            decomposition_table=decomposition_table,
-            tracing_mode="real",
-            _allow_non_fake_inputs=True,
-        )(*example_fake_inputs)
+        fake_tensor_mode = null_context()
+        if example_fake_inputs is not None and len(example_fake_inputs) > 0:
+            fake_tensor_mode = example_fake_inputs[0].fake_mode
+
+        with fake_tensor_mode:
+            graph = make_fx(
+                graph_with_interpreter,
+                decomposition_table=decomposition_table,
+                tracing_mode="real",
+                _allow_non_fake_inputs=True,
+            )(*example_fake_inputs)
 
     new_graph = ChangeInputOutputSignature(
         graph,

@@ -15,7 +15,6 @@ from torch.fx.experimental.proxy_tensor import (
     make_fx,
     track_tensor_tree,
     unwrap_proxy,
-    maybe_disable_all_fake_tensor_modes,
 )
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils._python_dispatch import (
@@ -41,7 +40,7 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
     assert isinstance(operands, (list, tuple)), "Cond operands must be a list or tuple of tensors"
     assert all(isinstance(o, torch.Tensor) for o in operands), "Cond operands must be a list of tensors"
 
-    with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
+    with disable_proxy_modes_tracing():
         true_graph = make_fx(true_fn)(*operands)
         false_graph = make_fx(false_fn)(*operands)
 
@@ -165,7 +164,7 @@ def _has_potential_branch_input_mutation(branch, inputs):
     bit restrictive as the branch must be traceable.
     """
     try:
-        with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
+        with disable_proxy_modes_tracing():
             gm = make_fx(branch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond is
@@ -194,7 +193,7 @@ def _has_potential_branch_input_alias(branch, inputs):
     bit restrictive as the branch must be traceable.
     """
     try:
-        with disable_proxy_modes_tracing(), maybe_disable_all_fake_tensor_modes():
+        with disable_proxy_modes_tracing():
             gm = make_fx(branch)(*inputs)
 
     except UnsupportedAliasMutationException:
