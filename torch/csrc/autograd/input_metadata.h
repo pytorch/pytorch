@@ -41,7 +41,7 @@ struct InputMetadata {
   InputMetadata() = default;
 
   InputMetadata(
-      const at::TensorOptions options,
+      const at::TensorOptions& options,
       MetadataShape input_shape,
       bool is_tensor_subclass)
       : options_{options},
