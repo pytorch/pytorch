@@ -35,7 +35,7 @@ size_t compute_strided_size(const at::Tensor& t) {
 }
 
 bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == t.numel();
+  return compute_strided_size(t) == static_cast<size_t>(t.numel());
 }
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().

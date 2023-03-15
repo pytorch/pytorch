@@ -14,10 +14,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 
 import onnxscript  # type: ignore[import]
-from onnxscript import (  # type: ignore[import]  # type: ignore[import]
-    evaluator,
-    opset18,
-)
+from onnxscript import evaluator, opset18  # type: ignore[import]
 from onnxscript.function_libs.torch_aten import graph_building  # type: ignore[import]
 
 import torch
@@ -135,17 +132,24 @@ def _retrieve_or_adapt_input_to_graph_set(
         #    in TorchScript graph.
         return fx_name_to_onnxscipt_value[onnx_tensor.name]
     if isinstance(onnx_tensor, (tuple, list)) and any(
-        isinstance(ele, torch.fx.Node) for ele in onnx_tensor
+        isinstance(ele, torch.fx.Node) and isinstance(ele.meta["val"], torch.SymInt)
+        for ele in onnx_tensor
     ):
-        # This intends to solve dynamic axes. for example, if the size input of op.Expand
-        # is dynamic, each of dim would be originated from other tensors.
+        # This intends to handle dynamic axes. for example, if the input size of op.Expand
+        # is dynamic, each dimension would be variable (i.e., sym variable in Pytorch
+        # FX graph. Note that sym variable is mapped to tensor in ONNX Script world)
+        # calculated by other operators.
         sequence_elements = []
         for tensor in onnx_tensor:
-            if isinstance(tensor, torch.fx.Node):
+            if isinstance(tensor, torch.fx.Node) and isinstance(
+                tensor.meta["val"], torch.SymInt
+            ):
                 sequence_elements.append(fx_name_to_onnxscipt_value[tensor.name])
             else:
                 sequence_elements.append(tensor)
         # Concat all the elements in the sequence.
+        # shapes are mapped to tensors in ONNX graph (TorchScriptGraph),
+        # so list of sym_ints is concatenated to a tensor before calling ONNX op.
 
         # For example:
         #    inputs: [2, 4, TensorA, 1, TensorB]
@@ -159,7 +163,7 @@ def _retrieve_or_adapt_input_to_graph_set(
     if isinstance(onnx_tensor, torch.dtype):
         onnx_tensor = int(_type_utils.JitScalarType.from_dtype(onnx_tensor).onnx_type())
 
-    # all other cases, we does nothing.
+    # all other cases, we do nothing.
     return onnx_tensor
 
 
@@ -196,7 +200,7 @@ def _fill_tensor_meta(
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
 
     # aten::sym_size output is a int, not a tensor, which stands
-    # for the size of one dim. We treat it as 1D tensor.
+    # for the size of one dim. We treat it as 0-D tensor.
     # TODO(titaiwang): SymFloat case?
     if isinstance(expected_values, torch.SymInt):
         return
@@ -226,13 +230,65 @@ def _fill_tensor_meta(
             onnxscript_value.name = name
 
 
+def _wrap_fx_args_as_torch_args(
+    complete_args: list, complete_kwargs: dict
+) -> Tuple[tuple, dict]:
+    # prepare torch format args and kwargs for op-level validation
+    # Use fake tensor to create real tensor to feed in ops
+    torch_args = []
+    for arg in complete_args:
+        if isinstance(arg, torch.fx.Node):
+            # Create a concreate test tensor based on the fake tensor
+            with torch.utils._mode_utils.no_dispatch():
+                # eg: aten_where needs BOOL in input_args
+                # fx_name_to_onnxscipt_value could help?
+                fake_tensor = arg.meta["val"]
+                if isinstance(fake_tensor, list):
+                    for meta_value in fake_tensor:
+                        # could be varying size
+                        # use 2 to replace dynamic shape
+                        shape = [
+                            dim if isinstance(dim, int) else 2
+                            for dim in meta_value.shape
+                        ]
+                        dtype = (
+                            meta_value.dtype
+                            if meta_value.dtype
+                            not in {torch.int64, torch.int32, torch.uint8, torch.bool}
+                            else torch.float32
+                        )
+                        torch_args.append(torch.randn(meta_value.shape, dtype=dtype))
+                elif isinstance(fake_tensor, torch.Tensor):
+                    # could be varying size
+                    # use 2 to replace dynamic shape
+                    shape = [
+                        dim if isinstance(dim, int) else 2 for dim in fake_tensor.shape
+                    ]
+                    dtype = (
+                        fake_tensor.dtype
+                        if fake_tensor.dtype
+                        not in {torch.int64, torch.int32, torch.uint8, torch.bool}
+                        else torch.float32
+                    )
+                    if not isinstance(fake_tensor, torch.Tensor):
+                        # aten_sym_size output is a int, not a tensor,
+                        # which stands for the size of one dim.
+                        torch_args.append(fake_tensor)
+                    else:
+                        torch_args.append(torch.randn(shape, dtype=dtype))
+        else:
+            torch_args.append(arg)
+    torch_kwargs = complete_kwargs
+    return (tuple(torch_args), torch_kwargs)
+
+
 def _wrap_fx_args_as_onnxscript_args(
     node: torch.fx.Node,
     fx_name_to_onnxscipt_value: Dict[
         str, Union[torch._C.Value, Tuple[torch._C.Value, ...]]
     ],
     tracer: graph_building.TorchScriptTracingEvaluator,
-) -> Tuple[tuple, dict, tuple, dict]:
+) -> Tuple[tuple, dict, list, dict]:
     """Map all FX arguments of a node to arguments in TorchScript graph."""
 
     # This function assumes the order of arguments in FX op is the
@@ -265,60 +321,7 @@ def _wrap_fx_args_as_onnxscript_args(
     )
     onnxscript_kwargs = _filter_incompatible_and_dtype_convert_kwargs(complete_kwargs)
 
-    # prepare torch format args and kwargs for op-level validation
-    # Use fake tensor to create real tensor to feed in ops
-    torch_args = []
-    for arg in complete_args:
-        if isinstance(arg, torch.fx.Node):
-            # Create a concreate test tensor based on the fake tensor
-            with torch.utils._mode_utils.no_dispatch():
-                # TODO(titaiwang): The assumption of torch.float might not be true,
-                # https://github.com/microsoft/onnx-script/issues/393
-                # eg: aten_where needs BOOL in input_args
-                # fx_name_to_onnxscipt_value could help?
-                fake_tensor = arg.meta["val"]
-                if isinstance(fake_tensor, list):
-                    for meta_value in fake_tensor:
-                        # could be varying size
-                        # use 2 to replace dynamic shape
-                        shape = [
-                            dim if isinstance(dim, int) else 2
-                            for dim in meta_value.shape
-                        ]
-                        # FIXME(titaiwang): Refactor me with
-                        # https://github.com/microsoft/onnx-script/issues/393
-                        dtype = (
-                            meta_value.dtype
-                            if meta_value.dtype
-                            not in {torch.int64, torch.int32, torch.uint8, torch.bool}
-                            else torch.float32
-                        )
-                        torch_args.append(torch.randn(meta_value.shape, dtype=dtype))
-                elif isinstance(fake_tensor, torch.Tensor):
-                    # could be varying size
-                    # use 2 to replace dynamic shape
-                    shape = [
-                        dim if isinstance(dim, int) else 2 for dim in fake_tensor.shape
-                    ]
-                    # FIXME(titaiwang): Refactor me with
-                    # # https://github.com/microsoft/onnx-script/issues/393
-                    dtype = (
-                        fake_tensor.dtype
-                        if fake_tensor.dtype
-                        not in {torch.int64, torch.int32, torch.uint8, torch.bool}
-                        else torch.float32
-                    )
-                    if not isinstance(fake_tensor, torch.Tensor):
-                        # FIXME(titaiwang): Refactor me with # https://github.com/microsoft/onnx-script/issues/393
-                        # aten_sym_size output is a int, not a tensor,
-                        # which stands for the size of one dim.
-                        torch_args.append(fake_tensor)
-                    else:
-                        torch_args.append(torch.randn(shape, dtype=dtype))
-        else:
-            torch_args.append(arg)
-    torch_kwargs = complete_kwargs
-    return (onnxscript_args, onnxscript_kwargs, tuple(torch_args), torch_kwargs)
+    return (onnxscript_args, onnxscript_kwargs, complete_args, complete_kwargs)
 
 
 @_beartype.beartype
@@ -430,8 +433,8 @@ def _export_fx_node_to_onnxscript(
         (
             onnx_args,
             onnx_kwargs,
-            torch_args,
-            torch_kwargs,
+            complete_args,
+            complete_kwargs,
         ) = _wrap_fx_args_as_onnxscript_args(node, fx_name_to_onnxscipt_value, tracer)
         with evaluator.default_as(tracer):
             output: Union[  # type: ignore[no-redef]
@@ -450,10 +453,14 @@ def _export_fx_node_to_onnxscript(
             output
         )
         if options.op_level_debug:
+            # FIXME(titaiwang): Refactor me with
+            # https://github.com/microsoft/onnx-script/issues/393
+            (torch_args, torch_kwargs) = _wrap_fx_args_as_torch_args(
+                complete_args, complete_kwargs
+            )
             _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
         fx_name_to_onnxscipt_value[node.name] = output
     elif node.op == "output":
-
         if isinstance(node.args[0], torch.fx.Node):
             onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
             onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
@@ -505,7 +512,6 @@ def _export_fx_node_to_onnxscript(
 def export_fx_to_onnxscript(
     fx_module_with_metadata: torch.fx.GraphModule, options: options.ExportOptions
 ):
-
     # Initialize the ONNX graph
     onnxscript_graph = graph_building.TorchScriptGraph()
     tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)

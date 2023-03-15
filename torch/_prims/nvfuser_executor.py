@@ -60,6 +60,7 @@ DEFAULT_NVFUSER_PYTHON_CONFIG = MappingProxyType(
     }
 )
 
+
 # nvFuserTensorTemplate and nvFuserScalarTemplate are helper objects
 # for cached construction of the nvFuser's Fusion
 # TODO: change what is stored in the cache for nvFuser's Tensor objects
@@ -258,7 +259,6 @@ def nvfuser_execute(gm: GraphModule, *args, executor_parameters=None):
         )
         for arg in flat_args
     ):
-
         # Construction of the fusion is expensive and cached based on the GraphModule
         # and symbolic nvFuser args.
         nv_template_args = to_nvfuser_template_args(flat_args)

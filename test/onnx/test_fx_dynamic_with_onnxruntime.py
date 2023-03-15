@@ -72,7 +72,6 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         model_input_args: _InputArgsType,
         model_input_kwargs,
     ):
-
         # Inspect the model's signature. It will be used
         # to flatten kwargs.
         if isinstance(model, torch.nn.Module):

@@ -29,7 +29,6 @@ def _export(
     args,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
-
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
@@ -126,7 +125,7 @@ def export_after_normalizing_args_and_kwargs(
         op_level_debug: Whether to export the model with op level debug information
             with onnxruntime evaluator.
         dynamic_axes: Whether to export the model with dynamic axes. This would set
-            the shape of input and nodes all to dynamic by following symbolic fx graph.
+            the shape of input and nodes all to dynamic by calling `proxy_tensor.make_fx` with `tracing_mode="symbolic"`.
 
         kwargs: the keyword arguments to pass to `fn`.
 
