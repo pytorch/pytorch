@@ -10,6 +10,7 @@ from torch.distributed._tensor.ops.utils import register_prop_rule
 aten = torch.ops.aten
 
 
+# TODO: Enable BWD for embedding op.
 @register_prop_rule(aten.embedding.default)
 def embedding_rules(op_schema: OpSchema) -> OutputSharding:
     weight_spec, inp_spec = op_schema.args_spec
@@ -19,12 +20,11 @@ def embedding_rules(op_schema: OpSchema) -> OutputSharding:
         )
 
     if all(placement.is_replicate() for placement in inp_spec.placements):
+        weight_dim_map = weight_spec.dim_map
+        output_dim_map = inp_spec.dim_map
+        output_dim_map.append(weight_dim_map[1])
         return OutputSharding(
-            output_spec=DTensorSpec(
-                mesh=inp_spec.mesh,
-                placements=[Replicate()] * (len(inp_spec.placements) - 1) + [Shard(-1)],  # type: ignore[list-item]
-                tensor_meta=inp_spec.tensor_meta,
-            )
+            output_spec=DTensorSpec.from_dim_map(inp_spec.mesh, output_dim_map, [])
         )
 
     return OutputSharding(

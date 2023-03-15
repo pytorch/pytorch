@@ -72,8 +72,7 @@ class Shard(Placement):
 
     def _pad_tensor(self, tensor: torch.Tensor) -> torch.Tensor:
         # pad tensor by 1 on the shard dim
-        pad_num = -self.dim if self.dim < 0 else tensor.ndim - self.dim
-        pad = [0, 0] * (pad_num)
+        pad = [0, 0] * (tensor.ndim - self.dim)
         pad[-1] = 1
         return torch.nn.functional.pad(tensor, pad)
 
