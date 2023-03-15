@@ -2872,7 +2872,9 @@ def aot_module_simplified(
                 # Reconstruct this to ensure we get the same name contract as dynamo
                 new_source = AttrSource(base, param_name)
                 # Sanitize the name, just as dynamo does
-                new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_source.name())
+                new_name = new_source.name()
+                new_name = re.sub(r"\[(\d+)\]", r"_\g<1>", new_name)
+                new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_name)
                 # Invariant, this must always be here.
                 aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[new_name])
 

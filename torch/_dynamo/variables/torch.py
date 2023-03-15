@@ -822,6 +822,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    nn_modules_sources=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
@@ -873,7 +874,13 @@ class TorchPyOperator(VariableTracker):
             tx.output.graph = graph_checkpoint
             tx.restore_graphstate(checkpoint)
 
-            return output, graph, guards, nn_modules, comparable_state
+            return (
+                output,
+                graph,
+                guards,
+                nn_modules,
+                comparable_state,
+            )
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
