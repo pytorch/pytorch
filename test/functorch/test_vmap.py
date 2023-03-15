@@ -1051,6 +1051,11 @@ class TestVmapAPI(TestCase):
         y = reshape_dim_outof(-1, 6, x)
         self.assertEqual(y, x.reshape(12, 12, 6, 2))
 
+        # Case: `0` sized dim.
+        x = torch.randn(12, 12, 0)
+        y = reshape_dim_outof(-1, 6, x)
+        self.assertEqual(y.shape, torch.Size((12, 12, 6, 0)))
+
     def test_batch_rule_does_not_need_to_handle_no_batched_input(self):
         def f(x, y):
             res = torch.dot(y, torch.ones(2))
@@ -3567,7 +3572,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcdiv'),
         xfail('addcmul'),
         xfail('clamp'),
-        xfail('aminmax'),
         # AssertionError: Tensor-likes are not equal!
         xfail('bitwise_left_shift', device_type='cpu'),
         decorate('bitwise_right_shift', device_type='cpu',
@@ -3596,7 +3600,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04), torch.complex64: tol(atol=1e-04, rtol=1e-04)})
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
-        xfail('aminmax'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('complex'),
         xfail('copysign'),
