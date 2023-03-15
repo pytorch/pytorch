@@ -449,16 +449,16 @@ class TestCheckpoint(TestCase):
         non_retain_stats = _do_test(lambda fn: fn(x).backward(), True)
 
         # In a retain_grad backward, buffers get preserved
-        retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
+        _unused_retain_stats = _do_test(lambda fn: fn(x).backward(retain_graph=True), False)
 
         # In a regular backward with checkpoint, buffers get eagerly freed
         checkpoint_non_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(), True)
 
-        # In a retain_grad backward with checkpoint, buffers get preserved
-        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), False)
+        # In a retain_grad backward with checkpoint, buffers get eagerly freed
+        checkpoint_retain_stats = _do_test(lambda fn: checkpoint(fn, x, use_reentrant=False).backward(retain_graph=True), True)
 
         self.assertEqual(non_retain_stats, checkpoint_non_retain_stats)
-        self.assertEqual(retain_stats, checkpoint_retain_stats)
+        self.assertEqual(non_retain_stats, checkpoint_retain_stats)
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300

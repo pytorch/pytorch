@@ -23,7 +23,6 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
 from torch._dynamo import bytecode_transformation, graph_break
-from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -37,6 +36,7 @@ from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
+from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -2039,7 +2039,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         # warmup
         opt_fn(x)
 
-        enable_cache_lookup_profiler(True)
+        # whenver we enter the profiler context, hooks are automatically registered
         with torch.autograd.profiler.profile() as prof:
             res = opt_fn(x)
         events = list(
@@ -2054,8 +2054,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
         )
 
-        enable_cache_lookup_profiler(False)
         with torch.autograd.profiler.profile() as prof:
+            # just make sure the disable functionality works
+            _enable_dynamo_cache_lookup_profiler(False)
             res = opt_fn(x)
         events = list(
             filter(
