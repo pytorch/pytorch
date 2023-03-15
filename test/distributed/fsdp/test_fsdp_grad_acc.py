@@ -160,7 +160,7 @@ class TestGradAcc(FSDPTest):
             num_iters_to_acc = sum(config.num_iters for config in configs)
             for _ in range(num_iters_to_acc - 1):
                 batches.append(tuple(permute_tensor(t) for t in batch))
-            for (batch1, batch2) in itertools.combinations(batches, r=2):
+            for batch1, batch2 in itertools.combinations(batches, r=2):
                 for t1, t2 in zip(batch1, batch2):
                     assert not torch.all(
                         t1 == t2

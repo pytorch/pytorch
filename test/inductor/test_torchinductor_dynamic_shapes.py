@@ -79,7 +79,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
 
 class TestInductorDynamic(TestCase):
-
     compile_fn = partial(torch.compile, dynamic=True)
 
     def setUp(self):
