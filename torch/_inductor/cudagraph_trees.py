@@ -588,13 +588,8 @@ class CUDAGraphNode:
     def all_outputs_are_dead(self):
         "All outputs of the path from this node to its root are dead"
         for depth, output_index in self.live_indices_after_graph:
-            try:
-                if is_live(self.path_weakrefs[depth][output_index]):
-                    return False
-            except Exception as e:
-                breakpoint()
-                raise
-
+            if is_live(self.path_weakrefs[depth][output_index]):
+                return False
         return True
 
     def _record(self, model, stream, inputs):
