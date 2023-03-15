@@ -3835,14 +3835,6 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _int_mm(Tensor self, Tensor mat2) -> Tensor
-  dispatch:
-    CUDA: _int_mm_cuda
-
-- func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CUDA: _int_mm_out_cuda
-
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
