@@ -238,6 +238,7 @@ class TestAOTAutograd(AOTTestCase):
     # test_mutation will:
     # - Ensure that inputs are non-leaves, so our graphs can mutate them
     # - try to mutate outputs of the graph (to ensure that autograd meta is set properly on outputs)
+    @patch("functorch.compile.config.debug_assert", True)
     def verify_aot_autograd(
         self,
         f,
@@ -2774,6 +2775,7 @@ class TestEagerFusionOpInfo(AOTTestCase):
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.use_functionalize", True)
+    @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
     def test_aot_autograd_symbolic_exhaustive(self, device, dtype, op):

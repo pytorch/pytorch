@@ -417,7 +417,7 @@ class InputAliasInfo:
 # This class encapsulates all aliasing + mutation info we need about the forward graph
 # See a more detailed overview of the edge case handling at
 # https://docs.google.com/document/d/19UoIh_SVrMy_b2Sx5ZaeOJttm6P0Qmyss2rdBuyfoic/edit
-@dataclass()
+@dataclass(eq=False)
 class ViewAndMutationMeta:
     # length = # user inputs
     # This gives us info about every input, and what sort of mutation happened to it (if any)
@@ -470,6 +470,17 @@ class ViewAndMutationMeta:
         # It contains the index of every element
         # of output_info that corresponds to an alias (either of an input or intermediate)
         self.aliased_out_indices = aliased_out_indices
+
+    def __eq__(self, other):
+        if not isinstance(other, ViewAndMutationMeta):
+            return NotImplemented
+        return (self.input_info == other.input_info and
+                self.output_info == other.output_info and
+                self.requires_grad_info == other.requires_grad_info and
+                self.num_intermediate_bases == other.num_intermediate_bases and
+                self.keep_input_mutations == other.keep_input_mutations and
+                len(self.traced_tangents) == len(other.traced_tangents) and
+                all(x.shape == y.shape and x.dtype == y.dtype for x, y, in zip(self.traced_tangents, other.traced_tangents)))
 
 
 # This class exists because:
@@ -1293,23 +1304,15 @@ class AOTConfig:
     keep_inference_input_mutations: bool
     dynamic_shapes: bool = False
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
-    with enable_python_dispatcher():
-        _fw_metadata = run_functionalized_fw_and_collect_metadata(
-            flat_fn,
-            keep_input_mutations=aot_config.keep_inference_input_mutations,
-        )(
-            *flat_args
-        )
-
-    _input_info = _fw_metadata.input_info
+def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    _input_info = fw_metadata.input_info
 
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
         flat_args, _input_info, is_inference=True
     )
     metadata_ = CompiledRuntimeMetadata(
         synthetic_base_info=_synthetic_base_info,
-        fw_metadata=_fw_metadata,
+        fw_metadata=fw_metadata,
     )
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
@@ -1603,6 +1606,49 @@ def format_guard_bug_msg(aot_config, expected):
     )
 
 
+def remove_dupe_metadata(
+    m: ViewAndMutationMeta,
+    keep_arg_mask: List[bool],
+) -> ViewAndMutationMeta:
+    assert len(m.input_info) == len(keep_arg_mask)
+    # Easy invariant: the first argument should never be a dupe (it will be kept)
+    assert len(keep_arg_mask) > 0 and keep_arg_mask[0]
+    dupe_to_dedup_idx = [0]
+    for i, b in enumerate(keep_arg_mask[1:]):
+        if b:
+            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1] + 1)
+        else:
+            dupe_to_dedup_idx.append(dupe_to_dedup_idx[-1])
+
+    # Filter dupe'd mutated inputs out of traced_tangents
+    num_data_mutations = len([x for x in m.input_info if x.mutates_data])
+    other_traced_tangents = m.traced_tangents[num_data_mutations:]
+    inp_traced_tangents = m.traced_tangents[:num_data_mutations]
+    filtered_inp_traced_tangents = [x for i, x in enumerate(inp_traced_tangents) if keep_arg_mask[m.mutated_inp_indices[i]]]
+    traced_tangents = filtered_inp_traced_tangents + other_traced_tangents
+
+    return ViewAndMutationMeta(
+        input_info=[x for i, x in enumerate(m.input_info) if keep_arg_mask[i]],
+        # requires_grad_info consists of (mutated_inputs, forward_outputs).
+        # Need to remove only the duplicate entries that correspond to the mutated inputs.
+        requires_grad_info=[
+            x for i, x in enumerate(m.requires_grad_info)
+            if i >= len(m.mutated_inp_indices) or keep_arg_mask[m.mutated_inp_indices[i]]],
+        # For outputs that are views of inputs, we store the index of the input that the output
+        # was generated from. Need to update that index to account for removed dupes.
+        output_info=[
+            OutputAliasInfo(
+                output_type=o.output_type,
+                raw_type=o.raw_type,
+                base_idx=None if o.base_idx is None else dupe_to_dedup_idx[o.base_idx]
+            )
+            for o in m.output_info
+        ],
+        num_intermediate_bases=m.num_intermediate_bases,
+        keep_input_mutations=m.keep_input_mutations,
+        traced_tangents=traced_tangents,
+    )
+
 # MOTIVATION:
 #
 # When tracing functions for future execution, one must be careful not to pass
@@ -1685,54 +1731,36 @@ def format_guard_bug_msg(aot_config, expected):
 # everything.
 #
 def aot_wrapper_dedupe(
-    flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, compiler_fn
+    flat_fn,
+    flat_args: List[Tensor],
+    aot_config: AOTConfig,
+    *,
+    compiler_fn,
+    fw_metadata,
 ):
-    # Get information about whether or not flat_fn mutates its arguments
-    # or not
-    try:
-        with enable_python_dispatcher():
-            fw_metadata = run_functionalized_fw_and_collect_metadata(
-                flat_fn,
-                # For the purpose of checking for dupes that are mutated,
-                # we always want our metadata to correctly reflect input mutations
-                keep_input_mutations=False,
-            )(
-                *flat_args
-            )
-    except RuntimeError as e:
-        log.warning(
-            "Failed to collect metadata on function, produced code may be suboptimal.  "
-            "Known situations this can occur are inference mode only compilation involving "
-            "resize_ or prims (!schema.hasAnyAliasInfo() INTERNAL ASSERT FAILED); "
-            "if your situation looks different please file a bug to PyTorch.",
-            exc_info=True,
-        )
-        # Analysis failed, fall back to duplicate specialize
-        # TODO: Known analysis problems:
-        #   - resize_: TestInductorOpInfoCPU.test_comprehensive_resize__cpu_bool
-        #   - prims: test_tmp_not_defined_issue1_cpu
-        pass
-    else:
-        # Strategy 1: For any input that is not mutated, we can leafify it if we
-        # need to remove a duplicate.
-        leaf_flat_args = []
-        args_set = set()
-        ok = True
+    # Use information about whether or not flat_fn mutates its arguments
+    # or not to handle dupe args
 
-        for i, a in enumerate(flat_args):
-            if not isinstance(a, torch.Tensor):
-                leaf_flat_args.append(a)
-            elif a not in args_set:
-                args_set.add(a)
-                leaf_flat_args.append(a)
-            elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
-                leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
-            else:
-                ok = False
-                break
+    # Strategy 1: For any input that is not mutated, we can leafify it if we
+    # need to remove a duplicate.
+    leaf_flat_args = []
+    args_set = set()
+    ok = True
 
-        if ok:
-            return compiler_fn(flat_fn, leaf_flat_args, aot_config)
+    for i, a in enumerate(flat_args):
+        if not isinstance(a, torch.Tensor):
+            leaf_flat_args.append(a)
+        elif a not in args_set:
+            args_set.add(a)
+            leaf_flat_args.append(a)
+        elif not fw_metadata.input_info[i].mutates_data and not fw_metadata.input_info[i].mutates_metadata:
+            leaf_flat_args.append(a.detach().requires_grad_(a.requires_grad))
+        else:
+            ok = False
+            break
+
+    if ok:
+        return compiler_fn(flat_fn, leaf_flat_args, aot_config, fw_metadata=fw_metadata)
 
     # Strategy 2: Duplicate specialize.
     #
@@ -1799,6 +1827,9 @@ def aot_wrapper_dedupe(
 
     deduped_flat_args = remove_dupe_args(flat_args)
 
+    # Update our input metadata to remove duped input metadata.
+    updated_fw_metadata = remove_dupe_metadata(fw_metadata, keep_arg_mask)
+
     tracing_context = TracingContext.get()
     if tracing_context:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
@@ -1821,7 +1852,14 @@ def aot_wrapper_dedupe(
     def wrapped_flat_fn(*args):
         return flat_fn(*add_dupe_args(args))
 
-    compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config)
+    if config.debug_assert:
+        ref_fw_metadata = run_functionalized_fw_and_collect_metadata(
+            wrapped_flat_fn,
+            keep_input_mutations=fw_metadata.keep_input_mutations,
+        )(*deduped_flat_args)
+        assert ref_fw_metadata == updated_fw_metadata
+
+    compiled_fn = compiler_fn(wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata)
 
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
@@ -2067,25 +2105,13 @@ def create_runtime_wrapper(
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
-
-    with enable_python_dispatcher():
-        _fw_metadata = run_functionalized_fw_and_collect_metadata(
-            flat_fn,
-            # Note: in the non-inference path, we are currently not passing input mutations into the graph directly.
-            # This is mainly difficult due to the partitioner, but we are leaving (a bit of) perf on the table.
-            keep_input_mutations=False,
-        )(
-            *flat_args
-        )
-
-
-    # out here corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
+def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+    # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
     traced_tangents = pytree.tree_map(
         lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x,
-        _fw_metadata.traced_tangents,
+        fw_metadata.traced_tangents,
     )
 
     # merge_view_inputs() is used again at runtime to create synthetic bases out of aliased inputs.
@@ -2094,16 +2120,16 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
     # When that happens, we replace the aliased inputs with a synthetic base, and in the traced forward
     # we later generate the input views
     flat_args_with_views_handled, _synthetic_base_info = merge_view_inputs(
-        flat_args, _fw_metadata.input_info, is_inference=False,
+        flat_args, fw_metadata.input_info, is_inference=False,
     )
 
     # pre-compute, so we can bail out quickly in the hotpath
     metadata_ = CompiledRuntimeMetadata(
         synthetic_base_info=_synthetic_base_info,
-        fw_metadata=_fw_metadata,
+        fw_metadata=fw_metadata,
     )
 
-    assert len(_fw_metadata.requires_grad_info) == metadata_.num_mutated_inputs + metadata_.num_outputs
+    assert len(fw_metadata.requires_grad_info) == metadata_.num_mutated_inputs + metadata_.num_outputs
 
     joint_forward_backward = create_forward_or_joint_functionalized(
         flat_fn,
@@ -2147,7 +2173,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
-            num_inner_fwd_outputs = metadata_.num_mutated_inputs + metadata_.num_outputs + _fw_metadata.num_intermediate_bases
+            num_inner_fwd_outputs = metadata_.num_mutated_inputs + metadata_.num_outputs + fw_metadata.num_intermediate_bases
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
@@ -2542,6 +2568,12 @@ def create_aot_dispatcher_function(
             any([x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)])
             and torch.is_grad_enabled()
         )
+        with enable_python_dispatcher():
+            fw_metadata = run_functionalized_fw_and_collect_metadata(
+                flat_fn,
+                keep_input_mutations=aot_config.keep_inference_input_mutations and not needs_autograd,
+            )(*fake_flat_args)
+
         # crappy version of dispatcher
         # TODO: Do this properly
         if needs_autograd:
@@ -2549,7 +2581,7 @@ def create_aot_dispatcher_function(
         else:
             compiler_fn = aot_dispatch_base
 
-        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
+        compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn, fw_metadata=fw_metadata)
         # You can put more passes here
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config)
