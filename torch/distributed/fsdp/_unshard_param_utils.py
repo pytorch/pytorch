@@ -21,7 +21,7 @@ from torch.distributed.fsdp._runtime_utils import (
     _unshard,
     _unshard_grads,
 )
-from ._utils import p_assert
+from torch.distributed.utils import _p_assert
 from .flat_param import FlatParamHandle
 
 FLAT_PARAM = "_flat_param"
@@ -336,7 +336,7 @@ def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
     Deregisters the original parameters; registers the ``FlatParameter``.
     """
     handles = _module_handles(state, module)
-    p_assert(
+    _p_assert(
         len(handles) <= 1,
         "Expects <=1 handle per FSDP instance; needs to be refactored "
         "for >1 handle (e.g. non-recursive wrapping)",
@@ -344,7 +344,7 @@ def _deregister_orig_params(state: _FSDPState, module: nn.Module) -> None:
     if not handles:
         return
     handle = handles[0]
-    p_assert(
+    _p_assert(
         handle._use_orig_params,
         f"Inconsistent `_use_orig_params` -- FSDP: {state._use_orig_params} "
         f"handle: {handle._use_orig_params}",

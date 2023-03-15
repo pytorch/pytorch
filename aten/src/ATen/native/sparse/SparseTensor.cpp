@@ -763,9 +763,43 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
                 "should match that of the `mask`. ",
                 "Got `self.sparse_dim() == ", t.sparse_dim(), "` != ",
                 "`mask.sparse_dim() == ", mask.sparse_dim(), "`.");
+
+    using OptTensor = c10::optional<Tensor>;
+
+    const auto wrapped_tensor = [](const Tensor& t,
+                                   const OptTensor& indices = c10::nullopt,
+                                   const OptTensor& values = c10::nullopt) -> Tensor {
+      auto res = at::empty({0}, t.options());
+      auto* res_sparse_impl = get_sparse_impl(res);
+      res_sparse_impl->raw_resize_(t.sparse_dim(), t.dense_dim(), t.sizes());
+      const auto res_indices = indices.has_value() ? *indices : t._indices();
+      const auto res_values = values.has_value() ? *values : t._values();
+      res_sparse_impl->set_indices_and_values_unsafe(res_indices, res_values);
+      res_sparse_impl->set_nnz_and_narrow(t._nnz());
+      res._coalesced_(false);
+      return res;
+    };
+
+    const auto lhs = [&]() -> Tensor {
+      if (t.is_coalesced()) {
+        return t;
+      } else {
+        const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
+        const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
+        const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
+        const auto res_values = t._values().index_select(0, argsort_indices_hash);
+        // NOTE: res is not necessariy coalesced, but it is sorted.
+        // We mark it as "coalesced" to skip sorting in the intersection kernel.
+        auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
+        return res;
+      }
+    }();
+
+    const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
+
     auto res = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(res.device().type(), res, t, mask);
-    return res;
+    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs);
+    return res._coalesced_(mask.is_coalesced());
   }
 
   const auto mask_values = mask._values();

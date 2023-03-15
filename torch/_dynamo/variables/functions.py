@@ -3,12 +3,14 @@ import enum
 import functools
 import inspect
 import itertools
+import sys
 import types
 from typing import Dict, List
 
 import torch
 
 from .. import variables
+from ..allowed_functions import is_allowed, is_builtin_callable
 from ..bytecode_transformation import create_instruction
 from ..exc import unimplemented
 from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
@@ -45,6 +47,10 @@ def wrap_bound_arg(tx, val, options, source=None):
         val, (torch.Size, torch.device, torch.dtype)
     ):
         return variables.ConstantVariable(val, **options)
+    elif is_builtin_callable(val):
+        return variables.BuiltinVariable(val, source=source, **options)
+    elif is_allowed(val):
+        return variables.TorchVariable(val, source=source, **options)
     elif isinstance(val, types.FunctionType):
         return variables.UserFunctionVariable(val, source=source, **options)
     elif isinstance(val, enum.Enum):
@@ -112,7 +118,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.is_constant = False
 
         assert isinstance(
-            fn, types.FunctionType
+            fn, (types.FunctionType, torch.jit.ScriptFunction)
         ), f"expected FunctionType found {typestr(fn)} {fn}"
         # unpack @torch._dynamo.optimize()(fn) wrapped function
         fn = inspect.getattr_static(fn, "_torchdynamo_inline", fn)
@@ -472,5 +478,6 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             flags |= 0x08
             codegen(self.closure)
         codegen(self.code)
-        codegen(self.fn_name)
+        if sys.version_info < (3, 11):
+            codegen(self.fn_name)
         return [create_instruction("MAKE_FUNCTION", flags)]

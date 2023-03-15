@@ -135,29 +135,24 @@ if sys.platform == 'win32':
     kernel32.SetErrorMode(prev_error_mode)
 
 
-def _preload_cuda_deps():
-    """Preloads cudnn/cublas deps if they could not be found otherwise."""
+def _preload_cuda_deps(lib_folder, lib_name):
+    """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    cublas_path = None
-    cudnn_path = None
+    import glob
+    lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
         if not os.path.exists(nvidia_path):
             continue
-        candidate_cublas_path = os.path.join(nvidia_path, 'cublas', 'lib', 'libcublas.so.11')
-        if os.path.exists(candidate_cublas_path) and not cublas_path:
-            cublas_path = candidate_cublas_path
-        candidate_cudnn_path = os.path.join(nvidia_path, 'cudnn', 'lib', 'libcudnn.so.8')
-        if os.path.exists(candidate_cudnn_path) and not cudnn_path:
-            cudnn_path = candidate_cudnn_path
-        if cublas_path and cudnn_path:
+        candidate_lib_paths = glob.glob(os.path.join(nvidia_path, lib_folder, 'lib', lib_name))
+        if candidate_lib_paths and not lib_path:
+            lib_path = candidate_lib_paths[0]
+        if lib_path:
             break
-    if not cublas_path or not cudnn_path:
-        raise ValueError(f"cublas and cudnn not found in the system path {sys.path}")
-
-    ctypes.CDLL(cublas_path)
-    ctypes.CDLL(cudnn_path)
+    if not lib_path:
+        raise ValueError(f"{lib_name} not found in the system path {sys.path}")
+    ctypes.CDLL(lib_path)
 
 
 # See Note [Global dependencies]
@@ -172,11 +167,26 @@ def _load_global_deps():
     try:
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
-        # Can only happen of wheel with cublas as PYPI deps
-        # As PyTorch is not purelib, but nvidia-cublas-cu11 is
-        if 'libcublas.so.11' not in err.args[0]:
+        # Can only happen for wheel with cuda libs as PYPI deps
+        # As PyTorch is not purelib, but nvidia-*-cu11 is
+        cuda_libs: Dict[str, str] = {
+            'cublas': 'libcublas.so.*[0-9]',
+            'cudnn': 'libcudnn.so.*[0-9]',
+            'cuda_nvrtc': 'libnvrtc.so.*[0-9].*[0-9]',
+            'cuda_runtime': 'libcudart.so.*[0-9].*[0-9]',
+            'cuda_cupti': 'libcupti.so.*[0-9].*[0-9]',
+            'cufft': 'libcufft.so.*[0-9]',
+            'curand': 'libcurand.so.*[0-9]',
+            'cusolver': 'libcusolver.so.*[0-9]',
+            'cusparse': 'libcusparse.so.*[0-9]',
+            'nccl': 'libnccl.so.*[0-9]',
+            'nvtx': 'libnvToolsExt.so.*[0-9]',
+        }
+        is_cuda_lib_err = [lib for lib in cuda_libs.values() if(lib.split('.')[0] in err.args[0])]
+        if not is_cuda_lib_err:
             raise err
-        _preload_cuda_deps()
+        for lib_folder, lib_name in cuda_libs.items():
+            _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
@@ -236,9 +246,12 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        return builtins.bool(self != 0)
 
     def __int__(self):
+        return self.node.int_()
+
+    def __index__(self):
         return self.node.int_()
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
@@ -278,8 +291,6 @@ class SymFloat:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -327,14 +338,15 @@ class SymBool:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __int__(self):
+        return builtins.int(self.node.bool_())
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
@@ -1313,7 +1325,6 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
-
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -1327,7 +1338,7 @@ class _TorchCompileInductorWrapper:
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
                 options or ()
-            ), "triton.cudagraphs does not support dynamic shapes"
+            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1337,17 +1348,8 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode == "reduce-overhead":
-            self.apply_options({
-                "triton.cudagraphs": True,
-                "size_asserts": False,
-            })
-        elif mode == "max-autotune":
-            self.apply_options({
-                "epilogue_fusion": True,
-                "max_autotune": True,
-                "triton.cudagraphs": True,
-            })
+        elif mode in ("reduce-overhead", "max-autotune"):
+            self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
@@ -1395,13 +1397,29 @@ def compile(model: Optional[Callable] = None, *,
        fullgraph (bool): Whether it is ok to break model into several subgraphs
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
+        - "inductor" is the default backend, which is a good balance between performance and overhead
+        - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+        - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       options (dict): A dictionary of options to pass to the backend.
+        - "default" is the default mode, which is a good balance between performance and overhead
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+       options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+        - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+        - `max_autotune` which will profile to pick the best matmul configuration
+        - `fallback_random` which is useful when debugging accuracy issues
+        - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+        - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+        - `trace.enabled` which is the most useful debugging flag to turn on
+        - `trace.graph_diagram` which will show you a picture of your graph after fusion
+        - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 

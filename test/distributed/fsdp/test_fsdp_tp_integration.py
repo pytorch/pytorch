@@ -2,24 +2,24 @@
 import copy
 import sys
 from collections import OrderedDict
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
-import torch.distributed._shard.sharding_spec as shard_spec
 from torch import distributed as dist
-from torch.distributed._shard import shard_module
-from torch.distributed._shard.sharded_tensor.api import Shard, ShardedTensor
-from torch.distributed._shard.sharding_plan import ShardingPlan
+from torch.distributed._shard.sharded_tensor.api import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
-from torch.distributed.fsdp._common_utils import _set_fsdp_flattened
-from torch.distributed.fsdp._fsdp_extensions import _set_fsdp_extensions, FSDPExtensions
-from torch.distributed.fsdp._shard_utils import _create_chunk_sharded_tensor
+from torch.distributed._tensor import DeviceMesh, DTensor as DT
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
     StateDictType,
 )
-from torch.distributed.remote_device import _remote_device
+from torch.distributed.tensor.parallel import (
+    PairwiseParallel,
+    PairwiseSequenceParallel,
+    parallelize_module,
+)
+from torch.distributed.tensor.parallel.fsdp import enable_2d_with_fsdp
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -39,122 +39,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-
-class STShardingInfo(NamedTuple):
-    """:class:`ShardedTensor` sharding information."""
-
-    sharding_spec: shard_spec.ShardingSpec
-    global_size: torch.Size
-    process_group: dist.ProcessGroup
-
-
-class ShardedTensorExtensions(FSDPExtensions):
-    def pre_flatten_transform(
-        self,
-        tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, Optional[Any]]:
-        if type(tensor) is ShardedTensor:
-            param_name_to_sharding_info = STShardingInfo(
-                tensor.sharding_spec(), tensor.size(), tensor._process_group
-            )
-            local_tensor = tensor.local_tensor()
-            return local_tensor, param_name_to_sharding_info
-        return tensor, None
-
-    def post_unflatten_transform(
-        self, tensor: torch.Tensor, param_name_to_sharding_info: STShardingInfo
-    ) -> torch.Tensor:
-        sharded_tensor = ShardedTensor._init_from_local_tensor(
-            tensor,
-            _rewrite_spec_if_needed(
-                param_name_to_sharding_info.sharding_spec,
-                tensor,
-                dist.get_rank(param_name_to_sharding_info.process_group),
-            ),
-            param_name_to_sharding_info.global_size,
-            process_group=param_name_to_sharding_info.process_group,
-        )
-        _set_fsdp_flattened(sharded_tensor)
-        return sharded_tensor
-
-    def chunk_tensor(
-        self,
-        tensor: torch.Tensor,
-        rank: int,
-        world_size: int,
-        num_devices_per_node: int,
-        pg: dist.ProcessGroup,
-    ) -> torch.Tensor:
-        if type(tensor) is ShardedTensor:
-            assert len(tensor.local_shards()) == 1
-
-            inner_param = tensor.local_tensor()
-            inner_st = _create_chunk_sharded_tensor(
-                inner_param,
-                rank,
-                world_size,
-                num_devices_per_node,
-                pg,
-            )
-
-            outer_local_shard = tensor.local_shards()[0]
-            shards: List[Shard] = [
-                Shard(inner_st, copy.deepcopy(outer_local_shard.metadata))
-            ]
-            st_meta = copy.deepcopy(tensor.metadata())
-            st_meta.tensor_properties.requires_grad = False
-
-            st_outer = ShardedTensor._init_from_local_shards_and_global_metadata(
-                shards,
-                sharded_tensor_metadata=st_meta,
-                process_group=tensor._process_group,
-                init_rrefs=False,
-            )
-            return st_outer
-        else:
-            return _create_chunk_sharded_tensor(
-                tensor, rank, world_size, num_devices_per_node, pg
-            )
-
-    def pre_load_state_dict_transform(
-        self,
-        tensor: torch.Tensor,
-    ) -> Tuple[torch.Tensor, List[Shard]]:
-        shards = tensor.local_shards()
-        if len(shards) == 1 and type(shards[0].tensor) is ShardedTensor:
-            tensor = shards[0].tensor
-            shards = tensor.local_shards()
-        return (tensor, shards if len(shards) > 0 else [])
-
-
-_set_fsdp_extensions(ShardedTensorExtensions())
-
-
-def _rewrite_spec_if_needed(
-    spec: shard_spec.ShardingSpec, tensor: torch.Tensor, rank: int
-):
-    """
-    Rewrites ``spec`` to match the device of ``tensor``.
-
-    Curerntly, ``FSDP.sharded_optim_state_dict` moves optimizer state to CPU
-    (without choice), so if the original ``ShardingSpec`` produces non-CPU
-    metadta, then the ST construction errors.
-    """
-    if not isinstance(spec, ChunkShardingSpec):
-        return spec
-    # Determine if we need to rewrite the spec
-    rewrite = False
-    for p in spec.placements:
-        if p.rank() == rank and p.device() != tensor.device:
-            rewrite = True
-            break
-    if rewrite:
-        spec = copy.deepcopy(spec)
-        for i, placement in enumerate(spec.placements):
-            if placement.rank() == rank and placement.device() != tensor.device:
-                spec.placements[i] = _remote_device(f"rank:{rank}/{tensor.device}")
-    return spec
 
 
 def _is_nested_tensor(val: Any) -> bool:
@@ -178,22 +62,8 @@ class SimpleModel(torch.nn.Module):
         return self.net3(self.net2(self.relu(self.net1(x))))
 
     @staticmethod
-    def module_sharding_plan(specs):
-        colwise_spec, rowwise_spec = specs[0], specs[1]
-        return ShardingPlan(
-            plan={
-                "net1.weight": colwise_spec,
-                "net2.weight": rowwise_spec,
-            },
-            output_plan={
-                "net2": colwise_spec,
-            },
-            return_local_tensor=["net2"],
-        )
-
-    @staticmethod
     def get_sharded_param_names() -> List[str]:
-        return ["net1.weight", "net2.weight"]
+        return ["net1.weight", "net1.bias", "net2.weight"]
 
     @staticmethod
     def get_non_sharded_param_names() -> List[str]:
@@ -234,22 +104,15 @@ class TestTPFSDPIntegration(FSDPTest):
         - 4 TP subprocess groups: [0, 1], [2, 3], [4, 5], [6, 7]
         - 2 FSDP subprocess groups: [0, 2, 4, 6], [1, 3, 5, 7]
         """
-        tp_ranks: List[List[int]] = []
-        fsdp_ranks: List[List[int]] = []
-        for rank in range(self.world_size):
-            tp_idx = rank // tensor_parallel_size
-            if len(tp_ranks) <= tp_idx:
-                tp_ranks.append([])
-            tp_ranks[tp_idx].append(rank)
-            fsdp_idx = rank % tensor_parallel_size
-            if len(fsdp_ranks) <= fsdp_idx:
-                fsdp_ranks.append([])
-            fsdp_ranks[fsdp_idx].append(rank)
-        tp_pgs = [dist.new_group(ranks) for ranks in tp_ranks]
-        fsdp_pgs = [dist.new_group(ranks) for ranks in fsdp_ranks]
-        tp_pg = tp_pgs[self.rank // tensor_parallel_size]
-        fsdp_pg = fsdp_pgs[self.rank % tensor_parallel_size]
-        return tp_pg, fsdp_pg
+        # 2-D mesh is [dp, tp]
+        twod_mesh = DeviceMesh(
+            device_type="cuda",
+            mesh=torch.arange(0, self.world_size).view(-1, tensor_parallel_size),
+        )
+
+        fsdp_pg = twod_mesh.get_dim_groups()[0]
+        tp_pg = twod_mesh.get_dim_groups()[1]
+        return twod_mesh, fsdp_pg, tp_pg
 
     def _get_chunk_sharding_spec(self, tp_world_size: int, tp_pg: dist.ProcessGroup):
         placements = [
@@ -360,6 +223,9 @@ class TestTPFSDPIntegration(FSDPTest):
         Tests training for TP + FSDP integration by comparing an FSDP-only
         model with a TP + FSDP model.
         """
+        self.assertTrue(
+            enable_2d_with_fsdp(), "FSDP 2d parallel integration not available"
+        )
         LR = 3e-5
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
@@ -381,14 +247,16 @@ class TestTPFSDPIntegration(FSDPTest):
         inp = torch.rand(*inp_size).cuda(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
-        tp_pg, fsdp_pg = self._get_sub_pgs(tensor_parallel_size)
+        mesh_2d, fsdp_pg, tp_pg = self._get_sub_pgs(tensor_parallel_size)
         fsdp_model = FSDP(
             model, process_group=self.process_group, cpu_offload=cpu_offload
         )
         # Shard with TP and then wrap with FSDP
-        sharding_specs = self._get_chunk_sharding_spec(tp_pg.size(), tp_pg)
-        sharding_plan = SimpleModel.module_sharding_plan(sharding_specs)
-        shard_module(tp_fsdp_model, sharding_plan, process_group=tp_pg)
+        tp_fsdp_model = parallelize_module(
+            tp_fsdp_model, mesh_2d, PairwiseSequenceParallel(), tp_mesh_dim=1
+        )
+        assert isinstance(tp_fsdp_model.net1.weight, DT)
+        assert isinstance(tp_fsdp_model.net2.weight, DT)
         tp_fsdp_model = FSDP(
             tp_fsdp_model, process_group=fsdp_pg, cpu_offload=cpu_offload
         )
@@ -441,14 +309,17 @@ class TestTPFSDPIntegration(FSDPTest):
     @skip_if_lt_x_gpu(4)
     def test_fsdp_tp_checkpoint_integration(self):
         """Tests checkpointing for TP + FSDP integration."""
+        self.assertTrue(
+            enable_2d_with_fsdp(), "FSDP 2d parallel integration not available"
+        )
         tensor_parallel_size = 2
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
-        tp_pg, fsdp_pg = self._get_sub_pgs(tensor_parallel_size)
+        mesh_2d, fsdp_pg, _ = self._get_sub_pgs(tensor_parallel_size)
         # Shard with TP and then wrap with FSDP
-        sharding_specs = self._get_chunk_sharding_spec(tp_pg.size(), tp_pg)
-        sharding_plan = SimpleModel.module_sharding_plan(sharding_specs)
-        shard_module(model, sharding_plan, process_group=tp_pg)
+        tp_fsdp_model = parallelize_module(
+            model, mesh_2d, PairwiseParallel(), tp_mesh_dim=1
+        )
         tp_fsdp_model = FSDP(model, process_group=fsdp_pg)
 
         # Check that we produce a nested ST from model state dict
@@ -456,7 +327,7 @@ class TestTPFSDPIntegration(FSDPTest):
             state_dict = tp_fsdp_model.state_dict()
             # TODO once 2D is out, validate the nesting
             self.assertTrue(_is_nested_tensor(state_dict["net1.weight"]))
-            self.assertFalse(_is_nested_tensor(state_dict["net1.bias"]))
+            self.assertFalse(_is_nested_tensor(state_dict["net3.bias"]))
             tp_fsdp_model.load_state_dict(state_dict)
 
         tp_fsdp_optim = torch.optim.Adam(tp_fsdp_model.parameters(), lr=0.0001)
@@ -476,7 +347,7 @@ class TestTPFSDPIntegration(FSDPTest):
             _is_nested_tensor(optim_state["state"]["net1.weight"]["exp_avg"])
         )
         self.assertFalse(
-            _is_nested_tensor(optim_state["state"]["net1.bias"]["exp_avg"])
+            _is_nested_tensor(optim_state["state"]["net3.bias"]["exp_avg"])
         )
 
 

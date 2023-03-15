@@ -39,7 +39,7 @@ from torch.testing._internal.common_utils import freeze_rng_state, run_tests, Te
     download_file, get_function_arglist, load_tests, skipIfMps,\
     TEST_WITH_UBSAN, IS_PPC, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
-    skipIfTorchDynamo, IS_WINDOWS
+    skipIfTorchDynamo, IS_WINDOWS, gcIfJetson
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, TEST_CUDNN_VERSION
 from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, CriterionTest, \
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
@@ -8119,6 +8119,23 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
+    @parametrize_test("no_batch_dim", [True, False])
+    @parametrize_test("affine", [True, False])
+    def test_instancenorm_raises_error_if_input_channels_is_not_num_features(self, device, instance_norm_cls, no_batch_dim, affine):
+        inst_norm = instance_norm_cls(4, affine=affine)
+        size = [2] * inst_norm._get_no_batch_dim()
+        if not no_batch_dim:
+            size = [3] + size
+        t = torch.randn(size)
+        if affine:
+            with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
+                inst_norm(t)
+        else:
+            with warnings.catch_warnings(record=True) as w:
+                inst_norm(t)
+            self.assertIn("which is not used because affine=False", str(w[0].message))
+
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -9625,6 +9642,7 @@ class TestNNDeviceType(NNTestCase):
                     )
 
     @onlyCUDA
+    @gcIfJetson
     def test_masked_softmax_devices_parity(self):
         # Test that softmax with mask type 0 (LxL attention mask), mask type 1 (BxL padding mask),
         # and mask type 2 (BxHxLxL generic mask) gives the same result on CPU and on CUDA.
@@ -10220,6 +10238,7 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @onlyCUDA
+    @gcIfJetson
     def test_upsamplingNearest3d_launch_config(self, device):
         m = nn.Upsample(scale_factor=2)
         inp = torch.rand(2**25, 1, 1, 1, 1, device=device)
