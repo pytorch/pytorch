@@ -996,7 +996,7 @@ def forward_or_joint(
             needed_outs.append(
                 out if out.shape == tangent.shape else out.view(tangent.shape)
             )
-            needed_tangents.append(tangent.requires_grad_(True))
+            needed_tangents.append(tangent)
 
     setup_stacktrace_preservation_hooks([out.grad_fn for out in needed_outs])
 
