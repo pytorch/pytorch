@@ -1486,6 +1486,11 @@ def merge(pr_num: int, repo: GitRepo,
         checks = pr.get_checkrun_conclusions()
         pending, failing = categorize_checks(checks, list(checks.keys()))
         ignore_current_checks_info = failing
+        if len(pending) == 0:
+            raise RuntimeError(
+                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use" +
+                "-f/--force instead."
+            )
 
     gh_post_pr_comment(
         org, project, pr.pr_num,
