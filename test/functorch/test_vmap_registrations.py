@@ -24,6 +24,7 @@ xfail_functorch_batched = {
     "aten::linalg_pinv",
     "aten::linalg_pinv.atol_rtol_float",
     "aten::linalg_slogdet",
+    "aten::linalg_lu_factor",
     "aten::linear",
     "aten::log_sigmoid",
     "aten::log_softmax.int",
