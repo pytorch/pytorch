@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import time
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -420,6 +420,10 @@ def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
+class LineContext(NamedTuple):
+    context: Any
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -427,19 +431,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -448,6 +460,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -467,7 +481,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -493,12 +509,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
