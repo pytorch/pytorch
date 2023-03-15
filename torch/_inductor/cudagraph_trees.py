@@ -336,10 +336,15 @@ class CUDAWarmupNode:
 
         # See: output_is_alias_of_static_inputs below. We should only be returning freshly created
         # storages in path_live_weakrefs.
-        existing_path_data_ptrs = {t.data_ptr() for t in self.path_live_weakrefs() if t()}
+        existing_path_data_ptrs = {
+            t.data_ptr() for t in self.path_live_weakrefs() if t()
+        }
         non_cudagraph_inps = set()
         for i in range(len(new_inputs)):
-            if new_inputs[i].untyped_storage().data_ptr() not in existing_path_data_ptrs:
+            if (
+                new_inputs[i].untyped_storage().data_ptr()
+                not in existing_path_data_ptrs
+            ):
                 non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
 
         if config.triton.debug_cudagraph_trees:
@@ -366,7 +371,9 @@ class CUDAWarmupNode:
 
         if config.triton.debug_cudagraph_trees:
             out_refs = self.path_live_weakrefs()
-            new_storages = [t for t in out_refs if t.data_ptr() not in non_cudagraph_inps]
+            new_storages = [
+                t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
+            ]
             check_memory_pool(self.cuda_graphs_pool, new_storages)
 
         return out
@@ -540,7 +547,6 @@ class CUDAGraphNode:
         self.checkpointed_caching_state: Optional[AllocatorState] = None
 
     def run(self, new_inputs):
-
         if config.triton.debug_cudagraph_trees:
             self.debug_check_invariants_before_invocation()
 
@@ -747,7 +753,9 @@ class CUDAGraphNode:
         for depth, outputs_liveness in enumerate(expected_liveness):
             for output_idx, output_liveness in enumerate(outputs_liveness):
                 # tensor can die early, but it can't be alive when it should be dead
-                assert output_liveness or not is_live(self.path_weakrefs[depth][output_idx])
+                assert output_liveness or not is_live(
+                    self.path_weakrefs[depth][output_idx]
+                )
 
         for depth, output_index in newly_dead:
             assert not is_live(self.path_weakrefs[depth][output_index])
@@ -774,7 +782,7 @@ class CUDAGraphNode:
 
         path = list(self._path_from_root)
         ptrs_to_deallocate = []
-        for (depth, output_index) in _get_different_indices:
+        for depth, output_index in _get_different_indices:
             ptrs_to_deallocate.append(
                 path[depth].outputs_metadata[output_index]["data_ptr"]
             )
@@ -783,7 +791,7 @@ class CUDAGraphNode:
 
     def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
         "Returns all live storages weakrefs that created by nodes in this path"
-        for (i, j) in self.live_indices_after_graph:
+        for i, j in self.live_indices_after_graph:
             out = self.path_weakrefs[i][j]
             if is_live(out):
                 yield out
@@ -1013,7 +1021,6 @@ class CUDAGraphTreeManager:
         self.debug_checkpointing_counter = 0
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
-
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
