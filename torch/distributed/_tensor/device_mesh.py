@@ -118,7 +118,7 @@ class DeviceMesh:
         # process (we need to know if the current global rank is in the mesh or not)
         default_pg = self._get_or_create_default_group()
         if init_process_groups:
-            self._dim_groups = self._init_process_groups(default_pg)
+            self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
         if not is_initialized():
@@ -144,7 +144,6 @@ class DeviceMesh:
                     f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
                 )
 
-
             _backend = "gloo" if self.device_type == "cpu" else "nccl"
             init_process_group(backend=_backend)
         else:
@@ -165,7 +164,8 @@ class DeviceMesh:
 
         return _get_default_group()
 
-    def _init_process_groups(self, default_pg):
+    def _init_process_groups(self):
+        default_pg = _get_default_group()
         self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
