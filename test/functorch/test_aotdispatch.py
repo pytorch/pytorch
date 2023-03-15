@@ -2040,8 +2040,8 @@ class TestPartitioning(AOTTestCase):
             a_sz = (x, a.size(0))
             return torch.cat([a.expand(a_sz), b, c])
         fw_graph, bw_graph = get_fw_bw_graph(f, inp, dynamic=True)
-        self.assertEqual(get_num_ins_outs(fw_graph), (3, 5))
-        self.assertEqual(get_num_ins_outs(bw_graph), (5, 3))
+        self.assertEqual(get_num_ins_outs(fw_graph), (3, 4))
+        self.assertEqual(get_num_ins_outs(bw_graph), (4, 3))
         _, outs = get_ins_outs(fw_graph)
         self.assertTrue(all([is_sym_node(n) for n in outs[1:]]))
 
@@ -2143,14 +2143,14 @@ class TestPartitioning(AOTTestCase):
         (compiled_outs[0].sum() + compiled_outs[2].sum()).backward()
         bw_graph = bw_graph_cell[0]
 
-        self.assertEqual(get_num_ins_outs(fw_graph), (4, 13))
-        self.assertEqual(get_num_ins_outs(bw_graph), (10, 4))
+        self.assertEqual(get_num_ins_outs(fw_graph), (4, 12))
+        self.assertEqual(get_num_ins_outs(bw_graph), (9, 4))
         _, fw_graph_out_nodes = get_ins_outs(fw_graph)
         self.assertEqual(
             # fw outputs include b.size() which expands to 2 symints,
             # then 4 tensors (transposes of matricies used for mm) are saved
-            # finally 4 symints are saved
-            [False, True, True, False, False] + [False] * 4 + [True] * 4,
+            # finally 3 symints are saved
+            [False, True, True, False, False] + [False] * 4 + [True] * 3,
             [is_sym_node(n) for n in fw_graph_out_nodes]
         )
 
@@ -2704,7 +2704,7 @@ def _test_aot_autograd_helper(self, device, dtype, op, dynamic=False):
             c_args, c_kwargs = pytree.tree_unflatten(cur_flat_args, args_spec)
             return op.op(*c_args, **c_kwargs)
 
-        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic)
+        compiled_f = compiled_function(f, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
         try:
             _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args)
         except GuardOnDataDependentSymNode:
