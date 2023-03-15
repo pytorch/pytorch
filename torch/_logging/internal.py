@@ -114,14 +114,16 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
     def _set_logs(**kwargs):
         for key, val in kwargs.items():
             if log_registry.is_artifact(key):
-                log_state.enable_artifact(key)
+                if val:
+                    log_state.enable_artifact(key)
             elif log_registry.is_log(key):
                 if val not in logging._levelToName:
                     raise ValueError(
                         f"Unrecognized log level for log {key}: {val}, valid level values "
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
-                log_state.enable_log(key, val)
+                if val != DEFAULT_LOG_LEVEL:
+                    log_state.enable_log(key, val)
             else:
                 # Check if it is a qualified name log
                 # if so, check that its root logger is parent

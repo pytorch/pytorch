@@ -8,24 +8,53 @@ import logging
 def log_settings(settings):
     return unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": settings})
 
+def kwargs_to_settings(**kwargs):
+    INT_TO_VERBOSITY = {10: "+", 20: "", 40: "-"}
+
+    settings = []
+    for name, val in kwargs.items():
+        if isinstance(val, bool):
+            settings.append(name)
+        elif isinstance(val, int):
+            if val in INT_TO_VERBOSITY:
+                settings.append(INT_TO_VERBOSITY[val] + name)
+        else:
+            raise ValueError("Invalid value for setting")
+
+    return ",".join(settings)
+
 
 # Note on testing strategy:
 # This class does two things:
-# 1. patches the env var log settings to some specific value
+# 1. Runs two versions of a test:
+#    1a. patches the env var log settings to some specific value
+#    1b. calls torch._logging.set_logs(..)
 # 2. patches the emit method of each setup handler to gather records
 # that are emitted to each console stream
 # 3. passes a ref to the gathered records to each test case for checking
 #
 # The goal of this testing in general is to ensure that given some settings env var
 # that the logs are setup correctly and capturing the correct records.
-def make_test(settings, log_names):
+
+
+
+def make_test(log_names, **kwargs):
     def wrapper(fn):
         def test_fn(self):
+            torch._dynamo.reset()
             records = []
-            with log_settings(settings):
+            # run with env var
+            with log_settings(kwargs_to_settings(**kwargs)):
                 torch._logging._init_logs()
                 with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
                     fn(self, records)
+
+            # run with API
+            torch._dynamo.reset()
+            records.clear()
+            torch._logging.set_logs(**kwargs)
+            with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
+                fn(self, records)
 
         return test_fn
 
