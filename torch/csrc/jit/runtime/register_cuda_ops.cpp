@@ -104,6 +104,20 @@ RegisterOperators const reg({
         // cuda::set_device has side effects.
         c10::AliasAnalysisKind::CONSERVATIVE),
     Operator(
+        "cuda::_maybe_exchange_device(int64_t index) -> int",
+        [](Stack& stack) {
+          int64_t idx = -1;
+          pop(stack, idx);
+          if (idx < 0) {
+            push(stack, -1);
+            return;
+          }
+          auto prev_idx = c10::cuda::current_device();
+          c10::cuda::MaybeSetDevice(static_cast<int>(idx));
+          push(stack, static_cast<int>(prev_idx));
+        },
+        c10::AliasAnalysisKind::CONSERVATIVE),
+    Operator(
         "cuda::_set_device(int64_t val) -> ()",
         [](Stack& stack) {
           int64_t idx = -1;
