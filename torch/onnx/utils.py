@@ -1352,7 +1352,7 @@ def unconvertible_ops(
     unsupported_ops = []
     for node in graph.nodes():
         domain_op = node.kind()
-        if domain_op.startswith("onnx::") or domain_op.startswith("prim::"):
+        if domain_op.startswith(("onnx::", "prim::")):
             # We consider onnx and prim ops as supported ops, even though some "prim"
             # ops are not implemented as symbolic functions, because they may be
             # eliminated in the conversion passes. Users may still see errors caused
