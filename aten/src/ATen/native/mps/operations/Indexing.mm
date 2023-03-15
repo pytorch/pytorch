@@ -424,7 +424,7 @@ Tensor flip_mps(const Tensor& self, IntArrayRef dims) {
   }
 
   // Nothing to do, we return fast
-  if (dims.size() == 0 || self.numel() <= 1) {
+  if (self.numel() <= 1 || ns_dims.count == 0) {
     result.copy_(self);
     return result;
   }
