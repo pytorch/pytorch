@@ -2240,6 +2240,7 @@
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
+  tags: core
 
 - func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -4321,7 +4322,7 @@
   autogen: rand.generator_with_names_out
 
 - func: rand(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: rand
 
@@ -4403,7 +4404,7 @@
   autogen: randint_like.low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: randn
 
@@ -4439,7 +4440,7 @@
   dispatch:
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randn_like
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6087,7 +6088,7 @@
   dispatch:
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: zeros_like
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: zeros_like
   autogen: zeros_like.out
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
@@ -6359,6 +6360,7 @@
     SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
+    NestedTensorCPU, NestedTensorCUDA: zero_nested_
   autogen: zero, zero.out
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -9644,6 +9646,7 @@
     MPS: normal_mps_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: normal_nested_
   autogen: normal.out
 
 # Only used by the functionalization pass.
@@ -13935,6 +13938,7 @@
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
 
+# THIS FUNCTION iS DEPRECATED AND SHOULD BE REMOVED
 - func: _chunk_grad_outputs_efficient_attention(Tensor query, Tensor key, Tensor value, bool is_causal=False) -> bool
   dispatch:
     CUDA: _chunk_grad_outputs_efficient_attention

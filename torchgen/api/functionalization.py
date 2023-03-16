@@ -69,6 +69,7 @@ reapply_views_binding = Binding(
     default=None,
 )
 
+
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
 def name(
