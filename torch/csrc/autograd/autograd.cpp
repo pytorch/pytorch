@@ -24,7 +24,7 @@ namespace autograd {
 // maintain the logic equality of this file and the python file together if one
 // changes.
 // TODO: Make the Python API above to just call this C++ API.
-variable_list _make_grads(
+static variable_list _make_grads(
     const variable_list& outputs,
     const variable_list& grad_outputs) {
   size_t num_tensors = outputs.size();
@@ -88,7 +88,7 @@ variable_list _make_grads(
   }
   return new_grads;
 }
-variable_list run_backward(
+static variable_list run_backward(
     const variable_list& outputs,
     const variable_list& grad_outputs,
     bool keep_graph,
