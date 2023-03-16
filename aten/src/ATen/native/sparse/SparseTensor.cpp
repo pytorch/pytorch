@@ -780,25 +780,31 @@ SparseTensor sparse_mask(const Tensor& t, const SparseTensor& mask) {
       return res;
     };
 
-    const auto lhs = [&]() -> Tensor {
+    using OptTensor = c10::optional<Tensor>;
+    Tensor lhs;
+    OptTensor lhs_hash_opt;
+
+    std::tie(lhs, lhs_hash_opt) = [&]() -> auto {
       if (t.is_coalesced()) {
-        return t;
+        return std::make_tuple(t, static_cast<OptTensor>(c10::nullopt));
       } else {
         const auto indices_hash = at::sparse::flatten_indices(t._indices(), t.sizes());
         const auto argsort_indices_hash = std::get<1>(indices_hash.sort(0));
+        // Probably worth having a dedicated kernel for.
         const auto res_indices = t._indices().index_select(1, argsort_indices_hash);
         const auto res_values = t._values().index_select(0, argsort_indices_hash);
+        const auto indices_hash_sorted = indices_hash.index_select(0, argsort_indices_hash);
         // NOTE: res is not necessariy coalesced, but it is sorted.
         // We mark it as "coalesced" to skip sorting in the intersection kernel.
         auto res = wrapped_tensor(t, res_indices, res_values)._coalesced_(true);
-        return res;
+        return std::make_tuple(res, static_cast<OptTensor>(indices_hash_sorted));
       }
     }();
 
     const auto rhs = mask.is_coalesced() ? wrapped_tensor(mask) : mask;
 
     auto res = at::empty({0}, t.options());
-    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs);
+    sparse_mask_intersection_out_stub(res.device().type(), res, lhs, rhs, lhs_hash_opt);
     return res._coalesced_(mask.is_coalesced());
   }
 

@@ -36,8 +36,7 @@ void FloatToFused8BitRowwiseQuantized__base(
     output_row_scale_bias[0] = range / 255.0f;
     output_row_scale_bias[1] = minimum_element;
     const auto inverse_scale = 255.0f / (range + kEpsilon);
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (std::size_t col = 0; col < input_columns; ++col) {
+    for (std::size_t col = 0; col < static_cast<size_t>(input_columns); ++col) {
       output_row[col] =
           std::lrintf((input_row[col] - minimum_element) * inverse_scale);
     }
@@ -58,8 +57,7 @@ void Fused8BitRowwiseQuantizedToFloat__base(
         reinterpret_cast<const float*>(input_row + output_columns);
     float* output_row = output + row * output_columns;
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (std::size_t col = 0; col < output_columns; ++col) {
+    for (std::size_t col = 0; col < static_cast<std::size_t>(output_columns); ++col) {
       output_row[col] =
           // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
           input_row[col] * input_row_scale_bias[0] + input_row_scale_bias[1];
@@ -136,8 +134,7 @@ void FloatToFusedNBitRowwiseQuantizedSBHalf__base(
 
     output_row_scale_bias[0] = scale;
     output_row_scale_bias[1] = minimum_element;
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (std::size_t col = 0; col < input_columns; ++col) {
+    for (std::size_t col = 0; col < static_cast<size_t>(input_columns); ++col) {
       float X = input_row[col];
       std::uint8_t quantized = std::max(
           0,
@@ -165,7 +162,7 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
       // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
       (input_columns - 2 * sizeof(at::Half)) * num_elem_per_byte;
 
-  for (std::size_t row = 0; row < input_rows; ++row) {
+  for (std::size_t row = 0; row < static_cast<size_t>(input_rows); ++row) {
     const std::uint8_t* input_row = input + row * input_columns;
     const at::Half* input_row_scale_bias = reinterpret_cast<const at::Half*>(
         input_row +
@@ -174,8 +171,7 @@ void FusedNBitRowwiseQuantizedSBHalfToFloat__base(
     float bias = input_row_scale_bias[1];
     float* output_row = output + row * output_columns;
 
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (std::size_t col = 0; col < output_columns; ++col) {
+    for (std::size_t col = 0; col < static_cast<std::size_t>(output_columns); ++col) {
       std::uint8_t quantized = input_row[col / num_elem_per_byte];
       quantized >>= (col % num_elem_per_byte) * bit_rate;
       quantized &= (1 << bit_rate) - 1;

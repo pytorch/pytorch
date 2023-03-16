@@ -1535,7 +1535,6 @@ class TritonScheduling:
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
-
             if current_loop_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
