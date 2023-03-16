@@ -1,4 +1,4 @@
-TorchDynamo Overview
+Technical Overview
 ====================
 
 **TorchDynamo** is a Python-level JIT compiler designed to make unmodified
@@ -34,12 +34,7 @@ dev-discuss <https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-co
 
 .. toctree::
    :maxdepth: 1
-   :hidden:
 
-   installation
-   get-started
    guards-overview
    custom-backends
    deep-dive
-   troubleshooting
-   faq
