@@ -1006,13 +1006,17 @@ bool isNamedTupleClass(const py::object& obj) {
   return is_tuple_class == 1 && py::hasattr(obj, "_fields");
 }
 
-TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
+TypePtr registerNamedTuple(
+    const py::object& obj,
+    const SourceRange& loc,
+    const ResolutionCallback& rcb) {
   TORCH_INTERNAL_ASSERT(isNamedTupleClass(obj));
   auto qualifiedName = c10::QualifiedName(py::cast<std::string>(
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
-  py::object props = py::module::import("torch._jit_internal")
-                         .attr("_get_named_tuple_properties")(obj, loc);
+  py::object props =
+      py::module::import("torch._jit_internal")
+          .attr("_get_named_tuple_properties")(obj, loc, py::cpp_function(rcb));
 
   std::string unqualName;
   std::vector<std::string> field_names;
@@ -1290,7 +1294,10 @@ std::shared_ptr<SugaredValue> toSugaredValue(
   }
 
   if (isNamedTupleClass(obj)) {
-    auto tuple_type = registerNamedTuple(obj, loc)->expect<TupleType>();
+    auto fakeRcb =
+        py::module::import("torch.jit.annotations").attr("_fake_rcb");
+    auto tuple_type =
+        registerNamedTuple(obj, loc, fakeRcb)->expect<TupleType>();
     return std::make_shared<NamedTupleConstructor>(tuple_type);
   }
 
