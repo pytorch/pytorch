@@ -1065,8 +1065,12 @@ class TorchPyOperator(VariableTracker):
             )
 
             # Make sure there is no side_effects in both subraphs
-            assert cond_cmp.output.side_effects.is_empty(), f"cond_fun has side_effects {cond_cmp.output.side_effects}"
-            assert body_cmp.output.side_effects.is_empty(), f"body_fun has side_effects {body_cmp.output.side_effects}"
+            assert (
+                cond_cmp.output.side_effects.is_empty()
+            ), f"cond_fun has side_effects {cond_cmp.output.side_effects}"
+            assert (
+                body_cmp.output.side_effects.is_empty()
+            ), f"body_fun has side_effects {body_cmp.output.side_effects}"
 
             cond_node = make_attr(cond_name)
             body_node = make_attr(body_name)
@@ -1077,7 +1081,9 @@ class TorchPyOperator(VariableTracker):
                 [a.as_proxy() for a in sub_args],
             )
 
-            example_value = [proxy.node.meta["example_value"] for proxy in body_r.as_proxy()]
+            example_value = [
+                proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
+            ]
         else:
             unimplemented(f"PyOperator {self.value.__name__}")
 

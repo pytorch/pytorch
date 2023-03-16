@@ -1583,7 +1583,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         out_graph, _ = torch._dynamo.export(mod, pred_x, x)
         self.assertEqual(real_result, out_graph(pred_y, y))
-    
+
     @config.patch(dynamic_shapes=True)
     def test_export_with_while_loop(self):
         from functorch.experimental.control_flow import while_loop
@@ -1599,14 +1599,17 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                     val_ = val.view(3, 2) + 2
                     val_.add_(-1)
                     return (iter - 1, val_.view(2, 3))
+
                 return while_loop(cond_fun, body_fun, input)
-            
+
         mod = Module()
         iter = torch.tensor(5)
         val = torch.zeros(2, 3)
         input = (iter, val)
         out_graph, _ = torch._dynamo.export(mod, input)
-        out_graph_symbolic, _ = torch._dynamo.export(mod, input, aten_graph=True, tracing_mode="symbolic")
+        out_graph_symbolic, _ = torch._dynamo.export(
+            mod, input, aten_graph=True, tracing_mode="symbolic"
+        )
         expected = mod(input)
         self.assertEqual(expected, out_graph(input))
         self.assertEqual(expected, out_graph_symbolic(input))
@@ -1629,6 +1632,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 def outter_fun(iter, inner_iter, val):
                     _, val = while_loop(inner_cond_fun, inner_fun, (inner_iter, val))
                     return (iter - 1, inner_iter.clone(), val)
+
                 return while_loop(outter_cond_fun, outter_fun, input)
 
         mod = Module()
@@ -1637,11 +1641,12 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         input = (iter, inner_iter, torch.zeros(2, 3))
         out_graph, _ = torch._dynamo.export(mod, input)
         out_graph, _ = torch._dynamo.export(mod, input)
-        out_graph_symbolic, _ = torch._dynamo.export(mod, input, aten_graph=True, tracing_mode="symbolic")
+        out_graph_symbolic, _ = torch._dynamo.export(
+            mod, input, aten_graph=True, tracing_mode="symbolic"
+        )
         expected = mod(input)
         self.assertEqual(expected, out_graph(input))
         self.assertEqual(expected, out_graph_symbolic(input))
-
 
     @config.patch(dynamic_shapes=True)
     def test_export_with_map_zero_sized_tensor(self):
