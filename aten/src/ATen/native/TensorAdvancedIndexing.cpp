@@ -5,7 +5,7 @@
 //  index(Tensor self, indices) -> Tensor
 //  index_put_(Tensor self, indices, value, accumulate=false)
 //
-// The index is a TensorList containg kLong, kBool or kByte tensors or nulls. Byte
+// The index is a TensorList containing kLong, kBool or kByte tensors or nulls. Byte
 // tensors (boolean masks) are expanded to long tensors via nonzero(). Null
 // tensors signify that the dimension is not indexed.
 //
@@ -1195,7 +1195,7 @@ Tensor & index_select_out_cpu_(const Tensor & self, int64_t dim, const Tensor & 
   dim = maybe_wrap_dim(dim, self.dim());
   auto numel = index.numel();
   TORCH_CHECK_INDEX(index.dim() <= 1, "index_select(): Index is supposed to be a vector");
-  TORCH_CHECK(!(self.dim() == 0 && index.numel() > 1), "index_select(): Index to scalar cannot have multiple values.");
+  TORCH_CHECK(!(self.dim() == 0 && numel != 1), "index_select(): Index to scalar can have only 1 value, got ", numel, " value(s)");
   TORCH_CHECK(index.scalar_type() == ScalarType::Long || index.scalar_type() == ScalarType::Int, "index_select(): Expected dtype int32 or int64 for index");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "index_select(): self and result must have the same scalar type");
@@ -1768,10 +1768,8 @@ Tensor masked_scatter(const Tensor & self, const Tensor & mask, const Tensor & s
 
 static Tensor & masked_fill_impl_cpu(Tensor & self, const Tensor & mask, const Scalar& value) {
   NoNamesGuard guard;
-  if (mask.dtype() == ScalarType::Byte) {
-    TORCH_WARN("masked_fill_ received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
+  TORCH_CHECK(mask.dtype() == ScalarType::Bool, "masked_fill_ only supports boolean masks, but got mask "
+      "with dtype ", mask.dtype());
 
   if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
@@ -1842,19 +1840,14 @@ Tensor masked_fill(const Tensor & self, const Tensor & mask, const Tensor & sour
 static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self, const Tensor & mask) {
   NoNamesGuard guard;
 
-  TORCH_CHECK(mask.scalar_type() == ScalarType::Byte || mask.scalar_type() == ScalarType::Bool,
-              "masked_select: expected BoolTensor or ByteTensor for mask");
+  TORCH_CHECK(mask.scalar_type() == ScalarType::Bool,
+              "masked_select: expected BoolTensor for mask");
   TORCH_CHECK(self.scalar_type() == result.scalar_type(),
               "masked_select(): self and result must have the same scalar type");
 
   at::assert_no_internal_overlap(result);
   at::assert_no_overlap(result, self);
   at::assert_no_overlap(result, mask);
-
-  if (mask.dtype() == at::ScalarType::Byte) {
-    TORCH_WARN("masked_select received a mask with dtype torch.uint8, this behavior is now deprecated," \
-            "please use a mask with dtype torch.bool instead.");
-  }
 
   c10::MaybeOwned<Tensor> _mask, _self;
   std::tie(_mask, _self) = expand_outplace(mask, self);
@@ -1880,7 +1873,7 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   _self->is_contiguous() && _mask->is_contiguous();
   if (use_serial_kernel) {
     auto iter = TensorIteratorConfig()
-      .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+      .set_check_mem_overlap(false)  // result is intentionally zero-strided above
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(result_strided)
@@ -1899,12 +1892,12 @@ static Tensor & masked_select_out_impl_cpu(Tensor & result, const Tensor & self,
   auto mask_long_data = mask_long.data_ptr<int64_t>();
   auto mask_prefix_sum_data = mask_prefix_sum.data_ptr<int64_t>();
   // TODO: Here can only use std::partial_sum for C++14,
-  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better peformance.
+  // use std::exclusive_scan when PyTorch upgrades to C++17, which have better performance.
   // std::exclusive_scan(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data, 0);
   std::partial_sum(mask_long_data, mask_long_data + mask_long.numel(), mask_prefix_sum_data);
 
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // result is intenionally zero-strided above
+    .set_check_mem_overlap(false)  // result is intentionally zero-strided above
     .check_all_same_dtype(false)
     .resize_outputs(false)
     .add_output(result_strided)
@@ -2024,25 +2017,25 @@ Tensor& take_along_dim_out(const Tensor& self, const Tensor& indices, c10::optio
 
 Tensor _gather_sparse_backward(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& grad){
 // special case scalar input and/or index
-    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(at::empty({0,grad.numel()}, index.options()), grad, self.sizes());
-    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe(index.view({1,1}), grad, self.sizes());
-    Tensor sparse_ind = at::empty({self.ndimension(), grad.numel()}, self.options().dtype(at::kLong));
-    int64_t grad_numel = grad.numel();
+    if (self.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(at::empty_symint({0,grad.sym_numel()}, index.options()), grad, self.sym_sizes());
+    if (grad.ndimension() == 0) return at::_sparse_coo_tensor_unsafe_symint(index.view({1,1}), grad, self.sym_sizes());
+    Tensor sparse_ind = at::empty_symint({self.ndimension(), grad.sym_numel()}, self.options().dtype(at::kLong));
+    SymInt grad_numel = grad.sym_numel();
     if (grad_numel > 0) {
-      int64_t n_above = grad_numel;
-      int64_t n_below = 1;
+      SymInt n_above = grad_numel;
+      SymInt n_below = 1;
       if (dim < 0) dim += self.ndimension();
       for (const auto i : c10::irange(self.ndimension())) {
-          n_above /= grad.size(i);
+          n_above /= grad.sym_size(i);
           if (i == dim) {
               sparse_ind[i] = index.reshape(-1);
           } else {
-              sparse_ind[i] = at::arange(grad.size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand({grad.size(i), n_above}).reshape(-1).repeat(n_below);
+              sparse_ind[i] = at::arange(grad.sym_size(i),self.options().dtype(at::kLong)).unsqueeze(1).expand_symint({grad.sym_size(i), n_above}).reshape(-1).repeat_symint(n_below);
           }
-          n_below *= grad.size(i);
+          n_below *= grad.sym_size(i);
       }
     }
-    return at::_sparse_coo_tensor_unsafe(sparse_ind, grad.reshape(-1), self.sizes());
+    return at::_sparse_coo_tensor_unsafe_symint(sparse_ind, grad.reshape(-1), self.sym_sizes());
 }
 
 template <typename scalar_t>
