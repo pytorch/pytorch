@@ -12,14 +12,12 @@ from torch.testing._internal import common_utils
 
 
 class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
-
     # opset version is
     # 1. local function is supported after opset 15
     # 2. onnx-script requires users to determine opset in local function
     opset_version = 15
 
     def test_selu_from_onnxscript_example(self):
-
         x = torch.randn(1, 2, 3, 4, requires_grad=True)
         model = torch.nn.SELU()
 
@@ -52,7 +50,6 @@ class TestONNXScriptRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, x)
 
     def test_layer_norm(self):
-
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
         z = torch.randn(2, 3)

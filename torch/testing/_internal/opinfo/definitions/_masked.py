@@ -29,6 +29,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.opinfo.utils import prod_numpy, reference_reduction_numpy
 
+
 # Used for log_softmax, softmax, softmin
 def sample_inputs_softmax_variant(
     op_info,

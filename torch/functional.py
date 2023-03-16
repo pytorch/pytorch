@@ -473,6 +473,7 @@ else:
             `torch.meshgrid` is commonly used to produce a grid for
             plotting.
             >>> # xdoctest: +REQUIRES(module:matplotlib)
+            >>> # xdoctest: +REQUIRES(env:DOCTEST_SHOW)
             >>> import matplotlib.pyplot as plt
             >>> xs = torch.linspace(-5, 5, steps=100)
             >>> ys = torch.linspace(-5, 5, steps=100)

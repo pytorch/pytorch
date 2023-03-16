@@ -503,7 +503,8 @@ GraphEncoder::GraphEncoder(
   model_proto_.set_producer_name("pytorch");
   TORCH_CHECK(
       onnx_opset_version > 0 &&
-          onnx_opset_version < kOpsetVersionToIRVersion.size() &&
+          static_cast<size_t>(onnx_opset_version) <
+              kOpsetVersionToIRVersion.size() &&
           kOpsetVersionToIRVersion[onnx_opset_version] != kInvalidOpsetVersion,
       "Unsupported onnx_opset_version: ",
       onnx_opset_version);
