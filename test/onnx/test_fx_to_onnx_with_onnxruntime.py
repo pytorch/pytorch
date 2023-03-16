@@ -11,13 +11,12 @@ from typing import Any, Callable, Sequence, Tuple, Union
 import onnx.reference
 import onnx_test_common
 import onnxruntime  # type: ignore[import]
-import transformers  # type: ignore[import]
 
 import torch
+import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx._internal import diagnostics
-from torch.onnx._internal import fx as fx_onnx
+from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
 
@@ -163,13 +162,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
         # Test with only positional args.
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x, 8.0)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x, 8.0))
         # Test while specifying optional kwarg.
-        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,), b=5.0
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,), b=5.0)
 
     def test_mnist(self):
         class MNISTModel(nn.Module):

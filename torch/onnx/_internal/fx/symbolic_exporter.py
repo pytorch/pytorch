@@ -182,6 +182,8 @@ def export_without_parameters_and_buffers(
     Tuple[Any, ...],
     Tuple[torch.Tensor, ...],
 ]:
+    # TODO: Migrate to `DynamoExport` frontend after fake model tracing is supported.
+    # Proposal at https://github.com/pytorch/pytorch/issues/95900.
     graph_module, bound_args = _trace_into_fx_graph_via_fx_symbolic_trace(
         module, *args, **kwargs
     )
