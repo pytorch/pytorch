@@ -5725,29 +5725,33 @@ class CommonTemplate:
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
 
         device = "cpu"
-        for name in [
-            "test_as_strided",  # buffer reuse
-            "test_bitwise",  # int32
-            "test_bmm1",
-            "test_bmm2",
-            "test_cat",  # alias
-            "test_linear1",
-            "test_linear2",
-            "test_lowmem_dropout1",  # None as output
-            "test_mm_views",
-            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
-            "test_reduction1",  # Reduction
-            "test_relu",  # multiple inputs
-            "test_silu",  # single input, single output
-            "test_sum_dtype",  # float64
-            "test_sum_int",  # bool, int64, int8, uint8
-            "test_transpose",  # multiple outputs, buffer clear
+        for name, supported in [
+            ["test_as_strided", True],  # buffer reuse
+            ["test_bitwise", True],  # int32
+            ["test_bmm1", True],
+            ["test_bmm2", True],
+            ["test_cat", True],  # alias
+            ["test_linear1", True],
+            ["test_linear2", True],
+            ["test_lowmem_dropout1", True],  # None as output
+            ["test_mm_views", True],
+            [
+                "test_profiler_mark_wrapper_call",
+                False,
+            ],  # TODO: fallback to default wrapper for now
+            ["test_reduction1", True],  # Reduction
+            ["test_relu", True],  # multiple inputs
+            ["test_silu", True],  # single input, single output
+            ["test_sum_dtype", True],  # float64
+            ["test_sum_int", True],  # bool, int64, int8, uint8
+            ["test_transpose", True],  # multiple outputs, buffer clear
         ]:
             test_name = f"{name}_{device}"
             assert hasattr(self, test_name), "undefined function"
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
-            func()
+            code = run_and_get_cpp_code(func, [])
+            self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
