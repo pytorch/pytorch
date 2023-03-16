@@ -12,7 +12,7 @@ AOT_AUTOGRAD_NAME = "aot"
 
 # (optional) register log with shorthand name
 register_log(TORCHDYNAMO_NAME, TORCHDYNAMO_LOG_NAME)
-register_log(AOT_AUTOGRAD_NAME, AOT_AUTOGRAD_LOG_NAME, has_verbosity=False)
+register_log(AOT_AUTOGRAD_NAME, AOT_AUTOGRAD_LOG_NAME)
 register_log(TORCHINDUCTOR_NAME, TORCHINDUCTOR_LOG_NAME)
 
 register_artifact("guards")

@@ -16,16 +16,21 @@ LOG_ENV_VAR = "TORCH_LOGS"
 @dataclass
 class LogRegistry:
     # shorthand name to log qualified name
+    # Note: this only contains loggers registered
+    # from register_log
     log_alias_to_log_qname : Dict[str, str] = field(default_factory=dict)
 
+    # artifact logger qualified names,
+    # this is populated lazily, as calls to getArtifactLogger
+    # occur
     artifact_log_qnames : Set[str] = field(default_factory=set)
 
+    # artifact names, populated by register_artifact
     artifact_names : Set[str] = field(default_factory=set)
 
-    # shorthand names of logs which support verbosity
-    # e.g. AOT only has debug messages, so INFO level is useless
-    log_aliases_with_verbosity: Set[str] = field(default_factory=set)
-
+    # artifacts which are not displayed unless explicitly named in the
+    # settings. Ex. output_code is NOT displayed even if the inductor
+    # log level is set to DEBUG. It must be explicitly named in the settings
     off_by_default_artifact_names: Set[str] = field(default_factory=set)
 
     def is_artifact(self, name):
@@ -34,12 +39,11 @@ class LogRegistry:
     def is_log(self, alias):
         return alias in self.log_alias_to_log_qname
 
-    def register_log(self, alias, log_qname, has_verbosity):
+    # register a log with an alias
+    def register_log(self, alias, log_qname):
         self.log_alias_to_log_qname[alias] = log_qname
 
-        if has_verbosity:
-            self.log_aliases_with_verbosity.add(alias)
-
+    # register an artifact name
     def register_artifact_name(self, name, off_by_default):
         self.artifact_names.add(name)
 
@@ -48,6 +52,9 @@ class LogRegistry:
         if off_by_default:
             self.off_by_default_artifact_names.add(name)
 
+    # register the qualified name of an artifact log
+    # this is needed to know which logs need to be reset
+    # whenever the log_state is changed
     def register_artifact_log(self, artifact_log_qname):
         self.artifact_log_qnames.add(artifact_log_qname)
 
@@ -57,16 +64,15 @@ class LogRegistry:
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
 
-    def supports_verbosity(self, log_alias):
-        return log_alias in self.log_aliases_with_verbosity
-
     def is_off_by_default(self, artifact_qname):
         return artifact_qname in self.off_by_default_artifact_names
 
 @dataclass
 class LogState:
+    # qualified log names -> currently set log level
     log_qname_to_level : Dict[str, str] = field(default_factory=dict)
 
+    # the set of currently enabled artifacts
     artifact_names : set[str] = field(default_factory=set)
 
     def enable_artifact(self, artifact_name):
@@ -79,7 +85,7 @@ class LogState:
         self.log_qname_to_level[log_qname] = log_level
 
     def get_log_level_pairs(self):
-        return list(self.log_qname_to_level.items())
+        return self.log_qname_to_level.items()
 
     def clear(self):
         self.log_qname_to_level.clear()
@@ -153,15 +159,14 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
               output_code=output_code,
               schedule=schedule)
 
-def register_log(setting_name, log_name, has_verbosity=True):
+def register_log(setting_name, log_name):
     """
     Enables a log to be controlled by the env var and user API with the setting_name
     Args:
         setting_name:  the shorthand name used in the env var and user API
         log_name:  the log name that the setting_name is associated with
-        has_verbosity: whether the log supports different verbosity levels
     """
-    log_registry.register_log(setting_name, log_name, has_verbosity)
+    log_registry.register_log(setting_name, log_name)
 
 def register_artifact(setting_name, off_by_default=False):
     """
@@ -213,7 +218,7 @@ def _gen_settings_regex():
 def _validate_settings(settings):
     return re.fullmatch(_gen_settings_regex(), settings) is not None
 
-
+@functools.lru_cache()
 def _parse_log_settings(settings):
     if settings == "":
         return dict()
@@ -246,10 +251,7 @@ def _parse_log_settings(settings):
         if log_registry.is_log(name):
             assert level is not None
             log_qname = log_registry.log_alias_to_log_qname[name]
-            if log_registry.supports_verbosity(name):
-                log_state.enable_log(log_qname, level)
-            else:
-                log_state.enable_log(log_qname, logging.DEBUG)
+            log_state.enable_log(log_qname, level)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
