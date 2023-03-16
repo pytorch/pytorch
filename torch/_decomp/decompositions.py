@@ -3058,7 +3058,7 @@ def mv(self, vec):
     )
     utils.check(
         self.size(1) == vec.size(0),
-        lambda: f"size mismatch, got matrix ({self.size(0)}x{self.size(1)}), vector ({vec.size(0)})",
+        lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
 
