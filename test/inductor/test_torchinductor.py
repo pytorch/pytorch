@@ -25,6 +25,12 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
+from torch._inductor.device_backend import (
+    ALL_DEVICE_BACKENDS,
+    CUDA_BACKEND,
+    DeviceBackend,
+    register_device_backend,
+)
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import run_and_get_triton_code
@@ -5690,6 +5696,87 @@ class CommonTemplate:
 
         # Constant must not get matched as constant
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
+
+    def test_backend_device(self):
+        class MockDeviceBackend(DeviceBackend):
+            def create_stream(self):
+                return "create_stream"
+
+            def get_device_capability(self, device=None):
+                return (0, 0)
+
+            def get_device_properties(self, device):
+                return "get_device_properties"
+
+            def current_stream(self):
+                return "current_stream"
+
+            def wait_stream(self, stream):
+                return "wait_stream"
+
+            def device_count(self):
+                return 123
+
+            def synchronize(self):
+                return "synchronize"
+
+            def current_device(self):
+                return "current_device"
+
+            def set_device(self, index):
+                return "set_device"
+
+            def vinfo(self):
+                return "vinfo"
+
+            def allow_tf32(self):
+                return "allow_tf32"
+
+            def tf32_min_version(self):
+                return (0, 1)
+
+            def processor_count(self, index):
+                return 1
+
+            def is_available(self) -> bool:
+                return True
+
+            def nms(self):
+                return "torch.mock"
+
+            def _DeviceGuard(self, index):
+                return "_DeviceGuard"
+
+            def backend_name(self):
+                return "mock"
+
+        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 1)
+        self.assertTrue(CUDA_BACKEND in ALL_DEVICE_BACKENDS)
+        mock_device_backend = MockDeviceBackend()
+        res = register_device_backend(mock_device_backend)
+        self.assertTrue(res)
+        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 2)
+        self.assertTrue(mock_device_backend in ALL_DEVICE_BACKENDS)
+
+        # Only allow one instance for a particular device backend.
+        #  Since mock_device_backend has been registered to ALL_DEVICE_BACKENDS,
+        #  the new device backend registration does nothing.
+        mock_device_backend1 = MockDeviceBackend()
+        res = register_device_backend(mock_device_backend1)
+        self.assertFalse(res)
+        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 2)
+        self.assertTrue(mock_device_backend1 not in ALL_DEVICE_BACKENDS)
+
+        with V.set_device_backend(mock_device_backend):
+            self.assertTrue(
+                V.device_backend.create_stream() == mock_device_backend.create_stream()
+            )
+            self.assertTrue(
+                V.device_backend.is_available() == mock_device_backend.is_available()
+            )
+            self.assertTrue(V.device_backend.is_available())
+            self.assertTrue(bool(V.device_backend))
+            self.assertTrue(str(V.device_backend) == "mock")
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):

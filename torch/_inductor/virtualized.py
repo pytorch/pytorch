@@ -9,6 +9,7 @@ import sympy
 from torch._inductor.utils import IndentedBuffer
 
 from torch.fx.graph import inplace_methods, magic_methods
+from .device_backend import DeviceBackend
 
 from .utils import sympy_str, sympy_symbol
 
@@ -159,6 +160,7 @@ _fake_mode = Virtualized("fake_mode", NullHandler)
 _kernel = Virtualized("kernel", NullHandler)
 _debug = Virtualized("debug", NullHandler)
 _interpreter = Virtualized("interpreter", NullHandler)
+_device_backend = Virtualized("device_backend", NullHandler)
 
 
 class _V:
@@ -173,6 +175,7 @@ class _V:
     set_kernel_handler = _kernel._set_handler
     set_debug_handler = _debug._set_handler
     set_interpreter_handler = _interpreter._set_handler
+    set_device_backend = _device_backend._set_handler
 
     @property
     def ops(self) -> MockHandler:
@@ -201,6 +204,11 @@ class _V:
     @property
     def interpreter(self):
         return _interpreter._get_handler()
+
+    @property
+    def device_backend(self) -> DeviceBackend:
+        """The device backend currently being generated"""
+        return _device_backend._get_handler()
 
 
 V = _V()
