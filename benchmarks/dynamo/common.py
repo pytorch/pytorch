@@ -163,6 +163,7 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
     "hf_GPT2_large",  # Intermittent failure on CI
+    "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",
@@ -200,6 +201,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -226,13 +228,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "fastNLP_Bert",  # AssertionError: 1900: <class 'torch.Tensor'>, 256: <class 'int'>
-    "speech_transformer",  # AssertionError: 2040: <class 'torch.Tensor'>, 256: <class 'int'>
-    "yolov3",  # AssertionError: 2304: <class 'torch.Tensor'>, 32: <class 'int'>
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # ceiling is not defined
-    "volo_d1_224",  # ceiling is not defined
+    "pnasnet5large",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -240,7 +240,11 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # TODO: Fill this in
+    # torchbench
+    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
+    # timm_models
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
+    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
 
@@ -1918,7 +1922,11 @@ def run(runner, args, original_dir=None):
     if args.unspecialize_int:
         torch._dynamo.config.specialize_int = False
     if args.ci:
-        args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
+        if args.accuracy:
+            # Run fewer iterations when checking accuracy
+            args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -1970,7 +1978,17 @@ def run(runner, args, original_dir=None):
             # TODO - Using train mode for timm_models. Move to train mode for HF and Torchbench as well.
             args.use_eval_mode = True
         inductor_config.fallback_random = True
-        torch.use_deterministic_algorithms(True)
+        if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
+            "pytorch_CycleGAN_and_pix2pix",
+            "pytorch_unet",
+            "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
+        }:
+            # some of the models do not support use_deterministic_algorithms
+            torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.allow_tf32 = False
