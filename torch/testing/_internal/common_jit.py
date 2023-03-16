@@ -174,8 +174,6 @@ class JitCommonTestCase(TestCase):
         # Use the process ID as prefix to uniquely identify which process the temp file
         # belongs to, and also to avoid clashing on Windows
         with TemporaryFileName(prefix=str(os.getpid())) as fname:
-            print(f"==== MODULE {imported}")
-            print(f"==== BUFFER LENGTH {buffer.getbuffer().nbytes}")
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
