@@ -2139,6 +2139,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
