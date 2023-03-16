@@ -3,6 +3,7 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandBase.h>
+#include <ATen/OpMathType.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <c10/util/Half.h>
@@ -453,24 +454,38 @@ struct NormalKernel {
 
 // ==================================================== Uniform ========================================================
 
+template <typename scalar_t, typename opmath_t>
+__device__ scalar_t truncate_to(opmath_t value) {
+  if constexpr(std::is_same_v<scalar_t, BFloat16>) {
+    return __float2bfloat16_rz(value);
+  }
+  if constexpr(std::is_same_v<scalar_t, Half>) {
+    return __float2half_rz(value);
+  }
+  return static_cast<scalar_t>(value);
+}
+
 template<typename RNG>
 void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
     auto from = static_cast<scalar_t>(from_);
     auto to = static_cast<scalar_t>(to_);
-    using accscalar_t = at::acc_type<scalar_t, true>;
-    auto range = static_cast<accscalar_t>(to-from);
+    using opmath_t = at::opmath_type<scalar_t>;
+    auto range = static_cast<opmath_t>(to-from);
     // define lambda to reverse bounds, multiply 'range' and add 'from_'
-    auto uniform_func = [range, from] __device__ (accscalar_t rand) {
+    auto uniform_func = [range, from] __device__ (opmath_t rand) {
       // reverse the bounds of curand4 from (0, 1] to [0, 1)
       // Note that this method is from legacy THCTensorRandom and is likely to give
       // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
       // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      auto reverse_bound_rand = rand == static_cast<accscalar_t>(1.0) ? static_cast<accscalar_t>(0.0) : rand;
-      return static_cast<scalar_t>(reverse_bound_rand * range + from);
+      auto reverse_bound_rand = rand == static_cast<opmath_t>(1.0) ? static_cast<opmath_t>(0.0) : rand;
+      // Note for BFloat16 and Half, the default constructor does
+      // round to nearest even, which may return the end point of our
+      // range. Use truncation rounding instead.
+      return truncate_to<scalar_t>(reverse_bound_rand * range + from);
     };
-    uniform_and_transform<scalar_t, accscalar_t, curand4_engine_calls>(iter, gen, uniform_func);
+    uniform_and_transform<scalar_t, opmath_t, curand4_engine_calls>(iter, gen, uniform_func);
    });
 }
 
