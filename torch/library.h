@@ -362,6 +362,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::XLA;
       case c10::DeviceType::Lazy:
         return c10::DispatchKey::Lazy;
+      case c10::DeviceType::XPU:
+        return c10::DispatchKey::XPU;
       case c10::DeviceType::MPS:
         return c10::DispatchKey::MPS;
       case c10::DeviceType::Meta:
