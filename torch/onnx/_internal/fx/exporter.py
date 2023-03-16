@@ -14,12 +14,7 @@ import torch._ops
 import torch.fx
 from torch.onnx import _constants
 from torch.onnx._internal import _beartype
-from torch.onnx._internal.fx import (
-    frontend,
-    function_dispatcher,
-    options,
-    passes,
-)
+from torch.onnx._internal.fx import frontend, function_dispatcher, options, passes
 from torch.utils import _pytree
 
 
