@@ -2,7 +2,7 @@ import torch
 from torch.library import Library, impl
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from typing import Tuple
-
+from torch._meta_registrations import calc_conv_nd_return_shape
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
@@ -418,3 +418,57 @@ def dequantize_per_channel_meta(
     assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     return torch.empty_like(input, dtype=torch.float32)
+
+quantized_decomposed_lib.define(
+    "conv_unary_inductor.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point,"
+    "Tensor qw, Tensor inv_weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias,"
+    "int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point,"
+    "str unary_post_op) -> Tensor")
+
+@impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "MkldnnCPU")
+def conv_unary_inductor(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis,
+                        bias, stride, padding, dilation, groups, output_scale,
+                        output_zero_point, unary_post_op):
+    quantized = torch.ops.quantized
+
+    if unary_post_op in ['relu', 'relu_']:
+        return quantized.conv_relu_int8_packed_weight(
+            qx, x_scale, x_zp, qw, inv_w_scale, w_zp, bias,
+            stride, padding, dilation, groups, output_scale, output_zero_point
+        )
+    # Last case: unary_post_op = 'None'
+    return quantized.conv_int8_packed_weight(
+        qx, x_scale, x_zp, qw, inv_w_scale, w_zp, bias,
+        stride, padding, dilation, groups, output_scale, output_zero_point
+    )
+
+@impl(quantized_decomposed_lib, "conv_unary_inductor.tensor", "Meta")
+def conv_unary_inductor_meta(qx, x_scale, x_zp, qw, inv_w_scale, w_zp, w_axis, bias,
+                             stride, padding, dilation, groups, output_scale,
+                             output_zero_point, unary_post_op):
+    if len(qx.shape) == 3 and len(qw.shape) == 4:
+        # For conv1d, x and w should both have rank 3
+        # But if weight is prepacked, it's rank is 4 by unsqueeze(2)
+        qw_squeezed = torch.squeeze(qw, 2)
+    else:
+        qw_squeezed = qw
+    shape_out = calc_conv_nd_return_shape(
+        qx,
+        qw_squeezed,
+        stride,
+        padding,
+        dilation,
+        False,
+        groups,
+        None,
+    )
+    out_format = torch.channels_last
+    if len(shape_out) == 5:
+        out_format = torch.channels_last_3d
+    out = qx.new_empty(shape_out)
+    if len(shape_out) == 3:
+        out = out.unsqueeze(2)
+    out = out.to(memory_format=out_format)
+    if len(shape_out) == 3:
+        out = out.squeeze(2)
+    return out
