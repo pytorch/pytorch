@@ -441,7 +441,6 @@ def shape_of_mm(a, b):
     CallFunction(aten.cat, ListOf(CallFunction(aten.mm, Arg(), Arg())), Arg()),
 )
 def cat_mm(match, inputs, dim):
-
     return cat_tuned_op(match, inputs, dim, op=L[aten.mm], shape_of=shape_of_mm)
 
 
