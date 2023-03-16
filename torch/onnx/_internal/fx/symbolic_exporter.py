@@ -210,7 +210,7 @@ def export_without_parameters_and_buffers(
     return (
         exporter._export(
             graph_module,
-            (*bound_args, *replaced_attrs),
+            *(*bound_args, *replaced_attrs),
             opset_version=opset_version,
             decomposition_table=decomposition_table,
             use_binary_format=use_binary_format,
