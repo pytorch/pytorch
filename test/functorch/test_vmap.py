@@ -3569,6 +3569,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+
         # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
         xfail('addcdiv'),
         xfail('addcmul'),
@@ -3745,14 +3750,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # https://github.com/pytorch/pytorch/issues/96560
         decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+
         # One or more of the overload doesn't have a Batch rule.
-        xfail('where'),
         xfail('bincount'),
-        xfail('float_power'),
-        xfail('gt'),
-        xfail('le'),
-        xfail('lt'),
-        xfail('ne'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # RuntimeError: Expected all tensors to be on the same device,

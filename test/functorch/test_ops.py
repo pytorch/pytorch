@@ -321,6 +321,10 @@ vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 }
 
 aliasing_ops = {

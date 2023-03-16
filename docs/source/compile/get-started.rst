@@ -4,6 +4,8 @@ Getting Started
 Let’s start with a simple example. Note that you are likely to see more
 significant speedups the newer your GPU is.
 
+The below is a tutorial for inference, for a training specific tutorial, make sure to checkout `example on training <https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html>`__
+
 .. code:: python
 
    import torch
