@@ -62,7 +62,7 @@ librosa>=0.6.2 ; python_version < "3.11"
 #mkl-devel
 # see mkl
 
-#mock # breaks ci/circleci: docker-pytorch-linux-xenial-py3-clang5-android-ndk-r19c
+#mock
 #Description: A testing library that allows you to replace parts of your
 #system under test with mock objects
 #Pinned versions:
@@ -159,7 +159,7 @@ pytest-flakefinder==1.1.0
 #Pinned versions: 1.1.0
 #test that import:
 
-pytest-rerunfailures
+pytest-rerunfailures>=10.3
 #Description: plugin for rerunning failure tests in pytest
 #Pinned versions:
 #test that import:

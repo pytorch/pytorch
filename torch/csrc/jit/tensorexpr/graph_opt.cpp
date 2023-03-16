@@ -427,7 +427,7 @@ bool trimGraphOnce(const std::shared_ptr<Graph>& graph) {
   std::unordered_set<Value*> outputs(
       graph->outputs().begin(), graph->outputs().end());
   bool changed = false;
-  for (int idx = 0; idx < ret->inputs().size(); idx++) {
+  for (size_t idx = 0; idx < ret->inputs().size(); idx++) {
     auto v = ret->inputs()[idx];
     if (graph_inputs.count(v)) {
       continue;

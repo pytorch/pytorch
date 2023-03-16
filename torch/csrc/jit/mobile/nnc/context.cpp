@@ -45,7 +45,7 @@ bool InputSpec::validate(const at::Tensor& input) const {
     return false;
   }
   auto spec_sizes = sizes_;
-  for (int i = 0; i < spec_sizes.size(); i++) {
+  for (const auto i : c10::irange(spec_sizes.size())) {
     // InputSpec size 0 means that the dimension is dynamic
     if (spec_sizes[i] != 0 && spec_sizes[i] != input.sizes()[i]) {
       return false;
