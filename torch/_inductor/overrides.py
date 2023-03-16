@@ -98,6 +98,20 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     return gm
 
 
+def is_quantized_graph_module(gm: torch.fx.GraphModule):
+    found_quantize = False
+    quantize_ops = (
+        torch.ops.quantized_decomposed.quantize_per_tensor,
+        torch.ops.quantized_decomposed.quantize_per_channel,
+        torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
+    )
+    for node in gm.graph.nodes:
+        if node.target in quantize_ops:
+            found_quantize = True
+            break
+    return found_quantize
+
+
 def fetch_attr(target: str, mod):
     target_atoms = target.split(".")
     attr_itr = mod

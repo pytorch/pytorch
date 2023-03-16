@@ -138,6 +138,7 @@ def compile_fx_inner(
     num_fixed=0,
     is_backward=False,
     graph_id=None,
+    aot_mode=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -174,10 +175,13 @@ def compile_fx_inner(
             shape_env=shape_env,
             num_static_inputs=num_fixed,
             graph_id=graph_id,
+            aot_mode=aot_mode,
         )
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             compiled_fn = graph.compile_to_fn()
+            if aot_mode:
+                return compiled_fn
 
     if cudagraphs:
         complex_memory_overlap_inputs = any(
@@ -399,6 +403,7 @@ def compile_fx(
     inner_compile=compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable]] = None,
+    aot_mode=False,
 ):
     """Main entrypoint to a compile given FX graph"""
     if config_patches:
@@ -409,7 +414,23 @@ def compile_fx(
                 # need extra layer of patching as backwards is compiled out of scope
                 inner_compile=config.patch(config_patches)(inner_compile),
                 decompositions=decompositions,
+                aot_mode=aot_mode,
             )
+
+    if aot_mode:
+        aot_config_patches = {
+            "cpp_wrapper": True,
+            "debug": True,
+            "triton.cudagraphs": False,
+        }
+        with config.patch(aot_config_patches):
+            return compile_fx(
+                model_,
+                example_inputs_,
+                inner_compile=functools.partial(inner_compile, aot_mode=aot_mode),
+                decompositions=decompositions,
+            )
+
     recursive_compile_fx = functools.partial(
         compile_fx,
         inner_compile=inner_compile,
@@ -424,10 +445,6 @@ def compile_fx(
         )
 
     if isinstance(model_, torch.fx.GraphModule):
-        with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_)
-            model_ = overrides.fuse_fx(model_, example_inputs_)
-
         if isinstance(model_.graph._codegen, _PyTreeCodeGen):
             # this graph is the result of dynamo.export()
             return handle_dynamo_export_graph(
@@ -435,6 +452,10 @@ def compile_fx(
                 example_inputs_,
                 recursive_compile_fx,
             )
+
+        with overrides.patch_functions():
+            model_ = overrides.replace_fx(model_)
+            model_ = overrides.fuse_fx(model_, example_inputs_)
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(
@@ -454,6 +475,9 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+        if overrides.is_quantized_graph_module(model):
+            model.graph.eliminate_dead_code()
+            model.recompile()
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -467,17 +491,23 @@ def compile_fx(
             graph_id=graph_id,
         )
 
+    # Save and restore dynamic shapes setting for backwards, as it is
+    # sometimes done as a context manager which won't be set when we
+    # hit backwards compile
+    dynamic_shapes = dynamo_config.dynamic_shapes
+
     @dynamo_utils.dynamo_timed
     def bw_compiler(model: torch.fx.GraphModule, example_inputs):
-        fixed = count_tangents(model)
-        return inner_compile(
-            model,
-            example_inputs,
-            num_fixed=fixed,
-            cudagraphs=cudagraphs,
-            is_backward=True,
-            graph_id=graph_id,
-        )
+        with dynamo_config.patch(dynamic_shapes=dynamic_shapes):
+            fixed = count_tangents(model)
+            return inner_compile(
+                model,
+                example_inputs,
+                num_fixed=fixed,
+                cudagraphs=cudagraphs,
+                is_backward=True,
+                graph_id=graph_id,
+            )
 
     with overrides.patch_functions():
         if decompositions is None:
