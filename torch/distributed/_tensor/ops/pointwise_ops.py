@@ -393,9 +393,12 @@ def _register_non_deterministic_op(op):
                 break
 
         if replicate_or_partial:
+            return OutputSharding(self_spec)
+            """
             return OutputSharding(
                 None, failed_reason=f"{op} with replication is not supported yet!"
             )
+            """
         else:
             return OutputSharding(self_spec)
 

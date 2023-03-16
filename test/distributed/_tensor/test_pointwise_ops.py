@@ -20,7 +20,9 @@ from torch.distributed.distributed_c10d import ReduceOp
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorOpTestBase,
+    DTensorTestBase,
     skip_unless_torch_gpu,
+    with_comms,
 )
 
 def no_op():
@@ -266,6 +268,76 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         expected = torch.mul(input_tensor, other_tensor, out=output_tensor)
         self.assertEqual(input_tensor, dtensor.to_local())
         self.assertEqual(expected, dt.to_local())
+
+
+class DistTensorNonDetOpTest(DTensorTestBase):
+    @with_comms
+    def test_uniform_replicate(self):
+        torch.cuda.manual_seed(0)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        placements = [Shard(1)]
+        size = [4, 4]
+        local_tensor = torch.empty(*size, device='cuda')
+        local_tensor.uniform_()
+        print(f"rank={self.rank}:\nexpected tensor={local_tensor}")
+
+        torch.cuda.manual_seed(self.rank)
+        dist_tensor = torch.ones(*size, device='cuda')
+        dist_tensor = distribute_tensor(dist_tensor, device_mesh, placements)
+        dist_tensor.uniform_()
+        #self.assertEqual(local_tensor, dist_tensor.to_local())
+        print(f"rank={self.rank}:\nlocal tensor={dist_tensor.to_local()}")
+
+    @with_comms
+    def test_uniform_shard(self):
+        torch.cuda.manual_seed(self.rank)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        size = [4, 1]
+        local_tensor = torch.empty(*size, device='cuda')
+        dtensor = DTensor.from_local(local_tensor, device_mesh, [Shard(1)])
+        dtensor.uniform_(0, 1)
+        _dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+        if self.rank == 0:
+            print(_dtensor.to_local())
+
+        mask = torch.empty(_dtensor.shape, device='cuda')
+        mask.uniform_(0, 1)
+        print(f"mask tensor on rank {self.rank} is:\n{mask}")
+
+        torch.cuda.manual_seed(self.rank)
+        if self.rank == 0:
+            local_tensor = torch.empty([4, 4], device='cuda')
+            local_tensor.uniform_(0, 1)
+            print(local_tensor.T)
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_deterministic_uniform_1d(self):
+        torch.cuda.manual_seed(1234)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        size = [4, 1]
+
+        local_tensor = torch.empty(*size, device='cuda')
+        local_tensor.uniform_(0, 1)
+
+        torch.cuda.manual_seed(1234)
+        _tensor = torch.empty(*size, device='cuda')
+        dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
+        dtensor.uniform_(0, 1)
+        dtensor = dtensor.redistribute(device_mesh, [Replicate()])
+        #print(local_tensor)
+        #print(f"{self.rank}: {dtensor.to_local()}")
+        for shard_num in range(self.world_size):
+            if self.rank == shard_num:
+                self.assertEqual(local_tensor, dtensor.to_local()[:, [shard_num]])
+            else:
+                self.assertEqual(local_tensor, dtensor.to_local()[:, [shard_num]])
+
+        # call dropout
+        if False:  # error: output spec mismatch. check propagation rule
+            _drop = torch.nn.Dropout(p=0.5)
+            dtensor = _drop(dtensor)
+            print(f"{self.rank}: {dtensor.to_local()}")
 
 
 if __name__ == "__main__":
