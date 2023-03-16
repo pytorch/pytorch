@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <unordered_set>
 #if AT_CUDNN_ENABLED()
 
@@ -883,8 +884,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
-void no_op_delete(void* ptr){};
-
 // We choose to ignore certain blocks that are currently allocated
 // when we set the pool to its checkpoint. For those blocks, we need
 // to swap out the deleter function of their corresponding blocks
@@ -898,7 +897,7 @@ void removeStorageDeleterFns(
     TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
     auto t = c10::cuda::CUDACachingAllocator::get();
     bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
-        t->raw_deleter(), &no_op_delete);
+        t->raw_deleter(), &c10::detail::deleteNothing);
 
     TORCH_CHECK(
         succeeded,
@@ -907,12 +906,11 @@ void removeStorageDeleterFns(
 }
 
 void addStorageDeleterFns(
-    std::vector<at::Tensor>& tensors_to_add_deleters_to,
+    std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
     c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
   std::unordered_map<void*, c10::StorageImpl*> storages;
-  for (auto& tensor : tensors_to_add_deleters_to) {
-    storages[tensor.storage().data_ptr().get()] =
-        tensor.storage().unsafeGetStorageImpl();
+  for (auto& storage : storages_to_add_deleters_to) {
+    storages[storage->data_ptr().get()] = storage;
   }
 
   for (auto& data_ptr : delta.dataptrs_allocd) {
@@ -1044,6 +1042,23 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
   });
 
+  m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    bool succeeded = storage_impl->data_ptr().compare_exchange_deleter(
+        alloc->raw_deleter(), c10::detail::deleteNothing);
+    TORCH_CHECK("Expected standard deleter");
+    c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
+  });
+
+  m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
+  });
+
   m.def(
       "_cuda_beginAllocateCurrentStreamToPool",
       [](int device, at::cuda::MempoolId_t mempool_id) {
@@ -1067,17 +1082,16 @@ static void registerCudaPluggableAllocator(PyObject* module) {
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<at::Tensor> stale_tensors,
-         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
-        // Could pass in Storage Pointers instead
+         std::vector<size_t> stale_storages_ptr,
+         std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
-        for (const auto& ten : stale_tensors) {
-          auto ptr = ten.storage().unsafeGetStorageImpl();
+        for (size_t ptr_int : stale_storages_ptr) {
+          c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
           if (!ptr_set.count(ptr)) {
-            ptrs.push_back(ten.storage().unsafeGetStorageImpl());
-            ptr_set.insert(ten.storage().unsafeGetStorageImpl());
+            ptrs.push_back(ptr);
+            ptr_set.insert(ptr);
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
@@ -1107,8 +1121,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             " must be passed to set checkpoint");
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
+        std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
+        }
 
-        addStorageDeleterFns(tensors_to_add_deleters_to, delta);
+        addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
 
