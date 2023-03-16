@@ -35,7 +35,7 @@ static ska::flat_hash_map<
     ska::flat_hash_map<c10::DispatchKey, std::shared_ptr<c10::SafePyObject>>>
     python_registrations_;
 
-torch::Library::Kind parseKind(const std::string& k) {
+static torch::Library::Kind parseKind(const std::string& k) {
   static std::unordered_map<std::string, torch::Library::Kind> kind_map = {
       {"DEF", torch::Library::DEF},
       {"IMPL", torch::Library::IMPL},
@@ -45,7 +45,7 @@ torch::Library::Kind parseKind(const std::string& k) {
   TORCH_CHECK(it != kind_map.end(), "could not parse ", k);
   return it->second;
 }
-c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
+static c10::AliasAnalysisKind parseAliasAnalysisKind(const std::string& k) {
   static std::unordered_map<std::string, c10::AliasAnalysisKind> key_map = {
       {"CONSERVATIVE", c10::AliasAnalysisKind::CONSERVATIVE},
       {"FROM_SCHEMA", c10::AliasAnalysisKind::FROM_SCHEMA},
@@ -179,7 +179,7 @@ class PythonKernelHolder : public c10::OperatorKernel {
   }
 };
 
-torch::_RegisterOrVerify register_or_verify() {
+static torch::_RegisterOrVerify register_or_verify() {
   if (isMainPyInterpreter()) {
     return torch::_RegisterOrVerify::REGISTER;
   } else {

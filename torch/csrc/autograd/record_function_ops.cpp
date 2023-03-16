@@ -51,7 +51,8 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
   return rec;
 }
 
-static at::RecordFunction& getRecordFunctionFromTensor(const at::Tensor& handle) {
+static at::RecordFunction& getRecordFunctionFromTensor(
+    const at::Tensor& handle) {
   auto& rec = at::cpp_custom_type_hack::cast<at::RecordFunction>(handle);
   return rec;
 }
