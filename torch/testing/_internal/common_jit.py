@@ -1,3 +1,5 @@
+import os
+
 # Torch
 import torch
 import torch.cuda
@@ -169,7 +171,9 @@ class JitCommonTestCase(TestCase):
         if not also_test_file:
             return imported
 
-        with TemporaryFileName() as fname:
+        # Use the process ID as prefix to uniquely identify which process the temp file
+        # belongs to, and also to avoid clashing on Windows
+        with TemporaryFileName(prefix=str(os.getpid())) as fname:
             print(f"==== MODULE {imported}")
             print(f"==== BUFFER LENGTH {buffer.getbuffer().nbytes}")
             torch.jit.save(imported, fname)
