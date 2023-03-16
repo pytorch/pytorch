@@ -156,7 +156,6 @@ def filter_stack(stack):
 
 
 def format_error_msg(exc, code, record_filename=None, frame=None):
-
     msg = os.linesep * 2
 
     if config.verbose:
