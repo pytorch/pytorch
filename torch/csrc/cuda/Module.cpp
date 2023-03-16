@@ -998,41 +998,31 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_record_stream_fn(func);
           })
       .def(
-          "set_capture_begin_fn",
+          "set_begin_allocate_stream_to_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType =
-                void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t);
+            using FuncType = void(int, cudaStream_t, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_begin_fn(func);
+            self.set_begin_allocate_stream_to_pool(func);
           })
       .def(
-          "set_capture_about_to_end_fn",
+          "set_end_allocate_stream_to_pool_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
+            using FuncType = void(int, cudaStream_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_about_to_end_fn(func);
+            self.set_end_allocate_stream_to_pool_fn(func);
           })
       .def(
-          "set_capture_ended_fn",
-          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
-             uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
-            std::function<FuncType> func =
-                reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_ended_fn(func);
-          })
-      .def(
-          "set_capture_destroy_fn",
+          "set_release_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
             using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_destroy_fn(func);
+            self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
     using MallocFuncType = void*(size_t, int, cudaStream_t);

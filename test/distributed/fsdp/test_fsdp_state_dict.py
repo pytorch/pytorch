@@ -937,14 +937,14 @@ class TestFSDPStateDict(FSDPTest):
         # Check that it can be loaded into FSDP.
         new_fsdp, _ = _create_module()
         _zero_model(new_fsdp)
-        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+        for p1, p2 in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertNotEqual(p1, p2)
         with FSDP.state_dict_type(new_fsdp, STATE_DICT_MAPPING[state_dict_type]):
             if state_dict_type != "local_state_dict":
                 # FlatParameter has not supported deepcopy yet.
                 state_dict = deepcopy(state_dict)
             new_fsdp.load_state_dict(state_dict, strict=True)
-        for (p1, p2) in zip(fsdp.parameters(), new_fsdp.parameters()):
+        for p1, p2 in zip(fsdp.parameters(), new_fsdp.parameters()):
             self.assertEqual(p1, p2)
 
         # Test that the checkpoint can be loaded into a local model.
@@ -954,7 +954,7 @@ class TestFSDPStateDict(FSDPTest):
                 param.zero_()
 
         with fsdp.summon_full_params(fsdp):
-            for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+            for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                 self.assertNotEqual(p1, p2)
 
         if state_dict_type == "local_state_dict":
@@ -963,7 +963,7 @@ class TestFSDPStateDict(FSDPTest):
         with fsdp.summon_full_params(fsdp):
             if self.rank == 0:
                 local.load_state_dict(state_dict, strict=True)
-                for (p1, p2) in zip(fsdp.parameters(), local.parameters()):
+                for p1, p2 in zip(fsdp.parameters(), local.parameters()):
                     self.assertEqual(p1, p2)
 
     @skip_if_lt_x_gpu(2)
