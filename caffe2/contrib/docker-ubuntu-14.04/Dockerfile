@@ -1,4 +1,4 @@
-FROM ubuntu:trusty-20190515
+FROM ubuntu:bionic
 MAINTAINER caffe-dev <caffe-dev@googlegroups.com>
 
 # A docker container with CUDA and caffe2 installed.
