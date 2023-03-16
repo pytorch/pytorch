@@ -168,8 +168,6 @@ Tensor mkldnn_reorder_conv3d_weight(
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
 
-
-
 Tensor mkldnn_reorder_linear_weight(
     const Tensor& self,
     c10::optional<int64_t> batch_size_opt) {
@@ -196,7 +194,6 @@ Tensor mkldnn_reorder_linear_weight(
   result.feed_from(w);
   return new_with_itensor_mkldnn(std::move(result), optTypeMetaToScalarType(self.options().dtype_opt()), self.options().device_opt());
 }
-
 
 ideep::tensor::desc get_conv_transpose_expected_weights_desc(
     const ideep::tensor::dims& weights_dims,
@@ -236,7 +233,6 @@ ideep::tensor::desc get_conv_transpose_expected_weights_desc(
         src_dims);
   }
 }
-
 
 Tensor mkldnn_reorder_conv_transpose2d_weight(
     const Tensor& self,

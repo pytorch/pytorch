@@ -405,6 +405,10 @@ TORCH_LIBRARY_IMPL(mkl, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
 }
 
+TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("mkl::_mkl_linear"), TORCH_FN(mkl_linear));
+}
+
 #endif // AT_MKL_ENABLED
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
