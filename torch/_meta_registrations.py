@@ -15,9 +15,10 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    TensorLike,
 )
 
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
@@ -1183,29 +1184,6 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
         lambda: "self tensor does not match matmul output shape",
     )
     return self.new_empty(self.size())
-
-
-@register_meta([aten._int_mm])
-@out_wrapper()
-def meta__int_mm(a, b):
-    check(a.dim() == 2, lambda: "a must be a 2D tensor")
-    check(b.dim() == 2, lambda: "b must be a 2D tensor")
-    check(
-        a.dtype is torch.int8,
-        lambda: f"expected self to be int8, got {a.dtype}",
-    )
-    check(
-        b.dtype is torch.int8,
-        lambda: f"expected mat2 to be int8, got {b.dtype}",
-    )
-    check(
-        a.size(1) == b.size(0),
-        lambda: (
-            f"Incompatible matrix sizes for _int_mm ({a.size(0)}x{a.size(1)} "
-            f"and {b.size(0)}x{b.size(1)})"
-        ),
-    )
-    return a.new_empty((a.size(0), b.size(1)), dtype=torch.int32)
 
 
 @register_meta(aten._cdist_forward.default)
@@ -2417,9 +2395,26 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
     )
 
 
-@register_meta([aten.sort.default, aten.sort.stable])
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+@register_meta(
+    [aten.sort.default, aten.sort.stable, aten.sort.values, aten.sort.values_stable]
+)
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    if values is not None and indices is not None:
+        assert isinstance(values, TensorLike)
+        assert isinstance(indices, TensorLike)
+        # Makes sure values and indices have the same strides. For cases where
+        # these have different shapes, like (5, 10, 5) and (0) in msort.
+        out_shape = v.shape
+        out_stride = v.stride()
+        values = _maybe_resize_out(values, out_shape)
+        indices = _maybe_resize_out(indices, out_shape)
+        values.as_strided_(out_shape, out_stride)
+        indices.as_strided_(out_shape, out_stride)
+        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        return values, indices
+    return v, i
 
 
 def rnn_cell_checkSizes(

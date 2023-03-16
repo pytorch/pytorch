@@ -7065,6 +7065,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
 
+        def test_memory_history_inductor(self):
+            def called_inside_compile(x, w, b):
+                a = x @ w + b
+                return torch.sigmoid(a)
+
+            @torch.compile
+            def fn(x, w, b):
+                x = called_inside_compile(x, w, b)
+                return called_inside_compile(x, w, b)
+
+            w = torch.rand(3, 3, device="cuda")
+            b = torch.rand(3, device="cuda")
+            x = torch.rand(3, device="cuda")
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(True)
+                r = fn(x, w, b)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+            snapshot = str(torch.cuda.memory._snapshot())
+            self.assertTrue("called_inside_compile" in snapshot)
+
     copy_tests(CommonTemplate, CudaTests, "cuda")
 
     class CudaReproTests(TestCase):

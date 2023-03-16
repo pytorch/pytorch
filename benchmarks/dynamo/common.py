@@ -664,10 +664,20 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
     if "compilation_latency" in kwargs:
-        headers += ["compilation_latency", "compression_ratio"]
+        headers += [
+            "compilation_latency",
+            "compression_ratio",
+            "eager_peak_mem",
+            "dynamo_peak_mem",
+        ]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
-
+        row.append(kwargs["eager_peak_mem"])
+        row.append(kwargs["dynamo_peak_mem"])
+    if "dynamo_stats" in kwargs:
+        for k, v in kwargs["dynamo_stats"].items():
+            headers.append(k)
+            row.append(v)
     output_csv(
         output_filename,
         headers,
@@ -1411,6 +1421,8 @@ class BenchmarkRunner:
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
+                experiment_kwargs["eager_peak_mem"] = eager_peak_mem
+                experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
 
             if experiment.func is coverage_experiment:
@@ -1667,7 +1679,7 @@ def parse_args(args=None):
         help="Runs a dynamic shapes version of the benchmark, if available.",
     )
     parser.add_argument(
-        "--unspecialize-int", action="store_true", help="Run with specialize_int=False."
+        "--specialize-int", action="store_true", help="Run with specialize_int=True."
     )
     parser.add_argument(
         "--use-eval-mode",
@@ -1926,11 +1938,9 @@ def run(runner, args, original_dir=None):
         args.ci = True
     if args.dynamic_shapes:
         torch._dynamo.config.dynamic_shapes = True
-    if args.unspecialize_int:
-        torch._dynamo.config.specialize_int = False
+    if args.specialize_int:
+        torch._dynamo.config.specialize_int = True
     if args.ci:
-        if args.inductor and args.accuracy:
-            torch._inductor.config.compile_threads = 1
         if args.accuracy:
             # Run fewer iterations when checking accuracy
             args.repeat = 2
