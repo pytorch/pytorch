@@ -749,16 +749,11 @@ class VariableBuilder:
         tensor_proxy = self.tx.output.create_graph_input(
             re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value)
         )
-        if getattr(value, "_dynamo_skip_guards", False):
-            guards = None
-            delattr(value, "_dynamo_skip_guards")
-        else:
-            guards = self.make_guards(GuardBuilder.TENSOR_MATCH)
         tensor_variable = wrap_fx_proxy(
             tx=self.tx,
             proxy=tensor_proxy,
             example_value=value,
-            guards=guards,
+            guards=self.make_guards(GuardBuilder.TENSOR_MATCH),
             should_specialize=self.tensor_should_specialize(),
             ignore_subclass=ignore_subclass,
             source=self.get_source(),
