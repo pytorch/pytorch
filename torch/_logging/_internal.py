@@ -230,7 +230,7 @@ def configure_artifact_log(log):
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def _gen_settings_regex():
-    return re.compile(r"((\+|-)?\w+,\\s*)*(\+|-)?\w+?")
+    return re.compile(r"((\+|-)?[\w\.]+,\\s*)*(\+|-)?[\w\.]+?")
 
 
 def _validate_settings(settings):
@@ -253,14 +253,13 @@ def _parse_log_settings(settings):
     def get_name_level_pair(name):
         clean_name = name.replace(INCR_VERBOSITY_CHAR, "")
         clean_name = clean_name.replace(DECR_VERBOSITY_CHAR, "")
-        level = None
-        if log_registry.is_log(clean_name):
-            if name[0] == INCR_VERBOSITY_CHAR:
-                level = logging.DEBUG
-            elif name[0] == DECR_VERBOSITY_CHAR:
-                level = logging.ERROR
-            else:
-                level = logging.INFO
+
+        if name[0] == INCR_VERBOSITY_CHAR:
+            level = logging.DEBUG
+        elif name[0] == DECR_VERBOSITY_CHAR:
+            level = logging.ERROR
+        else:
+            level = logging.INFO
 
         return clean_name, level
 
@@ -274,11 +273,12 @@ def _parse_log_settings(settings):
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
-            log_registry.register_log(name, name, True)
+            if not _has_registered_parent(name):
+                log_registry.register_log(name, name)
             log_state.enable_log(name, level)
         else:
             raise ValueError(
-                f"Invalid log settings: {settings}, must be a comma separated list of log or artifact names."
+                f"Invalid log settings: '{settings}', must be a comma separated list of log or artifact names."
             )
 
     return log_state
@@ -297,6 +297,19 @@ def _update_log_state_from_env():
     log_setting = os.environ.get(LOG_ENV_VAR, None)
     if log_setting is not None:
         log_state = _parse_log_settings(log_setting)
+
+
+def _has_registered_parent(log_qname):
+    cur_log = logging.getLogger(log_qname)
+
+    registered_log_qnames = log_registry.get_log_qnames()
+
+    while cur_log.parent:
+        if cur_log.name in registered_log_qnames:
+            return True
+        cur_log = cur_log.parent
+
+    return False
 
 
 # setup custom handlers

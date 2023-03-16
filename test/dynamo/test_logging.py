@@ -116,13 +116,21 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
 
+    # check that logging to a child log of a registered logger
+    # does not register it and result in duplicated records
     @make_settings_test("torch._dynamo.output_graph")
-    def test_open_registrarion_with_registered_parent(self, records):
-        pass
+    def test_open_registration_with_registered_parent(self, records):
+        logger = logging.getLogger("torch._dynamo.output_graph")
+        logger.info("hi")
+        self.assertEqual(len(records), 1)
 
+    # check logging to a random log that is not a child log of a registered
+    # logger registers it and sets handlers properly
     @make_settings_test("torch.utils")
     def test_open_registration(self, records):
-        pass
+        logger = logging.getLogger("torch.utils")
+        logger.info("hi")
+        self.assertEqual(len(records), 1)
 
 
 # single record tests
