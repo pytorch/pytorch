@@ -291,9 +291,7 @@ def create_default_local_save_plan(
     for fqn, obj in state_dict.items():
         # Since DTensor supports submesh, adding extra check to ensure _create_write_items()
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
-        if (
-            isinstance(obj, DTensor)
-        ):
+        if isinstance(obj, DTensor):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)
         elif isinstance(obj, (ShardedTensor)) or is_coordinator:
