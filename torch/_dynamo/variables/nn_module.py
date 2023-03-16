@@ -563,7 +563,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
             # force guard checks even when `not config.guard_nn_modules``
-            self.source = NotNNModuleSource(self.source)
+            self._source_rewrite()
+
+
+    def _source_rewrite(self):
+        self.source = NotNNModuleSource(self.source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -666,36 +670,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
 class FSDPNNModuleVariable(UnspecializedNNModuleVariable):
     def __init__(self, value, **kwargs):
-        super().__init__(value, **kwargs)
+        super().__init__(value=value, **kwargs)
+        if self.source:
+            # force NO guard checks, reusing all of UnspecializedNNModuleVariable excpet guard logic
+            self._source_rewrite()
 
-    def call_function(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
-    ) -> "VariableTracker":
-        options = VariableTracker.propagate(self, args, kwargs.values())
-        if is_lazy_module(self.value):
-            unimplemented(f"{self.__class__.__name__} does not support lazy modules")
-        # TODO: Support `nn.Module` hooks. For now, route to `forward()`.
-        fn = self.value_type.forward
-        source = AttrSource(AttrSource(self.source, "__class__"), "forward")
-        if isinstance(self.source, GetItemSource):
-            base_source = self.source.base
-            is_module_list_or_dict_access = (
-                isinstance(base_source, AttrSource) and base_source.member == "_modules"
-            )
-            if is_module_list_or_dict_access:
-                source = FSDPNNModuleSource(source)
-        return variables.UserFunctionVariable(
-            fn, source=source, **options
-        ).call_function(tx, [self] + list(args), kwargs)
-
-    def var_getattr(self, tx, name):
-        skip_guards = False
-        if name in self.value._parameters:
-            skip_guards = True
-        elif name == "_modules":
-            skip_guards = True
-        var = super().var_getattr(tx, name)
-        if skip_guards:
-            var.guards = set()
-        var.source = FSDPNNModuleSource(var.source)
-        return var
+    def _source_rewrite(self):
+        self.source = FSDPNNModuleSource(self.source)

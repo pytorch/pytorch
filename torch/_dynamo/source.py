@@ -374,16 +374,10 @@ class NotNNModuleSource(NNModuleSource):
 
 
 @dataclasses.dataclass
-class FSDPNNModuleSource(NotNNModuleSource):
-    def make_guard(self, fn, is_volatile=False):
-        return super().make_guard(self._no_op_create_fn, is_volatile)
-
-    def _no_op_create_fn(*args, **kwargs):
-        return
-
-    # A source for which guards should be skipped
+class FSDPNNModuleSource(NNModuleSource):
     def guard_source(self):
-        return GuardSource.SKIP
+        return _GUARD_SOURCE_NN_MODULE[self.inner.guard_source()]
+
 
 
 @dataclasses.dataclass
