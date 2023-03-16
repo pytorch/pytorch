@@ -127,7 +127,9 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         return nullptr;
       }
       return [](ProcessedNode* p_node) {
-        DCHECK(p_node->num_inputs() - 1 == p_node->outputs().size());
+        DCHECK(
+            static_cast<size_t>(p_node->num_inputs() - 1) ==
+            p_node->outputs().size());
         auto dict = p_node->Input(0).toGenericDict();
         const auto num_inputs = p_node->num_inputs();
         for (size_t i = 1; i < num_inputs; ++i) {
@@ -1252,7 +1254,8 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto num_elems = elems.size();
         const auto idx = pnode->Input(1).toInt();
         const auto norm_idx = normalizeIndex(idx, num_elems);
-        if (norm_idx < 0 || norm_idx >= num_elems) {
+        if (norm_idx < 0 ||
+            norm_idx >= static_cast<decltype(norm_idx)>(num_elems)) {
           // Use std::runtime_error instead of c10::Error to be consistent with
           // JIT
           throw std::out_of_range("Tuple index out of range");

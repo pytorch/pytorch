@@ -5,7 +5,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/sparse/Macros.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -134,6 +134,8 @@ void _sparse_binary_op_intersection_kernel_impl(
     const Tensor& x_,
     const Tensor& y_,
     const std::vector<int64_t> broadcasted_shape,
+    const c10::optional<Tensor>& x_hash_opt_ = c10::nullopt,
+    const c10::optional<Tensor>& y_hash_opt_ = c10::nullopt,
     const bool distributive_with_sum = true
 ) {
   // The common dtype check is relevant when op is done in-place.
@@ -146,10 +148,23 @@ void _sparse_binary_op_intersection_kernel_impl(
       " to output ", res.scalar_type());
 
   using KernelLauncher = KernelLauncher<kernel_t>;
+  using OptTensor = c10::optional<Tensor>;
 
   // If the op and sum are not distributive, coalesce is required.
-  const Tensor x = distributive_with_sum ? x_ : x_.coalesce();
-  const Tensor y = distributive_with_sum ? y_ : y_.coalesce();
+  const auto coalesce_if_not_distributive = [distributive_with_sum](const Tensor& t, const OptTensor& t_hash_opt) -> auto {
+    // No need to coalesce in such a case.
+    if (distributive_with_sum) {
+      return std::make_tuple(t, t_hash_opt);
+    } else {
+      // Otherwise coalesce and force hash recompute.
+      return std::make_tuple(t.coalesce(), static_cast<OptTensor>(c10::nullopt));
+    }
+  };
+
+  Tensor x, y;
+  OptTensor x_hash_opt, y_hash_opt;
+  std::tie(x, x_hash_opt) = coalesce_if_not_distributive(x_, x_hash_opt_);
+  std::tie(y, y_hash_opt) = coalesce_if_not_distributive(y_, y_hash_opt_);
 
   // Given sparse tensors x and y we decide which one is source, and which one
   // is probably_coalesced. The indices of both source and probably_coalesced are
@@ -159,22 +174,24 @@ void _sparse_binary_op_intersection_kernel_impl(
   // (see below), the hash values are already sorted and we can avoid any
   // explicit sorting routines.
   Tensor probably_coalesced, source;
-  std::tie(probably_coalesced, source) = [&]() -> std::tuple<Tensor, Tensor> {
+  OptTensor probably_coalesced_indices_hash_opt, source_indices_hash_opt;
+  std::tie(probably_coalesced, probably_coalesced_indices_hash_opt, source, source_indices_hash_opt) = [&]() -> auto {
     // Case 1: either x or y is coalesced.
     if ((x.is_coalesced() ^ y.is_coalesced())) {
       return x.is_coalesced()
-        ? std::make_tuple(x, y)
-        : std::make_tuple(y, x);
+        ? std::make_tuple(x, x_hash_opt, y, y_hash_opt)
+        : std::make_tuple(y, y_hash_opt, x, x_hash_opt);
     }
     // Case 2: Both x and y are either coalesced or non-coalesced.
     // If both are coalesced, search into the larger tensor is faster.
     // Same holds when both are non-coalesced.
     else {
       Tensor larger, smaller;
-      std::tie(larger, smaller) = [&]() -> std::tuple<Tensor, Tensor> {
+      OptTensor larger_hash_opt, smaller_hash_opt;
+      std::tie(larger, larger_hash_opt, smaller, smaller_hash_opt) = [&]() -> auto {
         return x._nnz() >= y._nnz()
-          ? std::make_tuple(x, y)
-          : std::make_tuple(y, x);
+          ? std::make_tuple(x, x_hash_opt, y, y_hash_opt)
+          : std::make_tuple(y, y_hash_opt, x, x_hash_opt);
       }();
 
       // If under a uniform distribution it is likely to hit many elements in larger,
@@ -194,8 +211,9 @@ void _sparse_binary_op_intersection_kernel_impl(
       const auto max_count_lower_bound = larger._nnz() / sparse_dim_numel;
       constexpr int64_t MAX_COPIES_PER_THREAD = 50;
       return max_count_lower_bound > MAX_COPIES_PER_THREAD
-        ? std::make_tuple(larger.coalesce(), smaller)
-        : std::make_tuple(larger, smaller);
+        // coalesce invalidates hash values, so force-recompute
+        ? std::make_tuple(larger.coalesce(), static_cast<OptTensor>(c10::nullopt), smaller, smaller_hash_opt)
+        : std::make_tuple(larger, larger_hash_opt, smaller, smaller_hash_opt);
     }
   }();
 
@@ -233,13 +251,17 @@ void _sparse_binary_op_intersection_kernel_impl(
 
   // Apply the hash function to probably_coalesced.indices
   const auto probably_coalesced_indices_hash = [&]() -> Tensor {
+    // probably_coalesced is coalesced and hash provided? Reuse it!
+    if (probably_coalesced_indices_hash_opt.has_value()) {
+      return (*probably_coalesced_indices_hash_opt).contiguous();
+    }
+
     const auto indices = probably_coalesced._indices();
     // non-const because of gcc-5/clang-5 issues
     auto indices_dim_stride = indices.stride(0);
     auto indices_nnz_stride = indices.stride(1);
 
-    auto hash = at::empty({probably_coalesced._nnz()},
-        indices.options().dtype(kLong));
+    auto hash = at::empty({probably_coalesced._nnz()}, indices.options().dtype(kLong));
 
     auto iter = TensorIteratorConfig()
       .check_all_same_dtype(false)
@@ -313,6 +335,13 @@ void _sparse_binary_op_intersection_kernel_impl(
     auto indices_nnz_stride = source_indices.stride(1);
     auto dummy = at::empty({1}, source_arange.options());
 
+    auto hash = source_indices_hash_opt.has_value()
+      ? (*source_indices_hash_opt).contiguous()
+      : at::empty({0}, probably_coalesced._indices().options().dtype(kLong));
+    const auto* RESTRICT hash_ptr = source_indices_hash_opt.has_value()
+      ? hash.data_ptr<int64_t>()
+      : nullptr;
+
     auto iter = TensorIteratorConfig()
       .set_check_mem_overlap(false)
       .add_owned_output(dummy.expand_as(source_arange))
@@ -333,10 +362,14 @@ void _sparse_binary_op_intersection_kernel_impl(
           // Compute hash value
           const auto* RESTRICT ptr_indices_dim = ptr_indices + nnz_idx * indices_nnz_stride;
           int64_t hash = 0;
-          for (int64_t dim = 0; dim < sparse_dim; ++dim) {
-            const auto dim_hash_coeff = hash_coeffs[dim];
-            const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
-            hash += dim_index * dim_hash_coeff;
+          if (hash_ptr) {
+            hash = hash_ptr[nnz_idx];
+          } else {
+            for (int64_t dim = 0; dim < sparse_dim; ++dim) {
+              const auto dim_hash_coeff = hash_coeffs[dim];
+              const auto dim_index = ptr_indices_dim[dim * indices_dim_stride];
+              hash += dim_index * dim_hash_coeff;
+            }
           }
 
           // Perform hash values intersection
@@ -390,6 +423,8 @@ void _sparse_binary_op_intersection_kernel_out(
     Tensor& res,
     const Tensor& x,
     const Tensor& y,
+    const c10::optional<Tensor>& x_hash_opt = c10::nullopt,
+    const c10::optional<Tensor>& y_hash_opt = c10::nullopt,
     // If op distributes with the sum, the arguments are processed as is,
     // without the calls to coalesce().
     const bool distributive_with_sum = true
@@ -404,6 +439,21 @@ void _sparse_binary_op_intersection_kernel_out(
       x._indices().scalar_type() == y._indices().scalar_type(),
       NAME, "(): expects inputs' indices to be of the same dtype (i.e. long or int)");
 
+  const auto check_hash_validity = [](const Tensor& t, const c10::optional<Tensor>& t_hash_opt) {
+    if (!t_hash_opt.has_value()) {
+      return;
+    }
+
+    const auto t_hash = *t_hash_opt;
+    TORCH_INTERNAL_ASSERT(
+        t_hash.dim() == 1 && t_hash.scalar_type() == kLong && t_hash.size(-1) == t._indices().size(-1),
+        NAME, "(): explicit hash values need to be a 1-dim Long tensor with the ",
+        "NSE matching that of the corresponding sparse tensor.");
+  };
+
+  check_hash_validity(x, x_hash_opt);
+  check_hash_validity(y, y_hash_opt);
+
   const auto broadcasted_shape = infer_size(x.sizes(), y.sizes());
 
   // 8 sparse dims should be more than enough?
@@ -417,11 +467,11 @@ void _sparse_binary_op_intersection_kernel_out(
       // For some reason MSVC complaints about passing constexpr max_sparse_dims
       // as a template parameter claiming as if it is not know at compile time.
       kernel_t, value_selection_intersection_kernel_t, index_t, 8>(
-        res, x, y, broadcasted_shape, distributive_with_sum);
+        res, x, y, broadcasted_shape, x_hash_opt, y_hash_opt, distributive_with_sum);
   } else {
     _sparse_binary_op_intersection_kernel_impl<
       kernel_t, value_selection_intersection_kernel_t, index_t>(
-        res, x, y, broadcasted_shape, distributive_with_sum);
+        res, x, y, broadcasted_shape, x_hash_opt, y_hash_opt, distributive_with_sum);
   }
 }
 

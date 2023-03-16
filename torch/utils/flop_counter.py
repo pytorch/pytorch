@@ -322,7 +322,7 @@ class FlopCounterMode(TorchDispatchMode):
 
         import tabulate
         tabulate.PRESERVE_WHITESPACE = True
-        header = ["Module", "FLOPS", "% Total"]
+        header = ["Module", "FLOP", "% Total"]
         values = []
         global_flops = sum(self.flop_counts['Global'].values())
         global_suffix = get_suffix_str(global_flops)

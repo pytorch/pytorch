@@ -30,7 +30,6 @@ def _export(
     args,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
-
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
