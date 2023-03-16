@@ -1,7 +1,9 @@
 import contextlib
+
 import dataclasses
 import enum
 import logging
+import traceback
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -327,6 +329,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
+        self.loc_in_frame = None
 
     @staticmethod
     @contextlib.contextmanager
@@ -340,6 +343,23 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_loc(filename, lineno):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Loc context manager must be called within an ongoing trace."
+        if len(tc.frame_summary_stack) > 0:
+            current_frame_name = tc.frame_summary_stack[-1].name
+        else:
+            current_frame_name = "<unknown>"
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, current_frame_name)
+        try:
+            yield
+        finally:
+            tc.loc_in_frame = None
 
 
 """

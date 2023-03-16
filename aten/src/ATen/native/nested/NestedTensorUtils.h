@@ -41,31 +41,19 @@ inline at::Tensor wrap_buffer(
       std::move(buffer), std::move(nested_size_tensor));
 }
 
+// TODO: Figure out if we need a non-moving wrap_buffer()
 inline at::Tensor wrap_buffer(
     at::Tensor buffer,
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets) {
+    at::Tensor offsets_tensor) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       buffer.is_contiguous(), "Given buffer must be contiguous.");
   return at::detail::make_tensor<NestedTensorImpl>(
       std::move(buffer),
       std::move(nested_size_tensor),
       std::move(nested_stride_tensor),
-      std::move(offsets));
-}
-
-inline at::Tensor wrap_buffer(
-    at::Tensor buffer,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    const std::vector<int64_t>& offsets) {
-  std::vector<int64_t> offsets_copy(offsets);
-  return wrap_buffer(
-      buffer,
-      nested_size_tensor,
-      nested_stride_tensor,
-      std::move(offsets_copy));
+      std::move(offsets_tensor));
 }
 
 inline at::Tensor get_buffer(const at::Tensor& tensor) {
@@ -86,14 +74,14 @@ inline at::Tensor get_buffer(const at::Tensor& tensor) {
  * @param base Base tensor to construct view from.
  * @param nested_size_tensor View tensors' sizes.
  * @param nested_stride_tensor View tensors' strides.
- * @param offsets View tensors' offsets.
+ * @param offsets_tensor View tensors' offsets.
  * @return A newly constructed view tensor
  */
 inline at::Tensor create_nested_view_tensor(
     const at::Tensor& base,
     at::Tensor nested_size_tensor,
     at::Tensor nested_stride_tensor,
-    std::vector<int64_t>&& offsets) {
+    at::Tensor offsets_tensor) {
   TORCH_INTERNAL_ASSERT(
       base.is_nested(),
       "This function can only be used to create nested tensor views");
@@ -106,7 +94,7 @@ inline at::Tensor create_nested_view_tensor(
       base,
       nested_size_tensor,
       nested_stride_tensor,
-      std::move(offsets));
+      offsets_tensor);
 }
 //  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -324,6 +312,14 @@ inline Tensor wrap_tensor_node(
       TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
           pin_memory);
   if (tensor_node.degree() == 0) {
+    // Temporarily disable meta if needed to ensure sizes are built as real tensors.
+    // TODO: This is a hack and should be removed once we have a proper solution for
+    // selectively disabling meta. Most likely, this will come in the form of more
+    // aggressive constant propagation for fake tensors.
+    auto disable_meta_keyset = c10::impl::tls_local_dispatch_key_set();
+    disable_meta_keyset.included_ = disable_meta_keyset.included_.remove_backend(
+      c10::BackendComponent::MetaBit);
+    c10::impl::ForceDispatchKeyGuard disable_meta_guard(disable_meta_keyset);
     return wrap_buffer(ones({0}, dtype, layout, device), ones({}));
   }
 

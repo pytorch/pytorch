@@ -7,7 +7,7 @@ NestedTensors are a generalization of torch Tensors which eases working with dat
 
 - nested_size_tensor_: 2d tensor of n_tensor_components x n_dims
 - nested_stride_tensor_: 2d tensor of n_tensor_components x n_dims
-- storage_offsets_: 1d tensor of offsets corresponding to the start position of each tensor component
+- offsets_tensor_: 1d tensor of offsets corresponding to the start position of each tensor component
 - storage_: The storage object that contains the flattened tensor_components (defined on c10::TensorImp)
 
 NestedTensors inherit from c10::TensorImpl whose definition can be found here: [NestedTensorImpl.h](../../NestedTensorImpl.h).

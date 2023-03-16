@@ -978,6 +978,13 @@ def skipIfCrossRef(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def expectedFailureIf(condition):
+    def decorator(fn):
+        if condition:
+            return unittest.expectedFailure(fn)
+        return fn
+    return decorator
+
 class CrossRefMode(torch.overrides.TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}

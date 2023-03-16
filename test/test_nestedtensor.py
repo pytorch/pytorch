@@ -24,6 +24,8 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     subtest,
     TestCase,
+    TEST_WITH_CROSSREF,
+    expectedFailureIf
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -95,6 +97,49 @@ def random_nt(device, dtype, num_tensors, max_dims, min_dims=None):
         ts1.append(t1)
     return torch.nested.nested_tensor(ts1, device=device, dtype=dtype)
 
+def define_crossref_xfails():
+    crossref_xfails = [
+        # NotImplementedError: Could not run 'aten::as_strided' with arguments
+        # from the 'NestedTensorMeta' backend. Similar error when trying to run
+        # fallback for NestedTensorCPU.
+        "TestNestedTensor.test_2d_nested_tensor*",
+        "TestNestedTensor.test_3d_nested_tensor*",
+        "TestNestedTensor.test_copy_",
+        # NotImplementedError: Could not run 'aten::fill_.Scalar' with arguments
+        # from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_fill_",
+        # NotImplementedError: Could not run 'aten::transpose.int' with arguments
+        # from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_is_contiguous",
+        # NotImplementedError: Could not run 'aten::zero_' / 'aten::normal_' /
+        # 'aten::fill_.Scalar' with arguments from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_like_functions*",
+        # Calls _to_copy() decomp -> torch._prims.convert_element_type() which is
+        # dense-specific.
+        "TestNestedTensor.test_to",
+        # DataDependentOutputException (expected for these)
+        "TestNestedTensor.test_unbind_0",
+        "TestNestedTensor.test_unbind_1",
+        "TestNestedTensor.test_unbind_3",
+        "TestNestedTensor.test_unbind_4",
+        # NotImplementedError: Could not run 'aten::as_strided' with arguments
+        # from the 'NestedTensorMeta' backend.
+        "TestNestedTensor.test_zero_",
+    ]
+    expectedFailureIfCrossRef = expectedFailureIf(TEST_WITH_CROSSREF)
+    for full_test_name in crossref_xfails:
+        test_cls_name, test_name = full_test_name.split('.')
+        test_cls = globals().get(test_cls_name)
+        if test_name.endswith('*'):
+            # Decorate all tests that match the prefix
+            for cls_attr in set(test_cls.__dict__.keys()):
+                if cls_attr.startswith(test_name[:-1]):
+                    test = getattr(test_cls, cls_attr)
+                    expectedFailureIfCrossRef(test)
+
+        else:
+            test = getattr(test_cls, test_name)
+            expectedFailureIfCrossRef(test)
 
 class CrossRefNestedFakeMode(torch._subclasses.CrossRefFakeMode):
     def __init__(self):
@@ -109,6 +154,13 @@ class CrossRefNestedFakeMode(torch._subclasses.CrossRefFakeMode):
 
 
 class TestNestedTensor(TestCase):
+    def run(self, result=None):
+        if TEST_WITH_CROSSREF:
+            with CrossRefNestedFakeMode():
+                return super().run(result)
+        else:
+            return super().run(result)
+
     @parametrize("batch_size", [2, 4])
     @parametrize("max_seq_len", [3, 5])
     @parametrize("vocab_size", [10, 20])
@@ -1948,30 +2000,6 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, "empty_like only supports contiguous memory format for Nested Tensors"):
             nt_empty = torch.empty_like(nt_noncont)
 
-    def test_fake_nt_creation(self, device):
-        with CrossRefNestedFakeMode():
-            components = [
-                torch.randn(3, 2, device='cpu'),
-                torch.randn(4, 2, device='cpu')
-            ]
-            nt = torch.nested.nested_tensor(components)
-
-            # ensure passing kwargs works
-            nt2 = torch.nested.nested_tensor(
-                components, device=device, dtype=torch.float64,
-                requires_grad=True, pin_memory=False)
-
-    def test_fake_nt_fallback(self, device):
-        with CrossRefNestedFakeMode():
-            components = [
-                torch.randn(3, 2, device=device),
-                torch.randn(4, 2, device=device)
-            ]
-            nt = torch.nested.nested_tensor(components)
-
-            # run op via fallback
-            b = nt + 1
-
 
 class TestNestedTensorAutograd(TestCase):
     # Note [Gradcheck args check_batched_grad=False] the common_utils testing version of gradcheck
@@ -2437,6 +2465,16 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
+    # Previously would error when input NT doesn't require grad
+    # NotImplementedError: Cannot access storage of UndefinedTensorImpl
+    def test_layer_norm_backward_edge_case(self, device):
+        size = 4
+        a = torch.randn(1, 2, size, requires_grad=False, dtype=torch.float64, device=device)
+        nt = torch.nested.nested_tensor([a])
+        nt_layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+        out = nt_layer_norm(nt)
+        out.backward(out.clone())
+
     # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
     @parametrize("size", [1024, 1023, 513, 512, 256, 128, 32, 4, 2])
@@ -2476,6 +2514,7 @@ class TestNestedTensorAutograd(TestCase):
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 instantiate_device_type_tests(TestNestedTensorAutograd, globals())
+define_crossref_xfails()
 
 if __name__ == '__main__':
     run_tests()
