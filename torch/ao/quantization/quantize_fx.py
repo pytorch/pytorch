@@ -10,8 +10,8 @@ from .fx.tracer import (  # noqa: F401
     Scope,
     ScopeContextManager
 )
-from .fx import fuse  # noqa: F401
-from .fx import prepare  # noqa: F401
+from .fx.fuse import fuse  # noqa: F401
+from .fx.prepare import prepare  # noqa: F401
 from .fx.convert import convert
 from .backend_config import (  # noqa: F401
     BackendConfig,

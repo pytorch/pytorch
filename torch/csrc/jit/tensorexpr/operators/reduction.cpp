@@ -126,8 +126,7 @@ Tensor computeMean(
     extra_args = c10::fmap<ExprHandle>(*mean_dims);
   } else {
     // When dims argument is not specified, reduce over all dimensions
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    for (int64_t idx = 0; idx < InputBuf.ndim(); idx++) {
+    for (int64_t idx = 0; idx < static_cast<int64_t>(InputBuf.ndim()); ++idx) {
       extra_args.emplace_back(idx);
     }
   }

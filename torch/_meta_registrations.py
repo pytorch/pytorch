@@ -1,5 +1,5 @@
 import math
-from typing import List, Optional, Union
+from typing import List, Optional, Sequence, Union
 
 import torch
 import torch._prims_common as utils
@@ -164,9 +164,20 @@ def meta_max_dim(self, dim, keepdim=False):
     )
 
 
-@register_meta([aten.min.default])
+@register_meta([aten.min.default, aten.min.unary_out])
+@out_wrapper()
 def meta_min(self):
     return self.new_empty(())
+
+
+@register_meta(aten.min.dim)
+def meta_min_dim(self, dim, keepdim=False):
+    dim = utils.reduction_dims(self.shape, (dim,))
+    output_shape = _compute_reduction_shape(self, dim, keepdim)
+    return (
+        self.new_empty(output_shape),
+        self.new_empty(output_shape, dtype=torch.long),
+    )
 
 
 @register_meta(aten.angle.default)
@@ -381,6 +392,29 @@ def meta_pad2d(self, padding):
         return self.new_empty((nplane, output_h, output_w))
     else:
         return self.new_empty((nbatch, nplane, output_h, output_w))
+
+
+@register_meta([aten.baddbmm.default, aten.baddbmm.out])
+@out_wrapper()
+def meta_baddbmm(self, batch1, batch2, *, beta=1, alpha=1):
+    dim1 = batch1.size(0)
+    dim2 = batch1.size(1)
+    dim3 = batch2.size(2)
+    self = self.expand((dim1, dim2, dim3))
+    check(batch1.dim() == 3, lambda: "batch1 must be a 3D tensor")
+    check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
+    batch1_sizes = batch1.shape
+    batch2_sizes = batch2.shape
+    bs = batch1_sizes[0]
+    contraction_size = batch1_sizes[2]
+    check(
+        batch2_sizes[0] == bs and batch2_sizes[1] == contraction_size,
+        lambda: (
+            f"Expected size for first two dimensions of batch2 tensor to be: "
+            f"[{bs}, {contraction_size}] but got: [{batch2_sizes[0]}, {batch2_sizes[1]}]."
+        ),
+    )
+    return self.new_empty(self.size())
 
 
 @register_meta([aten.bernoulli.default, aten.bernoulli.out])
@@ -2050,6 +2084,7 @@ def meta__scaled_dot_product_flash(
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
+    scale: Optional[float] = None,
 ):
     # [Note] SDPA_flash's meta function returns incorrect Philox seed and offset:
     # We have added logic to torch/_dynamo/variables/torch.py
@@ -2144,6 +2179,7 @@ def meta__scaled_dot_product_flash_backward(
     is_causal: bool,
     philox_seed: int,
     philox_offset: int,
+    scale: Optional[float] = None,
 ):
     batch_size = query.size(0)
     num_heads = query.size(1)
@@ -2182,6 +2218,7 @@ def meta__scaled_dot_product_efficient(
     value: Tensor,
     compute_log_sumexp: bool,
     is_causal: bool = False,
+    scale: Optional[float] = None,
 ):
     query = query.transpose(1, 2)
     key = key.transpose(1, 2)
@@ -2222,6 +2259,7 @@ def meta__scaled_dot_product_efficient_backward(
     logsumexp: Tensor,
     is_causal: bool = False,
     chunk_grad_outputs=False,
+    scale: Optional[float] = None,
 ):
     grad_out = grad_out.transpose(1, 2)
     query = query.transpose(1, 2)
@@ -2335,6 +2373,36 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
     return output
 
 
+@register_meta(aten.upsample_nearest2d_backward.default)
+def upsample_nearest2d_backward(
+    grad_output: Tensor,
+    output_size: Sequence[Union[int, torch.types.SymInt]],
+    input_size: Sequence[Union[int, torch.types.SymInt]],
+    scales_h: float = None,
+    scales_w: float = None,
+):
+    full_output_size = upsample_common_check(
+        input_size, output_size, num_spatial_dims=2
+    )
+    check(
+        grad_output.ndim == 4,
+        lambda: f"Expected grad_output to be a tensor of dimension 4 but got: dimension {grad_output.ndim}",
+    )
+    for i in range(4):
+        check(
+            grad_output.size(i) == full_output_size[i],
+            lambda: (
+                f"Expected grad_output to have the same shape as output;"
+                f" output.size({i}) = {full_output_size[i]}"
+                f" but got grad_output.size({i}) = {grad_output.size(i)}"
+            ),
+        )
+
+    return grad_output.new_empty(input_size).to(
+        memory_format=utils.suggest_memory_format(grad_output)
+    )  # type: ignore[call-overload]
+
+
 @register_meta(aten.upsample_nearest3d.default)
 def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_w=None):
     check(
@@ -2418,7 +2486,6 @@ def _cudnn_rnn(
     batch_sizes,
     dropout_state,
 ):
-
     is_input_packed = len(batch_sizes) != 0
     if is_input_packed:
         seq_length = len(batch_sizes)
@@ -2703,9 +2770,10 @@ import torch._refs
 import torch._refs.nn.functional
 import torch._refs.special
 
+import torch.ao.quantization.fx._decomposed
+
 
 def activate_meta():
-
     activate_meta_table = {}
 
     # For a given op, we pick the most specific decomp function from

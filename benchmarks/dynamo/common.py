@@ -76,6 +76,8 @@ CI_SKIP[CI("aot_eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
     "demucs",  # OOM
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
     # all dynamic shapes errors for detectron variants
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",
@@ -162,11 +164,17 @@ CI_SKIP[CI("inductor", training=False, device="cpu")] = [
     "detectron2_maskrcnn_r_101_fpn",
     "detectron2_maskrcnn_r_50_c4",
     "detectron2_maskrcnn_r_50_fpn",
+    "doctr_det_predictor",  # requires newer gcc
+    "doctr_reco_predictor",  # requires newer gcc
+    "hf_Bert_large",  # OOM
     "hf_GPT2_large",  # Intermittent failure on CI
+    "hf_T5_base",  # OOM
     "mobilenet_v2_quantized_qat",
     "pyhpc_turbulent_kinetic_energy",
     "vision_maskrcnn",
     "resnet50_quantized_qat",  # Eager model failed to run(Quantize only works on Float Tensor, got Double)
+    # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
+    "torchrec_dlrm",
     # Huggingface
     "AllenaiLongformerBase",
     "BartForConditionalGeneration",  # OOM
@@ -200,6 +208,7 @@ CI_SKIP[CI("inductor", training=True)] = [
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
     # https://github.com/pytorch/pytorch/issues/94066
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -226,13 +235,11 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # torchbench
     "functorch_dp_cifar10",  # timeout
     "opacus_cifar10",  # timeout
-    "fastNLP_Bert",  # AssertionError: 1900: <class 'torch.Tensor'>, 256: <class 'int'>
-    "speech_transformer",  # AssertionError: 2040: <class 'torch.Tensor'>, 256: <class 'int'>
-    "yolov3",  # AssertionError: 2304: <class 'torch.Tensor'>, 32: <class 'int'>
+    "PegasusForCausalLM",  # TypeError: Cannot convert symbols to int
+    "PegasusForConditionalGeneration",  # TypeError: Cannot convert symbols to int
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
-    "pnasnet5large",  # ceiling is not defined
-    "volo_d1_224",  # ceiling is not defined
+    "pnasnet5large",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -241,22 +248,10 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
     # torchbench
-    "drq",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
-    "soft_actor_critic",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    # huggingface
-    "PegasusForCausalLM",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "PegasusForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "T5ForConditionalGeneration",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "T5Small",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
-    "XLNetLMHeadModel",  # 'NoneType' object has no attribute '_has_symbolic_sizes_strides'
     # timm_models
-    "eca_botnext26ts_256",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "dla102",  # Accuracy failed for key name base_layer.1.bias.grad
-    "mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "tf_efficientnet_b0",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "tf_mixnet_l",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
-    "visformer_small",  # 'float' object has no attribute '_has_symbolic_sizes_strides'
+    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
+    "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
 
@@ -669,10 +664,20 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
     if "compilation_latency" in kwargs:
-        headers += ["compilation_latency", "compression_ratio"]
+        headers += [
+            "compilation_latency",
+            "compression_ratio",
+            "eager_peak_mem",
+            "dynamo_peak_mem",
+        ]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
-
+        row.append(kwargs["eager_peak_mem"])
+        row.append(kwargs["dynamo_peak_mem"])
+    if "dynamo_stats" in kwargs:
+        for k, v in kwargs["dynamo_stats"].items():
+            headers.append(k)
+            row.append(v)
     output_csv(
         output_filename,
         headers,
@@ -1416,6 +1421,8 @@ class BenchmarkRunner:
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
+                experiment_kwargs["eager_peak_mem"] = eager_peak_mem
+                experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
 
             if experiment.func is coverage_experiment:
@@ -1934,7 +1941,11 @@ def run(runner, args, original_dir=None):
     if args.unspecialize_int:
         torch._dynamo.config.specialize_int = False
     if args.ci:
-        args.repeat = 2
+        if args.inductor and args.accuracy:
+            torch._inductor.config.compile_threads = 1
+        if args.accuracy:
+            # Run fewer iterations when checking accuracy
+            args.repeat = 2
         if args.dynamic_ci_skips_only:
             # Test only the incremental set of jobs whose skipped was
             # caused solely by turning on dynamic shapes
@@ -1987,9 +1998,13 @@ def run(runner, args, original_dir=None):
             args.use_eval_mode = True
         inductor_config.fallback_random = True
         if args.only is not None and args.only not in {
+            "alexnet",
+            "Background_Matting",
             "pytorch_CycleGAN_and_pix2pix",
             "pytorch_unet",
             "Super_SloMo",
+            "vgg16",
+            "vision_maskrcnn",
         }:
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
