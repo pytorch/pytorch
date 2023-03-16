@@ -88,9 +88,11 @@ def validate_ir(node_or_nodes):
         assert isinstance(
             node,
             (
+                DynamicScalar,
                 TensorBox,
                 RandSeedBuffer,
                 sympy.Symbol,
+                sympy.core.relational.Relational,
                 Expr,
             ),
         ), f"Found {type(node)}, which is not a supported top level IR node. See [Note: Inductor IR]"
@@ -325,8 +327,10 @@ class IRNode:
     def current_origins(origins: Set[torch.fx.Node]):
         old = IRNode._current_origins
         IRNode._current_origins = old | origins
-        yield
-        IRNode._current_origins = old
+        try:
+            yield
+        finally:
+            IRNode._current_origins = old
 
     def __post_init__(self):
         self.origins = set(self._current_origins)
@@ -394,12 +398,8 @@ class Loops(IRNode):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(self._index(self.ranges))
-            return formatter.getvalue(result)
+        index = self._index(self.ranges)
+        return V.KernelFormatterHandler.ir_to_string(self.inner_fn, index)
 
     def is_zero_elements(self):
         return any(r == 0 for r in self.ranges)
@@ -515,15 +515,13 @@ class Reduction(Loops):
 
     @cache_on_self
     def inner_fn_str(self):
-        formatter = V.KernelFormatterHandler(V.MockHandler())
-        with V.set_ops_handler(formatter), patch.object(
-            FlexibleLayout, "allow_indexing", True
-        ):
-            result = self.inner_fn(
-                self._index(self.ranges),
-                self._index(self.reduction_ranges, "r"),
-            )
-            return formatter.getvalue(result)
+        index = self._index(self.ranges)
+        rindex = self._index(self.reduction_ranges, "r")
+        return V.KernelFormatterHandler.ir_to_string(
+            self.inner_fn,
+            index,
+            rindex,
+        )
 
     def constant_to_device(self, device):
         """Move this to a given device. Requires that all reads are to constants."""
@@ -804,7 +802,6 @@ class Reduction(Loops):
         reduction_numel = V.graph.sizevars.simplify(sympy_product(reduction_ranges))
 
         if reduction_numel == 0:
-
             # N.B. This is a hack to generate the literal of the given type
             # Ideally, we should be fixing `def constant` in triton.py
             # but it breaks due to hardcoded dtypes in other places
@@ -1254,7 +1251,6 @@ class PermuteView(BaseView):
 class SqueezeView(BaseView):
     @classmethod
     def create(cls, x, *, dim=None):
-
         if is_storage_and_layout(x):
             storage, old_layout = as_storage_and_layout(x)
             new_size = []
@@ -1523,10 +1519,10 @@ class ReinterpretView(BaseView):
         pass
 
     def codegen_reference(self):
-        size = V.graph.sizevars.codegen_shape_tuple(self.layout.size)
-        stride = V.graph.sizevars.codegen_shape_tuple(self.layout.stride)
-        offset = V.graph.sizevars.codegen_sizevar(self.layout.offset)
-        as_strided = V.graph.sizevars.as_strided
+        size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
+        stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
+        offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
+        as_strided = V.graph.wrapper_code.as_strided
         if offset != "0":
             return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
         return f"{as_strided}({self.get_name()}, {size}, {stride})"
@@ -2075,7 +2071,9 @@ class ShapeAsConstantBuffer(IRNode):
         self.shape = shape
 
     def codegen_reference(self):
-        return str(V.graph.sizevars.simplify(self.shape))
+        from torch._inductor.codegen.wrapper import pexpr
+
+        return pexpr(V.graph.sizevars.simplify(self.shape))
 
 
 @dataclasses.dataclass
@@ -2235,8 +2233,9 @@ class ComputedBuffer(Buffer):
             reduce_vars, reduce_size
         )
 
-        # remember the reordering order
-        self.iter_reordering_reindex = iter_reordering_reindex
+        # remember the reordering if not have loop collapse.
+        if len(iter_ranges) == len(index_vars):
+            self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -2715,8 +2714,8 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts:
-            size = V.graph.sizevars.codegen_shape_tuple(self.get_size())
-            stride = V.graph.sizevars.codegen_shape_tuple(self.get_stride())
+            size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
+            stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
                 f"assert_size_stride({self.get_name()}, {size}, {stride})"
             )
@@ -3827,7 +3826,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,

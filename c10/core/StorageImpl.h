@@ -3,6 +3,7 @@
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/SymInt.h>
+#include <c10/core/impl/PyObjectSlot.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -67,10 +68,10 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
             allocator,
             resizable) {}
 
-  StorageImpl& operator=(StorageImpl&& other) = default;
+  StorageImpl& operator=(StorageImpl&& other) = delete;
   StorageImpl& operator=(const StorageImpl&) = delete;
   StorageImpl() = delete;
-  StorageImpl(StorageImpl&& other) = default;
+  StorageImpl(StorageImpl&& other) = delete;
   StorageImpl(const StorageImpl&) = delete;
   ~StorageImpl() override = default;
 
@@ -222,5 +223,6 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   // local to process cuda memory allocation
   bool received_cuda_;
   Allocator* allocator_;
+  impl::PyObjectSlot pyobj_slot_;
 };
 } // namespace c10

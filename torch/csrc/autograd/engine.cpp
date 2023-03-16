@@ -347,14 +347,7 @@ void Engine::thread_init(
   // We don't have any good reason to prefer one or the other, so we've
   // arbitrarily picked to colocate devices.  Maybe the other approach is
   // better.
-
-#if defined(USE_CUDA)
-  if (at::detail::getCUDAHooks().hasPrimaryContext(device)) {
-    set_device(device);
-  }
-#else
-  set_device(device);
-#endif
+  worker_device = device;
 
   // initialize each device thread's thread local ready queue with the ready
   // queue that is created before the thread initialization
@@ -525,6 +518,8 @@ auto Engine::thread_main(const std::shared_ptr<GraphTask>& graph_task) -> void {
         // execution.
         continue;
       }
+
+      set_device(worker_device);
 
       if (task.fn_ && !local_graph_task->has_error_.load()) {
         // Set the ThreadLocalState before calling the function.
@@ -787,7 +782,8 @@ void set_device(int device) {
     for (const auto i : c10::irange(static_cast<size_t>(
              c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES))) {
       auto* impl = c10::impl::device_guard_impl_registry[i].load();
-      if (impl && device < impl->deviceCount()) {
+      if (impl && device < impl->deviceCount() &&
+          impl->getDevice().index() != device) {
         impl->setDevice(at::Device(static_cast<c10::DeviceType>(i), device));
       }
     }
@@ -930,7 +926,6 @@ static variable_list call_function(
   });
 
   if (has_post_hooks) {
-    // NOLINTNEXTLINE(bugprone-use-after-move)
     return call_post_hooks(fn, std::move(outputs), inputs);
   }
   return outputs;

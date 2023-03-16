@@ -1338,7 +1338,6 @@ class TestFSDPOptimState(FSDPTest):
         use_multiple_param_groups: bool,
         use_optim_input: bool,
     ):
-
         NUM_ITERS = 3
         # Run a wrapped model for a few iterations
         model1, optim1, optim_input1 = self._init_nested_model(

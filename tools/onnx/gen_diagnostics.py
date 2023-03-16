@@ -142,7 +142,6 @@ def _format_rule_for_cpp(rule: _RuleType) -> str:
 def gen_diagnostics_python(
     rules: Sequence[_RuleType], out_py_dir: str, template_dir: str
 ) -> None:
-
     rule_class_lines = [_format_rule_for_python_class(rule) for rule in rules]
     rule_field_lines = [_format_rule_for_python_field(rule) for rule in rules]
 
@@ -165,7 +164,6 @@ def gen_diagnostics_python(
 def gen_diagnostics_cpp(
     rules: Sequence[_RuleType], out_cpp_dir: str, template_dir: str
 ) -> None:
-
     rule_lines = [_format_rule_for_cpp(rule) for rule in rules]
     rule_names = [f'"{_kebab_case_to_snake_case(rule["name"])}",' for rule in rules]
 
@@ -206,7 +204,6 @@ def gen_diagnostics(
     out_cpp_dir: str,
     out_docs_dir: str,
 ) -> None:
-
     with open(rules_path, "r") as f:
         rules = yaml.load(f, Loader=torchgen_utils.YamlLoader)
 
