@@ -1,10 +1,10 @@
-import logging
 import functools
+import logging
 import os
 import re
+from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Dict, Set
-from dataclasses import dataclass, field
 
 DEFAULT_LOG_LEVEL = logging.WARN
 DEFAULT_FORMATTER = logging.Formatter(
@@ -18,15 +18,15 @@ class LogRegistry:
     # shorthand name to log qualified name
     # Note: this only contains loggers registered
     # from register_log
-    log_alias_to_log_qname : Dict[str, str] = field(default_factory=dict)
+    log_alias_to_log_qname: Dict[str, str] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
     # occur
-    artifact_log_qnames : Set[str] = field(default_factory=set)
+    artifact_log_qnames: Set[str] = field(default_factory=set)
 
     # artifact names, populated by register_artifact
-    artifact_names : Set[str] = field(default_factory=set)
+    artifact_names: Set[str] = field(default_factory=set)
 
     # artifacts which are not displayed unless explicitly named in the
     # settings. Ex. output_code is NOT displayed even if the inductor
@@ -67,13 +67,14 @@ class LogRegistry:
     def is_off_by_default(self, artifact_qname):
         return artifact_qname in self.off_by_default_artifact_names
 
+
 @dataclass
 class LogState:
     # qualified log names -> currently set log level
-    log_qname_to_level : Dict[str, str] = field(default_factory=dict)
+    log_qname_to_level: Dict[str, str] = field(default_factory=dict)
 
     # the set of currently enabled artifacts
-    artifact_names : set[str] = field(default_factory=set)
+    artifact_names: Set[str] = field(default_factory=set)
 
     def enable_artifact(self, artifact_name):
         self.artifact_names.add(artifact_name)
@@ -99,18 +100,20 @@ log_state = LogState()
 # User API for setting log properties
 # ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
 # ex. set_logs(dynamo=logging.DEBUG, graph_code=True)
-def set_logs(dynamo=DEFAULT_LOG_LEVEL,
-             aot=DEFAULT_LOG_LEVEL,
-             inductor=DEFAULT_LOG_LEVEL,
-             bytecode=False,
-             aot_forward_graph=False,
-             aot_backward_graph=False,
-             aot_joint_graph=False,
-             graph=False,
-             graph_code=False,
-             guards=False,
-             output_code=False,
-             schedule=False):
+def set_logs(
+    dynamo=DEFAULT_LOG_LEVEL,
+    aot=DEFAULT_LOG_LEVEL,
+    inductor=DEFAULT_LOG_LEVEL,
+    bytecode=False,
+    aot_forward_graph=False,
+    aot_backward_graph=False,
+    aot_joint_graph=False,
+    graph=False,
+    graph_code=False,
+    guards=False,
+    output_code=False,
+    schedule=False,
+):
     """
     Enable setting the log level of individual components through kwargs.
     Args are set using the following format:
@@ -134,7 +137,9 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
                 if val != DEFAULT_LOG_LEVEL:
-                    log_state.enable_log(log_registry.log_alias_to_log_qname[alias], val)
+                    log_state.enable_log(
+                        log_registry.log_alias_to_log_qname[alias], val
+                    )
             else:
                 # Check if it is a qualified name log
                 # if so, check that its root logger is parent
@@ -146,18 +151,21 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
 
         _init_logs()
 
-    _set_logs(dynamo=dynamo,
-              aot=aot,
-              inductor=inductor,
-              bytecode=bytecode,
-              aot_forward_graph=aot_forward_graph,
-              aot_backward_graph=aot_backward_graph,
-              aot_joint_graph=aot_joint_graph,
-              graph=graph,
-              graph_code=graph_code,
-              guards=guards,
-              output_code=output_code,
-              schedule=schedule)
+    _set_logs(
+        dynamo=dynamo,
+        aot=aot,
+        inductor=inductor,
+        bytecode=bytecode,
+        aot_forward_graph=aot_forward_graph,
+        aot_backward_graph=aot_backward_graph,
+        aot_joint_graph=aot_joint_graph,
+        graph=graph,
+        graph_code=graph_code,
+        guards=guards,
+        output_code=output_code,
+        schedule=schedule,
+    )
+
 
 def register_log(setting_name, log_name):
     """
@@ -167,6 +175,7 @@ def register_log(setting_name, log_name):
         log_name:  the log name that the setting_name is associated with
     """
     log_registry.register_log(setting_name, log_name)
+
 
 def register_artifact(setting_name, off_by_default=False):
     """
@@ -178,16 +187,20 @@ def register_artifact(setting_name, off_by_default=False):
     """
     log_registry.register_artifact_name(setting_name, off_by_default)
 
+
 def getArtifactLogger(module_qname, artifact_name):
     if artifact_name not in log_registry.artifact_names:
-        raise ValueError(f"Artifact name: {artifact_name} not registered,"
-                         f"please call register_artifact({artifact_name}) in torch._logging.registrations.")
+        raise ValueError(
+            f"Artifact name: {artifact_name} not registered,"
+            f"please call register_artifact({artifact_name}) in torch._logging.registrations."
+        )
     qname = module_qname + f".__{artifact_name}"
     log = logging.getLogger(module_qname + f".__{artifact_name}")
     log.artifact_name = artifact_name
     log_registry.register_artifact_log(qname)
     configure_artifact_log(log)
     return log
+
 
 INCR_VERBOSITY_CHAR = "+"
 DECR_VERBOSITY_CHAR = "-"
@@ -197,18 +210,23 @@ VERBOSITY_REGEX = (
     + "?)"
 )
 
+
 def configure_artifact_log(log):
     # if parent log is set to debug, but this artifact is off by default
     # set propagate to False so that this artifact is not propagated
     # to its ancestor logger
     # this artifact is only logged when explicitly enabled (occurs below)
-    if log_registry.is_off_by_default(log.artifact_name) and log.getEffectiveLevel() == logging.DEBUG:
+    if (
+        log_registry.is_off_by_default(log.artifact_name)
+        and log.getEffectiveLevel() == logging.DEBUG
+    ):
         log.propagate = False
 
     # enable artifact logging when explicitly enabled
     if log_state.is_artifact_enabled(log.artifact_name):
         log.setLevel(logging.DEBUG)
         log.propagate = True
+
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def _gen_settings_regex():
@@ -217,6 +235,7 @@ def _gen_settings_regex():
 
 def _validate_settings(settings):
     return re.fullmatch(_gen_settings_regex(), settings) is not None
+
 
 @functools.lru_cache()
 def _parse_log_settings(settings):
@@ -264,12 +283,14 @@ def _parse_log_settings(settings):
 
     return log_state
 
+
 def _is_valid_module(qname):
     try:
         __import__(qname)
         return True
     except ImportError:
         return False
+
 
 def _update_log_state_from_env():
     global log_state
@@ -291,6 +312,7 @@ def _setup_handlers(create_handler_fn, log):
     debug_handler.setLevel(logging.DEBUG)
     log.addHandler(debug_handler)
 
+
 # mark handlers that we've created
 # so we don't modify user handlers
 def _tag_handler(handler):
@@ -307,6 +329,7 @@ def _clear_handlers(log):
     to_remove = [handler for handler in log.handlers if _is_torch_handler(handler)]
     for handler in to_remove:
         log.removeHandler(handler)
+
 
 def _reset_logs():
     for log_name in log_registry.get_log_qnames():

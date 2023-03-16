@@ -1,4 +1,4 @@
-from ._internal import register_log, register_artifact
+from ._internal import register_artifact, register_log
 
 
 TORCHDYNAMO_LOG_NAME = "torch._dynamo"
