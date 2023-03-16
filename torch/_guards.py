@@ -29,7 +29,6 @@ class GuardSource(enum.Enum):
     CONSTANT = 4
     RANDOM_VALUE = 5
     SHAPE_ENV = 6
-    FSDP = 7
 
     def select(self, locals_, globals_):
         # SHAPE_ENV counts as locals, because the guard expressions
@@ -54,9 +53,6 @@ class GuardSource(enum.Enum):
 
     def is_local(self):
         return self in (GuardSource.LOCAL, GuardSource.LOCAL_NN_MODULE)
-
-    def is_fsdp(self) -> bool:
-        return self in (GuardSource.FSDP)
 
 
 """
