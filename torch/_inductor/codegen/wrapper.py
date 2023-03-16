@@ -17,6 +17,7 @@ from ..utils import (
     cache_on_self,
     get_benchmark_name,
     has_triton,
+    LineContext,
     sympy_dot,
     sympy_product,
     sympy_symbol,
@@ -562,7 +563,7 @@ class WrapperCodeGen(CodeGen):
 
         self.add_benchmark_harness(result)
 
-        return result.getvalue()
+        return result.getvaluewithlinemap()
 
     def codegen_inputs(self, code: IndentedBuffer, graph_inputs: Dict[str, ir.Buffer]):
         """Assign all symbolic shapes to locals"""
@@ -735,6 +736,9 @@ class WrapperCodeGen(CodeGen):
 
     def writeline(self, line):
         self.lines.append(line)
+
+    def enter_context(self, ctx):
+        self.lines.append(LineContext(ctx))
 
 
 class CppWrapperCodeGen(WrapperCodeGen):
