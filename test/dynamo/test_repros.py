@@ -2748,6 +2748,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
+    def test_odict_get_item_index_name(self):
+        d = {float: torch.float32, np.float16: torch.float16}
+
+        @torch.compile
+        def f(x, y1, y2):
+            return torch.zeros(5, dtype=d[y1]), torch.zeros(5, dtype=d[y2])
+
+        f(torch.zeros(4), float, np.float16)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
