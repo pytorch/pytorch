@@ -261,8 +261,8 @@ class TestQuantizePT2E(QuantizationTestCase):
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                         ]
                     self.checkGraphModuleNodes(convert_module,
-                                                expected_node_occurrence=node_occurrence,
-                                                expected_node_list=node_list)
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
 
                     # Step1: Ref result in 1.X fx path
                     backend_config_1_x = get_x86_backend_config()
