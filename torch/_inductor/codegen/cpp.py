@@ -2059,7 +2059,7 @@ class CppKernelProxy(CppKernel):
                     pass
 
             def eliminate_to_dtype(sub_graph: torch.fx.Graph):
-                def _eliminate_redundant_to_node(sub_graph: torch.fx.Graph):
+                def _eliminate_duplicate_to_node(sub_graph: torch.fx.Graph):
                     # Eliminate the redudant to_dtype node. Let's consider a pattern as follows:
                     #   graph():
                     #     %to_dtype1 = call_method[target=to_dtype](args = (%ops, %input, torch.float), kwargs = {})
@@ -2084,11 +2084,13 @@ class CppKernelProxy(CppKernel):
 
                     sub_graph.lint()
 
-                def _eliminate_to_node_mem_copy(sub_grah: torch.fx.Graph):
+                def _eliminate_redundant_to_node(sub_grah: torch.fx.Graph):
+                    # TODO(Eikan) Remove redundant to_dtype like load_bf16 + to_fp32 + to_bf16 + store_bf16
+                    # => load_bf16 + store_bf16
                     pass
 
+                _eliminate_duplicate_to_node(sub_graph)
                 _eliminate_redundant_to_node(sub_graph)
-                _eliminate_to_node_mem_copy(sub_graph)
 
             eliminate_to_dtype(sub_graph)
 
