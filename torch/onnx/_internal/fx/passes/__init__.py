@@ -1,9 +1,12 @@
-from .decomp import decompose
+from .decomp import Decompose
 from .fx_to_onnxscript import export_fx_to_onnxscript
-from .shape_inference import shape_inference_with_fake_tensor
+from .shape_inference import ShapeInferenceWithFakeTensor
+from .virtualization import MovePlaceholderToFront, ReplaceGetAttrWithPlaceholder
 
 __all__ = [
     "export_fx_to_onnxscript",
-    "shape_inference_with_fake_tensor",
-    "decompose",
+    "Decompose",
+    "MovePlaceholderToFront",
+    "ReplaceGetAttrWithPlaceholder",
+    "ShapeInferenceWithFakeTensor",
 ]

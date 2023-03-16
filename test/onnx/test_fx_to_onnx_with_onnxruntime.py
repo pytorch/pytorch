@@ -1,21 +1,90 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import inspect
+import io
 import os
 import tempfile
+import unittest
+from typing import Any, Callable, Sequence, Tuple, Union
 
-from typing import Callable
-
+import onnx.reference
 import onnx_test_common
+import onnxruntime  # type: ignore[import]
+import transformers  # type: ignore[import]
 
 import torch
-import transformers  # type: ignore[import]
 from torch import nn
 from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx import _constants as onnx_constants
-from torch.onnx._internal import diagnostics, fx as fx_onnx
+from torch.onnx._internal import diagnostics
+from torch.onnx._internal import fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
+
+
+def _run_onnx_reference_runtime(
+    onnx_model: Union[str, io.BytesIO],
+    pytorch_inputs: Tuple[Any, ...],
+    verbose: int = 10,
+) -> Sequence[Any]:
+    session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
+    )
+
+
+def _run_ort(
+    onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
+) -> Sequence[Any]:
+    session = onnxruntime.InferenceSession(
+        onnx_model, providers=["CPUExecutionProvider"]
+    )
+    input_names = [ort_input.name for ort_input in session.get_inputs()]
+    return session.run(
+        None, {k: v.cpu().numpy() for k, v in zip(input_names, pytorch_inputs)}
+    )
+
+
+def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+    model: Union[torch.nn.Module, Callable],
+    input_args,
+    rtol: float = 1e-3,
+    atol: float = 1e-7,
+    opset_version: int = 17,
+    **input_kwargs,
+):
+    # Feed args and kwargs into exporter.
+    # Note that exporter should flatten kwargs into positional args the exported model;
+    # since ONNX doesn't represent kwargs.
+    onnx_model = fx_onnx.export(
+        model,
+        *input_args,
+        opset_version=opset_version,
+        use_binary_format=True,
+        **input_kwargs,
+    )
+
+    # Inspect the model's signature. It will be used
+    # to flatten kwargs.
+    if isinstance(model, torch.nn.Module):
+        signature = inspect.signature(model.forward)
+    else:
+        signature = inspect.signature(model)
+
+    # Bind args and kwargs to the model's signature to
+    # flatten kwargs into positional args since ONNX
+    # model cannot be called with kwargs.
+    bound = signature.bind(*input_args, **input_kwargs)
+    # Fill optional inputs.
+    bound.apply_defaults()
+    assert not bound.kwargs
+
+    ref_outputs, _ = pytree.tree_flatten(model(*input_args, **input_kwargs))
+    ort_outputs = _run_ort(onnx_model, bound.args)
+    for ref_output, ort_output in zip(ref_outputs, ort_outputs):
+        torch.testing.assert_close(
+            ref_output, torch.tensor(ort_output), rtol=rtol, atol=atol
+        )
 
 
 class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
@@ -24,7 +93,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.diag_ctx = diagnostics.engine.create_diagnostic_context(
             "test_fx_export", version=torch.__version__
         )
-        self.opset_version = onnx_constants.FX_ONNX_OPSET
+        self.opset_version = 17
 
     def tearDown(self):
         diagnostics.engine.dump(
@@ -42,11 +111,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
-    def test_func_with_args_and_kwargs(self):
+    # AssertionError: Dynamo input/output is not consistent with traced input/output
+    # https://github.com/pytorch/pytorch/issues/96379
+    @unittest.expectedFailure
+    def test_func_with_args_and_tensor_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
         # removed from input list in Dynamo-traced graph, so we can't
         # define a function like
@@ -68,16 +138,37 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
 
         # Test without providing optional kwarg.
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            func, (tensor_x,)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
         # Test with only positional args.
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x, torch.tensor(8.0))
         )
         # Test while specifying optional kwarg.
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x,), b=torch.tensor(5.0)
+        )
+
+    # beartype.roar.BeartypeCallHintParamViolation:
+    # @beartyped onnxscript.function_libs.torch_aten.graph_building.TorchScriptGraph.add_input()
+    # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
+    # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
+    @unittest.expectedFailure
+    def test_func_with_args_and_kwargs(self):
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        # Test with only positional args.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (tensor_x, 8.0)
+        )
+        # Test while specifying optional kwarg.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
+            func, (tensor_x,), b=5.0
         )
 
     def test_mnist(self):
@@ -101,9 +192,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 return output
 
         tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            MNISTModel(), (tensor_x,)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(MNISTModel(), (tensor_x,))
 
     # test single op with no kwargs
     def test_sigmoid(self):
@@ -117,13 +206,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return self.sigmoid(x)
 
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            SigmoidModel(), (x,)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidModel(), (x,))
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
-        self.opset_version = onnx_constants.FX_ONNX_OPSET
+        self.opset_version = 17
         # TODO(titaiwang): change to randn once it's ready
         x = torch.tensor([1.0, 2.0], dtype=torch.float)
 
@@ -136,9 +223,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 x = torch.ops.aten.add(x, 1.0, alpha=2.0)
                 return self.sigmoid(x)
 
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            SigmoidAddModel(), (x,)
-        )
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(SigmoidAddModel(), (x,))
 
     def test_gpt2_tiny(self):
         model_name = "sshleifer/tiny-gpt2"
@@ -151,12 +236,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
-        onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+        onnx_model = fx_onnx.export(
             model, use_binary_format=True, opset_version=self.opset_version, **inputs
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
-        ort_outputs = onnx_test_common.run_ort(onnx_model, (input_ids, attention_mask))
+        ort_outputs = _run_ort(onnx_model, (input_ids, attention_mask))
         assert len(ref_outputs) == len(ort_outputs)
         assert len(ref_outputs) == 5
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
@@ -251,7 +336,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
-            ort_outputs = onnx_test_common.run_ort(
+            ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
                 (arg for arg in args if arg is not None),
             )

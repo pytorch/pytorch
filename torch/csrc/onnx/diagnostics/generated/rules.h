@@ -85,6 +85,11 @@ enum class Rule : uint32_t {
   kFxFrontendDynamoMakeFx,
 
   /**
+   * @brief FX graph transformation before ONNX export.
+   */
+  kFxPass,
+
+  /**
    * @brief The formatted str for argument to display is too verbose.
    */
   kArgFormatTooVerbose,
@@ -104,6 +109,7 @@ static constexpr const char* const kPyRuleNames[] = {
     "atenlib_fx_to_onnx",
     "fx_node_to_onnx",
     "fx_frontend_dynamo_make_fx",
+    "fx_pass",
     "arg_format_too_verbose",
 };
 

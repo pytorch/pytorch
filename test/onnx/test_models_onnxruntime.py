@@ -1,5 +1,4 @@
 # Owner(s): ["module: onnx"]
-from __future__ import annotations
 
 import os
 import unittest
@@ -14,13 +13,8 @@ import test_models
 
 import torch
 import torchvision
-from pytorch_test_common import (
-    skipFxTest,
-    skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
-)
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from torch import nn
-from torch.onnx import _constants
 from torch.testing._internal import common_utils
 from torchvision import ops
 from torchvision.models.detection import (
@@ -45,18 +39,6 @@ def exportTest(
 ):
     opset_versions = opset_versions if opset_versions else [7, 8, 9, 10, 11, 12, 13, 14]
 
-    if getattr(self, "is_fx", False):
-        if isinstance(inputs, torch.Tensor):
-            inputs = (inputs,)
-        model.eval()
-        onnx_test_common.run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            model,
-            inputs,
-            rtol=rtol,
-            atol=atol,
-        )
-        return
-
     for opset_version in opset_versions:
         self.opset_version = opset_version
         self.onnx_shape_inference = True
@@ -69,7 +51,7 @@ def exportTest(
             acceptable_error_percentage=acceptable_error_percentage,
         )
 
-        if self.is_script and opset_version > 11:
+        if self.is_script_test_enabled and opset_version > 11:
             script_model = torch.jit.script(model)
             onnx_test_common.run_model_test(
                 self,
@@ -86,6 +68,7 @@ TestModels = type(
     (pytorch_test_common.ExportTestCase,),
     dict(
         test_models.TestModels.__dict__,
+        is_script_test_enabled=False,
         is_script=False,
         exportTest=exportTest,
     ),
@@ -99,19 +82,9 @@ TestModels_new_jit_API = type(
     dict(
         TestModels.__dict__,
         exportTest=exportTest,
+        is_script_test_enabled=True,
         is_script=True,
         onnx_shape_inference=True,
-    ),
-)
-
-TestModels_fx = type(
-    "TestModels_fx",
-    (pytorch_test_common.ExportTestCase,),
-    dict(
-        TestModels.__dict__,
-        exportTest=exportTest,
-        is_fx=True,
-        opset_version=_constants.FX_ONNX_OPSET,  # PIN opset version for fx tests.
     ),
 )
 
@@ -225,17 +198,13 @@ def _init_test_roi_heads_faster_rcnn():
 
 
 @parameterized.parameterized_class(
-    [
-        {"is_script": True},
-        {"is_script": False},
-        {"is_fx": True, "opset_version": _constants.FX_ONNX_OPSET},
-    ],
+    ("is_script",),
+    [(True,), (False,)],
     class_name_func=onnx_test_common.parameterize_class_name,
 )
 class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()  # Faster RCNN model is not scriptable
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: Tensor.item")
     def test_faster_rcnn(self):
         model = faster_rcnn.fasterrcnn_resnet50_fpn(
             pretrained=False, pretrained_backbone=True, min_size=200, max_size=300
@@ -376,7 +345,6 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: dynamic shapes: where")
     def test_roi_heads(self):
         class RoIHeadsModule(torch.nn.Module):
             def __init__(self):
@@ -444,7 +412,6 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(MyModule(512, 8, 2048, 0.0, 3), (x,), atol=1e-5)
 
     @skipScriptTest()
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")
     def test_mobilenet_v3(self):
         model = torchvision.models.quantization.mobilenet_v3_large(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224)
@@ -452,7 +419,6 @@ class TestModelsONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(11)
     @skipScriptTest()
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.add_.Tensor")
     def test_shufflenet_v2_dynamic_axes(self):
         model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
         dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)

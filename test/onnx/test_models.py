@@ -12,11 +12,7 @@ from model_defs.op_test import ConcatNet, DummyNet, FakeQuantNet, PermuteNet, PR
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
-from pytorch_test_common import (
-    skipFxTest,
-    skipIfUnsupportedMinOpsetVersion,
-    skipScriptTest,
-)
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion, skipScriptTest
 from torch.ao import quantization
 from torch.autograd import Variable
 from torch.onnx import OperatorExportTypes
@@ -70,23 +66,14 @@ class TestModels(pytorch_test_common.ExportTestCase):
                 opset_version=self.opset_version,
             )
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::empty.memory_format, aten::new_zeros, aten::avg_pool2d, aten::squeeze.dim].")  # noqa: B950
-    # fmt: on
     def test_ops(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(DummyNet()), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Node (aten_gt_3) Op (aten_gt) [ShapeInferenceError] (op_type:Greater, node name: n0): B has inconsistent type tensor(int64)")  # noqa: B950
-    # fmt: on
     def test_prelu(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(PReluNet(), x)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Expected positional argument for parameter inputs_1_, but one was not passed in!")  # noqa: B950
-    # fmt: on
     @skipScriptTest()
     def test_concat(self):
         input_a = Variable(torch.randn(BATCH_SIZE, 3))
@@ -116,23 +103,14 @@ class TestModels(pytorch_test_common.ExportTestCase):
         )
 
     @skipIfNoLapack
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: aten.pixel_shuffle.default")  # noqa: B950
-    # fmt: on
     def test_super_resolution(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 224, 224).fill_(1.0))
         self.exportTest(toC(SuperResolutionNet(upscale_factor=3)), toC(x), atol=1e-6)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::copy_, aten::avg_pool2d, aten::max_pool2d_with_indices].")  # noqa: B950
-    # fmt: on
     def test_alexnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(alexnet()), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::max_pool2d_with_indices].")  # noqa: B950
-    # fmt: on
     def test_mnist(self):
         x = Variable(torch.randn(BATCH_SIZE, 1, 28, 28).fill_(1.0))
         self.exportTest(toC(MNIST()), toC(x))
@@ -161,25 +139,16 @@ class TestModels(pytorch_test_common.ExportTestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(vgg19_bn()), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::copy_, aten::mean.dim, aten::empty.memory_format, aten::new_zeros, aten::add_.Tensor, aten::max_pool2d_with_indices].")  # noqa: B950
-    # fmt: on
     def test_resnet(self):
         # ResNet50 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::avg_pool2d, aten::copy_, aten::max_pool2d_with_indices, aten::empty.memory_format, aten::cat, aten::new_zeros, aten::mean.dim].")  # noqa: B950
-    # fmt: on
     # This test is numerically unstable. Sporadic single element mismatch occurs occasionally.
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
         self.exportTest(toC(inception_v3()), toC(x), acceptable_error_percentage=0.01)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::max_pool2d_with_indices, aten::cat, aten::avg_pool2d, aten::copy_].")  # noqa: B950
-    # fmt: on
     def test_squeezenet(self):
         # SqueezeNet: AlexNet-level accuracy with 50x fewer parameters and
         # <0.5MB model size
@@ -193,17 +162,11 @@ class TestModels(pytorch_test_common.ExportTestCase):
         sqnet_v1_1 = SqueezeNet(version=1.1)
         self.exportTest(toC(sqnet_v1_1), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::mean.dim, aten::new_zeros, aten::cat, aten::avg_pool2d, aten::max_pool2d_with_indices, aten::empty.memory_format, aten::copy_].")  # noqa: B950
-    # fmt: on
     def test_densenet(self):
         # Densenet-121 model
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(densenet121()), toC(x), rtol=1e-2, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::empty.memory_format, aten::new_zeros, aten::copy_].")  # noqa: B950
-    # fmt: on
     @skipScriptTest()
     def test_dcgan_netD(self):
         netD = _netD(1)
@@ -211,9 +174,6 @@ class TestModels(pytorch_test_common.ExportTestCase):
         input = Variable(torch.empty(bsz, 3, imgsz, imgsz).normal_(0, 1))
         self.exportTest(toC(netD), toC(input))
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::copy_, aten::empty.memory_format, aten::new_zeros].")  # noqa: B950
-    # fmt: on
     @skipScriptTest()
     def test_dcgan_netG(self):
         netG = _netG(1)
@@ -221,17 +181,11 @@ class TestModels(pytorch_test_common.ExportTestCase):
         input = Variable(torch.empty(bsz, nz, 1, 1).normal_(0, 1))
         self.exportTest(toC(netG), toC(input))
 
-    # fmt: off
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # noqa: B950
-    # fmt: on
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quant(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(FakeQuantNet()), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # noqa: B950
-    # fmt: on
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_qat_resnet_pertensor(self):
         # Quantize ResNet50 model
@@ -255,9 +209,6 @@ class TestModels(pytorch_test_common.ExportTestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: data dependent operator: aten._local_scalar_dense.default")  # noqa: B950
-    # fmt: on
     @skipIfUnsupportedMinOpsetVersion(13)
     def test_qat_resnet_per_channel(self):
         # Quantize ResNet50 model
@@ -280,39 +231,24 @@ class TestModels(pytorch_test_common.ExportTestCase):
 
         self.exportTest(toC(qat_resnet50), toC(x))
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::mean.dim, aten::new_zeros, aten::empty.memory_format, aten::cat, aten::copy_, aten::max_pool2d_with_indices].")  # noqa: B950
-    # fmt: on
     @skipScriptTest(skip_before_opset_version=15, reason="None type in outputs")
     def test_googlenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(googlenet()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::copy_, aten::empty.memory_format, aten::mean.dim, aten::new_zeros].")  # noqa: B950
-    # fmt: on
     def test_mnasnet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mnasnet1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::hardtanh, aten::copy_, aten::mean.dim, aten::new_zeros, aten::empty.memory_format].")  # noqa: B950
-    # fmt: on
     def test_mobilenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(mobilenet_v2()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::new_zeros, aten::empty.memory_format, aten::copy_, aten::max_pool2d_with_indices, aten::mean.dim, aten::cat].")  # noqa: B950
-    # fmt: on
     @skipScriptTest()  # prim_data
     def test_shufflenet(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(shufflenet_v2_x1_0()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::empty.memory_format, aten::index.Tensor, aten::new_zeros, aten::add_.Tensor, aten::max_pool2d_with_indices, aten::copy_].")  # noqa: B950
-    # fmt: on
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_fcn(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -323,9 +259,6 @@ class TestModels(pytorch_test_common.ExportTestCase):
             atol=1e-5,
         )
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::new_zeros, aten::empty.memory_format, aten::copy_, aten::max_pool2d_with_indices, aten::mean.dim, aten::add_.Tensor, aten::cat, aten::index.Tensor].")  # noqa: B950
-    # fmt: on
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_deeplab(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
@@ -336,23 +269,14 @@ class TestModels(pytorch_test_common.ExportTestCase):
             atol=1e-5,
         )
 
-    # fmt: off
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # noqa: B950
-    # fmt: on
     def test_r3d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r3d_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="torch._dynamo.exc.Unsupported: call_method NNModuleVariable() _conv_forward [TensorVariable(), TensorVariable(), ConstantVariable(NoneType)] {}")  # noqa: B950
-    # fmt: on
     def test_mc3_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(mc3_18()), toC(x), rtol=1e-3, atol=1e-5)
 
-    # fmt: off
-    @skipFxTest(reason="RuntimeError: Unknown call_function target: [aten::mean.dim, aten::new_zeros, aten::empty.memory_format, aten::add_.Tensor, aten::copy_].")  # noqa: B950
-    # fmt: on
     def test_r2plus1d_18_video(self):
         x = Variable(torch.randn(1, 3, 4, 112, 112).fill_(1.0))
         self.exportTest(toC(r2plus1d_18()), toC(x), rtol=1e-3, atol=1e-5)

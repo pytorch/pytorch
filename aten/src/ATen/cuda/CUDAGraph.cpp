@@ -122,7 +122,8 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/) {
   // The user has no business launching kernels on capture_stream_ from another thread
   // while calling capture_begin. They'll have no idea if their side thread's
   // kernel will end up as part of the capture or not.
-  c10::cuda::CUDACachingAllocator::notifyCaptureBegin(capture_dev_, id_, mempool_id_);
+  c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(capture_dev_, capture_stream_, mempool_id_);
+
 #else
   TORCH_CHECK(false, "CUDA graphs may only be used in Pytorch built with CUDA >= 11.0 or ROCM >= 5.3")
 #endif
@@ -135,13 +136,11 @@ void CUDAGraph::capture_end() {
   TORCH_CHECK(stream == capture_stream_,
               "Capture must end on the same stream it began on.");
 
-  c10::cuda::CUDACachingAllocator::notifyCaptureAboutToEnd(capture_dev_, id_);
+  c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(capture_dev_, capture_stream_);
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
   TORCH_CHECK(graph_ != NULL, "Invalid capture.");
   has_graph_ = true;
-
-  c10::cuda::CUDACachingAllocator::notifyCaptureEnded(capture_dev_, id_);
 
   // In typical graph usage some tensors (e.g. the tensors used for graph IO) are not freed
   // between replays.
@@ -290,7 +289,7 @@ void CUDAGraph::reset() {
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
   if (has_graph_ || has_graph_exec_) {
     // notifyCaptureDestroy may throw. How should we handle this?
-    c10::cuda::CUDACachingAllocator::notifyCaptureDestroy(capture_dev_, mempool_id_);
+    c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
   }
   if (has_graph_) {
     C10_CUDA_CHECK_WARN(cudaGraphDestroy(graph_));

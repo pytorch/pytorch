@@ -1,5 +1,4 @@
 # Owner(s): ["module: onnx"]
-from __future__ import annotations
 
 import functools
 import os
@@ -155,28 +154,6 @@ def skipScriptTest(skip_before_opset_version: Optional[int] = None, reason: str 
         return wrapper
 
     return skip_dec
-
-
-def skipFxTest(*, reason: str = ""):
-    """Skip Fx test.
-
-    Args:
-        reason: The reason for skipping FX test.
-
-    Returns:
-        A decorator for skipping Fx test.
-    """
-
-    def skip_decorator(func):
-        @functools.wraps(func)
-        def wrapper(self, *args, **kwargs):
-            if getattr(self, "is_fx", None):
-                raise unittest.SkipTest(f"Skip FX test. {reason}")
-            return func(self, *args, **kwargs)
-
-        return wrapper
-
-    return skip_decorator
 
 
 # skips tests for opset_versions listed in unsupported_opset_versions.
