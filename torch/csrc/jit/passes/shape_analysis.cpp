@@ -1255,8 +1255,8 @@ class ShapePropagator : public PropertyPropBase {
         } else if (upcast_integer && !at::isFloatingType(*type->scalarType())) {
           type = type->withScalarType(at::kLong);
         }
-        // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-        if (*type->dim() >= num_reduced_dim && num_reduced_dim > 0) {
+        if (static_cast<int64_t>(*type->dim()) >= num_reduced_dim &&
+            num_reduced_dim > 0) {
           return {type->withDim(*type->dim() - num_reduced_dim)};
         } else {
           return {std::move(type)};

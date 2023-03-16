@@ -13,14 +13,12 @@ from torch.testing._internal import common_utils
 
 
 class TestONNXScriptExport(common_utils.TestCase):
-
     # opset version is
     # 1. local function is supported after opset 15
     # 2. onnx-script requires users to determine opset in local function
     opset_version = 15
 
     def test_onnxscript_registration_with_multiple_models(self):
-
         from onnxscript.onnx_opset import opset15 as op
 
         # 1. Register Selu onnxscript function as custom Op
