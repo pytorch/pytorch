@@ -180,7 +180,6 @@ Tensor mkldnn_reorder_linear_weight(
   auto w = itensor_from_mkldnn(self);
   ideep::dims input_size;
   auto dtype = w.get_data_type();
-  ideep::tensor::desc ori_desc(w.get_desc());
   if (batch_size_opt.has_value()) {
     input_size = {batch_size_opt.value(), in_features};
   }
