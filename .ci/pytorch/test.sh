@@ -126,7 +126,7 @@ fi
 # if you're not careful.  Check this if you made some changes and the
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
-    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=0
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1:detect_stack_use_after_return=1:strict_init_order=true:detect_odr_violation=1:detect_container_overflow=0
     export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
     export PYTORCH_TEST_WITH_UBSAN=1
@@ -298,13 +298,19 @@ test_single_dynamo_benchmark() {
 
   local partition_flags=()
   if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
-    partition_flags=( --total-partitions 2 --partition-id "$shard_id" )
+    partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
   fi
 
-  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    python "benchmarks/dynamo/$suite.py" \
+      --ci --performance --disable-cudagraphs \
+      "${DYNAMO_BENCHMARK_FLAGS[@]}" \
+      "$@" "${partition_flags[@]}" \
+      --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+  elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
     MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
-      --base-sha="$BASE_SHA" --output-dir="$TEST_REPORTS_DIR" "${partition_flags[@]}" \
+      --base-sha="$BASE_SHA" "${partition_flags[@]}" \
       --no-graphs --no-update-archive --no-gh-comment "$@"
   else
     python "benchmarks/dynamo/$suite.py" \
@@ -314,26 +320,34 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_csv.py \
       -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
+      # because I haven't tracked the cpu-side or dynamic expected artifacts yet, and need to differentiate filenames
+      python benchmarks/dynamo/check_graph_breaks.py \
+        --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
+        --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}${shard_id}.csv"
+    fi
   fi
 }
 
 test_dynamo_benchmark() {
   # Usage: test_dynamo_benchmark huggingface 0
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
 
   local suite="$1"
   shift
   local shard_id="$1"
   shift
 
-  if [[ "${TEST_CONFIG}" == *perf* ]]; then
+  if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --amp "$@"
+  elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # Performance test training only, for float32 and amp
-    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp "$@"
-    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 "$@"
+    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp --output-dir="$TEST_REPORTS_DIR"/amp "$@"
+    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 --output-dir="$TEST_REPORTS_DIR"/float32 "$@"
   else
     # Check inference with --float32
     test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
-
-    if [[ "${TEST_CONFIG}" != *cpu_accuracy* && "${TEST_CONFIG}" != *dynamic* ]]; then
+    if [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # Check training with --amp
       test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
     fi
@@ -639,7 +653,7 @@ build_xla() {
   apply_patches
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
   # These functions are defined in .circleci/common.sh in pytorch/xla repo
-  install_deps_pytorch_xla $XLA_DIR $USE_CACHE
+  retry install_deps_pytorch_xla $XLA_DIR $USE_CACHE
   CMAKE_PREFIX_PATH="${SITE_PACKAGES}/torch:${CMAKE_PREFIX_PATH}" XLA_SANDBOX_BUILD=1 build_torch_xla $XLA_DIR
   assert_git_not_dirty
 }
