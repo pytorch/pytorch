@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import ctypes
+import dataclasses
 import functools
 import inspect
 import logging
@@ -12,6 +13,7 @@ import threading
 import traceback
 import types
 import warnings
+import weakref
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
@@ -20,8 +22,8 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
-from torch._export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from .backends.registry import CompilerFn, lookup_backend
@@ -580,6 +582,13 @@ def explain(f, *args, **kwargs):
         break_reasons,
         explanation_verbose,
     )
+
+
+@dataclasses.dataclass
+class Constraint:
+    w_tensor: weakref.ReferenceType[torch.Tensor]
+    dim: int
+    constraint_range: Optional[MinMaxConstraint]
 
 
 def export(

@@ -29,7 +29,6 @@ from torch.fx.experimental.proxy_tensor import (
 )
 
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional
-from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 
 from .workflow import ExportedProgram
 
@@ -240,11 +239,6 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 #         0 <= dynamic_dim(blah, 1) <= 100,
 #     ]
 # )
-@dataclasses.dataclass
-class Constraint:
-    w_tensor : weakref.ReferenceType[torch.Tensor]
-    dim: int
-    constraint_range : Optional[MinMaxConstraint]
-
 def dynamic_dim(t: torch.Tensor, index: int):
+    from torch._dynamo.eval_frame import Constraint
     return Constraint(weakref.ref(t), index, None)
