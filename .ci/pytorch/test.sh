@@ -255,6 +255,10 @@ test_inductor() {
   python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
 }
 
+test_inductor_codegen() {
+  python test/run_test.py --include inductor/test_torchinductor_codegen --verbose
+}
+
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
 # For example 'dynamic_aot_eager_torchbench' TEST_CONFIG means we run
 # the benchmark script with '--dynamic-shapes --backend aot_eager --device cuda'

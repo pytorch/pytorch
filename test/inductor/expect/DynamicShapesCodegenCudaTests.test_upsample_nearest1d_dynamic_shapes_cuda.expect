@@ -1,0 +1,247 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+import triton
+import triton.language as tl
+from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+
+
+# kernel path: /tmp/torchinductor_nkaretnikov/ap/capws43lc5q2hzqjfrmmqatsyanwkn5k45gvab6rvvw4tillziav.py
+# Original ATen: aten.index
+
+# aten.index => index
+triton_fused_index_0 = async_compile.triton('''
+import triton
+import triton.language as tl
+from torch._inductor.ir import ReductionHint
+from torch._inductor.ir import TileHint
+from torch._inductor.triton_ops.autotune import pointwise
+from torch._inductor.utils import instance_descriptor
+
+@pointwise(size_hints=[1024], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 3), equal_to_1=())]})
+@triton.jit
+def triton_(in_ptr0, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 74
+    x1 = (xindex // 74)
+    x2 = xindex
+    tmp0 = x0
+    tmp1 = tmp0.to(tl.float32)
+    tmp2 = 1.0
+    tmp3 = tmp1 * tmp2
+    tmp4 = 0.0
+    tmp5 = tmp3 + tmp4
+    tmp6 = (1/74)*ks0
+    tmp7 = tmp5 * tmp6
+    tmp8 = tmp7.to(tl.int64)
+    tmp9 = tl.load(in_ptr0 + (tmp8 + (ks0*x1)), xmask)
+    tl.store(out_ptr0 + (x2 + tl.zeros([XBLOCK], tl.int32)), tmp9, xmask)
+''')
+
+
+# kernel path: /tmp/torchinductor_nkaretnikov/h5/ch5sezchgasshkf777akzealtg3jk2yaesgenz7kjhlsrybjaz5n.py
+# Original ATen: aten.index
+
+# aten.index => index_1
+triton_fused_index_1 = async_compile.triton('''
+import triton
+import triton.language as tl
+from torch._inductor.ir import ReductionHint
+from torch._inductor.ir import TileHint
+from torch._inductor.triton_ops.autotune import pointwise
+from torch._inductor.utils import instance_descriptor
+
+@pointwise(size_hints=[1024], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 3), equal_to_1=())]})
+@triton.jit
+def triton_(in_ptr0, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 70
+    x1 = (xindex // 70)
+    x2 = xindex
+    tmp0 = x0
+    tmp1 = tmp0.to(tl.float32)
+    tmp2 = 1.0
+    tmp3 = tmp1 * tmp2
+    tmp4 = 0.0
+    tmp5 = tmp3 + tmp4
+    tmp6 = (1/70)*ks0
+    tmp7 = tmp5 * tmp6
+    tmp8 = tmp7.to(tl.int64)
+    tmp9 = tl.load(in_ptr0 + (tmp8 + (ks0*x1)), xmask)
+    tl.store(out_ptr0 + (x2 + tl.zeros([XBLOCK], tl.int32)), tmp9, xmask)
+''')
+
+
+# kernel path: /tmp/torchinductor_nkaretnikov/2y/c2y6luba6y3m5psczy3377nkkrmsaqvvmn6733tiup2hcd5nfw6v.py
+# Original ATen: aten.index
+
+# aten.index => index_2
+triton_fused_index_2 = async_compile.triton('''
+import triton
+import triton.language as tl
+from torch._inductor.ir import ReductionHint
+from torch._inductor.ir import TileHint
+from torch._inductor.triton_ops.autotune import pointwise
+from torch._inductor.utils import instance_descriptor
+
+@pointwise(size_hints=[512], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1), equal_to_1=())]})
+@triton.jit
+def triton_(in_ptr0, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 45
+    x1 = (xindex // 45)
+    x2 = xindex
+    tmp0 = x0
+    tmp1 = tmp0.to(tl.float32)
+    tmp2 = 1.0
+    tmp3 = tmp1 * tmp2
+    tmp4 = 0.0
+    tmp5 = tmp3 + tmp4
+    tmp6 = (1/45)*ks0
+    tmp7 = tmp5 * tmp6
+    tmp8 = tmp7.to(tl.int64)
+    tmp9 = tl.load(in_ptr0 + (tmp8 + (ks0*x1)), xmask)
+    tl.store(out_ptr0 + (x2 + tl.zeros([XBLOCK], tl.int32)), tmp9, xmask)
+''')
+
+
+# kernel path: /tmp/torchinductor_nkaretnikov/q7/cq7q34zbwmkdssr764jcmdb66lvjdkksyy4miw3jbqrabhrbqnoa.py
+# Original ATen: aten.index
+
+# aten.index => index_3
+triton_fused_index_3 = async_compile.triton('''
+import triton
+import triton.language as tl
+from torch._inductor.ir import ReductionHint
+from torch._inductor.ir import TileHint
+from torch._inductor.triton_ops.autotune import pointwise
+from torch._inductor.utils import instance_descriptor
+
+@pointwise(size_hints=[512], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 3), equal_to_1=())]})
+@triton.jit
+def triton_(in_ptr0, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 36
+    x1 = (xindex // 36)
+    x2 = xindex
+    tmp0 = x0
+    tmp1 = tmp0.to(tl.float32)
+    tmp2 = 1.0
+    tmp3 = tmp1 * tmp2
+    tmp4 = 0.0
+    tmp5 = tmp3 + tmp4
+    tmp6 = (1/36)*ks0
+    tmp7 = tmp5 * tmp6
+    tmp8 = tmp7.to(tl.int64)
+    tmp9 = tl.load(in_ptr0 + (tmp8 + (ks0*x1)), xmask)
+    tl.store(out_ptr0 + (x2 + tl.zeros([XBLOCK], tl.int32)), tmp9, xmask)
+''')
+
+
+# kernel path: /tmp/torchinductor_nkaretnikov/3j/c3jrp7q7m6vngv3wipfs7tg5lmaav6i5npv5mgkqn4lge4hyy5fg.py
+# Original ATen: aten.index
+
+# aten.index => index_4
+triton_fused_index_4 = async_compile.triton('''
+import triton
+import triton.language as tl
+from torch._inductor.ir import ReductionHint
+from torch._inductor.ir import TileHint
+from torch._inductor.triton_ops.autotune import pointwise
+from torch._inductor.utils import instance_descriptor
+
+@pointwise(size_hints=[1024], filename=__file__, meta={'signature': {0: '*fp32', 1: '*fp32', 2: 'i32', 3: 'i32', 4: 'i32'}, 'device': 0, 'constants': {}, 'mutated_arg_names': [], 'configs': [instance_descriptor(divisible_by_16=(0, 1, 4), equal_to_1=())]})
+@triton.jit
+def triton_(in_ptr0, out_ptr0, ks0, ks1, xnumel, XBLOCK : tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % ks0
+    x1 = (xindex // ks0)
+    x2 = xindex
+    tmp0 = x0
+    tmp1 = tmp0.to(tl.float32)
+    tmp2 = 1.0
+    tmp3 = tmp1 * tmp2
+    tmp4 = 0.0
+    tmp5 = tmp3 + tmp4
+    tmp6 = 0.500000000000000
+    tmp7 = tmp5 * tmp6
+    tmp8 = tmp7.to(tl.int64)
+    tmp9 = tl.load(in_ptr0 + (tmp8 + (ks1*x1)), xmask)
+    tl.store(out_ptr0 + (x2 + tl.zeros([XBLOCK], tl.int32)), tmp9, xmask)
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    arg0_1_size = arg0_1.size()
+    s0 = arg0_1_size[0]
+    s1 = arg0_1_size[1]
+    s2 = arg0_1_size[2]
+    ps0 = 2*s2
+    with torch.cuda._DeviceGuard(0):
+        torch.cuda.set_device(0) # no-op to ensure context
+        buf0 = empty_strided((s0, s1, 74), (74*s1, 74, 1), device='cuda', dtype=torch.float32)
+        triton_fused_index_0_xnumel = 74*s0*s1
+        stream0 = get_cuda_stream(0)
+        triton_fused_index_0.run(arg0_1, buf0, s2, triton_fused_index_0_xnumel, grid=grid(triton_fused_index_0_xnumel), stream=stream0)
+        buf1 = empty_strided((s0, s1, 70), (70*s1, 70, 1), device='cuda', dtype=torch.float32)
+        triton_fused_index_1_xnumel = 70*s0*s1
+        triton_fused_index_1.run(arg0_1, buf1, s2, triton_fused_index_1_xnumel, grid=grid(triton_fused_index_1_xnumel), stream=stream0)
+        buf2 = empty_strided((s0, s1, 45), (45*s1, 45, 1), device='cuda', dtype=torch.float32)
+        triton_fused_index_2_xnumel = 45*s0*s1
+        triton_fused_index_2.run(arg0_1, buf2, s2, triton_fused_index_2_xnumel, grid=grid(triton_fused_index_2_xnumel), stream=stream0)
+        buf3 = empty_strided((s0, s1, 36), (36*s1, 36, 1), device='cuda', dtype=torch.float32)
+        triton_fused_index_3_xnumel = 36*s0*s1
+        triton_fused_index_3.run(arg0_1, buf3, s2, triton_fused_index_3_xnumel, grid=grid(triton_fused_index_3_xnumel), stream=stream0)
+        buf4 = empty_strided((s0, s1, 2*s2), (2*s1*s2, 2*s2, 1), device='cuda', dtype=torch.float32)
+        triton_fused_index_4_xnumel = 2*s0*s1*s2
+        triton_fused_index_4.run(arg0_1, buf4, ps0, s2, triton_fused_index_4_xnumel, grid=grid(triton_fused_index_4_xnumel), stream=stream0)
+        del arg0_1
+        return (buf0, buf1, buf2, buf3, buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((2, 4, 37), (148, 37, 1), device='cuda:0', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()

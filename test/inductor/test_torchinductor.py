@@ -303,14 +303,14 @@ def clone_preserve_strides(x):
 
 
 @patch.object(config, "debug", True)
-def run_and_get_cpp_code(fn, args):
+def run_and_get_cpp_code(fn, *args, **kwargs):
     torch._dynamo.reset()
     import io
     from contextlib import redirect_stdout
 
     f = io.StringIO()
     with redirect_stdout(f):
-        fn(*args)
+        fn(*args, **kwargs)
     s = f.getvalue()
     return s
 

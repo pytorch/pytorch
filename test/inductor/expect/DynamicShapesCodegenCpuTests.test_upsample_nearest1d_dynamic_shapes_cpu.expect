@@ -1,0 +1,176 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+import triton
+import triton.language as tl
+from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
+from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_nkaretnikov/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr2,
+                       float* out_ptr3,
+                       float* out_ptr4,
+                       const long ks0,
+                       const long ks1,
+                       const long ks2)
+{
+    {
+        for(long i0=0; i0<ks0*ks1; i0+=1)
+        {
+            for(long i1=0; i1<74; i1+=1)
+            {
+                auto tmp0 = static_cast<long>(i1);
+                auto tmp1 = static_cast<double>(tmp0);
+                auto tmp2 = static_cast<double>(1);
+                auto tmp3 = tmp1 * tmp2;
+                auto tmp4 = static_cast<double>(0);
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp6 = static_cast<float>(tmp5);
+                auto tmp7 = static_cast<float>((1.0/74.0)*ks2);
+                auto tmp8 = tmp6 * tmp7;
+                auto tmp9 = static_cast<long>(tmp8);
+                auto tmp10 = in_ptr0[tmp9 + (i0*ks2)];
+                out_ptr0[i1 + (74*i0)] = tmp10;
+            }
+        }
+    }
+    {
+        for(long i0=0; i0<ks0*ks1; i0+=1)
+        {
+            for(long i1=0; i1<70; i1+=1)
+            {
+                auto tmp0 = static_cast<long>(i1);
+                auto tmp1 = static_cast<double>(tmp0);
+                auto tmp2 = static_cast<double>(1);
+                auto tmp3 = tmp1 * tmp2;
+                auto tmp4 = static_cast<double>(0);
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp6 = static_cast<float>(tmp5);
+                auto tmp7 = static_cast<float>((1.0/70.0)*ks2);
+                auto tmp8 = tmp6 * tmp7;
+                auto tmp9 = static_cast<long>(tmp8);
+                auto tmp10 = in_ptr0[tmp9 + (i0*ks2)];
+                out_ptr1[i1 + (70*i0)] = tmp10;
+            }
+        }
+    }
+    {
+        for(long i0=0; i0<ks0*ks1; i0+=1)
+        {
+            for(long i1=0; i1<45; i1+=1)
+            {
+                auto tmp0 = static_cast<long>(i1);
+                auto tmp1 = static_cast<double>(tmp0);
+                auto tmp2 = static_cast<double>(1);
+                auto tmp3 = tmp1 * tmp2;
+                auto tmp4 = static_cast<double>(0);
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp6 = static_cast<float>(tmp5);
+                auto tmp7 = static_cast<float>((1.0/45.0)*ks2);
+                auto tmp8 = tmp6 * tmp7;
+                auto tmp9 = static_cast<long>(tmp8);
+                auto tmp10 = in_ptr0[tmp9 + (i0*ks2)];
+                out_ptr2[i1 + (45*i0)] = tmp10;
+            }
+        }
+    }
+    {
+        for(long i0=0; i0<ks0*ks1; i0+=1)
+        {
+            for(long i1=0; i1<36; i1+=1)
+            {
+                auto tmp0 = static_cast<long>(i1);
+                auto tmp1 = static_cast<double>(tmp0);
+                auto tmp2 = static_cast<double>(1);
+                auto tmp3 = tmp1 * tmp2;
+                auto tmp4 = static_cast<double>(0);
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp6 = static_cast<float>(tmp5);
+                auto tmp7 = static_cast<float>((1.0/36.0)*ks2);
+                auto tmp8 = tmp6 * tmp7;
+                auto tmp9 = static_cast<long>(tmp8);
+                auto tmp10 = in_ptr0[tmp9 + (i0*ks2)];
+                out_ptr3[i1 + (36*i0)] = tmp10;
+            }
+        }
+    }
+    {
+        for(long i0=0; i0<ks0*ks1; i0+=1)
+        {
+            for(long i1=0; i1<2*ks2; i1+=1)
+            {
+                auto tmp0 = static_cast<long>(i1);
+                auto tmp1 = static_cast<double>(tmp0);
+                auto tmp2 = static_cast<double>(1);
+                auto tmp3 = tmp1 * tmp2;
+                auto tmp4 = static_cast<double>(0);
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp6 = static_cast<float>(tmp5);
+                auto tmp7 = static_cast<float>(0.500000000000000);
+                auto tmp8 = tmp6 * tmp7;
+                auto tmp9 = static_cast<long>(tmp8);
+                auto tmp10 = in_ptr0[tmp9 + (i0*ks2)];
+                out_ptr4[i1 + (2*i0*ks2)] = tmp10;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    arg0_1_size = arg0_1.size()
+    s0 = arg0_1_size[0]
+    s1 = arg0_1_size[1]
+    s2 = arg0_1_size[2]
+    buf0 = empty_strided((s0, s1, 74), (74*s1, 74, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((s0, s1, 70), (70*s1, 70, 1), device='cpu', dtype=torch.float32)
+    buf2 = empty_strided((s0, s1, 45), (45*s1, 45, 1), device='cpu', dtype=torch.float32)
+    buf3 = empty_strided((s0, s1, 36), (36*s1, 36, 1), device='cpu', dtype=torch.float32)
+    buf4 = empty_strided((s0, s1, 2*s2), (2*s1*s2, 2*s2, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf3.data_ptr()), c_void_p(buf4.data_ptr()), c_long(s0), c_long(s1), c_long(s2))
+    del arg0_1
+    return (buf0, buf1, buf2, buf3, buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((2, 4, 37), (148, 37, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+
