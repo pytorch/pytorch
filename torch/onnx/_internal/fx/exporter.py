@@ -29,7 +29,6 @@ def _export(
     args,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
-
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
@@ -124,6 +123,7 @@ def export_after_normalizing_args_and_kwargs(
         ONNX model in binary format or `onnx.ModelProto`. To select return type,
         use `use_binary_format` argument.
     """
+
     # FIXME: Rewritten "wrapper" class with 'functools.wraps' to retain signature.
     # However, we should remove this in the effort to retain same input/output signature.
     def wrapper(fn):

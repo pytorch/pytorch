@@ -122,6 +122,7 @@ FX_FRONTEND_INFOS.append(
 
 # END OF SECTION TO MODIFY to add a FxFrontend or modify skips #################
 
+
 # MODIFY THIS SECTION to add or modify nn.Module test cases ####################
 # See Note [Add new module test cases] for more details.
 # TODO: Organize test models into a separate file to be re-used by other tests.
@@ -232,7 +233,7 @@ class _TestFxFrontendConsistency(common_utils.TestCase):
             training=training,
         )
 
-        for (i, module_input) in enumerate(module_inputs):
+        for i, module_input in enumerate(module_inputs):
             with self.subTest(
                 module_name=module_info.formatted_name,
                 sample_num=i,

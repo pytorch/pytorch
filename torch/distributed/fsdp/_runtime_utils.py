@@ -1240,7 +1240,7 @@ def _register_post_backward_hooks(
             "The `grad_fn` is needed to access the `AccumulateGrad` and "
             "register the post-backward hook",
         )
-        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]
+        acc_grad = temp_flat_param.grad_fn.next_functions[0][0]  # type: ignore[union-attr]
         assert acc_grad is not None
         hook_handle = acc_grad.register_hook(
             functools.partial(_post_backward_hook, state, handle)
@@ -1337,7 +1337,7 @@ def _get_buffers_and_dtypes_for_computation(
 
 
 @no_type_check
-def _get_buffer_dtypes(
+def _get_orig_buffer_dtypes(
     state: _FSDPState,
     buffer_names: List[str],
 ) -> List[torch.dtype]:
