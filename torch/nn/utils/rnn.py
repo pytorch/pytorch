@@ -241,13 +241,17 @@ def pack_padded_sequence(
     Returns:
         a :class:`PackedSequence` object
     """
-    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
-        warnings.warn('pack_padded_sequence has been called with a Python list of '
-                      'sequence lengths. The tracer cannot track the data flow of Python '
-                      'values, and it will treat them as constants, likely rendering '
-                      'the trace incorrect for any other combination of lengths.',
-                      stacklevel=2)
-    lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    if not isinstance(lengths, torch.Tensor):
+        if torch._C._get_tracing_state():
+            warnings.warn('pack_padded_sequence has been called with a Python list of '
+                          'sequence lengths. The tracer cannot track the data flow of Python '
+                          'values, and it will treat them as constants, likely rendering '
+                          'the trace incorrect for any other combination of lengths.',
+                          stacklevel=2)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    else:
+        lengths = lengths.to(dtype=torch.int64)
+
     if enforce_sorted:
         sorted_indices = None
     else:
