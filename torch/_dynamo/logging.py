@@ -1,7 +1,5 @@
 import itertools
 
-import torch._logging
-
 from torch.hub import _Faketqdm, tqdm
 
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
@@ -9,10 +7,7 @@ disable_progress = True
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
-    return [
-        torch._logging.loggable_types.TORCHDYNAMO_LOG_NAME,
-        torch._logging.loggable_types.TORCHINDUCTOR_LOG_NAME,
-    ]
+    return ["torch._dynamo" "torch._inductor"]
 
 
 # Set the level of all loggers that torchdynamo is responsible for

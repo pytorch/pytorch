@@ -1,9 +1,4 @@
-from .internal import loggable, register_log
-import typing
-import dis
-import types
-from .._guards import Guard
-from ..fx.graph_module import GraphModule
+from .internal import register_log, register_artifact
 
 
 TORCHDYNAMO_LOG_NAME = "torch._dynamo"
@@ -20,110 +15,12 @@ register_log(TORCHDYNAMO_NAME, TORCHDYNAMO_LOG_NAME)
 register_log(AOT_AUTOGRAD_NAME, AOT_AUTOGRAD_LOG_NAME, has_verbosity=False)
 register_log(TORCHINDUCTOR_NAME, TORCHINDUCTOR_LOG_NAME)
 
-
-@loggable("guards", TORCHDYNAMO_LOG_NAME)
-class GuardLogRec(typing.NamedTuple):
-    guards: typing.Set[Guard]
-
-    def __str__(self):
-        guard_str = "GUARDS:\n"
-        guard_str += "\n".join([f" - {str(guard)}" for guard in sorted(self.guards)])
-
-        return guard_str
-
-
-@loggable("bytecode", TORCHDYNAMO_LOG_NAME)
-class ByteCodeLogRec(typing.NamedTuple):
-    prefix: str  # MODIFIED or ORIGINAL
-    name: str
-    filename: str
-    line_no: str
-    code: types.CodeType
-
-    def __str__(self):
-        return f"{self.prefix} {self.name} {self.filename}\
-line {self.line_no} \n{dis.Bytecode(self.code).dis()}\n "
-
-
-def _gen_graph_log_str(name, filename, graph_str):
-    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
-
-
-@loggable("graph", TORCHDYNAMO_LOG_NAME)
-class GraphTabularLogRec(typing.NamedTuple):
-    fn_name: str  # the compiled fn name
-    gm: GraphModule
-
-    def __str__(self):
-        try:
-            from tabulate import tabulate  # TODO: Check that this is installed
-        except ImportError:
-            return (
-                "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
-                + _gen_graph_log_str(
-                    self.fn_name,
-                    self.gm.forward.__code__.co_filename,
-                    self.gm.print_readable(print_output=False),
-                )
-            )
-
-        node_specs = [
-            [n.op, n.name, n.target, n.args, n.kwargs] for n in self.gm.graph.nodes
-        ]
-        graph_str = tabulate(
-            node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
-        )
-        return _gen_graph_log_str(
-            self.fn_name, self.gm.forward.__code__.co_filename, graph_str
-        )
-
-
-class GraphCodeLogRec:
-    def __init__(self, fn_name, gm):
-        self.fn_name = fn_name
-        self.gm = gm
-
-    def __str__(self):
-        return _gen_graph_log_str(
-            self.fn_name,
-            self.gm.forward.__code__.co_filename,
-            self.gm.print_readable(print_output=False),
-        )
-
-
-@loggable("graph_code", TORCHDYNAMO_LOG_NAME, off_by_default=True)
-class DynamoGraphCodeLogRec(GraphCodeLogRec):
-    pass
-
-
-@loggable("aot_forward_graph", AOT_AUTOGRAD_LOG_NAME)
-class AOTForwardGraphLogRec(GraphCodeLogRec):
-    def __init__(self, aot_id, gm):
-        super().__init__(f"====== Forward graph {aot_id} ======\n", gm)
-
-@loggable("aot_backward_graph", AOT_AUTOGRAD_LOG_NAME)
-class AOTBackwardGraphLogRec(GraphCodeLogRec):
-    def __init__(self, aot_id, gm):
-        super().__init__(f"====== Backward graph {aot_id} ======\n", gm)
-
-
-@loggable("aot_joint_graph", AOT_AUTOGRAD_LOG_NAME)
-class AOTJointGraphLogRec(GraphCodeLogRec):
-    def __init__(self, aot_id, gm):
-        super().__init__(f"====== Joint graph {aot_id} =====\n", gm)
-
-
-@loggable("output_code", TORCHINDUCTOR_LOG_NAME, off_by_default=True)
-class OutputCodeLogRec(typing.NamedTuple):
-    output_code: str
-
-    def __str__(self):
-        return f"Output code:\n {self.output_code}"
-
-
-@loggable("schedule", TORCHINDUCTOR_LOG_NAME, off_by_default=True)
-class ScheduleLogRec(typing.NamedTuple):
-    schedule: typing.List[typing.Any]
-
-    def __str__(self):
-        return f"Schedule:\n {self.schedule}"
+register_artifact("guards")
+register_artifact("bytecode")
+register_artifact("graph")
+register_artifact("graph_code")
+register_artifact("aot_forward_graph")
+register_artifact("aot_backward_graph")
+register_artifact("aot_joint_graph")
+register_artifact("output_code", off_by_default=True)
+register_artifact("schedule", off_by_default=True)

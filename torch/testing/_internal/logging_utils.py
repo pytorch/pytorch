@@ -35,9 +35,6 @@ def kwargs_to_settings(**kwargs):
 #
 # The goal of this testing in general is to ensure that given some settings env var
 # that the logs are setup correctly and capturing the correct records.
-
-
-
 def make_test(log_names, **kwargs):
     def wrapper(fn):
         def test_fn(self):
@@ -88,13 +85,12 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         for logger in loggers:
             num_handlers = len(logger.handlers)
             self.assertLessEqual(
-                len(logger.handlers),
+                num_handlers,
                 2,
                 "All pt2 loggers should only have at most two handlers (debug artifacts and messages above debug level).",
             )
 
-            if num_handlers == 0:
-                continue
+            self.assertGreater(num_handlers, 0, "All pt2 loggers should have more than zero handlers")
 
             for handler in logger.handlers:
                 old_emit = handler.emit

@@ -3,11 +3,9 @@ import textwrap
 from traceback import extract_stack, format_exc, format_list, FrameSummary
 from typing import cast, List
 
-from torch._logging.loggable_types import ByteCodeLogRec
-
 from . import config
 
-from .utils import counters
+from .utils import counters, print_bytecode
 
 
 class TorchDynamoException(RuntimeError):
@@ -163,7 +161,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
     if config.verbose:
         msg = str(
-            ByteCodeLogRec(
+            print_bytecode(
                 "WON'T CONVERT",
                 code.co_name,
                 code.co_filename,

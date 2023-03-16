@@ -6,7 +6,6 @@ import unittest.mock
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-import torch._logging.loggable_types as rec_types
 from torch.testing._internal.dynamo_logging_utils import make_logging_test
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
@@ -41,50 +40,45 @@ def inductor_schedule_fn(a):
 ARGS = (torch.ones(1000, 1000, requires_grad=True),)
 
 
-def multi_record_test(ty, num_records, **kwargs):
+def multi_record_test(num_records, **kwargs):
     @make_logging_test(**kwargs)
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
         self.assertEqual(len(records), num_records)
-        self.assertIsInstance(records[0].msg, ty)
 
     return fn
 
 
-def within_range_record_test(ty, num_records_lower, num_records_higher, **kwargs):
+def within_range_record_test(num_records_lower, num_records_higher, **kwargs):
     @make_logging_test(**kwargs)
     def fn(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(*ARGS)
         self.assertGreaterEqual(len(records), num_records_lower)
         self.assertLessEqual(len(records), num_records_higher)
-        self.assertIsInstance(records[0].msg, ty)
 
     return fn
 
 
-def single_record_test(ty, **kwargs):
-    return multi_record_test(ty, 1, **kwargs)
+def single_record_test(**kwargs):
+    return multi_record_test(1, **kwargs)
 
 
 class LoggingTests(LoggingTestCase):
 
-    test_bytecode = multi_record_test(rec_types.ByteCodeLogRec, 2, bytecode=True)
-    test_output_code = multi_record_test(
-        rec_types.OutputCodeLogRec, 2, output_code=True
-    )
+    test_bytecode = multi_record_test(2, bytecode=True)
+    test_output_code = multi_record_test(2, output_code=True)
 
     @requires_cuda()
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
-        self.assertEqual(len(records), 1)
-        self.assertIsInstance(records[0].msg, rec_types.ScheduleLogRec)
+        self.assertEqual(len(records), 2)
 
-    test_dynamo_debug = within_range_record_test(str, 30, 50, dynamo=logging.DEBUG)
-    test_dynamo_info = within_range_record_test(str, 2, 10, dynamo=logging.INFO)
+    test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
+    test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_dynamo_error(self, records):
@@ -94,11 +88,10 @@ class LoggingTests(LoggingTestCase):
         except Exception:
             pass
         self.assertEqual(len(records), 1)
-        self.assertIsInstance(records[0].msg, str)
 
-    test_aot = multi_record_test(rec_types.AOTJointGraphLogRec, 3, aot=logging.DEBUG)
-    test_inductor_debug = within_range_record_test(str, 5, 15, inductor=logging.DEBUG)
-    test_inductor_info = within_range_record_test(str, 2, 4, inductor=logging.INFO)
+    test_aot = multi_record_test(3, aot=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(5, 15, inductor=logging.DEBUG)
+    test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_inductor_error(self, records):
@@ -123,9 +116,9 @@ class LoggingTests(LoggingTestCase):
 
 # single record tests
 exclusions = {"bytecode", "output_code", "schedule"}
-for name, ty in torch._logging.internal.log_registry.name_to_rec_type.items():
+for name in torch._logging.internal.log_registry.artifact_names:
     if name not in exclusions:
-        setattr(LoggingTests, f"test_{name}", single_record_test(ty, **{name: True}))
+        setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

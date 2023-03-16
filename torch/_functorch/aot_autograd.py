@@ -18,8 +18,8 @@ import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.utils import dynamo_timed
-from torch._logging.loggable_types import AOTForwardGraphLogRec, AOTJointGraphLogRec, AOTBackwardGraphLogRec
+from torch._dynamo.utils import dynamo_timed, print_graph_code
+from torch._logging import getArtifactLogger
 from torch._subclasses import CrossRefFakeMode, FakeTensor, FakeTensorMode
 from torch.fx import immutable_collections, Interpreter
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -31,6 +31,9 @@ from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs
 
 log = logging.getLogger(__name__)
+aot_forward_log = getArtifactLogger(__name__, "aot_forward_graph")
+aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+aot_backward_log = getArtifactLogger(__name__, "aot_backward_graph")
 
 MutationType = Enum(
     "MutationType", ("none", "metadata_only", "data", "data_and_metadata")
@@ -1336,7 +1339,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig):
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
 
-    log.debug(AOTForwardGraphLogRec(aot_config.aot_id, fw_module))
+    aot_forward_log.debug(print_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
 
     disable_amp = torch._C._is_any_autocast_enabled()
     context = disable_autocast_manager if disable_amp else nullcontext
@@ -2140,7 +2143,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             "Graph partitioning without functionalization is not sound, we may introduce errors"
         )
 
-    log.debug(AOTJointGraphLogRec(aot_config.aot_id, fx_g))
+    aot_joint_log.debug(print_graph_code(f"====== Joint graph {aot_config.aot_id} =====\n", fx_g))
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
@@ -2157,8 +2160,8 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig):
             ]
             _num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
 
-        log.debug(AOTForwardGraphLogRec(aot_config.aot_id, fw_module))
-        log.debug(AOTBackwardGraphLogRec(aot_config.aot_id, bw_module))
+        aot_forward_log.debug(print_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
+        aot_backward_log.debug(print_graph_code(f"====== Backward graph {aot_config.aot_id} ======\n", bw_module))
 
         with track_graph_compiling(aot_config, "forward"):
             compiled_fw_func = aot_config.fw_compiler(

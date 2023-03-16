@@ -7,8 +7,8 @@ import weakref
 from typing import Dict, Optional, Set
 
 import torch
+import torch._logging
 from torch._guards import tracing
-from torch._logging.loggable_types import ByteCodeLogRec, GuardLogRec
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
@@ -41,6 +41,7 @@ from .utils import (
     is_namedtuple,
     istype,
     orig_code_map,
+    print_bytecode,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -48,6 +49,8 @@ from .utils import (
 )
 
 log = logging.getLogger(__name__)
+guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 
 
 class Tracker:
@@ -343,23 +346,25 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        log.debug(
-            ByteCodeLogRec(
-                "ORIGINAL BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            ),
+        def log_bytecode(prefix, name, filename, line_no, code):
+            if bytecode_log.isEnabledFor(logging.DEBUG):
+                bytecode_log.debug(
+                    print_bytecode(prefix, name, filename, line_no, code)
+                )
+
+        log_bytecode(
+            "ORIGINAL BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
         )
-        log.debug(
-            ByteCodeLogRec(
-                "MODIFIED BYTECODE",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                out_code,
-            ),
+        log_bytecode(
+            "MODIFIED BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            out_code,
         )
 
         assert output is not None
@@ -374,7 +379,12 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        log.debug(GuardLogRec(output.guards))
+        if guards_log.isEnabledFor(logging.DEBUG):
+            guard_str = "GUARDS:\n"
+            guard_str += "\n".join(
+                [f" - {str(guard)}" for guard in sorted(output.guards)]
+            )
+            guards_log.debug(guard_str)
 
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)

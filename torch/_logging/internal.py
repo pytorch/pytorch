@@ -1,93 +1,94 @@
-import collections
-import itertools
 import logging
 import functools
 import os
 import re
 from importlib import __import__
-from typing import DefaultDict, Dict, Set
+from typing import Dict, Set
 from dataclasses import dataclass, field
 
 DEFAULT_LOG_LEVEL = logging.WARN
 DEFAULT_FORMATTER = logging.Formatter(
     "[%(asctime)s] %(name)s: [%(levelname)s] %(message)s"
 )
+LOG_ENV_VAR = "TORCH_LOGS"
+
 
 @dataclass
 class LogRegistry:
     # shorthand name to log qualified name
-    name_to_log_qname: Dict[str, str] = field(default_factory=dict)
-    # shorthand name to record type
-    name_to_rec_type: Dict[str, type] = field(default_factory=dict)
-    # log qualified name to set of artifact types
-    log_qname_to_rec_types: Dict[str, Set[type]] = field(default_factory=dict)
-    # log qualified name to all supported shorthand names
-    log_qname_to_loggable_names: Dict[str, Set[str]] = field(default_factory=dict)
+    log_alias_to_log_qname : Dict[str, str] = field(default_factory=dict)
+
+    artifact_log_qnames : Set[str] = field(default_factory=set)
+
+    artifact_names : Set[str] = field(default_factory=set)
+
     # shorthand names of logs which support verbosity
-    log_names_with_verbosity: Set[str] = field(default_factory=set)
+    # e.g. AOT only has debug messages, so INFO level is useless
+    log_aliases_with_verbosity: Set[str] = field(default_factory=set)
+
+    off_by_default_artifact_names: Set[str] = field(default_factory=set)
 
     def is_artifact(self, name):
-        return name in self.name_to_rec_type
+        return name in self.artifact_names
 
-    def is_log(self, name):
-        return name in self.name_to_log_qname and name not in self.name_to_rec_type
+    def is_log(self, alias):
+        return alias in self.log_alias_to_log_qname
 
-    def register_log(self, setting_name, log_qname, has_verbosity):
-        # Check dupes
-        assert log_qname not in self.log_qname_to_rec_types
-        assert log_qname not in self.log_qname_to_loggable_names
-        assert setting_name not in self.name_to_log_qname
-
-        self.name_to_log_qname[setting_name] = log_qname
-        self.log_qname_to_rec_types[log_qname] = set()
-        self.log_qname_to_loggable_names[log_qname] = set()
+    def register_log(self, alias, log_qname, has_verbosity):
+        self.log_alias_to_log_qname[alias] = log_qname
 
         if has_verbosity:
-            self.log_names_with_verbosity.add(setting_name)
+            self.log_aliases_with_verbosity.add(alias)
 
+    def register_artifact_name(self, name, off_by_default):
+        self.artifact_names.add(name)
 
-    def register_artifact(self, setting_name, artifact_type, log_qname, off_by_default):
-        self.log_qname_to_loggable_names[log_qname].add(setting_name)
-        self.name_to_log_qname[setting_name] = log_qname
-        self.name_to_rec_type[setting_name] = artifact_type
         # if off by default, don't enable it
         # when log_name's log_level is set to DEBUG
-        if not off_by_default:
-            self.log_qname_to_rec_types[log_qname].add(artifact_type)
+        if off_by_default:
+            self.off_by_default_artifact_names.add(name)
 
-    def get_loggable_names(self):
-        return list(itertools.chain(self.name_to_log_qname.keys(), self.name_to_rec_type.keys()))
+    def register_artifact_log(self, artifact_log_qname):
+        self.artifact_log_qnames.add(artifact_log_qname)
 
     def get_log_qnames(self):
-        return set(self.log_qname_to_rec_types.keys())
+        return set(self.log_alias_to_log_qname.values())
 
-    def supports_verbosity(self, log_name):
-        return log_name in self.log_names_with_verbosity
+    def get_artifact_log_qnames(self):
+        return set(self.artifact_log_qnames)
 
-    def register_existing_child_log(self, parent_qname, log_qname):
-        self.name_to_log_qname[log_qname] = log_qname
-        self.log_qname_to_rec_types = set(self.log_qname_to_rec_types[parent_qname])
+    def supports_verbosity(self, log_alias):
+        return log_alias in self.log_aliases_with_verbosity
 
-log_registry = LogRegistry()
+    def is_off_by_default(self, artifact_qname):
+        return artifact_qname in self.off_by_default_artifact_names
 
 @dataclass
 class LogState:
-    log_name_to_level: Dict[str, int] = field(default_factory=dict)
-    enabled_artifact_names: Set[str] = field(default_factory=set)
+    log_qname_to_level : Dict[str, str] = field(default_factory=dict)
 
-    # reset all logs in log_qname_to_level to default level
-    def clear(self):
-        self.log_name_to_level.clear()
-        self.enabled_artifact_names.clear()
-
-    def enable_log(self, name, level):
-        self.log_name_to_level[name] = level
+    artifact_names : set[str] = field(default_factory=set)
 
     def enable_artifact(self, artifact_name):
-        self.enabled_artifact_names.add(artifact_name)
+        self.artifact_names.add(artifact_name)
+
+    def is_artifact_enabled(self, name):
+        return name in self.artifact_names
+
+    def enable_log(self, log_qname, log_level):
+        self.log_qname_to_level[log_qname] = log_level
+
+    def get_log_level_pairs(self):
+        return list(self.log_qname_to_level.items())
+
+    def clear(self):
+        self.log_qname_to_level.clear()
+        self.artifact_names.clear()
 
 
+log_registry = LogRegistry()
 log_state = LogState()
+
 
 # User API for setting log properties
 # ex. format set_logs(LOG_NAME=LEVEL, ARTIFACT_NAME=bool)
@@ -109,28 +110,32 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
     Args are set using the following format:
         set_logs(<log_name>=<log_level>,...<artifact_name>=<True or False>)
     """
+    # ignore if env var is set
+    if LOG_ENV_VAR in os.environ:
+        return
+
     log_state.clear()
 
     def _set_logs(**kwargs):
-        for key, val in kwargs.items():
-            if log_registry.is_artifact(key):
+        for alias, val in kwargs.items():
+            if log_registry.is_artifact(alias):
                 if val:
-                    log_state.enable_artifact(key)
-            elif log_registry.is_log(key):
+                    log_state.enable_artifact(alias)
+            elif log_registry.is_log(alias):
                 if val not in logging._levelToName:
                     raise ValueError(
-                        f"Unrecognized log level for log {key}: {val}, valid level values "
+                        f"Unrecognized log level for log {alias}: {val}, valid level values "
                         f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
                     )
                 if val != DEFAULT_LOG_LEVEL:
-                    log_state.enable_log(key, val)
+                    log_state.enable_log(log_registry.log_alias_to_log_qname[alias], val)
             else:
                 # Check if it is a qualified name log
                 # if so, check that its root logger is parent
                 # if so set its level appropriately
                 # if not, register it? (maybe)
                 raise ValueError(
-                    f"Unrecognized log or artifact name passed to set_logs: {key}"
+                    f"Unrecognized log or artifact name passed to set_logs: {alias}"
                 )
 
         _init_logs()
@@ -148,24 +153,6 @@ def set_logs(dynamo=DEFAULT_LOG_LEVEL,
               output_code=output_code,
               schedule=schedule)
 
-
-def loggable(setting_name, log_name, off_by_default=False):
-    """
-    Enables a type to be controlled by the env var and user API with the setting_name
-    Args:
-        setting_name: the shorthand name used in the env var and user API
-        log_name: the log name that the setting_name is associated with
-        off_by_default: whether setting the associated log_name's level to DEBUG will
-            print the the artifact
-    """
-    def register(cls):
-        log_registry.register_artifact(setting_name, cls, log_name, off_by_default)
-
-        return cls
-
-    return register
-
-
 def register_log(setting_name, log_name, has_verbosity=True):
     """
     Enables a log to be controlled by the env var and user API with the setting_name
@@ -176,6 +163,26 @@ def register_log(setting_name, log_name, has_verbosity=True):
     """
     log_registry.register_log(setting_name, log_name, has_verbosity)
 
+def register_artifact(setting_name, off_by_default=False):
+    """
+    Enables an artifact to be controlled by the env var and user API with name
+    Args:
+        setting_name: the shorthand name used in the env var and user API
+        off_by_default: whether this artifact should be logged when the ancestor loggers
+            are enabled at level DEBUG
+    """
+    log_registry.register_artifact_name(setting_name, off_by_default)
+
+def getArtifactLogger(module_qname, artifact_name):
+    if artifact_name not in log_registry.artifact_names:
+        raise ValueError(f"Artifact name: {artifact_name} not registered,"
+                         f"please call register_artifact({artifact_name}) in torch._logging.registrations.")
+    qname = module_qname + f".__{artifact_name}"
+    log = logging.getLogger(module_qname + f".__{artifact_name}")
+    log.artifact_name = artifact_name
+    log_registry.register_artifact_log(qname)
+    configure_artifact_log(log)
+    return log
 
 INCR_VERBOSITY_CHAR = "+"
 DECR_VERBOSITY_CHAR = "-"
@@ -184,6 +191,19 @@ VERBOSITY_REGEX = (
     + "|".join([re.escape(INCR_VERBOSITY_CHAR), re.escape(DECR_VERBOSITY_CHAR)])
     + "?)"
 )
+
+def configure_artifact_log(log):
+    # if parent log is set to debug, but this artifact is off by default
+    # set propagate to False so that this artifact is not propagated
+    # to its ancestor logger
+    # this artifact is only logged when explicitly enabled (occurs below)
+    if log_registry.is_off_by_default(log.artifact_name) and log.getEffectiveLevel() == logging.DEBUG:
+        log.propagate = False
+
+    # enable artifact logging when explicitly enabled
+    if log_state.is_artifact_enabled(log.artifact_name):
+        log.setLevel(logging.DEBUG)
+        log.propagate = True
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def _gen_settings_regex():
@@ -225,16 +245,16 @@ def _parse_log_settings(settings):
         name, level = get_name_level_pair(name)
         if log_registry.is_log(name):
             assert level is not None
-            log_state.enable_log(name, level)
+            log_qname = log_registry.log_alias_to_log_qname[name]
+            if log_registry.supports_verbosity(name):
+                log_state.enable_log(log_qname, level)
+            else:
+                log_state.enable_log(log_qname, logging.DEBUG)
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
-            registered_parent = _get_registered_parent_qname(name)
-            if registered_parent:
-                log_registry.register_existing_child_log(registered_parent, name)
-            else:
-                log_registry.register_log(name, name, True)
-                log_state.enable_log(name)
+            log_registry.register_log(name, name, True)
+            log_state.enable_log(name, level)
         else:
             raise ValueError(
                 f"Invalid log settings: {settings}, must be a comma separated list of log or artifact names."
@@ -249,24 +269,11 @@ def _is_valid_module(qname):
     except ImportError:
         return False
 
-
-class FilterByType(logging.Filter):
-    def __init__(self, enabled_types):
-        self.set_enabled_types(enabled_types)
-
-    def filter(self, record):
-        return isinstance(record.msg, self.enabled_types)
-
-    def set_enabled_types(self, enabled_types):
-        self.enabled_types = tuple(set(enabled_types))
-
-
-def _get_log_state():
-    log_setting = os.environ.get("TORCH_LOGS", None)
-    if log_setting is None:
-        return log_state
-    else:
-        return _parse_log_settings(log_setting)
+def _update_log_state_from_env():
+    global log_state
+    log_setting = os.environ.get(LOG_ENV_VAR, None)
+    if log_setting is not None:
+        log_state = _parse_log_settings(log_setting)
 
 
 # setup custom handlers
@@ -276,24 +283,11 @@ def _get_log_state():
 # bytecode, etc.
 # if the log level of a component is set to DEBUG, allow all
 # string messages and allowed types (other than those off by default)
-def _setup_handlers(create_handler_fn, log, enabled_types, level=None):
-    debug_handler = create_handler_fn()
+def _setup_handlers(create_handler_fn, log):
+    debug_handler = _tag_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
     debug_handler.setLevel(logging.DEBUG)
-
-    if level == logging.DEBUG:
-        enabled_types = enabled_types.union({str})
-
-    filter = FilterByType(enabled_types)
-    debug_handler.addFilter(filter)
     log.addHandler(debug_handler)
-
-    if level is not None and level > logging.DEBUG:
-        generic_handler = create_handler_fn()
-        generic_handler.setFormatter(DEFAULT_FORMATTER)
-        generic_handler.setLevel(level)
-        log.addHandler(generic_handler)
-
 
 # mark handlers that we've created
 # so we don't modify user handlers
@@ -312,64 +306,46 @@ def _clear_handlers(log):
     for handler in to_remove:
         log.removeHandler(handler)
 
-def _get_registered_parent_qname(log_qname):
-    logger = logging.getLogger(log_qname)
-    while logger.parent:
-        if log_registry.is_log(logger.parent):
-            return logger.parent.name
-        logger = logger.parent
-
-    return None
-
-# initialize loggers log_names
-# each developer component should call this for their own logs
-# in the appropriate location after relevant types have been registered
-def _init_logs(log_file_name=None):
+def _reset_logs():
     for log_name in log_registry.get_log_qnames():
         log = logging.getLogger(log_name)
-        log.setLevel(logging.DEBUG)  # allow all messages through to the handlers
+        log.setLevel(logging.WARNING)
         log.propagate = False
         _clear_handlers(log)
 
-    log_state = _get_log_state()
-    log_qname_to_enabled_types: DefaultDict[str, Set[type]] = collections.defaultdict(set)
-    log_qname_to_level = dict()
+    for artifact_log_qname in log_registry.get_artifact_log_qnames():
+        log = logging.getLogger(artifact_log_qname)
+        log.setLevel(logging.NOTSET)
+        log.propagate = True
 
-    # generate a map of log_name -> the types that should be logged
-    for name, level in log_state.log_name_to_level.items():
-        log_qname = log_registry.name_to_log_qname[name]
-        assert log_registry.is_log(name)
-        log_qname_to_level[log_qname] = level
-        logging.getLogger(log_qname).setLevel(
-            logging.DEBUG
-        )  # allow all messages through logger
-        # ensure log_name is in the dictionary
-        rec_types = log_qname_to_enabled_types[log_qname]
-        if level == logging.DEBUG or not log_registry.supports_verbosity(name):
-            rec_types.update(log_registry.log_qname_to_rec_types[log_qname])
 
-    for name in log_state.enabled_artifact_names:
-        log_qname = log_registry.name_to_log_qname[name]
-        log_qname_to_enabled_types[log_qname].add(log_registry.name_to_rec_type[name])
+def _init_logs(log_file_name=None):
+    _reset_logs()
+    _update_log_state_from_env()
 
-    for log_name, enabled_types in log_qname_to_enabled_types.items():
-        log = logging.getLogger(log_name)
-        level = log_qname_to_level.get(log_name, DEFAULT_LOG_LEVEL)
+    for log_qname, level in log_state.get_log_level_pairs():
+        log = logging.getLogger(log_qname)
+        log.setLevel(level)
 
+    # setup handlers for all registered loggers
+    for log_qname in log_registry.get_log_qnames():
+        log = logging.getLogger(log_qname)
         _setup_handlers(
-            lambda: _tag_handler(logging.StreamHandler()),
+            logging.StreamHandler,
             log,
-            enabled_types,
-            level,
         )
 
         if log_file_name is not None:
             _setup_handlers(
-                lambda: _tag_handler(logging.FileHandler(log_file_name)),
+                lambda: logging.FileHandler(log_file_name),
                 log,
-                enabled_types,
-                level,
             )
+
+    # configure artifact loggers, note: this must happen last
+    # since the levels of ancestor loggers are taken into account
+    for artifact_log_qname in log_registry.get_artifact_log_qnames():
+        log = logging.getLogger(artifact_log_qname)
+        configure_artifact_log(log)
 
 
 @functools.lru_cache(None)
@@ -381,6 +357,3 @@ def warning_once(self, *args, **kwargs):
     another type of cache that includes the caller frame information in the hashing function.
     """
     self.warning(*args, **kwargs)
-
-
-logging.Logger.warning_once = warning_once

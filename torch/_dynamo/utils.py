@@ -4,6 +4,7 @@ import copy
 import cProfile
 import dataclasses
 import datetime
+import dis
 import enum
 import functools
 import gc
@@ -1396,3 +1397,33 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
+
+
+def print_graph_code(name, gm):
+    return _print_graph_code(
+        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+    )
+
+
+def _print_graph_code(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+def print_graph_tabular(fn_name, gm):
+    try:
+        from tabulate import tabulate  # TODO: Check that this is installed
+    except ImportError:
+        return (
+            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+            + print_graph_code(fn_name, gm)
+        )
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
+    graph_str = tabulate(
+        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+    )
+    return _print_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+
+def print_bytecode(prefix, name, filename, line_no, code):
+    f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"

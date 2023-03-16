@@ -9,10 +9,11 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
+import torch._logging
+
 import torch.nn
 from torch import fx
 from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
-from torch._logging.loggable_types import DynamoGraphCodeLogRec, GraphTabularLogRec
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -43,6 +44,8 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    print_graph_code,
+    print_graph_tabular,
     same,
 )
 from .variables.base import VariableTracker
@@ -55,6 +58,8 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 class OutputGraphState(NamedTuple):
@@ -618,8 +623,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        log.debug(DynamoGraphCodeLogRec(name, gm))
-        log.debug(GraphTabularLogRec(name, gm))
+        graph_code_log.debug(print_graph_code(name, gm))
+        graph_tabular_log.debug(print_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
