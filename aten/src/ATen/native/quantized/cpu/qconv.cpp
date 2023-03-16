@@ -1491,15 +1491,15 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
       weight.ndimension() == kSpatialDim + 2,
       func_name, ": Weights are expected to have ", kSpatialDim + 2, " dimensions");
   TORCH_CHECK(
-      stride.size() == kSpatialDim,
+      stride.size() == (decltype(stride.size()))kSpatialDim,
       func_name, ": stride should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
   TORCH_CHECK(
-      padding.size() == kSpatialDim,
+      padding.size() == (decltype(padding.size()))kSpatialDim,
       func_name, ": Specify front/top/left padding only. "
       "end/bottom/right padding assumed to be equal to front/top/left");
   TORCH_CHECK(
-      dilation.size() == kSpatialDim,
+      dilation.size() == (decltype(dilation.size()))kSpatialDim,
       func_name, ": dilation should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
 
