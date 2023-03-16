@@ -407,7 +407,7 @@ void StandardMemoryPlanner::allocateManagedTensors() {
   auto* start = allocateBuffer(managed_bytes_);
 
   reused_tensors_ = 0;
-  auto group_idx = 0;
+  size_t group_idx = 0;
   for (const size_t storages_idx : c10::irange(storages_.size())) {
     auto tensor_size = storages_nbytes_[storages_idx];
     if (tensor_size == 0) {
@@ -444,7 +444,7 @@ void StandardMemoryPlanner::deallocateManagedTensors() {
   // We don't have any guarantee that the model doesn't change the
   // Storage for managed tensors out from under us during execution,
   // so we have to check the Storages each time we deallocate.
-  auto group_idx = 0;
+  unsigned group_idx = 0;
   const bool first_time = storages_.empty();
   if (C10_UNLIKELY(first_time)) {
     if (storages_.is_allocated()) {
