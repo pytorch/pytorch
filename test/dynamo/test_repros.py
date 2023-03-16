@@ -1,5 +1,10 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+"""
 # Owner(s): ["module: dynamo"]
 import collections
+import contextlib
 import copy
 import inspect
 import itertools
@@ -19,7 +24,6 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
-from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -1571,7 +1575,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, 10)
 
     def test_sort_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -1606,7 +1609,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_sigmoid_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -1986,6 +1988,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_tensor_data_kwarg(self):
+        # https://github.com/pytorch/pytorch/issues/96278
+        def f():
+            return torch.tensor(data=[[1.0, -1.0]])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(), opt_fn()))
+        self.assertEqual(cnt.frame_count, 1)
+
     @requires_cuda()
     def test_norm_dtype(self):
         def foo(_stack0):
@@ -2229,7 +2241,81 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 2)
         self.assertEqual(cnt.op_count, 2)
 
-    @skip_if_pytest
+    def test_exception_in_dynamo_handling(self):
+        hit_handler = False
+
+        # See https://github.com/pytorch/pytorch/pull/96488
+        @contextlib.contextmanager
+        def ctx():
+            try:
+                yield
+            except RuntimeError:
+                nonlocal hit_handler
+                hit_handler = True
+
+        @torch._dynamo.optimize("eager")
+        def f():
+            with ctx():
+                h()
+
+        def h():
+            raise RuntimeError("boof")
+
+        # Should not error
+        f()
+        self.assertTrue(hit_handler)
+
+    def test_generator_dealloc(self):
+        # See https://github.com/pytorch/pytorch/pull/96488
+        #
+        # NB: yes, [(...)] is intentional, this is a list containing a
+        # generator
+        generator_box = [(x for x in [1, 2, 3])]
+
+        counter = torch._dynamo.testing.CompileCounter()
+
+        def g(x):
+            return x + 2
+
+        # TODO: This test is pretty delicate.  To test if it's actually doing
+        # anything, rebuild eval_frame.c with '#define TORCHDYNAMO_DEBUG 1'
+        # and then look at the logs for:
+        #
+        # TRACE[_custom_eval_frame:650] begin <genexpr> test_repros.py 2276 -1 0 0
+        # TRACE[_custom_eval_frame:664] throw <genexpr>
+        #
+        # This means we're actually hitting the relevant codepath
+
+        # NB: Make sure we don't actually Dynamo this frame; if we do Dynamo
+        # this frame, Dynamo actually DOES understand list.clear and will
+        # arrange for the generator deallocation to happen when the eval frame
+        # handler is disabled, which will prevent the bug from happening (we
+        # specifically want to trigger the generator deallocation WHILE the
+        # dynamo eval frame handler is active), as that will cause the
+        # generator to become exhausted and trigger the throw_flag == TRUE
+        # case.
+        @torch._dynamo.skip
+        def f(x):
+            generator_box.clear()
+            return g(x)
+
+        self.assertNoUnraisable(
+            lambda: torch._dynamo.optimize(counter)(f)(torch.randn(3))
+        )
+
+        # Make sure the x + 2 is captured (a previous incorrect implementation
+        # of this fix would have disabled the eval frame callback, which means
+        # g wouldn't get traced
+        self.assertEqual(counter.op_count, 1)
+
+    def test_error_return_without_exception_set(self):
+        # https://github.com/pytorch/pytorch/issues/93781
+        @torch.compile
+        def f():
+            _generator_type = type((_ for _ in ()))
+
+        self.assertNoUnraisable(f)
+
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2276,7 +2362,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -2312,6 +2397,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_size_typematch(self):
+        def f(x, y):
+            if isinstance(x, torch.Size):
+                return y + 1
+            else:
+                return y + 2
+
+        y = torch.zeros(1)
+        x1 = torch.Size((3,))
+        x2 = (3,)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(x1, y), opt_f(x1, y)))
+        self.assertTrue(same(f(x2, y), opt_f(x2, y)))
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):

@@ -1319,8 +1319,6 @@ class TestAssertCloseSparseBSC(TestCase):
                 fn()
 
 
-
-
 class TestAssertCloseQuantized(TestCase):
     def test_mismatching_is_quantized(self):
         actual = torch.tensor(1.0)
@@ -1452,6 +1450,10 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     def test_low_high_smoke(self, dtype, device):
+        if dtype in [torch.bfloat16, torch.float16, torch.complex32] and torch.device(device).type == "cuda":
+            # See https://github.com/pytorch/pytorch/issues/96947
+            return
+
         low_inclusive, high_exclusive = 0, 2
 
         t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
@@ -1462,6 +1464,10 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     def test_low_high_default_smoke(self, dtype, device):
+        if dtype in [torch.bfloat16, torch.float16, torch.complex32] and torch.device(device).type == "cuda":
+            # See https://github.com/pytorch/pytorch/issues/96947
+            return
+
         low_inclusive, high_exclusive = {
             torch.bool: (0, 2),
             torch.uint8: (0, 10),
@@ -1481,6 +1487,24 @@ class TestMakeTensor(TestCase):
             t = torch.view_as_real(t)
 
         self.assertTrue(((t >= low_inclusive) & (t < high_exclusive)).all())
+
+    @unittest.expectedFailure
+    @dtypes(torch.bfloat16, torch.float16, torch.complex32)
+    @onlyCUDA
+    def test_low_precision_floating_point_upper_limit_sampling(self, dtype, device):
+        t = torch.testing.make_tensor(10_000_000, dtype=dtype, device=device, low=0, high=1)
+        if dtype.is_complex:
+            t = torch.view_as_real(t)
+
+        self.assertTrue((t != 1).all(), """\
+        If you see this message, it seems that you have fixed https://github.com/pytorch/pytorch/issues/96947!
+        Please delete the conditional returns in 
+        
+        - test_testing.TestMakeTensor.test_low_high_smoke
+        - test_testing.TestMakeTensor.test_low_high_default_smoke
+        
+        that link to the same issue. If these tests are passing now, feel free to delete this test.
+        """)
 
     @parametrize("low_high", [(0, 0), (1, 0), (0, -1)])
     @parametrize("value_types", list(itertools.product([int, float], repeat=2)))
