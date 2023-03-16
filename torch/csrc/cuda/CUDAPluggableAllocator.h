@@ -59,17 +59,14 @@ struct CUDAPluggableAllocator
   void set_record_stream_fn(
       std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn);
 
-  void set_capture_begin_fn(
-      std::function<void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t)>
+  void set_begin_allocate_stream_to_pool(
+      std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
           capture_begin_fn);
 
-  void set_capture_about_to_end_fn(
-      std::function<void(int, c10::cuda::CaptureId_t)> capture_about_to_end_fn);
+  void set_end_allocate_stream_to_pool_fn(
+      std::function<void(int, cudaStream_t)> capture_about_to_end_fn);
 
-  void set_capture_ended_fn(
-      std::function<void(int, c10::cuda::CaptureId_t)> capture_ended_fn);
-
-  void set_capture_destroy_fn(
+  void set_release_pool(
       std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn);
 
   void* malloc(size_t size, int device, cudaStream_t stream);
@@ -95,18 +92,14 @@ struct CUDAPluggableAllocator
   virtual void resetAccumulatedStats(int device) override;
   virtual void resetPeakStats(int device) override;
   virtual c10::cuda::CUDACachingAllocator::SnapshotInfo snapshot() override;
-  virtual void notifyCaptureBegin(
+  virtual void beginAllocateStreamToPool(
       int device,
-      c10::cuda::CaptureId_t graph_id,
+      cudaStream_t stream,
       c10::cuda::MempoolId_t mempool_id) override;
-  virtual void notifyCaptureAboutToEnd(
-      int device,
-      c10::cuda::CaptureId_t graph_id) override;
-  virtual void notifyCaptureEnded(int device, c10::cuda::CaptureId_t graph_id)
+  virtual void endAllocateStreamToPool(int device, cudaStream_t stream)
       override;
-  virtual void notifyCaptureDestroy(
-      int device,
-      c10::cuda::MempoolId_t mempool_id) override;
+  virtual void releasePool(int device, c10::cuda::MempoolId_t mempool_id)
+      override;
   virtual std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
   virtual void recordHistory(
       bool enabled,
@@ -115,6 +108,13 @@ struct CUDAPluggableAllocator
       bool alloc_trace_record_context) override;
   virtual void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
+  virtual std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+  getCheckpointState(int device, at::cuda::MempoolId_t id) override;
+  virtual c10::cuda::CUDACachingAllocator::CheckpointDelta
+  setCheckpointPoolState(
+      int device,
+      std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps)
+      override;
   virtual bool needsPoolSpecificPeerAccess() override;
   virtual std::string name() override;
 
@@ -126,11 +126,10 @@ struct CUDAPluggableAllocator
   std::function<void(double, int)> memory_fraction_fn_;
   std::function<void*(void*, size_t*)> base_alloc_fn_;
   std::function<void(void* ptr, cudaStream_t stream)> record_stream_fn_;
-  std::function<void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t)>
-      capture_begin_fn_;
-  std::function<void(int, c10::cuda::CaptureId_t)> capture_about_to_end_fn_;
-  std::function<void(int, c10::cuda::CaptureId_t)> capture_ended_fn_;
-  std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn_;
+  std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
+      begin_allocate_stream_to_pool_fn_;
+  std::function<void(int, cudaStream_t)> end_allocate_stream_to_pool_fn_;
+  std::function<void(int, c10::cuda::MempoolId_t)> relase_pool_fn_;
   std::mutex allocator_mutex_;
   // We do the bookeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
