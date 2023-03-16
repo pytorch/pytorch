@@ -498,15 +498,15 @@ std::tuple<at::Tensor, at::Tensor> prepack_qconv_weight_bias_onednn(
       weight.ndimension() == kSpatialDim + 2,
       "Weights are expected to have ", kSpatialDim + 2, " dimensions");
   TORCH_CHECK(
-      stride.size() == kSpatialDim,
+      stride.size() == (decltype(stride.size()))kSpatialDim,
       "stride should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
   TORCH_CHECK(
-      padding.size() == kSpatialDim,
+      padding.size() == (decltype(padding.size()))kSpatialDim,
       "Specify front/top/left padding only. "
       "end/bottom/right padding assumed to be equal to front/top/left");
   TORCH_CHECK(
-      dilation.size() == kSpatialDim,
+      dilation.size() == (decltype(dilation.size()))kSpatialDim,
       "dilation should contain ", kSpatialDim, " elements for ",
       kSpatialDim, "D convolution.");
 
