@@ -30,9 +30,7 @@ def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
     input: Union[torch.Tensor, Tuple[torch.Tensor]],
     custom_ops: Optional[
-        Iterable[
-            Union[contextlib.AbstractContextManager, contextlib.ContextDecorator],
-        ]
+        Iterable[Union[contextlib.AbstractContextManager, contextlib.ContextDecorator]]
     ] = None,
     mocks: Optional[Iterable] = None,
     operator_export_type: torch.onnx.OperatorExportTypes = torch.onnx.OperatorExportTypes.ONNX,
@@ -765,7 +763,6 @@ class TestONNXExport(pytorch_test_common.ExportTestCase):
         )
 
     def test_dropout_script(self):
-
         eg = torch.zeros(1, 2, 3, requires_grad=True)
 
         @jit_utils._trace(eg)

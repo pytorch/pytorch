@@ -103,7 +103,6 @@ class DistributedDataParallel(Module):
         gradient_as_bucket_view=False,
         static_graph=False,
     ):
-
         super().__init__()
         self.logger: Optional[dist.Logger] = None
         if not any((p.requires_grad for p in module.parameters())):
