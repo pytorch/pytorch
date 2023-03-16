@@ -1,4 +1,5 @@
 import itertools
+import logging
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -7,7 +8,7 @@ disable_progress = True
 
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
-    return ["torch._dynamo" "torch._inductor"]
+    return [logging.getLogger("torch._dynamo"), logging.getLogger("torch._inductor")]
 
 
 # Set the level of all loggers that torchdynamo is responsible for
