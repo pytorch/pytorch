@@ -4,8 +4,6 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
-
-# TODO(whc) why is this here?
 import torch.distributed._functional_collectives
 from . import external_utils
 

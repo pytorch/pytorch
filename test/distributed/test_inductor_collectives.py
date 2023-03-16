@@ -319,6 +319,8 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct)
 
     def test_dynamo_trace_allreduce(self):
+        # torch._inductor.config.debug = True
+
         def func(inp, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
             return ar

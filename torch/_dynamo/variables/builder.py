@@ -94,7 +94,6 @@ from .tensor import (
     UnspecializedPythonVariable,
 )
 from .torch import (
-    AsyncCollectiveTensorClass,
     tensor_dunder_fns,
     torch_special_class_types,
     TorchPyOperator,
@@ -309,10 +308,7 @@ class VariableBuilder:
         value = inspect.getattr_static(value, "_torchdynamo_inline", value)
 
         # Everything else (NB: order matters!)
-        # TODO(whc) i think i screwed this up during rebase
-        if value is torch.distributed._functional_collectives.AsyncCollectiveTensor:
-            return AsyncCollectiveTensorClass(value)
-        elif istype(value, config.traceable_tensor_subclasses):
+        if istype(value, config.traceable_tensor_subclasses):
             return self.wrap_tensor(value)
         elif is_namedtuple(value):
             return self.wrap_listlike(value)

@@ -1,17 +1,12 @@
 import warnings
-
 import weakref
-from typing import Any, cast, List, Tuple, Union
-
 import sys
 import torch
 import torch.distributed as dist
-from typing import Any, Tuple, Union, List, cast, TYPE_CHECKING
-import weakref
-
 import torch.distributed.distributed_c10d as c10d
-
+from typing import Any, Tuple, Union, List, cast, TYPE_CHECKING
 from torch.utils._pytree import tree_map_only
+
 
 """
 New traceable, functional collectives.
@@ -83,9 +78,8 @@ def _wait_and_clear_tensor(data_ptr, version):
 
 def _register_wrapper_tensor(tensor_wrapper, tensor):
     global data_ptr_to_work
-
-    # tensor.data_ptr() isn't traceable by dynamo, it graph breaks
-
+    # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
+    # Instead, backends must call this themselves when implementing traced collectives.
     version, _ = data_ptr_to_work.get(tensor.data_ptr(), (None, None))
     if version is None:
         warnings.warn(
