@@ -293,7 +293,6 @@ def create_default_local_save_plan(
         # gets called only when the current rank is part of the mesh for the corresponding DTensor.
         if (
             isinstance(obj, DTensor)
-            and obj.device_mesh.get_coordinate() is not None
         ):
             if obj.device_mesh.get_coordinate() is not None:
                 requests += _create_write_items(fqn, obj)

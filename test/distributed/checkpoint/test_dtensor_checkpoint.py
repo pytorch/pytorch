@@ -102,7 +102,7 @@ class DTensorPlanner(DTensorTestBase):
             replicated_dt,
             submesh_sharded_dt,
             submesh_replicated_dt,
-        ).cuda(dist.get_rank())
+        ).cuda()
 
         return (
             model,
