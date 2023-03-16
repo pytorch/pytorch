@@ -1,3 +1,39 @@
+"""
+CUDA graph trees are a safety abstraction over graph/make_graph_callables
+which share the same memory pool.  Sharing a memory pool is an extremely
+important optimization when chaining multiple CUDA graphs together, as it
+prevents you from needing to copy intermediate tensors from one graph to the
+next, and reduces overall memory usage by allowing dead memory from the first
+pool to be reused in the second.
+
+The standard graph/make_graph_callables support sharing memory pool, but
+with a lot of caveats.  CUDA graph trees remove these restrictions:
+
+* Previously, if you recorded graphs A, B, you had to replay A, B in that
+  order.  With CUDA graph trees, after replaying A, you can change your
+  mind and record/replay a different graph B'; we will support efficient
+  execution of both A, B and A, B', using only max(mem(A, B), mem(A, B')).  In
+  other words: we support arbitrary trees of CUDA graph operations, not just
+  sequences (this is why this feature is called CUDA graph trees.)
+
+* Previously, if you executed graph A, some non-CUDA graph code, and then
+  graph B, after executing graph B, it was not safe to retain any references
+  to intermediates produced by A.  With CUDA graph trees, we track if any
+  outputs of graph A are still live by the time graph B is run, and make
+  sure graph B doesn't clobber there memory when reusing the CUDA graphs
+  pool.  You'll get a separate recording of B depending on what tensors
+  stay live or dead.
+
+CUDA graph trees are flexible enough to be used in Dynamo across graph breaks,
+which is their primary use case.
+
+The ability to switch from replay to record is fairly nontrivial: remember that
+when you replay a CUDA graph, you only replay CUDA operations; no CPU side state
+is updated.  In particular, the CPU-side book-keeping for the allocator is not
+reconstructed.  However, to record a new child CUDA graph, we must restore this
+book-keeping.  This is what checkpoint pool state is used for.
+"""
+
 from __future__ import annotations
 
 import contextlib
@@ -51,6 +87,11 @@ class FunctionID:
 
 @dataclasses.dataclass(frozen=True)
 class WrappedFunction:
+    """
+    Represents a function that you want to record for CUDA graph replay,
+    with a little more metadata so we can identify if we have an applicable
+    CUDA graph in our CUDA graph tree for it.
+    """
     model: Callable
     static_input_idxs: Sequence[int]
     id: FunctionID
@@ -395,6 +436,12 @@ class CUDAWarmupNode:
         return not list(self.path_live_weakrefs())
 
 
+# Aliases for List that say what the indices denote
+InputList = List  # input indexes
+OutputList = List  # output indexes
+LevelList = List  # levels (distance from root of tree)
+
+
 class CUDAGraphNode:
     """
     A single recording of a function into a CUDA Graph. Recordings of CUDA Graphs share a single memory pool
@@ -433,6 +480,7 @@ class CUDAGraphNode:
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
+        # reference to the shared memory pool for the entire cuda graphs tree
         self.cuda_graphs_pool = cuda_graphs_pool
 
         # A single wrapped function may be recorded multiple times if memory patterns or
@@ -443,8 +491,8 @@ class CUDAGraphNode:
         # in children to avoid children having to chase parent pointers in the hot path
         # DO NOT reassign output_weakrefs, only call `clear()`
         # Path is a series of nodes from root to the current node
-        self.outputs_weakrefs: List[Optional[StorageWeakRefWrapper]] = []
-        self.path_weakrefs: List[List[Optional[StorageWeakRefWrapper]]] = [
+        self.outputs_weakrefs: OutputList[Optional[StorageWeakRefWrapper]] = []
+        self.path_weakrefs: LevelList[OutputList[Optional[StorageWeakRefWrapper]]] = [
             node.outputs_weakrefs for node in self._path_from_root
         ]
 
@@ -459,7 +507,7 @@ class CUDAGraphNode:
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
-        self.static_input_data_ptrs: List[int] = [
+        self.static_input_data_ptrs: InputList[int] = [
             (inputs[i].data_ptr() if i in self.static_input_idxs else None)
             for i in range(len(inputs))
         ]
@@ -472,7 +520,7 @@ class CUDAGraphNode:
             inputs[i].untyped_storage().data_ptr()
             for i in self.wrapped_function.static_input_idxs
         }
-        self.output_is_alias_of_static_inputs: List[int] = []
+        self.output_is_alias_of_static_inputs: OutputList[int] = []
 
         # precompute expanded dims to avoid computing in the hot path
         self.expanded_dims: List[List[int]] = [
@@ -482,8 +530,8 @@ class CUDAGraphNode:
 
         # For each node in path, which outputs were observed to be live
         # before invoking graph recording, and after graph recording
-        self.recorded_liveness_before_graph: List[List[bool]] = []
-        self.recorded_liveness_after_graph: List[List[bool]] = []
+        self.recorded_liveness_before_graph: LevelList[OutputList[bool]] = []
+        self.recorded_liveness_after_graph: LevelList[OutputList[bool]] = []
 
         # List of Tuples of (depth, output_index) that index into node at depth
         # number of nodes from root and output_index of outputs. Will index into
@@ -515,21 +563,27 @@ class CUDAGraphNode:
         # to reclaim the input memory when the inputs are no longer live. To accomplish this,
         # we record the metadata needed to reconstruct the inputs at their correct memory location,
         # but do not keep them live during the cuda graph recording.
-        self.non_static_inputs_metadata = [
+        self.non_static_inputs_metadata: InputList[Dict[str, Any]] = [
             self._tensor_metadata(x) if idx not in (self.static_input_idxs) else None
             for idx, x in enumerate(recording_inputs)
         ]
 
         stream = torch.cuda.Stream()
 
-        # on the first invocation, return the first recorded outputs, because their memory
-        # is correctly accounted for in the CUDAGraphs caching allocator, so on subsequent cudagraph
-        # recording we are tracing with a valid caching allocator state
-        self.recording_outputs = self._record(
+        # DO THE RECORDING!!!
+        # We record the CUDA graph in the constructor of CUDAGraphNode, which
+        # gives you what the CPU side compute of the function would do.  We
+        # don't throw the recording outputs away: their memory is
+        # correctly accounted for in the CUDAGraphs caching allocator.  This
+        # means on the very FIRST run of the CUDA graph node, we can directly
+        # do more recording, because we have a valid caching allocator state.
+        # NB: This relies on run() being called immediately after the
+        # constructor, otherwise this optimization would not be valid.
+        self.recording_outputs: OutputList[Optional[torch.Tensor]] = self._record(
             wrapped_function.model, stream, recording_inputs
         )
 
-        self.outputs_metadata = []
+        self.outputs_metadata: OutputList[Optional[Dict[str, Any]]] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
@@ -553,12 +607,15 @@ class CUDAGraphNode:
         assert len(self.static_input_data_ptrs) == len(new_inputs)
 
         storage_cache = {}
+        # NB: this ranges over non-static inputs too
         for idx, data_ptr in enumerate(self.static_input_data_ptrs):
             if idx in self.cudagraph_managed_idxs:
                 continue
             if data_ptr is not None:
+                # static input, e.g., parameter
                 assert data_ptr == new_inputs[idx].data_ptr()
             else:
+                # non-static input, need to copy it into CUDA graph
                 dst = self._reconstruct_from_tensor_metadata(
                     self.non_static_inputs_metadata[idx], storage_cache
                 )
@@ -836,7 +893,11 @@ class CUDAGraphNode:
 
     def _allocate_recording_inputs(self, inputs):
         "Allocate inputs for non static, non cudagraph managraphed managed tensors in the memory pool"
+
+        # How come we need another cuda graph?  This graph is never replayed;
+        # it is just a way to force allocations to go into the shared pool
         inps_alloc_graph = torch.cuda.CUDAGraph()
+
         torch.cuda.synchronize()
         stream = torch.cuda.Stream()
         stream.wait_stream(torch.cuda.current_stream())
@@ -851,6 +912,7 @@ class CUDAGraphNode:
         ):
             for i, inp in enumerate(inputs):
                 if i not in self.static_input_idxs:
+                    # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
                 else:
                     recording_inputs.append(inp)
