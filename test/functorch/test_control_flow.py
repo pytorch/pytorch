@@ -970,7 +970,7 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(res_eager, expected)
         self.assertEqual(res_symbolic, expected)
         self.assertEqual(res_real, expected)
-    
+
     def test_trace_functionalize_while_loop(self):
         def cond_fun(iter, val):
             iter_ = iter.view(1) + 1
