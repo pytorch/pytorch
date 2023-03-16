@@ -54,9 +54,9 @@ Tensor empty_like_nested(
   Tensor new_buffer = at::empty_like(self_nt->get_buffer(), options);
   auto nested_size = self_nt->get_nested_size_tensor().clone();
   auto nested_strides = self_nt->get_nested_stride_tensor().clone();
-  auto offsets = std::vector<int64_t>(self_nt->get_storage_offsets());
+  auto offsets = self_nt->get_offsets_tensor().clone();
   auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      new_buffer, nested_size, nested_strides, std::move(offsets));
+      new_buffer, nested_size, nested_strides, offsets);
   return tensor;
 }
 
