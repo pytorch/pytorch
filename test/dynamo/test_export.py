@@ -2340,7 +2340,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 return x.sin()
             return x.cos()
 
-        with self.assertRaisesRegex(RuntimeError, "Duplicate index 0"):
+        with self.assertRaisesRegex(RuntimeError, "Duplicate dim 0"):
             torch._dynamo.export(
                 my_dyn_fn, y, constraints=[dynamic_dim(y, 0), dynamic_dim(y, 0)]
             )

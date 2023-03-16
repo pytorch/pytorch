@@ -20,8 +20,8 @@ import torch
 import torch.fx
 import torch.utils._pytree as pytree
 from torch import _guards
+from torch._export import Constraint
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import MinMaxConstraint
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
 from .backends.registry import CompilerFn, lookup_backend
@@ -591,7 +591,7 @@ def export(
     ] = None,
     tracing_mode: str = "real",
     constraints: List[
-        Tuple[torch.nn.Tensor, Tuple[int, Optional[MinMaxConstraint]]]
+        Constraint,
     ] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
@@ -705,33 +705,34 @@ def export(
         constraints = list()
 
     # id : set[dim]
-    tensor_id_to_indices: Dict[int, Set[int]] = dict()
+    tensor_id_to_dims: Dict[int, Set[int]] = dict()
     try:
         for constraint in constraints:
-            tensor = constraint[0]
-            dim_to_range: Tuple[int, Optional[MinMaxConstraint]] = constraint[1]
-            index = dim_to_range[0]
-            valid_range = dim_to_range[1]
-            # TODO(voz): Is tensor defaultdict friendly?
-            if id(tensor) not in tensor_id_to_indices:
+            tensor = constraint.w_tensor()
+            assert (
+                tensor is not None
+            ), "Tensor defined in constraint has gone out of scope."
+            dim = constraint.dim
+            constraint_range = constraint.constraint_range
+            if id(tensor) not in tensor_id_to_dims:
                 if torch._dynamo.has_dynamic_dims(tensor):
                     raise RuntimeError(
                         "Illegal to export tensor already marked dynamic."
                         "This is a temporary state, we will add support for exporting from any"
                         "predefined dynamic state, and having export leave it intact."
                     )
-                tensor_id_to_indices[id(tensor)] = set()
-            if index in tensor_id_to_indices[id(tensor)]:
-                raise RuntimeError(f"Duplicate index {index}")
-            tensor_id_to_indices[id(tensor)].add(index)
-            if valid_range:
+                tensor_id_to_dims[id(tensor)] = set()
+            if dim in tensor_id_to_dims[id(tensor)]:
+                raise RuntimeError(f"Duplicate dim {dim}")
+            tensor_id_to_dims[id(tensor)].add(dim)
+            if constraint_range:
                 torch._dynamo.mark_dynamic_constrain(
-                    tensor, index, min=valid_range.min, max=valid_range.max
+                    tensor, dim, min=constraint_range.min, max=constraint_range.max
                 )
             else:
-                torch._dynamo.mark_dynamic(tensor, index)
+                torch._dynamo.mark_dynamic(tensor, dim)
 
-        seen_tensors = set(tensor_id_to_indices.keys())
+        seen_tensors = set(tensor_id_to_dims.keys())
         arg_ids = {id(arg) for arg in flat_args if isinstance(arg, torch.Tensor)}
         if len(seen_tensors - arg_ids) != 0:
             raise RuntimeError("User specified dynamic dim for unknown tensors")
@@ -920,7 +921,7 @@ def export(
 
         new_graph.recompile()
     finally:
-        for tensor_id in tensor_id_to_indices.keys():
+        for tensor_id in tensor_id_to_dims.keys():
             torch._dynamo.clear_dynamic_dims(
                 ctypes.cast(tensor_id, ctypes.py_object).value
             )

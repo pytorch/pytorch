@@ -1385,7 +1385,7 @@ class ShapeEnv:
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source, dim_state: DIM_DYNAMISM_STATE=DIM_DYNAMISM_STATE.DUCK) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, dim_state: DIM_DYNAMISM_STATE = DIM_DYNAMISM_STATE.DUCK) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
         if dim_state == DIM_DYNAMISM_STATE.STATIC:
             return sympy.Integer(val)

@@ -2,8 +2,10 @@ import contextlib
 import copy
 from typing import Callable, Tuple, Generator, Dict, Optional
 from unittest.mock import patch
+import dataclasses
 
 import torch
+import weakref
 import torch._dynamo as torchdynamo
 from torch._decomp import core_aten_decompositions
 from torch._dispatch.python import enable_python_dispatcher
@@ -205,9 +207,7 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
     graph_module, _, out_spec = _aot_capture(graph_module, flat_args)
     return ExportedProgram(fw_module=graph_module, example_inputs=original_flat_args, in_spec=in_spec, out_spec=out_spec)
 
-# See Note - [On Export Dynamic Dimension UX]
-# The integer here represents a dimension
-Constraint = Tuple[torch.Tensor, Tuple[int, Optional[MinMaxConstraint]]]
+
 
 # Note - [On Export Dynamic Dimension UX]
 #
@@ -240,5 +240,11 @@ Constraint = Tuple[torch.Tensor, Tuple[int, Optional[MinMaxConstraint]]]
 #         0 <= dynamic_dim(blah, 1) <= 100,
 #     ]
 # )
+@dataclasses.dataclass
+class Constraint:
+    w_tensor : weakref.ReferenceType[torch.Tensor]
+    dim: int
+    constraint_range : Optional[MinMaxConstraint]
+
 def dynamic_dim(t: torch.Tensor, index: int):
-    return (t, (index, None))
+    return Constraint(weakref.ref(t), index, None)

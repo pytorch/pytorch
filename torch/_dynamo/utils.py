@@ -1441,5 +1441,5 @@ def dynamic_dims_from_tensor(
                 dynamic_dims[i] = DIM_DYNAMISM_STATE.STATIC
             else:
                 dynamic_dims[i] = DIM_DYNAMISM_STATE.DUCK
-            
+
     return dynamic_dims
