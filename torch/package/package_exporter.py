@@ -916,7 +916,6 @@ class PackageExporter:
 
     def _persistent_id(self, obj):
         if torch.is_storage(obj) or isinstance(obj, torch.storage.TypedStorage):
-
             storage: Storage
             if isinstance(obj, torch.storage.TypedStorage):
                 # TODO: Once we decide to break serialization FC, we can

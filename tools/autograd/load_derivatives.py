@@ -52,6 +52,7 @@ _GLOBAL_LOAD_DERIVATIVE_CACHE = {}
 
 _VALID_AUTOGRAD_KEYS = set(AUTOGRAD_KEYS)
 
+
 # This function directly adds per-dispatchkey derivative entries for {view}_copy variants of each view op.
 # Since every {view} and {view}_copy op shares the same derivative formula,
 # we generate them here instead of duplicating them in the yaml.
@@ -96,7 +97,6 @@ def load_derivatives(
     global _GLOBAL_LOAD_DERIVATIVE_CACHE
     key = (derivatives_yaml_path, native_yaml_path)
     if key not in _GLOBAL_LOAD_DERIVATIVE_CACHE:
-
         with open(derivatives_yaml_path, "r") as f:
             definitions = yaml.load(f, Loader=YamlLoader)
 
