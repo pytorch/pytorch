@@ -38,6 +38,7 @@ def kwargs_to_settings(**kwargs):
 def make_test(log_names, **kwargs):
     def wrapper(fn):
         def test_fn(self):
+
             torch._dynamo.reset()
             records = []
             # run with env var

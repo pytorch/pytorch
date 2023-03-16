@@ -116,7 +116,7 @@ class LoggingTests(LoggingTestCase):
 
 # single record tests
 exclusions = {"bytecode", "output_code", "schedule"}
-for name in torch._logging.internal.log_registry.artifact_names:
+for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
         setattr(LoggingTests, f"test_{name}", single_record_test(**{name: True}))
 
