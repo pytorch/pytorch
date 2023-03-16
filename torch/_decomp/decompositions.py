@@ -1136,13 +1136,6 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-@register_decomposition(aten._int_mm)
-@out_wrapper()
-@pw_cast_for_opmath
-def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
-    return torch._int_mm(mat1, mat2)
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
