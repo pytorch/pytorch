@@ -25,12 +25,16 @@ class MyTestModule(torch.nn.Module):
         self,
         sdt: DTensor,
         rdt: DTensor,
+        submesh_sdt: DTensor,
+        submesh_rdt: DTensor,
         extra_state: int = 1,
         extra_state_tensor: torch.Tensor = torch.zeros(1),
     ) -> None:
         super().__init__()
-        self.rdt = torch.nn.Parameter(rdt)
         self.sdt = torch.nn.Parameter(sdt)
+        self.rdt = torch.nn.Parameter(rdt)
+        self.submesh_sdt = torch.nn.Parameter(submesh_sdt)
+        self.submesh_rdt = torch.nn.Parameter(submesh_rdt)
         self._extra_state = extra_state
         self._extra_state_tensor = extra_state_tensor
 
@@ -68,6 +72,8 @@ class DTensorPlanner(DTensorTestBase):
         self,
         tensor_to_shard: torch.tensor,
         tensor_to_replicate: torch.tensor,
+        tensor_to_shard_to_submesh: torch.tensor,
+        tensor_to_replicate_submesh: torch.tensor,
     ) -> torch.nn.Module:
         mesh = DeviceMesh(
             device_type=self.device_type,
@@ -79,9 +85,32 @@ class DTensorPlanner(DTensorTestBase):
         replicated_dt = distribute_tensor(
             tensor_to_replicate, mesh, placements=[Replicate()]
         )
-        model = MyTestModule(sharded_dt, replicated_dt).cuda(dist.get_rank())
 
-        return model, sharded_dt, replicated_dt
+        # Only even rank will be part of the mesh.
+        submesh = DeviceMesh(
+            device_type=self.device_type,
+            mesh=[i for i in range(dist.get_world_size()) if i % 2 == 0],
+        )
+        submesh_sharded_dt = distribute_tensor(
+            tensor_to_shard_to_submesh, submesh, placements=[Shard(0)]
+        )
+        submesh_replicated_dt = distribute_tensor(
+            tensor_to_replicate_submesh, submesh, placements=[Replicate()]
+        )
+        model = MyTestModule(
+            sharded_dt,
+            replicated_dt,
+            submesh_sharded_dt,
+            submesh_replicated_dt,
+        ).cuda()
+
+        return (
+            model,
+            sharded_dt,
+            replicated_dt,
+            submesh_sharded_dt,
+            submesh_replicated_dt,
+        )
 
     @with_comms
     @with_temp_dir
@@ -91,13 +120,21 @@ class DTensorPlanner(DTensorTestBase):
 
         local_tensor = torch.arange(0, 4, dtype=torch.float32)
         local_tensor_2 = torch.arange(4, 8, dtype=torch.float32)
-        model, sharded_dt, replicated_dt = self.create_dtensor_model(
-            local_tensor, local_tensor_2
+        local_tensor_3 = torch.arange(8, 12, dtype=torch.float32)
+        local_tensor_4 = torch.arange(12, 16, dtype=torch.float32)
+        (
+            model,
+            sharded_dt,
+            replicated_dt,
+            submesh_sharded_dt,
+            submesh_replicated_dt,
+        ) = self.create_dtensor_model(
+            local_tensor, local_tensor_2, local_tensor_3, local_tensor_4
         )
         state_dict = model.state_dict()
 
         """
-        When the model is initialized, the state_dict on each rank are as followed when there are 4 GPUs:
+        When the model is initialized, the state_dict on rank 0 are as follows when there are 4 GPUs.
         rank 0:
             OrderedDict(
                 [
@@ -116,76 +153,21 @@ class DTensorPlanner(DTensorTestBase):
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)])
                         ),
-                    (
-                        '_extra_state',
-                        {'extra_state': 1, 'extra_state_tensor': tensor([0.])}
-                    )
-                ]
-            )
-        rank 1:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
-                        DTensor(
-                            local_tensor=tensor([4., 5., 6., 7.],device='cuda:3'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Replicate()])
-                        ),
-                    (
-                        'sdt',
-                        DTensor(
-                            local_tensor=tensor([1.], device='cuda:3'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Shard(dim=0)])
-                        ),
-                    (
-                        '_extra_state',
-                        {'extra_state': 1, 'extra_state_tensor': tensor([0.])}
-                    )
-                ]
-            )
-        rank 3:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
-                        DTensor(
-                            local_tensor=tensor([4., 5., 6., 7.],device='cuda:2'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Replicate()]
-                        )
                     ),
                     (
-                        'sdt',
+                        'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([2.], device='cuda:2'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Shard(dim=0)])
-                        ),
-                    (
-                        '_extra_state',
-                        {'extra_state': 1, 'extra_state_tensor': tensor([0.])}
-                    )
-                ]
-            )
-        rank 4:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
-                        DTensor(
-                            local_tensor=tensor([4., 5., 6., 7.], device='cuda:3'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Replicate()]
-                        )
-                    ),
-                    (
-                        'sdt',
-                        DTensor(
-                            local_tensor=tensor([3.], device='cuda:3'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
+                            local_tensor=tensor([8., 9.], device='cuda:0'),
+                            device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
+                        ),
+                    ),
+                    (
+                        'submesh_rdt',
+                        DTensor(
+                            local_tensor=tensor([12., 13., 14., 15.], device='cuda:0'),
+                            device_mesh=DeviceMesh:([0, 2]),
+                            placements=[Replicate()]
                         )
                     ),
                     (
@@ -201,13 +183,17 @@ class DTensorPlanner(DTensorTestBase):
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
         )
-        model, _, _ = self.create_dtensor_model(
-            local_tensor * 10, local_tensor_2 * 10
+        model, _, _, _, _ = self.create_dtensor_model(
+            local_tensor * 10,
+            local_tensor_2 * 10,
+            local_tensor_3 * 10,
+            local_tensor_4 * 10,
         )
         state_dict = model.state_dict()
+
         """
         When the model is re-initialized, we have changed the params in state_dict.
-        The updated values are as followed, when there are 4 GPUs:
+        The updated values are as follows, when there are 4 GPUs:
         rank 0:
             OrderedDict(
                 [
@@ -225,81 +211,25 @@ class DTensorPlanner(DTensorTestBase):
                             local_tensor=tensor([0.], device='cuda:0'),
                             device_mesh=DeviceMesh:([0, 1, 2, 3]),
                             placements=[Shard(dim=0)],
-                        ),
-                    (
-                        '_extra_state', {'extra_state': 10, 'extra_state_tensor': tensor([10.])}
-                    )
-                ]
-            )
-        rank 1:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
-                        DTensor(
-                            local_tensor=tensor([40., 50., 60., 70.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Replicate()],
                         )
                     ),
                     (
-                        'sdt',
-                        DTensor(local_tensor=tensor([10.], device='cuda:0'),
-                        device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                        placements=[Shard(dim=0)],
-                        )
-                    ),
-                    (
-                        '_extra_state', {'extra_state': 10, 'extra_state_tensor': tensor([10.])}
-                    )
-                ]
-            )
-        rank 3:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
+                        'submesh_sdt',
                         DTensor(
-                            local_tensor=tensor([40., 50., 60., 70.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Replicate()],
-                        )
-                    ),
-                    (
-                        'sdt',
-                        DTensor(
-                            local_tensor=tensor([20.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
+                            local_tensor=tensor([80., 90.], device='cuda:0'),
+                            device_mesh=DeviceMesh:([0, 2]),
                             placements=[Shard(dim=0)]
                         )
                     ),
-                    (
-                        '_extra_state', {'extra_state': 10, 'extra_state_tensor': tensor([10.])}
-                    )
-                ]
-            )
-        rank 4:
-            OrderedDict(
-                [
-                    (
-                        'rdt',
+                    ('submesh_rdt',
                         DTensor(
-                            local_tensor=tensor([40., 50., 60., 70.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
+                            local_tensor=tensor([120., 130., 140., 150.], device='cuda:0'),
+                            device_mesh=DeviceMesh:([0, 2]),
                             placements=[Replicate()]
                         )
                     ),
                     (
-                        'sdt',
-                        DTensor(
-                            local_tensor=tensor([30.], device='cuda:0'),
-                            device_mesh=DeviceMesh:([0, 1, 2, 3]),
-                            placements=[Shard(dim=0)]
-                        )
-                    ),
-                    (
-                        '_extra_state',
-                        {'extra_state': 10, 'extra_state_tensor': tensor([10.])}
+                        '_extra_state', {'extra_state': 10, 'extra_state_tensor': tensor([10.])}
                     )
                 ]
             )
@@ -316,10 +246,14 @@ class DTensorPlanner(DTensorTestBase):
         match the values that are originally saved to the checkpoint.
         """
         for k, v in state_dict.items():
-            if k == "rdt":
-                self.assertEqual(replicated_dt.to_local(), v.to_local())
             if k == "sdt":
                 self.assertEqual(sharded_dt.to_local(), v.to_local())
+            if k == "rdt":
+                self.assertEqual(replicated_dt.to_local(), v.to_local())
+            if k == "sub_mesh_sdt":
+                self.assertEqual(submesh_sharded_dt.to_local(), v.to_local())
+            if k == "sub_mesh_sdt":
+                self.assertEqual(submesh_replicated_dt.to_local(), v.to_local())
             if k == "_extra_state":
                 self.assertEqual(1, v["extra_state"])
                 self.assertEqual(torch.tensor([0.0]), v["extra_state_tensor"])
