@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import functools
 import inspect
@@ -10,11 +12,13 @@ import traceback
 import types
 import warnings
 from enum import Enum
-from typing import Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import torch
+import torch.fx
 import torch.utils._pytree as pytree
+from torch import _guards
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 from torch.nn.parallel.distributed import DistributedDataParallel
@@ -559,8 +563,15 @@ def explain(f, *args, **kwargs):
 
 
 def export(
-    f, *args, aten_graph=False, decomposition_table=None, tracing_mode="real", **kwargs
-):
+    f: Callable[..., Any],
+    *args,
+    aten_graph: bool = False,
+    decomposition_table: Optional[
+        Dict[torch._ops.OpOverload, Callable[..., Any]]
+    ] = None,
+    tracing_mode: str = "real",
+    **kwargs,
+) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
     Export an input function f to a format that can be executed outside of PyTorch using the FX graph.
 
@@ -635,7 +646,7 @@ def export(
 
         return matched_elements_positions
 
-    def guard_export_print(guards):
+    def guard_export_print(guards: Set[_guards.Guard]):
         nonlocal out_guards
         assert out_guards is None, "whole graph export entails exactly one guard export"
         out_guards = guards
@@ -742,20 +753,91 @@ def export(
         graph,
     ).transform()
 
+    def signature_to_fullargspec(sig: inspect.Signature):
+        # Get a list of Parameter objects from the Signature object
+        params = list(sig.parameters.values())
+        # Separate positional arguments, keyword-only arguments and varargs/varkw
+        args = [
+            p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwonlyargs = [
+            p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        varargs = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL), None
+        )
+        varkw = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD), None
+        )
+        # Get default values for positional arguments and keyword-only arguments
+        defaults = tuple(
+            p.default
+            for p in params
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and p.default is not inspect.Parameter.empty
+        )
+        kwonlydefaults = {
+            p.name: p.default
+            for p in params
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        # Get annotations for parameters and return value
+        annotations = {}
+        if sig.return_annotation:
+            annotations = {"return": sig.return_annotation}
+        for parameter in params:
+            annotations[parameter.name] = parameter.annotation
+        # Return a FullArgSpec object with the extracted attributes
+        return inspect.FullArgSpec(
+            args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+        )
+
     # Make dynamo graph to have same input/output spec as user code
-    if isinstance(f, torch.nn.Module):
-        inspect_fn = f.forward
-    else:
-        inspect_fn = f
-    arg_names = list(inspect.signature(inspect_fn).parameters.keys())
-    if len(arg_names) != len(args):
-        # *args mess this up
-        input_strs = [f"orig_arg_{i}" for i in range(len(args))] + list(kwargs.keys())
-    else:
-        input_strs = [arg_names[i] for i in range(len(args))] + list(kwargs.keys())
+    def argument_names(f: Callable[..., Any], *args, **kwargs) -> List[str]:
+        call_to_inspect = f.forward if isinstance(f, torch.nn.Module) else f
+
+        sig = inspect.signature(call_to_inspect)
+        fullargspec = signature_to_fullargspec(sig)
+
+        # 1. Map `args` 1-to-1 to positional arguments in original signature.
+        input_strs = fullargspec.args[: len(args)]
+
+        if len(args) > len(fullargspec.args):
+            # 2. If there are more arguments left in `args`, they map to varargs in original
+            # signature. Assign names as {varargs}_0, {varargs}_1, ...
+            assert fullargspec.varargs is not None, "More arguments than expected"
+            input_strs += [
+                f"{fullargspec.varargs}_{i}"
+                for i in range(0, len(args) - len(input_strs))
+            ]
+        elif len(args) < len(fullargspec.args):
+            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+            # it implies these are arguments either with default values, or provided in
+            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+            # export them as part of the function signature. The latter will be handled
+            # in the next step.
+            for unprovided_arg in fullargspec.args[
+                len(args) : -len(fullargspec.defaults or [])
+            ]:
+                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+        # 4. Keyword arguments provided in `kwargs`.
+        input_strs += list(kwargs.keys())
+
+        # 5. Keyword-only arguments with default values if not provided are not exported
+        # as part of the function signature.
+        for kwonly_arg in fullargspec.kwonlyargs:
+            kwonlydefaults = fullargspec.kwonlydefaults or {}
+            assert (
+                kwonly_arg in kwargs or kwonly_arg in kwonlydefaults
+            ), f"Missing keyword only argument {kwonly_arg}"
+
+        return input_strs
+
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
-            input_strs,
+            argument_names(f, *args, **kwargs),
             in_spec,
             out_spec_traced,
         )
