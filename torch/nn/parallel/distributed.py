@@ -1,4 +1,6 @@
 import copy
+import functools
+from collections import defaultdict, deque
 import inspect
 import itertools
 import logging
@@ -9,7 +11,7 @@ import weakref
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum, auto
-from typing import Callable, Any, Type
+from typing import Callable, Any, Type, Tuple, Optional, List
 
 import torch
 import torch.distributed as dist
@@ -28,6 +30,9 @@ if dist.is_available():
         _verify_param_shape_across_processes,
         _sync_module_states,
         _to_kwargs,
+        _apply_to_tensors,
+        _alloc_storage,
+        _free_storage,
     )
     from torch.distributed.distributed_c10d import ReduceOp, _get_default_group
 if torch.distributed.rpc.is_available():
@@ -43,6 +48,97 @@ __all__ = ["DistributedDataParallel"]
 
 logger = logging.getLogger(__name__)
 
+@dataclass
+class _MixedPrecision:
+    """
+    This configures DDP-native mixed precision training.
+
+    Attributes:
+        param_dtype (torch.dtype): This specifies the dtype for model
+            parameters, inputs (when ``cast_forward_inputs`` is set to
+            ``True``), and therefore the dtype for computation.
+            However, outside the forward and backward passes, parameters are in
+            full precision. Model checkpointing always happens in full
+            precision.
+        reduce_dtype (torch.dtype): This specifies the dtype for gradient
+            reduction, which is permitted to differ from ``param_dtype``.
+        buffer_dtype (torch.dtype): This specifies the dtype for buffers.
+
+    .. note:: This API is experimental and subject to change.
+
+    .. note:: Only floating point tensors are cast to their specified dtypes.
+
+    .. note:: ``state_dict`` checkpoints parameters and buffers in full
+        precision.
+
+    .. note:: Each low precision dtype must be specified explicitly. For
+        example, ``_MixedPrecision(reduce_dtype=torch.float16)`` only specifies
+        the reduction dtype to be low precision, and DDP will not cast
+        parameters or buffers.
+
+    .. note:: If a ``reduce_dtype`` is not specified, then gradient reduction
+        happens in ``param_dtype`` if specified or the original parameter dtype
+        otherwise. For example, ``_MixedPrecision(param_dtype=torch.float16)``
+        would result in communication ocurring in fp16.
+    """
+
+    param_dtype: Optional[torch.dtype] = None
+    reduce_dtype: Optional[torch.dtype] = None
+    buffer_dtype: Optional[torch.dtype] = None
+    # TODO (rohan-varma): keep_low_precision_grads: bool = False
+    # TODO (rohan-varma): APIs to allow users to run batchnorm and layernorm
+    # in full precision. For DDP, this can be implemented by not performing the
+    # parameter cast for BN and LN units.
+
+def _cast_buffers(mixed_precision_config, root_module):
+    """
+    Casts buffers to the given ``buffer_dtype``.
+    """
+    for buf in root_module.buffers():
+        if hasattr(buf, '_ddp_ignored') and buf._ddp_ignored:
+            continue
+
+        buf.data = buf.to(dtype=mixed_precision_config.buffer_dtype)
+
+def _setup_mixed_precision_params(mixed_precision_config, root_module):
+    """
+    Creates and frees storage for the mixed precision parameters.
+    """
+    for param in root_module.parameters():
+        # Do not setup mixed precision for DDP ignored parameters.
+        if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+            continue
+
+        if not hasattr(param, '_mp_param'):
+            param._mp_param = torch.zeros_like(
+                param,
+                device=param.device,
+                dtype=mixed_precision_config.param_dtype,
+                requires_grad=param.requires_grad,
+            )
+            _free_storage(param._mp_param)
+            # _fp_param will point to the full precision param so it can be switched
+            # back to at the end of forward / backward.
+            param._fp_param = param.data
+
+def _cast_forward_inputs(
+    input_dtype: Optional[torch.dtype],
+    *args: Any,
+    **kwargs: Any,
+) -> Tuple[Any, Any]:
+    """
+    Casts input args and kwargs to the given input_dtype. Note that only
+    floating point tensors are cast.
+    """
+    def cast_fn(x: torch.Tensor) -> torch.Tensor:
+        if not torch.is_floating_point(x) or x.dtype == input_dtype:
+            return x
+        return x.to(input_dtype)
+
+    return (
+        _apply_to_tensors(cast_fn, args),
+        _apply_to_tensors(cast_fn, kwargs)
+    )
 
 def _tree_flatten_with_rref(output):
     output_is_rref = RPC_AVAILABLE and isinstance(output, RRef)
@@ -528,6 +624,13 @@ class DistributedDataParallel(Module, Joinable):
                          >>> ...
                          >>> ddp_logging_data = model_DDP._get_ddp_logging_data()
                          >>> static_graph = ddp_logging_data.get("can_set_static_graph")
+        delay_all_reduce_named_params (list of tuple of str and torch.nn.Parameter): a list
+                    of named parameters whose all reduce will be delayed when the gradient of
+                    the parameter specified in ``param_to_hook_all_reduce`` is ready. Other
+                    arguments of DDP do not apply to named params specified in this argument
+                    as these named params will be ignored by DDP reducer.
+        param_to_hook_all_reduce (torch.nn.Parameter): a parameter to hook delayed all reduce
+                    of parameters specified in ``delay_all_reduce_named_params``.
 
 
     Attributes:
@@ -556,21 +659,40 @@ class DistributedDataParallel(Module, Joinable):
         check_reduction=False,
         gradient_as_bucket_view=False,
         static_graph=False,
+        delay_all_reduce_named_params=None,
+        param_to_hook_all_reduce=None,
+        mixed_precision: Optional[_MixedPrecision] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
         self.logger = None
+        if bool(delay_all_reduce_named_params is not None) != bool(param_to_hook_all_reduce is not None):
+            self._log_and_throw(
+                ValueError,
+                "delay_all_reduce_named_params and param_to_hook_all_reduce "
+                "need to be set at the same time."
+            )
+
+        self._delay_all_reduce_params = []
         if hasattr(module, "_ddp_params_and_buffers_to_ignore"):
             self.parameters_to_ignore = set(module._ddp_params_and_buffers_to_ignore)
         else:
             self.parameters_to_ignore = set()
+        if delay_all_reduce_named_params is not None:
+            for name, param in delay_all_reduce_named_params:
+                self.parameters_to_ignore.add(name)
+                self._delay_all_reduce_params.append(param)
+
         self._module_parameters = [p for n, p in module.named_parameters() if n not in self.parameters_to_ignore]
         if not any((p.requires_grad for p in self._module_parameters)):
-            self._log_and_throw(
-                RuntimeError,
-                "DistributedDataParallel is not needed when a module "
-                "doesn't have any parameter that requires a gradient.",
-            )
+            if len(self._delay_all_reduce_params):
+                logger.info("Delay the AllReduce of all parameters.")
+            else:
+                self._log_and_throw(
+                    RuntimeError,
+                    "DistributedDataParallel is not needed when a module "
+                    "doesn't have any parameter that requires a gradient.",
+                )
 
         if device_ids is not None and len(device_ids) > 1:
             self._log_and_throw(
@@ -633,6 +755,9 @@ class DistributedDataParallel(Module, Joinable):
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
+        self.mixed_precision = mixed_precision
+        if self.mixed_precision is not None:
+            logger.warning(f"Received mixed precision config {self.mixed_precision}")
 
         if check_reduction:
             # This argument is no longer used since the reducer
@@ -661,6 +786,20 @@ class DistributedDataParallel(Module, Joinable):
             os.environ.get("PYTORCH_DDP_USE_SIDE_STREAM", "1") == "1"
         )
 
+        # Initialize gradient buffers and register all reduce hook
+        self._delay_grad_buffer = None
+        self._delay_grad_views: List[torch.Tensor] = []
+        self._delay_all_reduce_all_params = False
+        if len(self._delay_all_reduce_params) != 0:
+            self._register_delay_all_reduce_hook(
+                bucket_cap_mb=bucket_cap_mb,
+                process_group=self.process_group,
+                param_to_hook_all_reduce=param_to_hook_all_reduce,
+                device_ids=device_ids,
+            )
+            if self._delay_all_reduce_all_params:
+                return
+
         # Build parameters for reducer.
         parameters, expect_sparse_gradient = self._build_params_for_reducer()
         # Verify model equivalence.
@@ -677,6 +816,7 @@ class DistributedDataParallel(Module, Joinable):
         param_to_name_mapping = self._build_debug_param_to_name_mapping(
             parameters
         )
+
         # Builds reducer.
         self._ddp_init_helper(
             parameters,
@@ -684,12 +824,99 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             static_graph,
         )
+        if self.mixed_precision is not None:
+            _setup_mixed_precision_params(self.mixed_precision, self.module)
+            _cast_buffers(self.mixed_precision, self.module)
+            # Stream used for async low precision copies.
+            self._mp_stream = torch.cuda.Stream()
+            self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
+            # Add forward pre-hook to root module to kick off copies to lower
+            # precision.
+            self.module.register_forward_pre_hook(
+                self._root_copy_hook, prepend=False, with_kwargs=True
+            )
+            # Add forward pre hook to all submodules to wait for copy events
+            # before running computation.
+            for module in self.module.modules():
+                module.register_forward_pre_hook(
+                    self._module_wait_for_copy_hook, prepend=False, with_kwargs=True,
+                )
+            # Set up callbacks in backward to upcast and use full precision
+            # params. TODO (rohan-varma): Make this compose with general
+            # comm hooks and apply_optimizer_in_backward. Importing inline to
+            # avoid circular import issue.
+            from torch.distributed.algorithms.ddp_comm_hooks.mixed_precision_hooks import (
+                _reducer_allreduce_and_upcast_hook, _AllreduceUpcastHookState
+            )
+            upcast_hook_state = _AllreduceUpcastHookState(
+                ddp_weakref=weakref.ref(self),
+                upcast_stream=torch.cuda.Stream(),
+            )
+            self.register_comm_hook(
+                upcast_hook_state,
+                _reducer_allreduce_and_upcast_hook,
+            )
+            # Inform reducer of reduced precision param dtype for correctness
+            # of type checks between gradient and bucket.
+            self.reducer._set_mixed_precision_param_dtype(  # type: ignore[attr-defined]
+                self.mixed_precision.param_dtype
+            )
+
         self._has_rebuilt_buckets = False
 
         if static_graph:
             self._set_static_graph()
 
         self._setup_in_backward_optimizers()
+
+    def _register_delay_all_reduce_hook(
+        self,
+        bucket_cap_mb,
+        process_group,
+        param_to_hook_all_reduce,
+        device_ids,
+    ):
+        # 1. Create gradient buffer
+        device = torch.device("cpu") if device_ids is None else device_ids[0]
+        self._delay_grad_buffer = torch.zeros(
+            sum([p.numel() for p in self._delay_all_reduce_params]),
+            device=device,
+        )
+
+        # 2. Broadcast the parameters
+        detached_params = [p.detach() for p in self._delay_all_reduce_params]
+        dist._broadcast_coalesced(process_group, detached_params, bucket_cap_mb, 0)
+
+        # 3. Hook all reduce to the specified parameter
+        world_size = dist.get_world_size(process_group)
+
+        def _delayed_all_reduce(grad):
+            self._delay_grad_buffer.div_(world_size)  # type: ignore[union-attr]
+            _ = dist.all_reduce(self._delay_grad_buffer, group=process_group, async_op=True)
+            return grad
+
+        param_to_hook_all_reduce.register_hook(_delayed_all_reduce)
+
+        # 4. Build tensor views for gradients
+        offset = 0
+        for param in self._delay_all_reduce_params:
+            grad_view = self._delay_grad_buffer[offset : (offset + param.numel())].view(
+                param.shape
+            )
+            self._delay_grad_views.append(grad_view)
+            offset = offset + param.numel()
+
+        # 5. Check whether the all reduce of all params requiring grad is delayed.
+        for module_name, module in self.module.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if param.requires_grad:
+                    full_name = f"{module_name}.{param_name}"
+                    if full_name not in self.parameters_to_ignore:
+                        # There is at least a param whose all reduce will not be delayed.
+                        # In this case, we should not set self._delay_all_reduce_all_params
+                        # to True.
+                        return
+        self._delay_all_reduce_all_params = True
 
     def _setup_in_backward_optimizers(self):
         # Check if user has used apply_optim_in_backward to overlap optimizer
@@ -744,6 +971,92 @@ class DistributedDataParallel(Module, Joinable):
                     "gradients to None/zero as desired."
                 )
                 self.reducer._set_grads_to_none()  # type: ignore[attr-defined]
+
+    def _fire_reducer_autograd_hook(self, idx, *unused):
+        """
+        Fires the reducer's autograd hook to allreduce params in a Reducer bucket.
+        Note that this is only used during mixed precision training as the
+        Reducer's hooks installed during construction time would not be called
+        as we're working in the low precision parameter setting.
+        """
+        self.reducer._autograd_hook(idx)  # type: ignore[attr-defined]
+
+    def _root_copy_hook(
+        self,
+        *args: Any,
+        **kwargs: Any
+    ) -> None:
+        """
+        When training with DDP mixed precision, this root pre-forward hook kicks
+        off low precision copies on a separate stream and creates respective
+        events to wait for them.
+        """
+        # Clear out previous iteration submodule to event. This is because we
+        # may have populated some events for modules that didn't end up being
+        # used.
+        self._submodule_to_event = defaultdict(deque)  # type: ignore[var-annotated]
+        with torch.cuda.stream(self._mp_stream):
+            for submodule in self.module.modules():
+                for param in submodule.parameters(recurse=False):
+                    # Do not cast DDP ignored parameters.
+                    if hasattr(param, '_ddp_ignored') and param._ddp_ignored:
+                        continue
+                    _alloc_storage(param._mp_param, param.size())
+                    # copy() implicitly casts to low precision
+                    with torch.no_grad():
+                        param._mp_param.copy_(param.data)
+                        # TODO: when zero_grad(set_to_none=False) or in grad
+                        # accumulation case, accumulated grads can be in fp32
+                        # which can cause errors when running DDP backwards due
+                        # to mismatched incoming and accumulated gradient types.
+                        # So we manually cast the accumulated grad down for now,
+                        # in the future we may shift to FSDP style gradient
+                        # accumulation management where the accumulated gradient
+                        # is saved and .grad field is set to None, bypassing
+                        # this issue.
+                        if param.grad is not None:
+                            param.grad.data = param.grad.to(
+                                self.mixed_precision.param_dtype  # type: ignore[union-attr]
+                            )
+                    param.data = param._mp_param
+                copy_event = torch.cuda.Event()
+                copy_event.record()
+                self._submodule_to_event[submodule].append(copy_event)
+
+    def _module_wait_for_copy_hook(
+        self,
+        module,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Before carrying out computation, wait on the appropriate event to ensure
+        low precision copies have finished.
+        """
+        try:
+            event = self._submodule_to_event[module].popleft()
+        except IndexError:
+            # copy event has already been waited on
+            return
+
+        event.wait(stream=torch.cuda.current_stream())
+        for p in module.parameters(recurse=False):
+            # Don't register hooks if param does not require grad
+            if (
+                not p.requires_grad
+                or (hasattr(p, '_ddp_ignored') and p._ddp_ignored)
+            ):
+                continue
+            # We need to register autograd hook here instead of DDP's ctor
+            # since we're working with the low precision param. Register them
+            # via obtaining the gradient accumulator.
+            tmp = p.expand_as(p)
+            grad_acc = tmp.grad_fn.next_functions[0][0]
+
+            hook = grad_acc.register_hook(
+                functools.partial(self._fire_reducer_autograd_hook, p._idx)
+            )
+            p._ddp_mp_hook_state = (grad_acc, hook)
 
     def _log_and_throw(self, err_type, err_msg):
         if self.logger is not None:
@@ -800,6 +1113,12 @@ class DistributedDataParallel(Module, Joinable):
             bucket_size_limits,
             expect_sparse_gradient,
         )
+
+        # Remember index for parameters if we are in mixed precision, as we
+        # need to pass in index to Reducer's autograd hook via python.
+        if self.mixed_precision is not None:
+            for i, p in enumerate(parameters):
+                p._idx = i
 
         # Note: reverse list of buckets because we want to approximate the
         # order in which their gradients are produced, and assume they
@@ -1079,16 +1398,62 @@ class DistributedDataParallel(Module, Joinable):
                 self.device_ids[0],
                 self.use_side_stream_for_tensor_copies,
             )
+            args, kwargs = inputs[0], kwargs[0]  # type: ignore[index]
+            # Cast inputs to reduced precision if needed.
+            if (
+                self.mixed_precision is not None
+            ):
+                args, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *args,
+                    **kwargs,
+                )
             with self._inside_ddp_forward():
-                return self.module(*inputs[0], **kwargs[0])  # type: ignore[index]
+                return self.module(*args, **kwargs)  # type: ignore[index]
         else:
+            # Cast inputs to reduced precision if needed.
+            # TODO (rohan-varma) test this codepath.
+            if (
+                self.mixed_precision is not None
+            ):
+                inputs, kwargs = _cast_forward_inputs(
+                    self.mixed_precision.param_dtype,
+                    *inputs,
+                    **kwargs,
+                )
             with self._inside_ddp_forward():
                 return self.module(*inputs, **kwargs)
+
+    def _clear_grad_buffer(self):
+        # Making param.grad points to the grad buffers before backward is based on the
+        # assumption that the grad accumulation is done in place in autograd engine,
+        # for some edge cases, if the grad accumulation in autograd engine is not in
+        # place, then the param.grad and grad buffers are detached.
+        if self._delay_grad_buffer is not None:
+            # We batch zero_grad for all params by resetting the whole grad
+            # buffer when the grad of all params is set to None.
+            all_param_grad_none = all(
+                [param.grad is None for param in self._delay_all_reduce_params]
+            )
+
+            for index, param in enumerate(self._delay_all_reduce_params):
+                if param.grad is None:
+                    param.grad = self._delay_grad_views[index]
+                    if not all_param_grad_none:
+                        param.grad.zero_()
+
+            if all_param_grad_none:
+                self._delay_grad_buffer.zero_()
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function(
             "DistributedDataParallel.forward"
         ):
+            if self._delay_all_reduce_all_params:
+                output = self.module.forward(*inputs, **kwargs)
+                self._clear_grad_buffer()
+                return output
+
             if torch.is_grad_enabled() and self.require_backward_grad_sync:
                 assert self.logger is not None
                 self.logger.set_runtime_stats_and_log()
@@ -1190,6 +1555,9 @@ class DistributedDataParallel(Module, Joinable):
             output = _tree_unflatten_with_rref(
                 output_placeholders, treespec, output_is_rref
             )
+
+        # At the end of the forward pass, reset the grad buffer and grad views
+        self._clear_grad_buffer()
         return output
 
     def scatter(self, inputs, kwargs, device_ids):

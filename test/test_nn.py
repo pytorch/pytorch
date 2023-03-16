@@ -8680,6 +8680,19 @@ class TestNNDeviceType(NNTestCase):
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
 
+    @onlyCUDA
+    def test_MarginLoss_warnings(self, device):
+        model = torch.nn.Linear(128, 22, device=device)
+        loss = torch.nn.MultiMarginLoss()
+        x = torch.rand((56, 128), device=device)
+        targets = torch.randint(22, (56,), device=device)
+        f = io.StringIO()
+        with contextlib.redirect_stderr(f):
+            out = model(x)
+            l = loss(out, targets)
+            l.backward()
+        self.assertTrue(len(f.getvalue()) == 0)
+
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
         inp = torch.randn(0, 3, 3, 4, device=device)

@@ -322,7 +322,7 @@ if _has_triton():
                     c_output,
                     *c_output.stride(),
                     GROUP_SIZE_ROW=4,
-                    num_stages=4,
+                    num_stages=1,
                     num_warps=4,
                 )
 
@@ -373,7 +373,7 @@ if _has_triton():
                         brc_o,
                         *brc_o.stride(),
                         GROUP_SIZE_ROW=4,
-                        num_stages=4,
+                        num_stages=1,
                         num_warps=4,
                     )
 
@@ -451,9 +451,15 @@ if _has_triton():
                 "should be True.",
             )
 
+        # Allocate out
+        if out is None:
+            out = dense.new_zeros(original_batch_dims_broadcasted + (m, n))
+        else:
+            out.zero_()
+
         # Short circuit if lhs is zero
         if bsr._nnz() == 0:
-            return dense.new_zeros(original_batch_dims_broadcasted + (m, n))
+            return out
 
         # TODO: insert switch
         if is_sparse_rowspace_mode is None:
@@ -486,10 +492,6 @@ if _has_triton():
         dense_batch_dims = dense.shape[:-2]
         batch_dims_broadcasted = torch.broadcast_shapes(bsr_batch_dims, dense_batch_dims)
 
-        # Allocate out
-        if out is None:
-            out = dense.new_zeros(batch_dims_broadcasted + (m, n))
-
         # Broadcast batch dimensions and squash
         def batch_broadcast_and_squash(t, batch_dims, invariant_dims):
             return t.broadcast_to(batch_dims + invariant_dims).flatten(
@@ -520,6 +522,8 @@ if _has_triton():
         dense = batch_broadcast_and_squash(dense, batch_dims_broadcasted, dense.shape[-2:])
 
         # NOTE: out is contiguous, so batch_broadcast_and_squash will create a view
+        # out gets modified in-place, so we store a backup copy.
+        out_backup = out
         out = batch_broadcast_and_squash(out, batch_dims_broadcasted, out.shape[-2:])
 
         # NOTE: this function will ALWAYS create a view
@@ -570,10 +574,7 @@ if _has_triton():
 
         kernel(blocksize, values, crow_indices, col_indices, dense, out, max_grid)
 
-        # Block dims need to rejoin with the corresponding block dimensions
-        # prior to reshape so that blocks do not end up being transposed.
-        # NB: type checker is not able to narrow Optional[Tensor] to tensor by this point
-        return out.transpose(-3, -2).reshape(original_batch_dims_broadcasted + (m, n))  # type: ignore[union-attr]
+        return out_backup
 else:
     bsr_dense_mm = None  # type: ignore[assignment]
 
