@@ -1136,13 +1136,6 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-@register_decomposition(aten._int_mm)
-@out_wrapper()
-@pw_cast_for_opmath
-def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
-    return torch._int_mm(mat1, mat2)
-
-
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
@@ -3337,16 +3330,6 @@ def upsample_bicubic2d_vec(
 def aminmax(self, *, dim=None, keepdim=False):
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
-    if (
-        keepdim
-        and dim is not None
-        and self.ndimension() == 0
-        and self.device.type == "cpu"
-    ):
-        # the behavior of aminmax differs from amin/amax for 0D tensors on CPU
-        # https://github.com/pytorch/pytorch/issues/96042
-        amin = amin.expand([1])
-        amax = amax.expand([1])
     return amin, amax
 
 
