@@ -2,7 +2,7 @@ import torch._dynamo.test_case
 import unittest.mock
 import os
 import contextlib
-
+import torch._logging._internal
 import logging
 
 def log_settings(settings):
@@ -35,7 +35,7 @@ def kwargs_to_settings(**kwargs):
 #
 # The goal of this testing in general is to ensure that given some settings env var
 # that the logs are setup correctly and capturing the correct records.
-def make_test(log_names, **kwargs):
+def make_logging_test(**kwargs):
     def wrapper(fn):
         def test_fn(self):
 
@@ -44,15 +44,30 @@ def make_test(log_names, **kwargs):
             # run with env var
             with log_settings(kwargs_to_settings(**kwargs)):
                 torch._logging._init_logs()
-                with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
+                with self._handler_watcher(records):
                     fn(self, records)
 
             # run with API
             torch._dynamo.reset()
             records.clear()
             torch._logging.set_logs(**kwargs)
-            with self._handler_watcher([logging.getLogger(n) for n in log_names], records):
+            with self._handler_watcher(records):
                 fn(self, records)
+
+        return test_fn
+
+    return wrapper
+
+def make_settings_test(settings):
+    def wrapper(fn):
+        def test_fn(self):
+            torch._dynamo.reset()
+            records = []
+            # run with env var
+            with log_settings(settings):
+                torch._logging._init_logs()
+                with self._handler_watcher(records):
+                    fn(self, records)
 
         return test_fn
 
@@ -76,14 +91,16 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
 
     # This patches the emit method of each handler to gather records
     # as they are emitted
-    def _handler_watcher(self, loggers, record_list):
+    def _handler_watcher(self, record_list):
         exit_stack = contextlib.ExitStack()
 
         def emit_post_hook(record):
             nonlocal record_list
             record_list.append(record)
 
-        for logger in loggers:
+        # registered logs are the only ones with handlers, so patch those
+        for log_qname in torch._logging._internal.log_registry.get_log_qnames():
+            logger = logging.getLogger(log_qname)
             num_handlers = len(logger.handlers)
             self.assertLessEqual(
                 num_handlers,

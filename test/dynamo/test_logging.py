@@ -6,10 +6,13 @@ import unittest.mock
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.dynamo_logging_utils import make_logging_test
 
 from torch.testing._internal.inductor_utils import HAS_CUDA
-from torch.testing._internal.logging_utils import LoggingTestCase
+from torch.testing._internal.logging_utils import (
+    LoggingTestCase,
+    make_logging_test,
+    make_settings_test,
+)
 
 requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
 
@@ -112,6 +115,14 @@ class LoggingTests(LoggingTestCase):
             pass
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
+
+    @make_settings_test("torch._dynamo.output_graph")
+    def test_open_registrarion_with_registered_parent(self, records):
+        pass
+
+    @make_settings_test("torch.utils")
+    def test_open_registration(self, records):
+        pass
 
 
 # single record tests

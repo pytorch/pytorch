@@ -106,7 +106,6 @@ def wrap_convert_context(fn):
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         cleanup = setup_compile_debug()
-        reset_graph_break_dup_checker()
         try:
             return fn(*args, **kwargs)
         finally:
@@ -202,6 +201,7 @@ def convert_frame_assert(
     export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
+    reset_graph_break_dup_checker()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
