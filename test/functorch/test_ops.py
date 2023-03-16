@@ -1006,6 +1006,12 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
