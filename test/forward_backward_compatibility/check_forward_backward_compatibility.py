@@ -348,6 +348,8 @@ ALLOW_LIST = [
     ("prim::infer_unsqueeze_size", datetime.date(2023, 2, 1)),
     ("prim::t_copy", datetime.date(2023, 2, 1)),
     ("prim::view_copy", datetime.date(2023, 2, 1)),
+    ("aten::_int_mm.out", datetime.date(2023, 4, 1)),
+    ("aten::_int_mm", datetime.date(2023, 4, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
