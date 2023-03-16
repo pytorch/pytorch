@@ -1073,7 +1073,7 @@ def wrap_to_fake_tensor_and_record(
             assert not static_shapes, tensor_static_reason_to_message(reason)
 
         if not static_shapes:
-            dynamic_dims: List[DIM_DYNAMISM_STATE] = dynamic_dims_from_tensor(
+            dynamic_dims: Dict[int, DIM_DYNAMISM_STATE] = dynamic_dims_from_tensor(
                 e, dynamic_ranges
             )
         else:
@@ -1086,7 +1086,7 @@ def wrap_to_fake_tensor_and_record(
                 ignore_subclass=ignore_subclass,
                 source=source,
                 dynamic_dims=dynamic_dims,
-                dynamic_dims_range=dynamic_ranges,
+                constraint_dims=dynamic_ranges,
             )
         )
         if is_tensor:

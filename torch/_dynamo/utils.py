@@ -1407,11 +1407,11 @@ def tensor_always_has_static_shape(
 
 
 # Note - this could live in shape_env, but then we would need to plumb the
-# config.assume_static_by_default as an input, and that seems a little annoying for little
+# config as an input, and that seems a little annoying for little
 # gain.
 def dynamic_dims_from_tensor(
     e: torch.Tensor, dynamic_ranges: Optional[Dict[int, MinMaxConstraint]]
-) -> List[DIM_DYNAMISM_STATE]:
+) -> Dict[int, DIM_DYNAMISM_STATE]:
     """
     Given a tensor, returns a list of dimension dynamism states.
 
@@ -1421,20 +1421,25 @@ def dynamic_dims_from_tensor(
     constraints. Defaults to None.
     :type dynamic_ranges: Optional[Dict[int, MinMaxConstraint]], optional
     :return: A list of DIM_DYNAMISM_STATE values representing the dynamism state of each dimension in the input tensor.
-    :rtype: List[DIM_DYNAMISM_STATE]
+    :rtype: Dict[int, DIM_DYNAMISM_STATE]
 
     An invariant is that the length of this list is the number of dimensions of the tensor.
     If a dimension is marked in dynamic_ranges, it is set as DYNAMIC.
     Otherwise, it is set to the default dimension state, either DUCK or STATIC depending on the configuration.
     """
-    dynamic_dims: List[DIM_DYNAMISM_STATE] = []
+    # Note - while dynamo callers must be in config.dynamic_shapes
+    # This is invoked outside of dynamo tests, so we do not assert on it here.
+    # We suppose we could patch the tests, but that feels like a strange thing to add to
+    # what should just be a dynamic shapes test.
+    # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
+    dynamic_dims: Dict[int, DIM_DYNAMISM_STATE] = {}
     for i, _ in enumerate(e.size()):
         if dynamic_ranges and i in dynamic_ranges:
-            dynamic_dims.append(DIM_DYNAMISM_STATE.DYNAMIC)
+            dynamic_dims[i] = DIM_DYNAMISM_STATE.DYNAMIC
         else:
-            dynamic_dims.append(
-                DIM_DYNAMISM_STATE.STATIC
-                if config.assume_static_by_default
-                else DIM_DYNAMISM_STATE.DUCK
-            )
+            if config.assume_static_by_default:
+                dynamic_dims[i] = DIM_DYNAMISM_STATE.STATIC
+            else:
+                dynamic_dims[i] = DIM_DYNAMISM_STATE.DUCK
+            
     return dynamic_dims

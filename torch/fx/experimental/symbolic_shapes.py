@@ -1281,25 +1281,27 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex: torch.Tensor,
                            source: Source,
-                           dims: Optional[List[DIM_DYNAMISM_STATE]]) -> List[sympy.Expr]:
+                           dims: Dict[int, DIM_DYNAMISM_STATE]) -> List[sympy.Expr]:
+        if dims is None:
+            dims = {}
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(ex.size()):
-            dim_state = dims[i] if dims else DIM_DYNAMISM_STATE.DUCK
-            is_static = dim_state == DIM_DYNAMISM_STATE.STATIC
-            if not is_static:
-                size.append(self.create_symbol(
-                    val, TensorPropertySource(source, TensorProperty.SIZE, i), dim_state
-                ))
+            if i not in dims:
+                dim_state = DIM_DYNAMISM_STATE.DUCK
             else:
-                size.append(sympy.Integer(val))
+                dim_state = dims[i]
+            size.append(self.create_symbol(
+                val, TensorPropertySource(source, TensorProperty.SIZE, i), dim_state
+            ))
         return size
 
     def create_symbolic_sizes_strides_storage_offset(self,
                                                      ex: torch.Tensor,
                                                      source: Source,
-                                                     dynamic_dims: Optional[List[DIM_DYNAMISM_STATE]],
-                                                     dynamic_dims_range: Dict[int, "MinMaxConstraint"]):
+                                                     *,
+                                                     dynamic_dims: Dict[int, DIM_DYNAMISM_STATE],
+                                                     constraint_dims: Dict[int, "MinMaxConstraint"]):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -1339,16 +1341,16 @@ class ShapeEnv:
                     TensorPropertySource(source, TensorProperty.STRIDE, i)
                 )
         assert all(x is not None for x in stride)
-        sym_size = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
+        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
 
-        for i, syms in enumerate(sym_size):
-            user_constrained = dynamic_dims_range and i in dynamic_dims_range
+        for i, sym_size in enumerate(sym_sizes):
+            user_constrained = constraint_dims and i in constraint_dims
             if user_constrained:
                 msg = "Illegal state. User constrained dims must be marked as such in dynamic_dims"
                 assert dynamic_dims and dynamic_dims[i] == DIM_DYNAMISM_STATE.DYNAMIC, msg
-                constraint = dynamic_dims_range[i]
+                constraint = constraint_dims[i]
                 if constraint != MinMaxConstraint.NONE():
-                    constrain_range(syms, min=constraint.min, max=constraint.max)
+                    constrain_range(sym_size, min=constraint.min, max=constraint.max)
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -1360,7 +1362,7 @@ class ShapeEnv:
             ex.storage_offset(),
             TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
         ), hint=ex.storage_offset())
-        return sym_size, sym_stride, sym_storage_offset
+        return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
     # is, pass it into hint.  Otherwise, pass None and we will make our best
@@ -1383,8 +1385,11 @@ class ShapeEnv:
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source, dim_state=DIM_DYNAMISM_STATE) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, dim_state: DIM_DYNAMISM_STATE=DIM_DYNAMISM_STATE.DUCK) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
+        if dim_state == DIM_DYNAMISM_STATE.STATIC:
+            return sympy.Integer(val)
+
         dyn = dim_state == DIM_DYNAMISM_STATE.DYNAMIC
 
         if val < 0:
@@ -2026,23 +2031,28 @@ class ShapeEnv:
         return concrete_val
 
 class MinMaxConstraint:
-    min: Optional[Union[int, sympy.core.numbers.NegativeInfinity]]
-    max: Optional[Union[int, sympy.core.numbers.Infinity]]
+    range_ : ValueRanges
 
     def __init__(self, min=None, max=None):
-        self.min = min if min else -sympy.oo
-        self.max = max if max else sympy.oo
-        assert self.min < self.max, f"Illegal intersection produced! {self.min} < {self.max}"
+        min_ = min if min else -sympy.oo
+        max_ = max if max else sympy.oo
+        assert min_ < max_, f"Illegal intersection produced! {min_} < {max_}"
+        self.range_ = ValueRanges(min_, max_)
 
     @staticmethod
     def NONE():
         return MinMaxConstraint(min=-sympy.oo, max=sympy.oo)
 
-    def to_range(self) -> ValueRanges:
-        return ValueRanges(
-            self.min, self.max
-        )
+    @property
+    def min(self):
+        return self.range_.lower
 
+    @property
+    def max(self):
+        return self.range_.upper
+
+    def to_range(self) -> ValueRanges:
+        return self.range_
 
     def __repr__(self):
         return f"({self.min}, {self.max})"

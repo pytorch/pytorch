@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Dict, List, Optional
+from typing import ContextManager, Dict, Optional
 
 import torch
 from torch._guards import Source
@@ -166,8 +166,8 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[List[DIM_DYNAMISM_STATE]] = None,
-        dynamic_dims_range: Optional[Dict[int, MinMaxConstraint]] = None,
+        dynamic_dims: Optional[Dict[int, DIM_DYNAMISM_STATE]] = None,
+        constraint_dims: Optional[Dict[int, MinMaxConstraint]] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
@@ -220,8 +220,8 @@ class MetaConverter:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
                     source,
-                    dynamic_dims,
-                    dynamic_dims_range,
+                    dynamic_dims=dynamic_dims,
+                    constraint_dims=constraint_dims,
                 )
             return (t.size(), t.stride(), t.storage_offset())
 
@@ -448,7 +448,7 @@ class MetaConverter:
                         callback,
                         source=AttrSource(source, "grad"),
                         dynamic_dims=dynamic_dims,
-                        dynamic_dims_range=dynamic_dims_range,
+                        constraint_dims=constraint_dims,
                     )
                 torch._C._set_conj(r, t.is_conj())
                 torch._C._set_neg(r, t.is_neg())
@@ -467,7 +467,7 @@ class MetaConverter:
         ignore_subclass=False,
         source=None,
         dynamic_dims=None,
-        dynamic_dims_range=None,
+        constraint_dims=None,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -521,7 +521,7 @@ class MetaConverter:
                         callback=callback,
                         source=source,
                         dynamic_dims=dynamic_dims,
-                        dynamic_dims_range=dynamic_dims_range,
+                        constraint_dims=constraint_dims,
                     )
                 # TODO: this is suspicious, now that we have callback argument
                 if type(t) is torch.nn.Parameter:
