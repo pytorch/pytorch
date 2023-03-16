@@ -2720,7 +2720,21 @@ class CommonTemplate:
     def test_max_pool2d3(self):
         def fn(x):
             # with padding
-            return aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [1, 1])
+            return (
+                aten.max_pool2d_with_indices(x, [3, 3], [2, 2], [1, 1]),
+                aten.max_pool2d_with_indices(
+                    x,
+                    [
+                        3,
+                    ],
+                    [
+                        2,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
 
         self.common(
             fn,
@@ -2791,7 +2805,21 @@ class CommonTemplate:
 
     def test_avg_pool2d3(self):
         def fn(x):
-            return aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1])
+            return (
+                aten.avg_pool2d(x, [3, 3], [2, 2], [1, 1]),
+                aten.avg_pool2d(
+                    x,
+                    [
+                        3,
+                    ],
+                    [
+                        2,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
 
         self.common(
             fn,
@@ -6141,6 +6169,48 @@ if HAS_CPU:
             union = {*cpp_vec_op_list, *diff}
             self.assertTrue(set(cpp_op_list).issubset(union))
 
+        def test_atomic_add_bf16(self):
+            def fn(test_args):
+                res = torch.gather(**test_args)
+                return res
+
+            input_tensor_for_ref = torch.tensor(
+                [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
+            )
+            input_tensor_for_opt = torch.tensor(
+                [[3.0, -5.0]], dtype=torch.bfloat16, requires_grad=True
+            )
+
+            test_args_for_ref = {
+                "input": input_tensor_for_ref,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
+            test_args_for_opt = {
+                "input": input_tensor_for_opt,
+                "dim": 1,
+                "index": torch.tensor([[1]]),
+            }
+
+            opt_fn = torch.compile(fn)
+
+            ref_fwd = fn(test_args_for_ref)
+            res_fwd = opt_fn(test_args_for_opt)
+            self.assertEqual(res_fwd, ref_fwd)
+
+            torch.manual_seed(1)
+            bwd_tensor_for_ref = torch.randn(ref_fwd.shape, dtype=torch.bfloat16)
+            torch.manual_seed(1)
+            bwd_tensor_for_opt = torch.randn(res_fwd.shape, dtype=torch.bfloat16)
+            self.assertEqual(bwd_tensor_for_ref, bwd_tensor_for_opt)
+
+            ref_fwd.backward(bwd_tensor_for_ref)
+            res_fwd.backward(bwd_tensor_for_opt)
+
+            ref_grad = test_args_for_ref["input"].grad
+            res_grad = test_args_for_opt["input"].grad
+            self.assertEqual(ref_grad, res_grad)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
@@ -6506,6 +6576,27 @@ if HAS_CPU:
                     graph(input)
                     assert same(graph(input), func(input), equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
+            x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True)
+
+            def func(x1, x2):
+                y = x1 + x2
+                return maxpool(y)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(x1, x2)
+                assert same(graph(x1, x2), func(x1, x2), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 2
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6973,6 +7064,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(num_transpose_matmul, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        def test_memory_history_inductor(self):
+            def called_inside_compile(x, w, b):
+                a = x @ w + b
+                return torch.sigmoid(a)
+
+            @torch.compile
+            def fn(x, w, b):
+                x = called_inside_compile(x, w, b)
+                return called_inside_compile(x, w, b)
+
+            w = torch.rand(3, 3, device="cuda")
+            b = torch.rand(3, device="cuda")
+            x = torch.rand(3, device="cuda")
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(True)
+                r = fn(x, w, b)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+            snapshot = str(torch.cuda.memory._snapshot())
+            self.assertTrue("called_inside_compile" in snapshot)
 
     copy_tests(CommonTemplate, CudaTests, "cuda")
 
@@ -7645,6 +7758,12 @@ class ExprPrinterTests(TestCase):
         expr = sympy.floor(s1)
         self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
         self.assertEqual(pexpr(expr), "math.floor(s1)")
+
+    def test_print_ceil(self):
+        s1 = sympy.Symbol("s1", integer=False)
+        expr = sympy.ceiling(s1)
+        self.assertEqual(texpr(expr), "tl.libdevice.ceil(s1)")
+        self.assertEqual(pexpr(expr), "math.ceil(s1)")
 
 
 if HAS_CUDA and not TEST_WITH_ASAN:

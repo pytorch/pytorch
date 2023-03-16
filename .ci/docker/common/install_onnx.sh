@@ -23,3 +23,18 @@ pip_install \
 
 # TODO: change this when onnx-script is on testPypi
 pip_install "onnx-script@git+https://github.com/microsoft/onnx-script@29241e15f5182be1384f1cf6ba203d7e2e125196"
+
+# Cache the transformers model to be used later by ONNX tests. We need to run the transformers
+# package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
+IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
+as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
+
+# Need a PyTorch version for transformers to work
+pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu
+# Very weird quoting behavior here https://github.com/conda/conda/issues/10972,
+# so echo the command to a file and run the file instead
+conda_run python "${IMPORT_SCRIPT_FILENAME}"
+
+# Cleaning up
+conda_run pip uninstall -y torch
+rm "${IMPORT_SCRIPT_FILENAME}" || true

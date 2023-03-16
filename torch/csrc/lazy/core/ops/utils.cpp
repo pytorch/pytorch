@@ -82,7 +82,8 @@ std::vector<int64_t> BuildSqueezedDimensions(
   std::vector<int64_t> output_dimensions;
   for (const auto i : c10::irange(dimensions.size())) {
     int64_t dim = dimensions[i];
-    if (dim != 1 || (i != squeeze_dim && squeeze_dim >= 0)) {
+    if (dim != 1 ||
+        (static_cast<int64_t>(i) != squeeze_dim && squeeze_dim >= 0)) {
       output_dimensions.push_back(dim);
     }
   }

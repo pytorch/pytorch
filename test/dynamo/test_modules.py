@@ -847,7 +847,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
         try:
-
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -862,7 +861,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_with_closure(self):
         def run():
-
             counter = 0
 
             def foo(x):
@@ -1097,7 +1095,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
         # Check parameteres and buffers
-        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+        for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
 
     def test_recursion(self):
