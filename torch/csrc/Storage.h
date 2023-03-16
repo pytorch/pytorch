@@ -13,28 +13,11 @@ struct MaybeOwnedTraits<c10::Storage> {
   using borrow_type = c10::Storage;
 
   static borrow_type createBorrow(const owned_type& from) {
-    // NOTE: this can be implemented without the special
-    // unsafe_borrow_t Tensor constructor as
-    //
-    // return borrow_type(c10::intrusive_ptr<at::TensorImpl,
-    // at::UndefinedTensorImpl>::rec    laim(from.unsafeGetTensorImpl()));
-    //
-    // but that hurts inlining due to the nullptr check in the
-    // Tensor(c10::intrusive_ptr<...>) constructor. We already know
-    // that from.impl_ isn't null because from is a valid Tensor, so
-    // we needn't do the check again. (using __builtin_assume can
-    // avoid this, but wouldn't be portable to MSVC.)
-
-    // return borrow_type(borrow_type::unsafe_borrow_t{}, from);
     return borrow_type(from);
   }
 
   static void assignBorrow(borrow_type& lhs, const borrow_type& rhs) {
     lhs.unsafeReleaseStorageImpl();
-    // See above note: this can be implemented with public API
-    // similarly to createBorrow(), but that would hurt inlining.
-
-    // lhs = borrow_type(borrow_type::unsafe_borrow_t{}, rhs);
     lhs = borrow_type(rhs);
   }
 
@@ -73,11 +56,6 @@ struct ExclusivelyOwnedTraits<c10::Storage> {
   static repr_type moveToRepr(c10::Storage&& x) {
     return std::move(x);
   }
-
-  // TODO: Not sure yet if I need this
-  // static void destroyOwned(c10::Storage& x) {
-  //  return ExclusivelyOwnedTraits<c10::StorageBase>::destroyOwned(x);
-  //}
 
   static c10::Storage take(c10::Storage& x) {
     return std::move(x);

@@ -31,9 +31,11 @@ if __name__ == "__main__":
 
 class TestTorchbind(JitTestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_WINDOWS or IS_MACOS or IS_FBCODE:
+        if IS_SANDCASTLE or IS_MACOS or IS_FBCODE:
             raise unittest.SkipTest("non-portable load_library call used in test")
         lib_file_path = find_library_location('libtorchbind_test.so')
+        if IS_WINDOWS:
+            lib_file_path = find_library_location('torchbind_test.dll')
         torch.ops.load_library(str(lib_file_path))
 
     def test_torchbind(self):

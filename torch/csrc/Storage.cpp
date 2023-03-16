@@ -277,14 +277,14 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   }
 
   uint8_t rvalue = THPByteUtils_unpackReal(value);
+  const auto& storage = THPStorage_Unpack(self);
   if (THPUtils_checkLong(index)) {
     int64_t nindex = THPUtils_unpackLong(index);
-    storage_set(THPStorage_Unpack(self), nindex, rvalue);
+    storage_set(storage, nindex, rvalue);
     return 0;
   } else if (PySlice_Check(index)) {
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     Py_ssize_t start, stop, slicelength, step;
-    const auto& storage = THPStorage_Unpack(self);
     int64_t len = storage.nbytes();
     if (PySlice_GetIndicesEx(index, len, &start, &stop, &step, &slicelength) !=
         0)
