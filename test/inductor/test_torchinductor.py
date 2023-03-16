@@ -7845,10 +7845,10 @@ if HAS_MPS:
                 return self.linear(x)
 
         def test_mps_not_supported(self):
-            model = MPSNotSupportedTest.ToyModel()
-            model = torch._dynamo.optimize("inductor")(model)
-            x = torch.randn(1)
+            model = MPSNotSupportedTest.ToyModel().to(torch.device("mps"))
+            x = torch.randn(1).to(torch.device("mps"))
             with self.assertRaises(RuntimeError):
+                model = torch._dynamo.optimize("inductor")(model)
                 model(x)
 
 
