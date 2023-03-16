@@ -251,8 +251,7 @@ std::vector<at::Tensor>& scatter_out(
         out_tensors[i].device(),
         "'");
     auto out_sizes = out_tensors[i].sizes().vec();
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    bool same_ndim = out_sizes.size() == tensor.dim();
+    bool same_ndim = out_sizes.size() == static_cast<size_t>(tensor.dim());
     if (same_ndim) {
       total_size += out_sizes[dim];
       chunk_sizes.emplace_back(out_sizes[dim]);
