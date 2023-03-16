@@ -176,7 +176,7 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       executor.model = configuredModel ?: cpuModel;
     });
 
-    MLModelWrapper model_wrapper = MLModelWrapper(executor);
+    MLModelWrapper model_wrapper = MLModelWrapper(modelID, executor);
     model_wrapper.outputs = output_specs;
 
     auto model_wrapper_ptr = c10::make_intrusive<MLModelWrapper>(model_wrapper);
@@ -197,6 +197,12 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
       NSError *error;
       id<MLFeatureProvider> outputsProvider = [executor forward:&error];
       if (!outputsProvider) {
+        // coremltools documentation recommends running on CPU only as a workaround when error is "Error computing NN outputs."
+        if (executor.model.configuration.computeUnits != MLComputeUnitsCPUOnly && [error.localizedDescription isEqualToString:@"Error computing NN outputs."]) {
+          // reload model with CPU only and re-execute
+          executor.model = [PTMCoreMLCompiler loadModel:model_wrapper->modelID backend:"cpu" allowLowPrecision:NO];
+          return execute(handle, inputs);
+        }
         COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
       }
 

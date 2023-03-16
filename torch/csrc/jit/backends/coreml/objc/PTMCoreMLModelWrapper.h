@@ -9,22 +9,25 @@ namespace coreml {
 
 class MLModelWrapper : public CustomClassHolder {
  public:
+  std::string modelID;
   PTMCoreMLExecutor* executor;
   std::vector<TensorSpec> outputs;
 
   MLModelWrapper() = delete;
 
-  MLModelWrapper(PTMCoreMLExecutor* executor) : executor(executor) {
+  MLModelWrapper(const std::string& modelID, PTMCoreMLExecutor* executor) : modelID(modelID), executor(executor) {
     [executor retain];
   }
 
   MLModelWrapper(const MLModelWrapper& oldObject) {
+    modelID = oldObject.modelID;
     executor = oldObject.executor;
     outputs = oldObject.outputs;
     [executor retain];
   }
 
   MLModelWrapper(MLModelWrapper&& oldObject) {
+    modelID = oldObject.modelID;
     executor = oldObject.executor;
     outputs = oldObject.outputs;
     [executor retain];
