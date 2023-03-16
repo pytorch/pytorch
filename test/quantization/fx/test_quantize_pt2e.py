@@ -8,7 +8,6 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
     skipIfNoONEDNN,
-    skipIfNoX86,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import (
@@ -193,7 +192,6 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
-    @skipIfNoX86
     @skipIfNoONEDNN
     @xfailIfPython311
     def test_inductor_backend_config_conv(self):
@@ -210,52 +208,51 @@ class TestQuantizePT2E(QuantizationTestCase):
 
         use_relu_list = [True, False]
         inplace_relu_list = [True, False]
-        with override_quantized_engine("x86"):
-            for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
-                m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
-                example_inputs = (torch.randn(1, 1, 1, 1),)
-                # program capture
-                m, guards = torchdynamo.export(
-                    m,
-                    *copy.deepcopy(example_inputs),
-                    aten_graph=True,
-                    tracing_mode="real",
-                )
+        for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
+            m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
+            example_inputs = (torch.randn(1, 1, 1, 1),)
+            # program capture
+            m, guards = torchdynamo.export(
+                m,
+                *copy.deepcopy(example_inputs),
+                aten_graph=True,
+                tracing_mode="real",
+            )
 
-                qconfig = get_default_qconfig("x86")
-                qconfig_mapping = QConfigMapping().set_global(qconfig)
-                backend_config = get_inductor_pt2e_backend_config()
-                m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
-                m(*example_inputs)
-                m = convert_pt2e(m)
-                m(*example_inputs)
+            qconfig = get_default_qconfig("x86")
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
+            backend_config = get_inductor_pt2e_backend_config()
+            m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
+            m(*example_inputs)
+            m = convert_pt2e(m)
+            m(*example_inputs)
 
-                # Fake quant should only be inserted at start and end
-                node_occurrence = {
-                    # one for input and weight of the conv, one for output for the conv
-                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
-                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
-                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
-                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
-                }
-                if use_relu:
-                    node_list = [
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                        ns.call_function(torch.ops.aten.convolution.default),
-                        ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                    ]
-                else:
-                    node_list = [
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                        ns.call_function(torch.ops.aten.convolution.default),
-                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
-                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                    ]
-                self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
+            # Fake quant should only be inserted at start and end
+            node_occurrence = {
+                # one for input and weight of the conv, one for output for the conv
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+            }
+            if use_relu:
+                node_list = [
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ]
+            else:
+                node_list = [
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                    ns.call_function(torch.ops.aten.convolution.default),
+                    ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                    ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                ]
+            self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
