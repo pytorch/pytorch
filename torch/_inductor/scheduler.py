@@ -1150,6 +1150,10 @@ class Scheduler:
             from .codegen.cpp import CppScheduling
 
             return CppScheduling(self)
+        elif device.type == "mps":
+            raise RuntimeError(
+                f"Device type {device.type} is not supported yet with the Inductor compiler"
+            )
         else:
             if not has_triton():
                 device_props = torch.cuda.get_device_properties(device)
