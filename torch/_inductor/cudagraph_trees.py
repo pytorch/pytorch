@@ -389,7 +389,7 @@ class CUDAWarmupNode:
             ):
                 non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.cuda_graphs_pool, refs)
 
@@ -411,7 +411,7 @@ class CUDAWarmupNode:
             ]
         )
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             out_refs = self.path_live_weakrefs()
             new_storages = [
                 t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
@@ -602,7 +602,7 @@ class CUDAGraphNode:
         self.checkpointed_caching_state: Optional[AllocatorState] = None
 
     def run(self, new_inputs):
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.slow_cudagraph_asserts:
             self.debug_check_invariants_before_invocation()
 
         assert len(self.static_input_data_ptrs) == len(new_inputs)
@@ -663,7 +663,7 @@ class CUDAGraphNode:
     def _record(self, model, stream, inputs):
         "Record the model"
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             # need to use parent live weakrefs because live_indices isnt set yet
             memory = (
                 [] if self.parent is None else list(self.parent.path_live_weakrefs())
@@ -720,7 +720,7 @@ class CUDAGraphNode:
                     self.live_indices_after_graph.append((depth, output_index))
 
         self.debug_check_invariants_after_invocation()
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _add_replayed_outputs(self, outputs):
@@ -802,7 +802,7 @@ class CUDAGraphNode:
     def debug_assert_invariants(
         self, expected_liveness: List[List[bool]], newly_dead: List[PathOutputIndex]
     ):
-        if not config.triton.debug_cudagraph_trees:
+        if not config.triton.slow_cudagraph_asserts:
             return
 
         for i, node in enumerate(self._path_from_root):
@@ -1316,7 +1316,7 @@ class CUDAGraphTreeManager:
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             check_memory_pool(self.cuda_graphs_thread_pool, live_storages_wrappers)
 
     def live_cudagraph_pool_storages_in_curr_execution(
