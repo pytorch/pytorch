@@ -3,7 +3,7 @@
 
 import torch
 
-from torch.distributed._tensor.api import DTensorSpec, Replicate, Shard
+from torch.distributed._tensor.api import DTensorSpec, Replicate
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 
