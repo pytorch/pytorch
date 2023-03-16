@@ -152,6 +152,7 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
             raise ValueError("The provided filename {} does not exist".format(f))  # type: ignore[str-bytes-safe]
         if os.path.isdir(f):
             raise ValueError("The provided filename {} is a directory".format(f))  # type: ignore[str-bytes-safe]
+        print(f"=== FILE EXISTS {f}")
 
     map_location = validate_map_location(map_location)
     if _extra_files is None:
@@ -159,6 +160,7 @@ def load(f, map_location=None, _extra_files=None, _restore_shapes=False):
 
     cu = torch._C.CompilationUnit()
     if isinstance(f, (str, pathlib.Path)):
+        print(f"=== BEFORE LOADING {f}")
         cpp_module = torch._C.import_ir_module(cu, str(f), map_location, _extra_files, _restore_shapes)  # type: ignore[call-arg]
     else:
         cpp_module = torch._C.import_ir_module_from_buffer(

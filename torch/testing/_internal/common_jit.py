@@ -170,6 +170,7 @@ class JitCommonTestCase(TestCase):
             return imported
 
         with TemporaryFileName() as fname:
+            print(f"==== MODULE LENGTH {len(imported)}")
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
