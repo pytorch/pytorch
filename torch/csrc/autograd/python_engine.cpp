@@ -177,7 +177,6 @@ PyObject* THPEngine_run_backward(
   unsigned char create_graph = 0;
   PyObject* inputs = nullptr;
   unsigned char allow_unreachable = 0;
-  unsigned char zero_grad_unused = 0;
   unsigned char accumulate_grad =
       0; // Indicate whether to accumulate grad into leaf Tensors or capture
   constexpr const char* accepted_kwargs[] = {// NOLINT
@@ -187,13 +186,12 @@ PyObject* THPEngine_run_backward(
                                              "create_graph",
                                              "inputs",
                                              "allow_unreachable",
-                                             "zero_grad_unused",
                                              "accumulate_grad",
                                              nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "OObb|Obbb",
+          "OObb|Obb",
           const_cast<char**>(accepted_kwargs),
           &tensors,
           &grad_tensors,
@@ -201,7 +199,6 @@ PyObject* THPEngine_run_backward(
           &create_graph,
           &inputs,
           &allow_unreachable,
-          &zero_grad_unused,
           &accumulate_grad))
     return nullptr;
   THPUtils_assert(
@@ -349,10 +346,6 @@ PyObject* THPEngine_run_backward(
           "differentiated Tensors appears to not have been used "
           "in the graph. Set allow_unused=True if this is the "
           "desired behavior.");
-        if (!outputs[i].defined() && zero_grad_unused) {
-          auto input_var = THPVariable_Unpack(PyTuple_GET_ITEM(inputs, i));
-          outputs[i] = at::zeros(input_var.sizes(), input_var.options().requires_grad(true));
-        }
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
     return py_outputs.release();
