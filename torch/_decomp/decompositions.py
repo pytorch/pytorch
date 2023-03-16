@@ -1136,6 +1136,19 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
+@register_decomposition(aten.addmv)
+@out_wrapper()
+@pw_cast_for_opmath
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * torch.mv(mat1, vec)
+    if beta == 0:
+        return out
+    return out + beta * self
+
+
 @register_decomposition(aten.native_group_norm_backward)
 @pw_cast_for_opmath
 def native_group_norm_backward(
