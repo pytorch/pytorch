@@ -161,7 +161,7 @@ class DTensorAPITest(DTensorTestBase):
         dist_module = distribute_module(module_to_distribute, device_mesh, shard_fn)
         for name, param in dist_module.named_parameters():
             self.assertIsInstance(param, DTensor)
-            if name.startswith("seq.0") or name.startswith("seq.8"):
+            if name.startswith(("seq.0", "seq.8")):
                 self.assertEqual(param.placements, shard_spec)
             else:
                 self.assertEqual(param.placements, replica_spec)
