@@ -213,7 +213,8 @@ def grad(
     create_graph: bool = False,
     only_inputs: bool = True,
     allow_unused: bool = False,
-    is_grads_batched: bool = False
+    is_grads_batched: bool = False,
+    zero_grad_unused: bool = False,
 ) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs with respect to
     the inputs.
@@ -265,6 +266,10 @@ def grad(
             cliffs. Please use ``torch._C._debug_only_display_vmap_fallback_warnings(True)``
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
+        zero_grad_unused (bool, optional): If ``True``, the gradient for inputs that were
+            not used when computing outputs will be set to zero instead of None. This can
+            be helpful in scenarios that involve multiple differentiations. Defaults to ``False``.
+
     """
     t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
     t_inputs = cast(Tuple[torch.Tensor, ...], (inputs,) if is_tensor_like(inputs) else tuple(inputs))
@@ -281,6 +286,7 @@ def grad(
             only_inputs=only_inputs,
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
+            zero_grad_unused=zero_grad_unused,
         )
 
     if not only_inputs:
@@ -302,11 +308,15 @@ def grad(
             return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
                 t_outputs, gO, retain_graph, create_graph, t_inputs,
                 allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-        return _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
+        result = _vmap_internals._vmap(vjp, 0, 0, allow_none_pass_through=True)(grad_outputs_)
     else:
-        return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+        result = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
+    if (zero_grad_unused):
+        result = tuple(output if output is not None else torch.zeros_like(input, requires_grad=True) 
+                       for (output, input) in zip(result, t_inputs))
+    return result
 
 
 # This function applies in case of gradient checkpointing for memory
