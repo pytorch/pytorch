@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import operator
+
 from typing import Callable, Dict, Union
 
-import operator
 import onnxscript  # type: ignore[import]
 from onnxscript import opset18  # type: ignore[import]
 from onnxscript.function_libs.torch_aten import ops  # type: ignore[import]

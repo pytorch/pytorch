@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-import torch
-import torch.fx
-import torch._ops
 import operator
-from typing import Callable, Sequence, Union, List
+from typing import Callable, List, Sequence, Union
 
-from torch.onnx._internal.fx import function_dispatcher, errors
+import torch
+import torch._ops
+import torch.fx
+
+from torch.onnx._internal.fx import errors, function_dispatcher
 
 _TARGET_TYPE = Union[Callable, torch._ops.OpOverload]
 
-def unsupported_call_functions(graph_module: torch.fx.GraphModule) -> Sequence[_TARGET_TYPE]:
+
+def unsupported_call_functions(
+    graph_module: torch.fx.GraphModule,
+) -> Sequence[_TARGET_TYPE]:
     ops: List[_TARGET_TYPE] = []
     for node in graph_module.graph.nodes:
         if node.op == "call_function":

@@ -6581,6 +6581,27 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
+            x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True)
+
+            def func(x1, x2):
+                y = x1 + x2
+                return maxpool(y)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(x1, x2)
+                assert same(graph(x1, x2), func(x1, x2), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 2
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -7043,6 +7064,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(num_transpose_matmul, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        def test_memory_history_inductor(self):
+            def called_inside_compile(x, w, b):
+                a = x @ w + b
+                return torch.sigmoid(a)
+
+            @torch.compile
+            def fn(x, w, b):
+                x = called_inside_compile(x, w, b)
+                return called_inside_compile(x, w, b)
+
+            w = torch.rand(3, 3, device="cuda")
+            b = torch.rand(3, device="cuda")
+            x = torch.rand(3, device="cuda")
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(True)
+                r = fn(x, w, b)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+            snapshot = str(torch.cuda.memory._snapshot())
+            self.assertTrue("called_inside_compile" in snapshot)
 
     copy_tests(CommonTemplate, CudaTests, "cuda")
 

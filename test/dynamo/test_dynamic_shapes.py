@@ -41,18 +41,14 @@ ALL_DYNAMIC_XFAILS = {
 XFAIL_HITS = 0
 
 
-def make_dynamic_cls(cls, *, static_default=False, unspec=False):
+def make_dynamic_cls(cls, *, static_default=False):
     suffix = "_dynamic_shapes"
     if static_default:
         suffix += "_static_default"
-    if unspec:
-        suffix += "_unspec"
 
     cls_prefix = "DynamicShapes"
     if static_default:
         cls_prefix = f"StaticDefault{cls_prefix}"
-    if unspec:
-        cls_prefix = f"Unspec{cls_prefix}"
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -60,7 +56,7 @@ def make_dynamic_cls(cls, *, static_default=False, unspec=False):
         suffix,
         (config, "dynamic_shapes", True),
         (config, "assume_static_by_default", static_default),
-        (config, "specialize_int", not unspec),
+        (config, "specialize_int", static_default),
     )
 
     xfail_tests = ALL_DYNAMIC_XFAILS.get(cls.__name__)
@@ -86,15 +82,14 @@ tests = [
 ]
 for test in tests:
     make_dynamic_cls(test)
-    make_dynamic_cls(test, unspec=True)
     make_dynamic_cls(test, static_default=True)
 
-assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 3
+assert XFAIL_HITS == len(ALL_DYNAMIC_XFAILS) * 2
 
-# Unspec only failures
+# Single config failures
 
 unittest.expectedFailure(
-    UnspecDynamicShapesMiscTests.test_slice_input_dynamic_shapes_unspec
+    DynamicShapesMiscTests.test_slice_input_dynamic_shapes
     # NotImplementedError: SymNodeVariable() is not a constant
 )
 

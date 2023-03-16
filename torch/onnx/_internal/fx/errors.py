@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any, Sequence
+
 import torch
 import torch._ops
 from torch.onnx import errors
-from typing import Sequence, Any
+
 
 class UnsupportedCallFunctionError(errors.OnnxExporterError):
     """Raised when unsupported call_function is encountered."""
