@@ -2,7 +2,7 @@ import copy
 import logging
 import random
 import weakref
-from typing import Optional
+from typing import Optional, List
 
 import torch
 import torch._dynamo.config as dynamo_config
@@ -254,6 +254,23 @@ class NormalizedMatmulNode:
             return self.node.kwargs["other"]
 
 
+class NormalizedCatNode:
+    def __init__(self, node: torch.fx.Node) -> None:
+        assert node.op == "call_function"
+        assert node.target in [torch.cat]
+        self.node: torch.fx.Node = node
+
+    def get_tensors(self) -> List[torch.fx.Node]:
+        if len(self.node.args) > 0:
+            return self.node.args[0]
+        return self.node.kwargs["tensors"]
+
+    def get_dim(self) -> int:
+        if len(self.node.args) > 1:
+            return self.node.args[1]
+        return self.node.kwargs["dim"]
+
+
 def check_permute(node: torch.fx.Node):
     ranks = len(node.meta["tensor_meta"].shape)
     if len(node.args) > 3:
@@ -299,13 +316,17 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
+                norm_cat = NormalizedCatNode(node)
                 new_tensors = [
                     g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
-                    for arg in node.args[0]
+                    for arg in norm_cat.get_tensors()
                 ]
-                node.args = (new_tensors,) + node.args[1:]
+                new_dim = norm_cat.get_dim()
+                new_cat = g.create_node("call_function", torch.cat, args=(new_tensors, new_dim))
                 user.replace_all_uses_with(cat_or_view)
+                node.replace_all_uses_with(new_cat)
                 g.erase_node(user)
+                g.erase_node(node)
     g.lint()
     module.recompile()
     return module
