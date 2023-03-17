@@ -739,7 +739,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
     @staticmethod
     def log_results(name, input_nodes, timings):
-        if not config.max_autotune or not PRINT_AUTOTUNE:
+        if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
             [
