@@ -642,11 +642,11 @@ void ImagingResampleHorizontalConvolution8u4x(
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
-    // Shift back the output integer values: output = output >> weights_precision
+    // Convert fixed point values back to integers (truncating)
     sss0 = _mm256_srai_epi32(sss0, coefs_precision);
     sss1 = _mm256_srai_epi32(sss1, coefs_precision);
     // Convert packed signed 32-bit integers to packed 16-bit integers using signed saturation
-    // (a a a a b b b b | c c c c d d d d) -> (a a b b c c d d | 0 0 0 0 0 0 0 0)
+    // (a a a a b b b b c c c c d d d d) -> (a a b b c c d d 0 0 0 0 0 0 0 0)
     sss0 = _mm256_packs_epi32(sss0, zero);
     sss1 = _mm256_packs_epi32(sss1, zero);
     // Convert packed signed 16-bit integers to packed 8-bit integers using unsigned saturation
@@ -1003,10 +1003,10 @@ void ImagingResampleHorizontalConvolution8u(
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
 
-    // Shift back the output integer values: output = output >> weights_precision
+    // Convert fixed point values back to integers (truncating)
     sss = _mm_srai_epi32(sss, coefs_precision);
     // Convert packed signed 32-bit integers to packed 16-bit integers using signed saturation
-    // (a a a a b b b b | c c c c d d d d) -> (a a b b c c d d | 0 0 0 0 0 0 0 0)
+    // (a a a a b b b b c c c c d d d d) -> (a a b b c c d d 0 0 0 0 0 0 0 0)
     sss = _mm_packs_epi32(sss, zero);
     // Convert packed signed 16-bit integers to packed 8-bit integers using unsigned saturation
     // (a a b b c c d d) -> (a b c d 0 0 0 0)
@@ -1162,13 +1162,13 @@ void ImagingResampleVerticalConvolution8u(
       auto pix4 = _mm256_unpackhi_epi8(source_hi, _mm256_setzero_si256());
       sss3 = _mm256_add_epi32(sss3, _mm256_madd_epi16(pix4, mmk));
     }
-    // Shift back the output integer values: output = output >> weights_precision
+    // Convert fixed point values back to integers (truncating)
     sss0 = _mm256_srai_epi32(sss0, coefs_precision);
     sss1 = _mm256_srai_epi32(sss1, coefs_precision);
     sss2 = _mm256_srai_epi32(sss2, coefs_precision);
     sss3 = _mm256_srai_epi32(sss3, coefs_precision);
     // Convert packed signed 32-bit integers to packed 16-bit integers using signed saturation
-    // (a a a a b b b b | c c c c d d d d) -> (a a b b c c d d)
+    // (a a a a b b b b c c c c d d d d) -> (a a b b c c d d)
     sss0 = _mm256_packs_epi32(sss0, sss1);
     sss2 = _mm256_packs_epi32(sss2, sss3);
     // Convert packed signed 16-bit integers to packed 8-bit integers using unsigned saturation
@@ -1235,11 +1235,11 @@ void ImagingResampleVerticalConvolution8u(
       auto pix2 = _mm_unpackhi_epi8(source, zero);
       sss1 = _mm_add_epi32(sss1, _mm_madd_epi16(pix2, mmk));
     }
-    // Shift back the output integer values: output = output >> weights_precision
+    // Convert fixed point values back to integers (truncating)
     sss0 = _mm_srai_epi32(sss0, coefs_precision);
     sss1 = _mm_srai_epi32(sss1, coefs_precision);
     // Convert packed signed 32-bit integers to packed 16-bit integers using signed saturation
-    // (a a a a b b b b | c c c c d d d d) -> (a a b b c c d d)
+    // (a a a a b b b b c c c c d d d d) -> (a a b b c c d d)
     sss0 = _mm_packs_epi32(sss0, sss1);
     // Convert packed signed 16-bit integers to packed 8-bit integers using unsigned saturation
     // (a a b b c c d d) -> (a b c d)
@@ -1338,10 +1338,10 @@ void ImagingResampleVerticalConvolution8u(
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
 
-    // Shift back the output integer values: output = output >> weights_precision
+    // Convert fixed point values back to integers (truncating)
     sss = _mm_srai_epi32(sss, coefs_precision);
     // Convert packed signed 32-bit integers to packed 16-bit integers using signed saturation
-    // (a a a a b b b b | c c c c d d d d) -> (a a b b c c d d)
+    // (a a a a b b b b c c c c d d d d) -> (a a b b c c d d)
     sss = _mm_packs_epi32(sss, zero);
     // Convert packed signed 16-bit integers to packed 8-bit integers using unsigned saturation
     // (a a b b c c d d) -> (a b c d)
