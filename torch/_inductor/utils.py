@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import time
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -80,7 +80,7 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
-    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    # --amp --only YituTechConvBert --dynamic-shapes
     assert isinstance(numer, int) and isinstance(
         denom, int
     ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
@@ -221,6 +221,13 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
+def pad_list(x):
+    if len(x) == 1:
+        return [x[0], x[0]]
+    else:
+        return x
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
@@ -238,13 +245,14 @@ def get_fused_kernel_name(node_schedule):
         operator.or_,
         [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
-    if config.triton.descriptive_names == "aten":
+    if config.triton.descriptive_names == "original_aten":
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
             origin.meta["original_aten"]._overloadpacket.__name__
             for origin in all_origins
             if origin.op == "call_function" and "original_aten" in origin.meta
         ]
+        sources = sorted(set(sources))
     elif config.triton.descriptive_names == "torch":
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
@@ -254,11 +262,37 @@ def get_fused_kernel_name(node_schedule):
                     sources.append(origin.meta["source_fn"])
                 else:
                     sources.append(origin.meta["source_fn"].__name__)
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "inductor_node":
+        sources = [
+            origin.name for origin in all_origins if origin.op == "call_function"
+        ]
     else:
         raise NotImplementedError
-    sources = set(sources)
-    sources = sorted(sources)[: config.kernel_name_max_ops]
+    sources = sources
     return "_".join(["fused"] + sources)
+
+
+def get_kernel_metadata(node_schedule):
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+    )
+    inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+    original_aten_dict = collections.defaultdict(list)
+    for node in inductor_nodes:
+        if "original_aten" in node.meta:
+            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
+                node
+            )
+    metadata = [
+        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+    ]
+    for original_aten, nodes in original_aten_dict.items():
+        metadata.append(
+            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
+        )
+    return "\n".join(metadata)
 
 
 def gather_origins(args, kwargs):
@@ -386,6 +420,10 @@ def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
+class LineContext(NamedTuple):
+    context: Any
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -393,19 +431,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -414,6 +460,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -433,7 +481,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -459,12 +509,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -512,16 +565,20 @@ class DeferredLineBase:
 def is_big_gpu(index):
     cores = torch.cuda.get_device_properties(index).multi_processor_count
     if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune mode")
+        log.warning("not enough cuda cores to use max_autotune_gemm mode")
         return False
     return True
 
 
 def use_triton_template(layout):
     return (
-        (config.max_autotune or config.search_autotune_cache)
+        (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.search_autotune_cache
+        )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -595,13 +652,16 @@ def get_num_bytes(*args):
 
 
 def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
-    import colorama
-
     info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
-    if ms > 0.012 and gb_per_s < 650:
-        return colorama.Fore.RED + info_str + colorama.Fore.RESET
-    else:
-        return info_str
+    try:
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+    except ImportError:
+        log.warning("Colorama is not installed. Install it if you want colored output")
+
+    return info_str
 
 
 def get_benchmark_name():

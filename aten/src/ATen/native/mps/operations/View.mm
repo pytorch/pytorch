@@ -70,7 +70,7 @@ static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src,
     feeds[cachedGraph->storageOffsetTensor] = getMPSGraphTensorFromScalar(stream, storageOffsetScalar);
 
     std::vector<MPSScalar> strideScalars(sizes.size());
-    for (int i = 0; i < sizes.size(); i++) {
+    for (const auto i : c10::irange(sizes.size())) {
       strideScalars[i] = getMPSScalar(strides[i], ScalarType::Int);
       feeds[cachedGraph->strideTensors[i]] = getMPSGraphTensorFromScalar(stream, strideScalars[i]);
     }
@@ -133,7 +133,7 @@ NSDictionary* getStrideToDimLengthOffsetDict(MPSGraphTensor* tensor, NSUInteger 
 // Detect only expand dims, allows for duplicate strides
 MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
                                                  MPSGraphTensor* inputTensor,
-                                                 int dstRank,
+                                                 size_t dstRank,
                                                  const IntArrayRef& dstSizes,
                                                  const IntArrayRef& dstStrides,
                                                  int offset) {
@@ -185,7 +185,7 @@ MPSGraphTensor* asStridedLayer_expandDimsPattern(MPSGraph* graph,
 // Detect contiguous reshapes, no slicing
 MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
                                               MPSGraphTensor* inputTensor,
-                                              int dstRank,
+                                              size_t dstRank,
                                               const IntArrayRef& dstSizes,
                                               const IntArrayRef& dstStrides,
                                               int offset) {
@@ -228,7 +228,7 @@ MPSGraphTensor* asStridedLayer_reshapePattern(MPSGraph* graph,
 
 MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
                                               MPSGraphTensor* inputTensor,
-                                              int dstRank,
+                                              size_t dstRank,
                                               const IntArrayRef& dstSizes,
                                               const IntArrayRef& dstStrides,
                                               int offset) {
@@ -236,7 +236,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
   {
     BOOL allUnique = YES;
     NSMutableSet* uniqueStrides = [[NSMutableSet alloc] init];
-    for (NSInteger dstDim = 0; (dstDim < dstRank) && allUnique; dstDim++) {
+    for (NSUInteger dstDim = 0; (dstDim < dstRank) && allUnique; dstDim++) {
       int stride = dstStrides[dstDim];
       NSNumber* strideObj = [NSNumber numberWithInt:stride];
       allUnique &= (stride == 0 || ![uniqueStrides containsObject:strideObj]);
@@ -247,7 +247,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
       return nil;
 
     // Skip for zero in dst shape
-    for (NSInteger dstDim = 0; dstDim < dstRank; dstDim++)
+    for (NSUInteger dstDim = 0; dstDim < dstRank; dstDim++)
       if (dstSizes[dstDim] == 0) {
         return nil;
       }
@@ -277,7 +277,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
   std::vector<int32_t> dstDimToSliceOffset(dstRank);
   bool needsBroadcast = false;
   {
-    for (NSInteger dstDim = dstRank - 1; dstDim >= 0; dstDim--) {
+    for (auto dstDim = dstRank - 1; dstDim >= 0; dstDim--) {
       if (dstStrides[dstDim] == 0) {
         // This dimension should be a broadcast
         needsBroadcast = true;
@@ -318,7 +318,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
         [missingSrcStrides addObject:[NSNumber numberWithInteger:stride]];
         stride *= [[flatInputTensor shape][srcDim] integerValue];
       }
-      for (NSInteger dstDim = 0; dstDim < dstRank; dstDim++) {
+      for (NSUInteger dstDim = 0; dstDim < dstRank; dstDim++) {
         [missingSrcStrides removeObject:[NSNumber numberWithInteger:dstStrides[dstDim]]];
       }
     }
@@ -344,7 +344,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
     // TODO: Use Transpose API
     BOOL needsTranspose = NO;
     for (NSUInteger dstDim = 0; dstDim < [dstDimOrder count] && !needsTranspose; dstDim++)
-      needsTranspose |= ([dstDimOrder[dstDim] intValue] != dstDim);
+      needsTranspose |= ([dstDimOrder[dstDim] intValue] != static_cast<int>(dstDim));
     if (needsTranspose)
       transposedTensor = permuteTensor(graph, transposedTensor, dstDimOrder);
   }
@@ -385,7 +385,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
   if (needsBroadcast) {
     NSMutableArray* broadcastShape = [[NSMutableArray alloc] init];
     NSMutableArray* expandAxes = [[NSMutableArray alloc] init];
-    for (NSInteger dstDim = 0; dstDim < dstRank; dstDim++) {
+    for (NSUInteger dstDim = 0; dstDim < dstRank; dstDim++) {
       [broadcastShape addObject:[NSNumber numberWithInt:dstSizes[dstDim]]];
       if (dstStrides[dstDim] == 0)
         [expandAxes addObject:[NSNumber numberWithInt:dstDim]];
@@ -408,7 +408,7 @@ MPSGraphTensor* asStridedLayer_genericPattern(MPSGraph* graph,
 
 MPSGraphTensor* asStridedLayer_pattern(MPSGraph* graph,
                                        MPSGraphTensor* inputTensor,
-                                       int dstRank,
+                                       size_t dstRank,
                                        const IntArrayRef& dstSizes,
                                        const IntArrayRef& dstStrides,
                                        int offset) {
@@ -503,7 +503,7 @@ MPSGraphTensorData* getMPSGraphTensorDataForView(const Tensor& src, MPSShape* mp
   MPSNDArrayDescriptor* srcTensorNDArrayDesc = nil;
   MPSNDArray* srcTensorNDArray = nil;
   id<MTLCommandBuffer> commandBuffer = getCurrentMPSStream()->commandBuffer();
-  int64_t base_idx = 0;
+  size_t base_idx = 0;
 
   std::vector<int64_t> src_base_shape_vec;
 
@@ -574,7 +574,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph,
   @autoreleasepool {
     std::vector<int32_t> sizeArray(shape_size);
     const int64_t int_max = std::numeric_limits<int32_t>::max();
-    for (int i = 0; i < shape_size; i++) {
+    for (const auto i : c10::irange(shape_size)) {
       TORCH_CHECK(size[i] <= int_max);
       sizeArray[i] = static_cast<int32_t>(size[i]);
     }
@@ -584,7 +584,7 @@ static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph,
                                                     dataType:MPSDataTypeInt32];
     MPSGraphTensor* indicesTensor = nil;
     // create stride Tensors for each rank of the input tensor
-    for (int i = 0; i < shape_size; i++) {
+    for (int i = 0; i < static_cast<int>(shape_size); i++) {
       MPSGraphTensor* rangeTensor = [mpsGraph coordinateAlongAxis:(-i - 1) withShapeTensor:shapeTensor name:nil];
       MPSGraphTensor* strideTensor = cachedGraph->strideTensors[shape_size - i - 1];
       MPSGraphTensor* indexTensor = [mpsGraph multiplicationWithPrimaryTensor:rangeTensor
@@ -702,7 +702,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self,
           // Self is the input tensor we are creating view of
           newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, inputType, getMPSShape(base_shape));
           newCachedGraph->storageOffsetTensor = mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]);
-          for (int i = 0; i < size.size(); i++) {
+          for (const auto C10_UNUSED i : c10::irange(size.size())) {
             newCachedGraph->strideTensors.push_back(mpsGraphRankedPlaceHolder(mpsGraph, MPSDataTypeInt32, @[ @1 ]));
           }
           if (needsScatter) {
@@ -837,7 +837,7 @@ Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst) {
     if (kernel_size == 0) {
       src_sizes[0] = src_strides[0] = 1;
     } else {
-      for (int i = 0; i < kernel_size; i++) {
+      for (const auto i : c10::irange(kernel_size)) {
         src_sizes[i] = (uint32_t)(src.sizes()[i]);
         src_strides[i] = (uint32_t)(src.strides()[i]);
       }
