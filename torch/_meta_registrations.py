@@ -2252,23 +2252,17 @@ def meta__scaled_dot_product_efficient_backward(
 
     grad_kv_needs_init = is_causal and N > M
 
-    if chunk_grad_outputs:
-        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
-        grad_q = chunk.select(2, 0)
-        grad_k = chunk.select(2, 1)
-        grad_v = chunk.select(2, 2)
-    else:
-        grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
-        grad_k = (
-            torch.zeros(key.shape, dtype=key.dtype, device=key.device)
-            if grad_kv_needs_init
-            else torch.empty(key.shape, dtype=key.dtype, device=key.device)
-        )
-        grad_v = (
-            torch.zeros(value.shape, dtype=value.dtype, device=value.device)
-            if grad_kv_needs_init
-            else torch.empty(value.shape, dtype=value.dtype, device=value.device)
-        )
+    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+    grad_k = (
+        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+        if grad_kv_needs_init
+        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+    )
+    grad_v = (
+        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+        if grad_kv_needs_init
+        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+    )
     return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
