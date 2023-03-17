@@ -4,8 +4,7 @@
 
 #include <limits>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 namespace {
 // returns -1 on failure
@@ -150,6 +149,40 @@ void warn_or_error_on_sync() {
   }
 }
 
+c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
+  // check current device first
+  int64_t current_device_index = current_device();
+  if (current_device_index >= 0) {
+    if (hasPrimaryContext(current_device_index)) {
+      return current_device_index;
+    }
+  }
+  for (const auto device_index : c10::irange(at::cuda::device_count())) {
+    if (device_index == current_device_index)
+      continue;
+    if (hasPrimaryContext(device_index)) {
+      return device_index;
+    }
+  }
+  return c10::nullopt;
+}
+
+namespace _internal {
+bool dummyHasPrimaryContext(C10_UNUSED int64_t device_index) {
+  TORCH_CHECK(false, "Should never been called");
+}
+bool (*hasPrimaryContext)(int64_t) = dummyHasPrimaryContext;
+
+// Private api to be called from CUDAHooks.cpp
+C10_CUDA_API void setHasPrimaryContext(bool (*func)(int64_t)) {
+  hasPrimaryContext = func ? func : dummyHasPrimaryContext;
+}
+} // namespace _internal
+
+bool hasPrimaryContext(int64_t device_index) {
+  return _internal::hasPrimaryContext(device_index);
+}
+
 static int CUDA_LAST_SAVED_DEVICE = 0;
 static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
     std::make_shared<c10::cuda::CUDADriverAPI>();
@@ -183,5 +216,4 @@ cudaError_t MaybeSetDevice(int device) {
   return cudaSuccess;
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

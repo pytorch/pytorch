@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import time
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -80,7 +80,7 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
-    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    # --amp --only YituTechConvBert --dynamic-shapes
     assert isinstance(numer, int) and isinstance(
         denom, int
     ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
@@ -420,6 +420,10 @@ def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
+class LineContext(NamedTuple):
+    context: Any
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -427,19 +431,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -448,6 +460,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -467,7 +481,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -493,12 +509,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -559,7 +578,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -676,6 +695,29 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
+def get_kernel_category(kernel_mod):
+    """
+    Given the module defining a triton kernel, return the category of the kernel.
+    Cateogry can be one of:
+    - pointwise
+    - reduction
+    - persistent_reduction
+
+    Currently we simply decide the cateory depending on what decorator is imported
+    by the kernel.
+    """
+    choices = [
+        "pointwise",
+        "reduction",
+        "persistent_reduction",
+    ]
+    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -692,6 +734,8 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
+
+        kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_gb = get_num_bytes(*args) / 1e9
 
@@ -709,10 +753,13 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         bench_result = []
+        kernel_desc = (
+            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+        )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
-            print(f"{benchmark_name:20} {kernel_key[:10]}")
+            print(kernel_desc)
             for launcher, ms in bench_result.items():
                 print(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
@@ -729,7 +776,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     launcher.n_regs,
                     launcher.n_spills,
                     launcher.shared,
-                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
+                    prefix=f"{kernel_desc} ",
                 )
             )
 
