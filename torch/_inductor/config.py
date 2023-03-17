@@ -12,6 +12,9 @@ disable_progress = True
 # Whether to enable printing the source code for each future
 verbose_progress = False
 
+# Name for generated .h and .so files
+aot_codegen_output_prefix = None
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = False
 
@@ -47,6 +50,12 @@ reordering = False
 
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
+
+# enable slow autotuning passes to select pointwise/reductions algorithms
+max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
+
+# enable slow autotuning passes to select gemm algorithms
+max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
@@ -90,16 +99,29 @@ def is_fbcode():
 # warnings intended for PyTorch developers, disable for point releases
 developer_warnings = is_fbcode() or "+" in torch.__version__
 
-compile_threads = (
-    1
-    if sys.platform == "win32" or is_fbcode()
-    else min(
-        32,
-        len(os.sched_getaffinity(0))
-        if hasattr(os, "sched_getaffinity")
-        else os.cpu_count(),
-    )
-)
+
+def decide_compile_threads():
+    """
+    Here are the precedence to decide compile_threads
+    1. User can override it by TORCHINDUCTOR_COMPILE_THREADS.  One may want to disable async compiling by
+       setting this to 1 to make pdb happy.
+    2. Set to 1 if it's win32 platform or it's a fbcode build
+    3. decide by the number of CPU cores
+    """
+    if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
+        return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
+    elif sys.platform == "win32" or is_fbcode():
+        return 1
+    else:
+        return min(
+            32,
+            len(os.sched_getaffinity(0))
+            if hasattr(os, "sched_getaffinity")
+            else os.cpu_count(),
+        )
+
+
+compile_threads = decide_compile_threads()
 
 # autotuning global cache path
 if is_fbcode():
@@ -161,9 +183,16 @@ class cpp:
 
 # config specific to codegen/triton.py
 class triton:
-
     # Use cudagraphs on output code
     cudagraphs = False
+
+    # Use cudagraph trees for memory pooling if `cudagraphs` is True
+    cudagraph_trees = False
+
+    debug_cudagraph_trees = True
+
+    # skip warmup for cudagraph trees
+    skip_cudagraph_warmup = False
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
@@ -186,10 +215,17 @@ class triton:
     tiling_prevents_reduction_fusion = True
 
     # should we give different names to kernels
-    ordered_kernel_names = False
+    # Note: This is orthogonal to descriptive_names - this is deciding whether
+    # our triton kernel names should all be `triton_` (to maximize caching) or
+    # whether they should be unique.
+    unique_kernel_names = False
 
     # should we put op names in kernel names
-    descriptive_kernel_names = False
+    # False: No special names (just triton__1, triton__2, etc.)
+    # "torch": Maps to the fx op in the Dynamo graph (module name, method name, etc.)
+    # "original_aten": Maps to the highest-level aten op (i.e. pre-decompositions)
+    # "inductor_node": Maps to the node name in the FX graph passed to Inductor
+    descriptive_names = "original_aten"
 
     # use alternate codegen for smaller reductions
     persistent_reductions = True
@@ -234,6 +270,12 @@ class trace:
     # Upload the .tar.gz file
     # Needs to be overriden based on specific environment needs
     upload_tar = None
+
+
+_save_config_ignore = {
+    # workaround: "Can't pickle <function ...>"
+    "trace.upload_tar",
+}
 
 
 from .._dynamo.config_utils import install_config_module

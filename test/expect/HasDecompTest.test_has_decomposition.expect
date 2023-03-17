@@ -564,8 +564,6 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
-aten::addmv
-aten::addmv.out
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
@@ -886,6 +884,7 @@ aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
+aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward

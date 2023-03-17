@@ -352,6 +352,8 @@ ALLOW_LIST = [
     ("aten::_transformer_decoder_only_layer_fwd", datetime.date(9999, 1, 1)),
     ("aten::_native_decoder_only_multi_head_attention",
      datetime.date(9999, 1, 1)),
+    ("aten::_int_mm.out", datetime.date(2023, 4, 1)),
+    ("aten::_int_mm", datetime.date(2023, 4, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
