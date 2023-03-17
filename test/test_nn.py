@@ -5397,6 +5397,26 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaises(RuntimeError):
             F.smooth_l1_loss(torch.randn(2, 2), torch.randn(2, 2), beta=-1.0)
 
+    def test_smoothl1loss_backward_zero_beta_cpu(self):
+        input = torch.randn(300, 256, requires_grad=True, device='cpu')
+        target = input.detach()
+
+        loss = F.smooth_l1_loss(input, target, beta=0.0, reduction='sum')
+        loss.backward()
+
+        grad_max_abs = input.grad.abs().max().item()
+        self.assertLessEqual(grad_max_abs, 1.0)
+
+    def test_smoothl1loss_backward_zero_beta_cuda(self):
+        input = torch.randn(300, 256, requires_grad=True, device='cuda')
+        target = input.detach()
+
+        loss = F.smooth_l1_loss(input, target, beta=0.0, reduction='sum')
+        loss.backward()
+
+        grad_max_abs = input.grad.abs().max().item()
+        self.assertLessEqual(grad_max_abs, 1.0)
+
     def test_huber_loss_invalid_delta(self):
         def _test_huber_loss_delta_error_helper(delta):
             input, target = torch.randn(2, 2), torch.randn(2, 2)
