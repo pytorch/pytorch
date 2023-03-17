@@ -538,6 +538,10 @@ class TritonTemplateCaller(ChoiceCaller):
         self.debug_extra = debug_extra
         self.bmreq = bmreq
 
+    def benchmark(self, *args, out):
+        assert self.bmreq is not None
+        return self.bmreq.benchmark(*args, output_tensor=out)
+
     def __str__(self):
         return (
             f"TritonTemplateCaller({self.to_callable().__file__}, {self.debug_extra})"
@@ -716,8 +720,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
             else:
                 # triton templates want the base pointer for sliced tensors
-                assert choice.bmreq is not None
-                result = choice.bmreq.benchmark(*example_inputs, output_tensor=out)
+                result = choice.benchmark(*example_inputs, out=out)
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
