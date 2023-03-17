@@ -6,6 +6,9 @@ import re
 from dataclasses import dataclass, field
 from importlib import __import__
 from typing import Dict, Set
+from weakref import WeakSet
+
+log = logging.getLogger(__name__)
 
 DEFAULT_LOG_LEVEL = logging.WARN
 DEFAULT_FORMATTER = logging.Formatter(
@@ -19,19 +22,23 @@ class LogRegistry:
     # shorthand name to log qualified name
     # Note: this only contains loggers registered
     # from register_log
+    # e.g. "dynamo" -> "torch._dynamo"
     log_alias_to_log_qname: Dict[str, str] = field(default_factory=dict)
 
     # artifact logger qualified names,
     # this is populated lazily, as calls to getArtifactLogger
-    # occur
+    # currently formatted as <module>.__<artifact_name>
+    # e.g. "torch._dynamo.convert_frame.__guards"
     artifact_log_qnames: Set[str] = field(default_factory=set)
 
     # child logs of registered logs if specified via open
     # registration by the user (ie placing "torch._dynamo.output_graph" in the env var)
     # these need to be tracked so their levels can be reset properly
+    # e.g. "torch._dynamo.output_graph"
     child_log_qnames: Set[str] = field(default_factory=set)
 
     # artifact names, populated by register_artifact
+    # e.g. "guards"
     artifact_names: Set[str] = field(default_factory=set)
 
     # artifacts which are not displayed unless explicitly named in the
@@ -133,6 +140,9 @@ def set_logs(
     """
     # ignore if env var is set
     if LOG_ENV_VAR in os.environ:
+        log.warning(
+            "Using TORCH_LOGS environment variable for log settings, ignoring call to set_logs"
+        )
         return
 
     log_state.clear()
@@ -153,10 +163,6 @@ def set_logs(
                         log_registry.log_alias_to_log_qname[alias], val
                     )
             else:
-                # Check if it is a qualified name log
-                # if so, check that its root logger is parent
-                # if so set its level appropriately
-                # if not, register it? (maybe)
                 raise ValueError(
                     f"Unrecognized log or artifact name passed to set_logs: {alias}"
                 )
@@ -203,8 +209,8 @@ def register_artifact(setting_name, off_by_default=False):
 def getArtifactLogger(module_qname, artifact_name):
     if artifact_name not in log_registry.artifact_names:
         raise ValueError(
-            f"Artifact name: {artifact_name} not registered,"
-            f"please call register_artifact({artifact_name}) in torch._logging.registrations."
+            f"Artifact name: {repr(artifact_name)} not registered,"
+            f"please call register_artifact({repr(artifact_name)}) in torch._logging.registrations."
         )
     qname = module_qname + f".__{artifact_name}"
     log = logging.getLogger(module_qname + f".__{artifact_name}")
@@ -326,29 +332,25 @@ def _has_registered_parent(log_qname):
     return False
 
 
-# setup custom handlers
-# if the log level of a component is set to INFO, setup
-# an additional handler to print those messages, because
-# the debug handler is what handles custom objects like guards,
-# bytecode, etc.
-# if the log level of a component is set to DEBUG, allow all
-# string messages and allowed types (other than those off by default)
 def _setup_handlers(create_handler_fn, log):
-    debug_handler = _tag_handler(create_handler_fn())
+    debug_handler = _track_handler(create_handler_fn())
     debug_handler.setFormatter(DEFAULT_FORMATTER)
     debug_handler.setLevel(logging.DEBUG)
     log.addHandler(debug_handler)
 
 
+handlers = WeakSet()
+
+
 # mark handlers that we've created
 # so we don't modify user handlers
-def _tag_handler(handler):
-    handler.__torch_log_handler = True
+def _track_handler(handler):
+    handlers.add(handler)
     return handler
 
 
 def _is_torch_handler(handler):
-    return hasattr(handler, "__torch_log_handler")
+    return handler in handlers
 
 
 # clears all torch handlers on specified loggers

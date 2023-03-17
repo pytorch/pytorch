@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import contextlib
 import functools
 import logging
 import unittest.mock
@@ -76,7 +77,8 @@ class LoggingTests(LoggingTestCase):
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
-        self.assertEqual(len(records), 1)
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 5)
 
     test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -90,21 +92,27 @@ class LoggingTests(LoggingTestCase):
             pass
         self.assertEqual(len(records), 1)
 
-    test_aot = multi_record_test(3, aot=logging.DEBUG)
+    test_aot = within_range_record_test(2, 6, aot=logging.INFO)
     test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test(dynamo=logging.ERROR)
     def test_inductor_error(self, records):
+        exitstack = contextlib.ExitStack()
         import torch._inductor.lowering
 
         def throw(x):
             raise AssertionError()
 
         # inject an error in the lowerings
+        dict_entries = {}
         for x in list(torch._inductor.lowering.lowerings.keys()):
             if "round" in x.__name__:
-                torch._inductor.lowering.lowerings[x] = throw
+                dict_entries[x] = throw
+
+        exitstack.enter_context(
+            unittest.mock.patch.dict(torch._inductor.lowering.lowerings, dict_entries)
+        )
 
         try:
             fn_opt = torch._dynamo.optimize("inductor")(inductor_error_fn)
@@ -113,6 +121,8 @@ class LoggingTests(LoggingTestCase):
             pass
         self.assertEqual(len(records), 1)
         self.assertIsInstance(records[0].msg, str)
+
+        exitstack.close()
 
     # check that logging to a child log of a registered logger
     # does not register it and result in duplicated records

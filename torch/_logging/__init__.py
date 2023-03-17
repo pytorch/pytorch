@@ -1,11 +1,8 @@
 # Top level logging module for torch logging
 # Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 # Simple setup for onboarding (see above doc for more detail):
-# 1. @loggable any classes you'd like to register as artifacts can be toggled as logged/not logged, and
-#    add them to the loggable_types module
-#    Only requirement here is that it has a __str__ method, and then instances of this class can be passed directly
-#    to log.debug(<instance here>)
-# 2. register the top-level log for your component (also in loggable_types)
-#    (See loggable_types module for examples or the above design doc)
+# 1. register any top-level log qualified name for your module in torch._logging._registrations (see there for examples)
+# 2. register any artifacts (<artifact_name> below) in torch._logging._registrations
+#   a. call getArtifactLogger(__name__, <artifact_name>) at your logging site instead of the standard logger to log your artifact
 import torch._logging._registrations
 from ._internal import _init_logs, getArtifactLogger, set_logs

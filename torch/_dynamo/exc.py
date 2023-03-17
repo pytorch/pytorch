@@ -5,7 +5,7 @@ from typing import cast, List
 
 from . import config
 
-from .utils import counters, print_bytecode
+from .utils import counters, format_bytecode
 
 
 class TorchDynamoException(RuntimeError):
@@ -160,7 +160,7 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
 
     if config.verbose:
         msg = str(
-            print_bytecode(
+            format_bytecode(
                 "WON'T CONVERT",
                 code.co_name,
                 code.co_filename,

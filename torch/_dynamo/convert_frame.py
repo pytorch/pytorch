@@ -35,13 +35,13 @@ from .utils import (
     CleanupManager,
     counters,
     dynamo_timed,
+    format_bytecode,
     gen_record_file_name,
     guard_failures,
     increment_frame,
     is_namedtuple,
     istype,
     orig_code_map,
-    print_bytecode,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     troubleshooting_url,
@@ -348,7 +348,7 @@ def _compile(
         def log_bytecode(prefix, name, filename, line_no, code):
             if bytecode_log.isEnabledFor(logging.DEBUG):
                 bytecode_log.debug(
-                    print_bytecode(prefix, name, filename, line_no, code)
+                    format_bytecode(prefix, name, filename, line_no, code)
                 )
 
         log_bytecode(

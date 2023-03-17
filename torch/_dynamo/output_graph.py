@@ -44,8 +44,8 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
-    print_graph_code,
-    print_graph_tabular,
+    format_graph_code,
+    format_graph_tabular,
     same,
 )
 from .variables.base import VariableTracker
@@ -623,8 +623,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        graph_code_log.debug(print_graph_code(name, gm))
-        graph_tabular_log.debug(print_graph_tabular(name, gm))
+        graph_code_log.debug(format_graph_code(name, gm))
+        graph_tabular_log.debug(format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)

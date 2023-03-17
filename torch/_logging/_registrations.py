@@ -1,19 +1,8 @@
 from ._internal import register_artifact, register_log
 
-
-TORCHDYNAMO_LOG_NAME = "torch._dynamo"
-TORCHINDUCTOR_LOG_NAME = "torch._inductor"
-AOT_AUTOGRAD_LOG_NAME = "torch._functorch.aot_autograd"
-
-# (optional) shorthand names used in the logging env var and user API
-TORCHDYNAMO_NAME = "dynamo"
-TORCHINDUCTOR_NAME = "inductor"
-AOT_AUTOGRAD_NAME = "aot"
-
-# (optional) register log with shorthand name
-register_log(TORCHDYNAMO_NAME, TORCHDYNAMO_LOG_NAME)
-register_log(AOT_AUTOGRAD_NAME, AOT_AUTOGRAD_LOG_NAME)
-register_log(TORCHINDUCTOR_NAME, TORCHINDUCTOR_LOG_NAME)
+register_log("dynamo", "torch._dynamo")
+register_log("aot", "torch._functorch.aot_autograd")
+register_log("inductor", "torch._inductor")
 
 register_artifact("guards")
 register_artifact("bytecode")
