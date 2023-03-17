@@ -490,14 +490,27 @@ class TestNestedTensor(TestCase):
             t.fill_(11.)
             self.assertEqual(nt_ub, t)
 
-    def test_ones_like(self):
+    def test_zero_(self):
         ntensors = 4
         nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        ones_nt = torch.ones_like(nt)
-
-        for nt_ub in ones_nt.unbind():
-            t = torch.ones_like(nt_ub)
+        nt.zero_()
+        for nt_ub in nt.unbind():
+            t = torch.empty_like(nt_ub)
+            t.fill_(0.)
             self.assertEqual(nt_ub, t)
+
+    @parametrize("func", [torch.ones_like, torch.zeros_like, torch.randn_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_functions(self, func):
+        ntensors = 4
+        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
+        torch.manual_seed(1)
+        nt_like = func(nt)
+
+        torch.manual_seed(1)
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
 
 
 class TestNestedTensorDeviceType(TestCase):
@@ -2387,6 +2400,16 @@ class TestNestedTensorAutograd(TestCase):
 
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    # Previously would error when input NT doesn't require grad
+    # NotImplementedError: Cannot access storage of UndefinedTensorImpl
+    def test_layer_norm_backward_edge_case(self, device):
+        size = 4
+        a = torch.randn(1, 2, size, requires_grad=False, dtype=torch.float64, device=device)
+        nt = torch.nested.nested_tensor([a])
+        nt_layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+        out = nt_layer_norm(nt)
+        out.backward(out.clone())
 
     # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv

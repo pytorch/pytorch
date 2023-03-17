@@ -15,13 +15,13 @@ clone-deps:
 
 pull-deps: clone-deps
 	echo $(TRITON_VERSION)
-	(cd ../../../torchvision    && git pull && git submodule update --init --recursive)
-	(cd ../../../torchdata      && git pull && git submodule update --init --recursive)
-	(cd ../../../torchtext      && git pull && git submodule update --init --recursive)
-	(cd ../../../torchaudio     && git pull && git submodule update --init --recursive)
-	(cd ../../../detectron2     && git pull && git submodule update --init --recursive)
-	(cd ../../../torchbenchmark && git pull && git submodule update --init --recursive)
-	(cd ../../../triton         && git fetch && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
+	(cd ../../../torchvision    && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../torchdata      && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../torchtext      && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../torchaudio     && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../detectron2     && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../torchbenchmark && git reset --hard HEAD && git pull && git submodule update --init --recursive)
+	(cd ../../../triton         && git reset --hard HEAD && git fetch && git checkout $(TRITON_VERSION) && git submodule update --init --recursive)
 
 build-deps: clone-deps
 	# conda env remove --name torchdynamo
