@@ -483,11 +483,11 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
 
     fake_mode = fake_mode_from_tensors(example_inputs)
     ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-    # gm = fuse_unary(gm)
+    gm = fuse_unary(gm)
     gm = fuse_binary(gm)
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
-    # gm = fuse_unary(gm)
+    gm = fuse_unary(gm)
     if config.cpp.weight_prepack:
         gm = pack_module(gm)
     return gm
