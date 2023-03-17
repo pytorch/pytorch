@@ -208,7 +208,7 @@ def getArtifactLogger(module_qname, artifact_name):
         )
     qname = module_qname + f".__{artifact_name}"
     log = logging.getLogger(module_qname + f".__{artifact_name}")
-    log.artifact_name = artifact_name
+    log.artifact_name = artifact_name  # type: ignore[attr-defined]
     log_registry.register_artifact_log(qname)
     configure_artifact_log(log)
     return log
