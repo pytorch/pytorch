@@ -1,0 +1,355 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr2,
+                       float* out_ptr3,
+                       float* out_ptr4)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<27; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<6; i1+=1)
+                {
+                    auto tmp0 = in_ptr0[(2*i1) + (24*i0)];
+                    auto tmp1 = in_ptr0[1 + (2*i1) + (24*i0)];
+                    auto tmp3 = in_ptr0[12 + (2*i1) + (24*i0)];
+                    auto tmp5 = in_ptr0[13 + (2*i1) + (24*i0)];
+                    auto tmp2 = tmp1 + tmp0;
+                    auto tmp4 = tmp3 + tmp2;
+                    auto tmp6 = tmp5 + tmp4;
+                    auto tmp7 = static_cast<float>(1.0);
+                    auto tmp8 = tmp6 * tmp7;
+                    out_ptr0[i1 + (6*i0)] = tmp8;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<9; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<4; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<5; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(((3 + (6*i1)) / 4));
+                        auto tmp1 = static_cast<long>(((9 + (6*i1)) / 4));
+                        auto tmp2 = tmp0 < tmp1;
+                        auto tmp3 = static_cast<long>(((4 + (12*i2)) / 5));
+                        auto tmp4 = static_cast<long>(((16 + (12*i2)) / 5));
+                        auto tmp5 = tmp3 < tmp4;
+                        auto tmp6 = tmp2 & tmp5;
+                        auto tmp7 = [&]
+                        {
+                            auto tmp8 = in_ptr0[(12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp8;
+                        }
+                        ;
+                        auto tmp9 = tmp6 ? tmp7() : static_cast<decltype(tmp7())>(0.0);
+                        auto tmp10 = static_cast<long>(1 + (((4 + (12*i2)) / 5)));
+                        auto tmp11 = tmp10 < tmp4;
+                        auto tmp12 = tmp2 & tmp11;
+                        auto tmp13 = [&]
+                        {
+                            auto tmp14 = in_ptr0[1 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp14;
+                        }
+                        ;
+                        auto tmp15 = tmp12 ? tmp13() : static_cast<decltype(tmp13())>(0.0);
+                        auto tmp16 = tmp15 + tmp9;
+                        auto tmp17 = static_cast<long>(2 + (((4 + (12*i2)) / 5)));
+                        auto tmp18 = tmp17 < tmp4;
+                        auto tmp19 = tmp2 & tmp18;
+                        auto tmp20 = [&]
+                        {
+                            auto tmp21 = in_ptr0[2 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp21;
+                        }
+                        ;
+                        auto tmp22 = tmp19 ? tmp20() : static_cast<decltype(tmp20())>(0.0);
+                        auto tmp23 = tmp22 + tmp16;
+                        auto tmp24 = static_cast<long>(1 + (((3 + (6*i1)) / 4)));
+                        auto tmp25 = tmp24 < tmp1;
+                        auto tmp26 = tmp25 & tmp5;
+                        auto tmp27 = [&]
+                        {
+                            auto tmp28 = in_ptr0[12 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp28;
+                        }
+                        ;
+                        auto tmp29 = tmp26 ? tmp27() : static_cast<decltype(tmp27())>(0.0);
+                        auto tmp30 = tmp29 + tmp23;
+                        auto tmp31 = tmp25 & tmp11;
+                        auto tmp32 = [&]
+                        {
+                            auto tmp33 = in_ptr0[13 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp33;
+                        }
+                        ;
+                        auto tmp34 = tmp31 ? tmp32() : static_cast<decltype(tmp32())>(0.0);
+                        auto tmp35 = tmp34 + tmp30;
+                        auto tmp36 = tmp25 & tmp18;
+                        auto tmp37 = [&]
+                        {
+                            auto tmp38 = in_ptr0[14 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((4 + (12*i2)) / 5))];
+                            return tmp38;
+                        }
+                        ;
+                        auto tmp39 = tmp36 ? tmp37() : static_cast<decltype(tmp37())>(0.0);
+                        auto tmp40 = tmp39 + tmp35;
+                        out_ptr1[i2 + (5*i1) + (20*i0)] = tmp40;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<9; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<2; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<8; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(3*i1);
+                        auto tmp1 = static_cast<long>(3 + (3*i1));
+                        auto tmp2 = tmp0 < tmp1;
+                        auto tmp3 = static_cast<long>(((7 + (12*i2)) / 8));
+                        auto tmp4 = static_cast<long>(((19 + (12*i2)) / 8));
+                        auto tmp5 = tmp3 < tmp4;
+                        auto tmp6 = tmp2 & tmp5;
+                        auto tmp7 = [&]
+                        {
+                            auto tmp8 = in_ptr0[(36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp8;
+                        }
+                        ;
+                        auto tmp9 = tmp6 ? tmp7() : static_cast<decltype(tmp7())>(0.0);
+                        auto tmp10 = static_cast<long>(1 + (((7 + (12*i2)) / 8)));
+                        auto tmp11 = tmp10 < tmp4;
+                        auto tmp12 = tmp2 & tmp11;
+                        auto tmp13 = [&]
+                        {
+                            auto tmp14 = in_ptr0[1 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp14;
+                        }
+                        ;
+                        auto tmp15 = tmp12 ? tmp13() : static_cast<decltype(tmp13())>(0.0);
+                        auto tmp16 = tmp15 + tmp9;
+                        auto tmp17 = static_cast<long>(1 + (3*i1));
+                        auto tmp18 = tmp17 < tmp1;
+                        auto tmp19 = tmp18 & tmp5;
+                        auto tmp20 = [&]
+                        {
+                            auto tmp21 = in_ptr0[12 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp21;
+                        }
+                        ;
+                        auto tmp22 = tmp19 ? tmp20() : static_cast<decltype(tmp20())>(0.0);
+                        auto tmp23 = tmp22 + tmp16;
+                        auto tmp24 = tmp18 & tmp11;
+                        auto tmp25 = [&]
+                        {
+                            auto tmp26 = in_ptr0[13 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp26;
+                        }
+                        ;
+                        auto tmp27 = tmp24 ? tmp25() : static_cast<decltype(tmp25())>(0.0);
+                        auto tmp28 = tmp27 + tmp23;
+                        auto tmp29 = static_cast<long>(2 + (3*i1));
+                        auto tmp30 = tmp29 < tmp1;
+                        auto tmp31 = tmp30 & tmp5;
+                        auto tmp32 = [&]
+                        {
+                            auto tmp33 = in_ptr0[24 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp33;
+                        }
+                        ;
+                        auto tmp34 = tmp31 ? tmp32() : static_cast<decltype(tmp32())>(0.0);
+                        auto tmp35 = tmp34 + tmp28;
+                        auto tmp36 = tmp30 & tmp11;
+                        auto tmp37 = [&]
+                        {
+                            auto tmp38 = in_ptr0[25 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp38;
+                        }
+                        ;
+                        auto tmp39 = tmp36 ? tmp37() : static_cast<decltype(tmp37())>(0.0);
+                        auto tmp40 = tmp39 + tmp35;
+                        auto tmp41 = [&]
+                        {
+                            auto tmp42 = in_ptr0[(36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp42;
+                        }
+                        ;
+                        auto tmp43 = tmp6 ? tmp41() : static_cast<decltype(tmp41())>(0.0);
+                        auto tmp44 = [&]
+                        {
+                            auto tmp45 = in_ptr0[1 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp45;
+                        }
+                        ;
+                        auto tmp46 = tmp12 ? tmp44() : static_cast<decltype(tmp44())>(0.0);
+                        auto tmp47 = tmp46 + tmp43;
+                        auto tmp48 = [&]
+                        {
+                            auto tmp49 = in_ptr0[12 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp49;
+                        }
+                        ;
+                        auto tmp50 = tmp19 ? tmp48() : static_cast<decltype(tmp48())>(0.0);
+                        auto tmp51 = tmp50 + tmp47;
+                        auto tmp52 = [&]
+                        {
+                            auto tmp53 = in_ptr0[13 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp53;
+                        }
+                        ;
+                        auto tmp54 = tmp24 ? tmp52() : static_cast<decltype(tmp52())>(0.0);
+                        auto tmp55 = tmp54 + tmp51;
+                        auto tmp56 = [&]
+                        {
+                            auto tmp57 = in_ptr0[24 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp57;
+                        }
+                        ;
+                        auto tmp58 = tmp31 ? tmp56() : static_cast<decltype(tmp56())>(0.0);
+                        auto tmp59 = tmp58 + tmp55;
+                        auto tmp60 = [&]
+                        {
+                            auto tmp61 = in_ptr0[25 + (36*i1) + (72*i0) + (((7 + (12*i2)) / 8))];
+                            return tmp61;
+                        }
+                        ;
+                        auto tmp62 = tmp36 ? tmp60() : static_cast<decltype(tmp60())>(0.0);
+                        auto tmp63 = tmp62 + tmp59;
+                        out_ptr2[i2 + (8*i1) + (16*i0)] = tmp40;
+                        out_ptr3[i2 + (8*i1) + (16*i0)] = tmp63;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<9; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<4; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<7; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(((3 + (6*i1)) / 4));
+                        auto tmp1 = static_cast<long>(((9 + (6*i1)) / 4));
+                        auto tmp2 = tmp0 < tmp1;
+                        auto tmp3 = static_cast<long>(((6 + (12*i2)) / 7));
+                        auto tmp4 = static_cast<long>(((18 + (12*i2)) / 7));
+                        auto tmp5 = tmp3 < tmp4;
+                        auto tmp6 = tmp2 & tmp5;
+                        auto tmp7 = [&]
+                        {
+                            auto tmp8 = in_ptr0[(12*(((3 + (6*i1)) / 4))) + (72*i0) + (((6 + (12*i2)) / 7))];
+                            return tmp8;
+                        }
+                        ;
+                        auto tmp9 = tmp6 ? tmp7() : static_cast<decltype(tmp7())>(0.0);
+                        auto tmp10 = static_cast<long>(1 + (((6 + (12*i2)) / 7)));
+                        auto tmp11 = tmp10 < tmp4;
+                        auto tmp12 = tmp2 & tmp11;
+                        auto tmp13 = [&]
+                        {
+                            auto tmp14 = in_ptr0[1 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((6 + (12*i2)) / 7))];
+                            return tmp14;
+                        }
+                        ;
+                        auto tmp15 = tmp12 ? tmp13() : static_cast<decltype(tmp13())>(0.0);
+                        auto tmp16 = tmp15 + tmp9;
+                        auto tmp17 = static_cast<long>(1 + (((3 + (6*i1)) / 4)));
+                        auto tmp18 = tmp17 < tmp1;
+                        auto tmp19 = tmp18 & tmp5;
+                        auto tmp20 = [&]
+                        {
+                            auto tmp21 = in_ptr0[12 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((6 + (12*i2)) / 7))];
+                            return tmp21;
+                        }
+                        ;
+                        auto tmp22 = tmp19 ? tmp20() : static_cast<decltype(tmp20())>(0.0);
+                        auto tmp23 = tmp22 + tmp16;
+                        auto tmp24 = tmp18 & tmp11;
+                        auto tmp25 = [&]
+                        {
+                            auto tmp26 = in_ptr0[13 + (12*(((3 + (6*i1)) / 4))) + (72*i0) + (((6 + (12*i2)) / 7))];
+                            return tmp26;
+                        }
+                        ;
+                        auto tmp27 = tmp24 ? tmp25() : static_cast<decltype(tmp25())>(0.0);
+                        auto tmp28 = tmp27 + tmp23;
+                        out_ptr4[i2 + (7*i1) + (28*i0)] = tmp28;
+                    }
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((3, 3, 3, 6), (54, 18, 6, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((3, 3, 4, 5), (60, 20, 5, 1), device='cpu', dtype=torch.float32)
+    buf2 = empty_strided((3, 3, 2, 8), (48, 16, 8, 1), device='cpu', dtype=torch.float32)
+    buf3 = empty_strided((3, 3, 2, 8), (48, 16, 8, 1), device='cpu', dtype=torch.float32)
+    buf4 = empty_strided((3, 3, 4, 7), (84, 28, 7, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf3.data_ptr()), c_void_p(buf4.data_ptr()))
+    del arg0_1
+    return (buf0, buf1, buf2, buf3, buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((3, 3, 6, 12), (216, 72, 12, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

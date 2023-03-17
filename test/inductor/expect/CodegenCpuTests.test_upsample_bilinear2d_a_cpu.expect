@@ -1,0 +1,340 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       float* in_out_ptr1,
+                       const float* in_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr3)
+{
+    auto out_ptr0 = in_out_ptr0;
+    auto out_ptr2 = in_out_ptr1;
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<45; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<45; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.5);
+                        auto tmp8 = tmp6 + tmp7;
+                        auto tmp9 = static_cast<float>(0.8222222222222222);
+                        auto tmp10 = tmp8 * tmp9;
+                        auto tmp11 = tmp10 - tmp7;
+                        auto tmp12 = static_cast<float>(0.0);
+                        auto tmp13 = (tmp12 != tmp12) ? tmp12 : std::max(tmp11, tmp12);
+                        auto tmp14 = static_cast<long>(tmp13);
+                        auto tmp15 = static_cast<long>(i2);
+                        auto tmp16 = static_cast<double>(tmp15);
+                        auto tmp17 = tmp16 * tmp2;
+                        auto tmp18 = tmp17 + tmp4;
+                        auto tmp19 = static_cast<float>(tmp18);
+                        auto tmp20 = tmp19 + tmp7;
+                        auto tmp21 = static_cast<float>(0.8444444444444444);
+                        auto tmp22 = tmp20 * tmp21;
+                        auto tmp23 = tmp22 - tmp7;
+                        auto tmp24 = (tmp12 != tmp12) ? tmp12 : std::max(tmp23, tmp12);
+                        auto tmp25 = static_cast<long>(tmp24);
+                        auto tmp26 = in_ptr0[tmp25 + (38*tmp14) + (1406*i0)];
+                        auto tmp27 = static_cast<float>(1.0);
+                        auto tmp28 = static_cast<float>(tmp14);
+                        auto tmp29 = tmp13 - tmp28;
+                        auto tmp30 = tmp27 - tmp29;
+                        auto tmp31 = tmp26 * tmp30;
+                        auto tmp32 = std::ceil(tmp13);
+                        auto tmp33 = static_cast<float>(36);
+                        auto tmp34 = (tmp33 != tmp33) ? tmp33 : std::min(tmp32, tmp33);
+                        auto tmp35 = static_cast<long>(tmp34);
+                        auto tmp36 = in_ptr0[tmp25 + (38*tmp35) + (1406*i0)];
+                        auto tmp37 = tmp36 * tmp29;
+                        auto tmp38 = tmp31 + tmp37;
+                        out_ptr0[i2 + (45*i1) + (2025*i0)] = tmp38;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<45; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<45; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.5);
+                        auto tmp8 = tmp6 + tmp7;
+                        auto tmp9 = static_cast<float>(0.8222222222222222);
+                        auto tmp10 = tmp8 * tmp9;
+                        auto tmp11 = tmp10 - tmp7;
+                        auto tmp12 = static_cast<float>(0.0);
+                        auto tmp13 = (tmp12 != tmp12) ? tmp12 : std::max(tmp11, tmp12);
+                        auto tmp14 = static_cast<long>(tmp13);
+                        auto tmp15 = static_cast<long>(i2);
+                        auto tmp16 = static_cast<double>(tmp15);
+                        auto tmp17 = tmp16 * tmp2;
+                        auto tmp18 = tmp17 + tmp4;
+                        auto tmp19 = static_cast<float>(tmp18);
+                        auto tmp20 = tmp19 + tmp7;
+                        auto tmp21 = static_cast<float>(0.8444444444444444);
+                        auto tmp22 = tmp20 * tmp21;
+                        auto tmp23 = tmp22 - tmp7;
+                        auto tmp24 = (tmp12 != tmp12) ? tmp12 : std::max(tmp23, tmp12);
+                        auto tmp25 = std::ceil(tmp24);
+                        auto tmp26 = static_cast<float>(37);
+                        auto tmp27 = (tmp26 != tmp26) ? tmp26 : std::min(tmp25, tmp26);
+                        auto tmp28 = static_cast<long>(tmp27);
+                        auto tmp29 = in_ptr0[tmp28 + (38*tmp14) + (1406*i0)];
+                        auto tmp30 = static_cast<float>(1.0);
+                        auto tmp31 = static_cast<float>(tmp14);
+                        auto tmp32 = tmp13 - tmp31;
+                        auto tmp33 = tmp30 - tmp32;
+                        auto tmp34 = tmp29 * tmp33;
+                        auto tmp35 = std::ceil(tmp13);
+                        auto tmp36 = static_cast<float>(36);
+                        auto tmp37 = (tmp36 != tmp36) ? tmp36 : std::min(tmp35, tmp36);
+                        auto tmp38 = static_cast<long>(tmp37);
+                        auto tmp39 = in_ptr0[tmp28 + (38*tmp38) + (1406*i0)];
+                        auto tmp40 = tmp39 * tmp32;
+                        auto tmp41 = tmp34 + tmp40;
+                        out_ptr1[i2 + (45*i1) + (2025*i0)] = tmp41;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<360; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<45; i1+=1)
+                {
+                    auto tmp0 = out_ptr0[i1 + (45*i0)];
+                    auto tmp21 = out_ptr1[i1 + (45*i0)];
+                    auto tmp1 = static_cast<float>(1.0);
+                    auto tmp2 = static_cast<long>(i1);
+                    auto tmp3 = static_cast<double>(tmp2);
+                    auto tmp4 = static_cast<double>(1);
+                    auto tmp5 = tmp3 * tmp4;
+                    auto tmp6 = static_cast<double>(0);
+                    auto tmp7 = tmp5 + tmp6;
+                    auto tmp8 = static_cast<float>(tmp7);
+                    auto tmp9 = static_cast<float>(0.5);
+                    auto tmp10 = tmp8 + tmp9;
+                    auto tmp11 = static_cast<float>(0.8444444444444444);
+                    auto tmp12 = tmp10 * tmp11;
+                    auto tmp13 = tmp12 - tmp9;
+                    auto tmp14 = static_cast<float>(0.0);
+                    auto tmp15 = (tmp14 != tmp14) ? tmp14 : std::max(tmp13, tmp14);
+                    auto tmp16 = static_cast<long>(tmp15);
+                    auto tmp17 = static_cast<float>(tmp16);
+                    auto tmp18 = tmp15 - tmp17;
+                    auto tmp19 = tmp1 - tmp18;
+                    auto tmp20 = tmp0 * tmp19;
+                    auto tmp22 = tmp21 * tmp18;
+                    auto tmp23 = tmp20 + tmp22;
+                    in_out_ptr0[i1 + (45*i0)] = tmp23;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<74; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<76; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.4931506849315068);
+                        auto tmp8 = tmp6 * tmp7;
+                        auto tmp9 = static_cast<long>(tmp8);
+                        auto tmp10 = static_cast<long>(i2);
+                        auto tmp11 = static_cast<double>(tmp10);
+                        auto tmp12 = tmp11 * tmp2;
+                        auto tmp13 = tmp12 + tmp4;
+                        auto tmp14 = static_cast<float>(tmp13);
+                        auto tmp15 = static_cast<float>(0.49333333333333335);
+                        auto tmp16 = tmp14 * tmp15;
+                        auto tmp17 = static_cast<long>(tmp16);
+                        auto tmp18 = in_ptr0[tmp17 + (38*tmp9) + (1406*i0)];
+                        auto tmp19 = static_cast<float>(1.0);
+                        auto tmp20 = static_cast<float>(tmp9);
+                        auto tmp21 = tmp8 - tmp20;
+                        auto tmp22 = tmp19 - tmp21;
+                        auto tmp23 = tmp18 * tmp22;
+                        auto tmp24 = std::ceil(tmp8);
+                        auto tmp25 = static_cast<float>(36);
+                        auto tmp26 = (tmp25 != tmp25) ? tmp25 : std::min(tmp24, tmp25);
+                        auto tmp27 = static_cast<long>(tmp26);
+                        auto tmp28 = in_ptr0[tmp17 + (38*tmp27) + (1406*i0)];
+                        auto tmp29 = tmp28 * tmp21;
+                        auto tmp30 = tmp23 + tmp29;
+                        out_ptr2[i2 + (76*i1) + (5624*i0)] = tmp30;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<74; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<76; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.4931506849315068);
+                        auto tmp8 = tmp6 * tmp7;
+                        auto tmp9 = static_cast<long>(tmp8);
+                        auto tmp10 = static_cast<long>(i2);
+                        auto tmp11 = static_cast<double>(tmp10);
+                        auto tmp12 = tmp11 * tmp2;
+                        auto tmp13 = tmp12 + tmp4;
+                        auto tmp14 = static_cast<float>(tmp13);
+                        auto tmp15 = static_cast<float>(0.49333333333333335);
+                        auto tmp16 = tmp14 * tmp15;
+                        auto tmp17 = std::ceil(tmp16);
+                        auto tmp18 = static_cast<float>(37);
+                        auto tmp19 = (tmp18 != tmp18) ? tmp18 : std::min(tmp17, tmp18);
+                        auto tmp20 = static_cast<long>(tmp19);
+                        auto tmp21 = in_ptr0[tmp20 + (38*tmp9) + (1406*i0)];
+                        auto tmp22 = static_cast<float>(1.0);
+                        auto tmp23 = static_cast<float>(tmp9);
+                        auto tmp24 = tmp8 - tmp23;
+                        auto tmp25 = tmp22 - tmp24;
+                        auto tmp26 = tmp21 * tmp25;
+                        auto tmp27 = std::ceil(tmp8);
+                        auto tmp28 = static_cast<float>(36);
+                        auto tmp29 = (tmp28 != tmp28) ? tmp28 : std::min(tmp27, tmp28);
+                        auto tmp30 = static_cast<long>(tmp29);
+                        auto tmp31 = in_ptr0[tmp20 + (38*tmp30) + (1406*i0)];
+                        auto tmp32 = tmp31 * tmp24;
+                        auto tmp33 = tmp26 + tmp32;
+                        out_ptr3[i2 + (76*i1) + (5624*i0)] = tmp33;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<592; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<76; i1+=1)
+                {
+                    auto tmp0 = out_ptr2[i1 + (76*i0)];
+                    auto tmp16 = out_ptr3[i1 + (76*i0)];
+                    auto tmp1 = static_cast<float>(1.0);
+                    auto tmp2 = static_cast<long>(i1);
+                    auto tmp3 = static_cast<double>(tmp2);
+                    auto tmp4 = static_cast<double>(1);
+                    auto tmp5 = tmp3 * tmp4;
+                    auto tmp6 = static_cast<double>(0);
+                    auto tmp7 = tmp5 + tmp6;
+                    auto tmp8 = static_cast<float>(tmp7);
+                    auto tmp9 = static_cast<float>(0.49333333333333335);
+                    auto tmp10 = tmp8 * tmp9;
+                    auto tmp11 = static_cast<long>(tmp10);
+                    auto tmp12 = static_cast<float>(tmp11);
+                    auto tmp13 = tmp10 - tmp12;
+                    auto tmp14 = tmp1 - tmp13;
+                    auto tmp15 = tmp0 * tmp14;
+                    auto tmp17 = tmp16 * tmp13;
+                    auto tmp18 = tmp15 + tmp17;
+                    in_out_ptr1[i1 + (76*i0)] = tmp18;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((2, 4, 45, 45), (8100, 2025, 45, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((2, 4, 45, 45), (8100, 2025, 45, 1), device='cpu', dtype=torch.float32)
+    buf2 = buf0; del buf0  # reuse
+    buf3 = empty_strided((2, 4, 74, 76), (22496, 5624, 76, 1), device='cpu', dtype=torch.float32)
+    buf4 = empty_strided((2, 4, 74, 76), (22496, 5624, 76, 1), device='cpu', dtype=torch.float32)
+    buf5 = buf3; del buf3  # reuse
+    kernel_cpp_0(c_void_p(buf2.data_ptr()), c_void_p(buf5.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf4.data_ptr()))
+    del arg0_1
+    return (buf2, buf5, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((2, 4, 37, 38), (5624, 1406, 38, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

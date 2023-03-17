@@ -1,0 +1,154 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       float* in_out_ptr1,
+                       const float* in_ptr0,
+                       const float* in_ptr1,
+                       const float* in_ptr2)
+{
+    auto out_ptr1 = in_out_ptr1;
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<135252; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                auto tmp8 = at::vec::Vectorized<float>::loadu(in_ptr1 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(-1.061519070296458e-11));
+                auto tmp2 = tmp0 * tmp1;
+                auto tmp3 = at::vec::Vectorized<float>(static_cast<float>(-1.988366587925593e-08));
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp5 = tmp0 * tmp4;
+                auto tmp6 = at::vec::Vectorized<float>(static_cast<float>(-3.087032500374211e-07));
+                auto tmp7 = tmp5 + tmp6;
+                auto tmp9 = at::vec::Vectorized<float>(static_cast<float>(1.55093272922008e-10));
+                auto tmp10 = tmp8 * tmp9;
+                auto tmp11 = tmp7 + tmp10;
+                auto tmp12 = tmp11.reciprocal();
+                auto tmp13 = at::vec::Vectorized<float>(static_cast<float>(1.0));
+                auto tmp14 = tmp12 * tmp13;
+                tmp11.store(in_out_ptr0 + 8*i0);
+                tmp14.store(out_ptr1 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=1082016; i0<1082016; i0+=1)
+            {
+                auto tmp0 = in_ptr0[i0];
+                auto tmp8 = in_ptr1[i0];
+                auto tmp1 = static_cast<float>(-1.061519070296458e-11);
+                auto tmp2 = tmp0 * tmp1;
+                auto tmp3 = static_cast<float>(-1.988366587925593e-08);
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp5 = tmp0 * tmp4;
+                auto tmp6 = static_cast<float>(-3.087032500374211e-07);
+                auto tmp7 = tmp5 + tmp6;
+                auto tmp9 = static_cast<float>(1.55093272922008e-10);
+                auto tmp10 = tmp8 * tmp9;
+                auto tmp11 = tmp7 + tmp10;
+                auto tmp12 = 1 / tmp11;
+                auto tmp13 = static_cast<float>(1.0);
+                auto tmp14 = tmp12 * tmp13;
+                in_out_ptr0[i0] = tmp11;
+                out_ptr1[i0] = tmp14;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<41616; i0+=1)
+            {
+                for(long i1=0; i1<3; i1+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + (8*i1) + (26*i0));
+                    auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr2 + 8*i1);
+                    auto tmp2 = tmp0 * tmp1;
+                    tmp2.store(in_out_ptr0 + (8*i1) + (26*i0));
+                }
+                #pragma omp simd simdlen(4)
+                for(long i1=24; i1<26; i1+=1)
+                {
+                    auto tmp0 = in_out_ptr0[i1 + (26*i0)];
+                    auto tmp1 = in_ptr2[i1];
+                    auto tmp2 = tmp0 * tmp1;
+                    in_out_ptr0[i1 + (26*i0)] = tmp2;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<135252; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr1 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(in_out_ptr1 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=1082016; i0<1082016; i0+=1)
+            {
+                auto tmp0 = out_ptr1[i0];
+                auto tmp1 = in_out_ptr0[i0];
+                auto tmp2 = tmp0 + tmp1;
+                in_out_ptr1[i0] = tmp2;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1, arg2_1 = args
+    args.clear()
+    buf0 = empty_strided((204, 204, 26), (5304, 26, 1), device='cpu', dtype=torch.float32)
+    buf1 = buf0; del buf0  # reuse
+    buf2 = empty_strided((204, 204, 26), (5304, 26, 1), device='cpu', dtype=torch.float32)
+    buf3 = buf1; del buf1  # reuse
+    buf4 = buf2; del buf2  # reuse
+    kernel_cpp_0(c_void_p(buf3.data_ptr()), c_void_p(buf4.data_ptr()), c_void_p(arg1_1.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(arg2_1.data_ptr()))
+    del arg0_1
+    del arg1_1
+    del arg2_1
+    return (buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((204, 204, 26), (5304, 26, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((204, 204, 26), (5304, 26, 1), device='cpu', dtype=torch.float32)
+    arg2_1 = rand_strided((26, ), (1, ), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1, arg2_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

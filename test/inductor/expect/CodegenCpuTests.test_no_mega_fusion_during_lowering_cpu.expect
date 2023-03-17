@@ -1,0 +1,509 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       const float* in_ptr0,
+                       const float* in_ptr1,
+                       const float* in_ptr2,
+                       const float* in_ptr3,
+                       const float* in_ptr4,
+                       const float* in_ptr5,
+                       const float* in_ptr6,
+                       const float* in_ptr7,
+                       const float* in_ptr8,
+                       const float* in_ptr9,
+                       const float* in_ptr10,
+                       const float* in_ptr11,
+                       const float* in_ptr12,
+                       const float* in_ptr13,
+                       const float* in_ptr14,
+                       const float* in_ptr15,
+                       const float* in_ptr16,
+                       const float* in_ptr17,
+                       const float* in_ptr18,
+                       const float* in_ptr19,
+                       const float* in_ptr20,
+                       const float* in_ptr21,
+                       const float* in_ptr22,
+                       const float* in_ptr23,
+                       const float* in_ptr24,
+                       const float* in_ptr25,
+                       const float* in_ptr26,
+                       const float* in_ptr27,
+                       const float* in_ptr28,
+                       const float* in_ptr29,
+                       const float* in_ptr30,
+                       const float* in_ptr31,
+                       const float* in_ptr32,
+                       const float* in_ptr33,
+                       const float* in_ptr34,
+                       const float* in_ptr35,
+                       const float* in_ptr36,
+                       const float* in_ptr37,
+                       const float* in_ptr38,
+                       const float* in_ptr39,
+                       const float* in_ptr40,
+                       const float* in_ptr41,
+                       const float* in_ptr42,
+                       const float* in_ptr43,
+                       const float* in_ptr44,
+                       const float* in_ptr45,
+                       const float* in_ptr46,
+                       const float* in_ptr47,
+                       const float* in_ptr48,
+                       const float* in_ptr49)
+{
+    auto out_ptr0 = in_out_ptr0;
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                auto tmp2 = at::vec::Vectorized<float>::loadu(in_ptr1 + 8*i0);
+                auto tmp4 = at::vec::Vectorized<float>::loadu(in_ptr2 + 8*i0);
+                auto tmp6 = at::vec::Vectorized<float>::loadu(in_ptr3 + 8*i0);
+                auto tmp8 = at::vec::Vectorized<float>::loadu(in_ptr4 + 8*i0);
+                auto tmp10 = at::vec::Vectorized<float>::loadu(in_ptr5 + 8*i0);
+                auto tmp12 = at::vec::Vectorized<float>::loadu(in_ptr6 + 8*i0);
+                auto tmp14 = at::vec::Vectorized<float>::loadu(in_ptr7 + 8*i0);
+                auto tmp16 = at::vec::Vectorized<float>::loadu(in_ptr8 + 8*i0);
+                auto tmp1 = tmp0 + tmp0;
+                auto tmp3 = tmp1 + tmp2;
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp7 = tmp5 + tmp6;
+                auto tmp9 = tmp7 + tmp8;
+                auto tmp11 = tmp9 + tmp10;
+                auto tmp13 = tmp11 + tmp12;
+                auto tmp15 = tmp13 + tmp14;
+                auto tmp17 = tmp15 + tmp16;
+                tmp17.store(out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_ptr0[i0];
+                auto tmp2 = in_ptr1[i0];
+                auto tmp4 = in_ptr2[i0];
+                auto tmp6 = in_ptr3[i0];
+                auto tmp8 = in_ptr4[i0];
+                auto tmp10 = in_ptr5[i0];
+                auto tmp12 = in_ptr6[i0];
+                auto tmp14 = in_ptr7[i0];
+                auto tmp16 = in_ptr8[i0];
+                auto tmp1 = tmp0 + tmp0;
+                auto tmp3 = tmp1 + tmp2;
+                auto tmp5 = tmp3 + tmp4;
+                auto tmp7 = tmp5 + tmp6;
+                auto tmp9 = tmp7 + tmp8;
+                auto tmp11 = tmp9 + tmp10;
+                auto tmp13 = tmp11 + tmp12;
+                auto tmp15 = tmp13 + tmp14;
+                auto tmp17 = tmp15 + tmp16;
+                out_ptr0[i0] = tmp17;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr9 + 8*i0);
+                auto tmp3 = at::vec::Vectorized<float>::loadu(in_ptr10 + 8*i0);
+                auto tmp5 = at::vec::Vectorized<float>::loadu(in_ptr11 + 8*i0);
+                auto tmp7 = at::vec::Vectorized<float>::loadu(in_ptr12 + 8*i0);
+                auto tmp9 = at::vec::Vectorized<float>::loadu(in_ptr13 + 8*i0);
+                auto tmp11 = at::vec::Vectorized<float>::loadu(in_ptr14 + 8*i0);
+                auto tmp13 = at::vec::Vectorized<float>::loadu(in_ptr15 + 8*i0);
+                auto tmp15 = at::vec::Vectorized<float>::loadu(in_ptr16 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                tmp16.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = out_ptr0[i0];
+                auto tmp1 = in_ptr9[i0];
+                auto tmp3 = in_ptr10[i0];
+                auto tmp5 = in_ptr11[i0];
+                auto tmp7 = in_ptr12[i0];
+                auto tmp9 = in_ptr13[i0];
+                auto tmp11 = in_ptr14[i0];
+                auto tmp13 = in_ptr15[i0];
+                auto tmp15 = in_ptr16[i0];
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                in_out_ptr0[i0] = tmp16;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr17 + 8*i0);
+                auto tmp3 = at::vec::Vectorized<float>::loadu(in_ptr18 + 8*i0);
+                auto tmp5 = at::vec::Vectorized<float>::loadu(in_ptr19 + 8*i0);
+                auto tmp7 = at::vec::Vectorized<float>::loadu(in_ptr20 + 8*i0);
+                auto tmp9 = at::vec::Vectorized<float>::loadu(in_ptr21 + 8*i0);
+                auto tmp11 = at::vec::Vectorized<float>::loadu(in_ptr22 + 8*i0);
+                auto tmp13 = at::vec::Vectorized<float>::loadu(in_ptr23 + 8*i0);
+                auto tmp15 = at::vec::Vectorized<float>::loadu(in_ptr24 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                tmp16.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = in_ptr17[i0];
+                auto tmp3 = in_ptr18[i0];
+                auto tmp5 = in_ptr19[i0];
+                auto tmp7 = in_ptr20[i0];
+                auto tmp9 = in_ptr21[i0];
+                auto tmp11 = in_ptr22[i0];
+                auto tmp13 = in_ptr23[i0];
+                auto tmp15 = in_ptr24[i0];
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                in_out_ptr0[i0] = tmp16;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr25 + 8*i0);
+                auto tmp3 = at::vec::Vectorized<float>::loadu(in_ptr26 + 8*i0);
+                auto tmp5 = at::vec::Vectorized<float>::loadu(in_ptr27 + 8*i0);
+                auto tmp7 = at::vec::Vectorized<float>::loadu(in_ptr28 + 8*i0);
+                auto tmp9 = at::vec::Vectorized<float>::loadu(in_ptr29 + 8*i0);
+                auto tmp11 = at::vec::Vectorized<float>::loadu(in_ptr30 + 8*i0);
+                auto tmp13 = at::vec::Vectorized<float>::loadu(in_ptr31 + 8*i0);
+                auto tmp15 = at::vec::Vectorized<float>::loadu(in_ptr32 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                tmp16.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = in_ptr25[i0];
+                auto tmp3 = in_ptr26[i0];
+                auto tmp5 = in_ptr27[i0];
+                auto tmp7 = in_ptr28[i0];
+                auto tmp9 = in_ptr29[i0];
+                auto tmp11 = in_ptr30[i0];
+                auto tmp13 = in_ptr31[i0];
+                auto tmp15 = in_ptr32[i0];
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                in_out_ptr0[i0] = tmp16;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr33 + 8*i0);
+                auto tmp3 = at::vec::Vectorized<float>::loadu(in_ptr34 + 8*i0);
+                auto tmp5 = at::vec::Vectorized<float>::loadu(in_ptr35 + 8*i0);
+                auto tmp7 = at::vec::Vectorized<float>::loadu(in_ptr36 + 8*i0);
+                auto tmp9 = at::vec::Vectorized<float>::loadu(in_ptr37 + 8*i0);
+                auto tmp11 = at::vec::Vectorized<float>::loadu(in_ptr38 + 8*i0);
+                auto tmp13 = at::vec::Vectorized<float>::loadu(in_ptr39 + 8*i0);
+                auto tmp15 = at::vec::Vectorized<float>::loadu(in_ptr40 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                tmp16.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = in_ptr33[i0];
+                auto tmp3 = in_ptr34[i0];
+                auto tmp5 = in_ptr35[i0];
+                auto tmp7 = in_ptr36[i0];
+                auto tmp9 = in_ptr37[i0];
+                auto tmp11 = in_ptr38[i0];
+                auto tmp13 = in_ptr39[i0];
+                auto tmp15 = in_ptr40[i0];
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                in_out_ptr0[i0] = tmp16;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr41 + 8*i0);
+                auto tmp3 = at::vec::Vectorized<float>::loadu(in_ptr42 + 8*i0);
+                auto tmp5 = at::vec::Vectorized<float>::loadu(in_ptr43 + 8*i0);
+                auto tmp7 = at::vec::Vectorized<float>::loadu(in_ptr44 + 8*i0);
+                auto tmp9 = at::vec::Vectorized<float>::loadu(in_ptr45 + 8*i0);
+                auto tmp11 = at::vec::Vectorized<float>::loadu(in_ptr46 + 8*i0);
+                auto tmp13 = at::vec::Vectorized<float>::loadu(in_ptr47 + 8*i0);
+                auto tmp15 = at::vec::Vectorized<float>::loadu(in_ptr48 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                tmp16.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = in_ptr41[i0];
+                auto tmp3 = in_ptr42[i0];
+                auto tmp5 = in_ptr43[i0];
+                auto tmp7 = in_ptr44[i0];
+                auto tmp9 = in_ptr45[i0];
+                auto tmp11 = in_ptr46[i0];
+                auto tmp13 = in_ptr47[i0];
+                auto tmp15 = in_ptr48[i0];
+                auto tmp2 = tmp0 + tmp1;
+                auto tmp4 = tmp2 + tmp3;
+                auto tmp6 = tmp4 + tmp5;
+                auto tmp8 = tmp6 + tmp7;
+                auto tmp10 = tmp8 + tmp9;
+                auto tmp12 = tmp10 + tmp11;
+                auto tmp14 = tmp12 + tmp13;
+                auto tmp16 = tmp14 + tmp15;
+                in_out_ptr0[i0] = tmp16;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr49 + 8*i0);
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = in_ptr49[i0];
+                auto tmp2 = tmp0 + tmp1;
+                in_out_ptr0[i0] = tmp2;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1, arg8_1, arg9_1, arg10_1, arg11_1, arg12_1, arg13_1, arg14_1, arg15_1, arg16_1, arg17_1, arg18_1, arg19_1, arg20_1, arg21_1, arg22_1, arg23_1, arg24_1, arg25_1, arg26_1, arg27_1, arg28_1, arg29_1, arg30_1, arg31_1, arg32_1, arg33_1, arg34_1, arg35_1, arg36_1, arg37_1, arg38_1, arg39_1, arg40_1, arg41_1, arg42_1, arg43_1, arg44_1, arg45_1, arg46_1, arg47_1, arg48_1, arg49_1 = args
+    args.clear()
+    buf0 = empty_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    buf1 = buf0; del buf0  # reuse
+    buf2 = buf1; del buf1  # reuse
+    buf3 = buf2; del buf2  # reuse
+    buf4 = buf3; del buf3  # reuse
+    buf5 = buf4; del buf4  # reuse
+    buf6 = buf5; del buf5  # reuse
+    kernel_cpp_0(c_void_p(buf6.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(arg1_1.data_ptr()), c_void_p(arg2_1.data_ptr()), c_void_p(arg3_1.data_ptr()), c_void_p(arg4_1.data_ptr()), c_void_p(arg5_1.data_ptr()), c_void_p(arg6_1.data_ptr()), c_void_p(arg7_1.data_ptr()), c_void_p(arg8_1.data_ptr()), c_void_p(arg9_1.data_ptr()), c_void_p(arg10_1.data_ptr()), c_void_p(arg11_1.data_ptr()), c_void_p(arg12_1.data_ptr()), c_void_p(arg13_1.data_ptr()), c_void_p(arg14_1.data_ptr()), c_void_p(arg15_1.data_ptr()), c_void_p(arg16_1.data_ptr()), c_void_p(arg17_1.data_ptr()), c_void_p(arg18_1.data_ptr()), c_void_p(arg19_1.data_ptr()), c_void_p(arg20_1.data_ptr()), c_void_p(arg21_1.data_ptr()), c_void_p(arg22_1.data_ptr()), c_void_p(arg23_1.data_ptr()), c_void_p(arg24_1.data_ptr()), c_void_p(arg25_1.data_ptr()), c_void_p(arg26_1.data_ptr()), c_void_p(arg27_1.data_ptr()), c_void_p(arg28_1.data_ptr()), c_void_p(arg29_1.data_ptr()), c_void_p(arg30_1.data_ptr()), c_void_p(arg31_1.data_ptr()), c_void_p(arg32_1.data_ptr()), c_void_p(arg33_1.data_ptr()), c_void_p(arg34_1.data_ptr()), c_void_p(arg35_1.data_ptr()), c_void_p(arg36_1.data_ptr()), c_void_p(arg37_1.data_ptr()), c_void_p(arg38_1.data_ptr()), c_void_p(arg39_1.data_ptr()), c_void_p(arg40_1.data_ptr()), c_void_p(arg41_1.data_ptr()), c_void_p(arg42_1.data_ptr()), c_void_p(arg43_1.data_ptr()), c_void_p(arg44_1.data_ptr()), c_void_p(arg45_1.data_ptr()), c_void_p(arg46_1.data_ptr()), c_void_p(arg47_1.data_ptr()), c_void_p(arg48_1.data_ptr()), c_void_p(arg49_1.data_ptr()))
+    del arg0_1
+    del arg10_1
+    del arg11_1
+    del arg12_1
+    del arg13_1
+    del arg14_1
+    del arg15_1
+    del arg16_1
+    del arg17_1
+    del arg18_1
+    del arg19_1
+    del arg1_1
+    del arg20_1
+    del arg21_1
+    del arg22_1
+    del arg23_1
+    del arg24_1
+    del arg25_1
+    del arg26_1
+    del arg27_1
+    del arg28_1
+    del arg29_1
+    del arg2_1
+    del arg30_1
+    del arg31_1
+    del arg32_1
+    del arg33_1
+    del arg34_1
+    del arg35_1
+    del arg36_1
+    del arg37_1
+    del arg38_1
+    del arg39_1
+    del arg3_1
+    del arg40_1
+    del arg41_1
+    del arg42_1
+    del arg43_1
+    del arg44_1
+    del arg45_1
+    del arg46_1
+    del arg47_1
+    del arg48_1
+    del arg49_1
+    del arg4_1
+    del arg5_1
+    del arg6_1
+    del arg7_1
+    del arg8_1
+    del arg9_1
+    return (buf6, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg2_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg3_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg4_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg5_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg6_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg7_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg8_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg9_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg10_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg11_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg12_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg13_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg14_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg15_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg16_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg17_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg18_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg19_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg20_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg21_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg22_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg23_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg24_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg25_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg26_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg27_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg28_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg29_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg30_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg31_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg32_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg33_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg34_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg35_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg36_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg37_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg38_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg39_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg40_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg41_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg42_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg43_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg44_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg45_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg46_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg47_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg48_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg49_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1, arg8_1, arg9_1, arg10_1, arg11_1, arg12_1, arg13_1, arg14_1, arg15_1, arg16_1, arg17_1, arg18_1, arg19_1, arg20_1, arg21_1, arg22_1, arg23_1, arg24_1, arg25_1, arg26_1, arg27_1, arg28_1, arg29_1, arg30_1, arg31_1, arg32_1, arg33_1, arg34_1, arg35_1, arg36_1, arg37_1, arg38_1, arg39_1, arg40_1, arg41_1, arg42_1, arg43_1, arg44_1, arg45_1, arg46_1, arg47_1, arg48_1, arg49_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

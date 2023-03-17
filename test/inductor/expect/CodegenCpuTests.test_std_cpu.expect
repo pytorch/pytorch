@@ -1,0 +1,544 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       float* in_out_ptr1,
+                       float* in_out_ptr2,
+                       float* in_out_ptr3,
+                       float* in_out_ptr4,
+                       float* in_out_ptr5,
+                       float* in_out_ptr6,
+                       float* in_out_ptr7,
+                       const float* in_ptr0,
+                       float* out_ptr0,
+                       float* out_ptr2,
+                       float* out_ptr4,
+                       float* out_ptr5,
+                       float* out_ptr7,
+                       float* out_ptr10,
+                       float* out_ptr12)
+{
+    auto out_ptr6 = in_out_ptr0;
+    auto out_ptr8 = in_out_ptr1;
+    auto out_ptr11 = in_out_ptr2;
+    auto out_ptr13 = in_out_ptr3;
+    auto out_ptr14 = in_out_ptr4;
+    auto out_ptr1 = in_out_ptr5;
+    auto out_ptr3 = in_out_ptr6;
+    auto out_ptr9 = in_out_ptr7;
+    {
+        {
+            #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+            float tmp1 = 0;
+            auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+            #pragma omp parallel num_threads(4)
+            {
+                #pragma omp for reduction(+:tmp1_vec)
+                for(long i0=0; i0<32; i0+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                    tmp1_vec += tmp0;
+                }
+                #pragma omp for simd simdlen(4) reduction(+:tmp1)
+                for(long i0=256; i0<256; i0+=1)
+                {
+                    auto tmp0 = in_ptr0[i0];
+                    tmp1 += tmp0;
+                }
+            }
+            tmp1 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp1_vec);
+            out_ptr0[0] = tmp1;
+        }
+    }
+    {
+        {
+            #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+            float tmp6 = 0;
+            auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
+            float tmp7 = 0;
+            auto tmp7_vec = at::vec::Vectorized<float>(tmp7);
+            #pragma omp parallel num_threads(4)
+            {
+                #pragma omp for reduction(+:tmp6_vec) reduction(+:tmp7_vec)
+                for(long i0=0; i0<32; i0+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                    auto tmp1 = at::vec::Vectorized<float>(out_ptr0[0]);
+                    auto tmp2 = at::vec::Vectorized<float>(static_cast<float>(256));
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6_vec += tmp5;
+                    tmp7_vec += tmp0;
+                }
+                #pragma omp for simd simdlen(4) reduction(+:tmp6) reduction(+:tmp7)
+                for(long i0=256; i0<256; i0+=1)
+                {
+                    auto tmp0 = in_ptr0[i0];
+                    auto tmp1 = out_ptr0[0];
+                    auto tmp2 = static_cast<float>(256);
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6 += tmp5;
+                    tmp7 += tmp0;
+                }
+            }
+            tmp6 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp6_vec);
+            tmp7 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp7_vec);
+            out_ptr1[0] = tmp6;
+            out_ptr2[0] = tmp7;
+        }
+    }
+    {
+        {
+            #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+            float tmp6 = 0;
+            auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
+            float tmp7 = 0;
+            auto tmp7_vec = at::vec::Vectorized<float>(tmp7);
+            #pragma omp parallel num_threads(4)
+            {
+                #pragma omp for reduction(+:tmp6_vec) reduction(+:tmp7_vec)
+                for(long i0=0; i0<32; i0+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                    auto tmp1 = at::vec::Vectorized<float>(out_ptr2[0]);
+                    auto tmp2 = at::vec::Vectorized<float>(static_cast<float>(256));
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6_vec += tmp5;
+                    tmp7_vec += tmp0;
+                }
+                #pragma omp for simd simdlen(4) reduction(+:tmp6) reduction(+:tmp7)
+                for(long i0=256; i0<256; i0+=1)
+                {
+                    auto tmp0 = in_ptr0[i0];
+                    auto tmp1 = out_ptr2[0];
+                    auto tmp2 = static_cast<float>(256);
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6 += tmp5;
+                    tmp7 += tmp0;
+                }
+            }
+            tmp6 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp6_vec);
+            tmp7 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp7_vec);
+            out_ptr3[0] = tmp6;
+            out_ptr4[0] = tmp7;
+        }
+    }
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+                    float tmp1 = 0;
+                    auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (8*i1));
+                        tmp1_vec += tmp0;
+                    }
+                    #pragma omp simd simdlen(4)  reduction(+:tmp1)
+                    for(long i1=8; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (8*i0)];
+                        tmp1 += tmp0;
+                    }
+                    tmp1 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp1_vec);
+                    out_ptr5[i0] = tmp1;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+                    float tmp6 = 0;
+                    auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
+                    float tmp7 = 0;
+                    auto tmp7_vec = at::vec::Vectorized<float>(tmp7);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (8*i1));
+                        auto tmp1 = at::vec::Vectorized<float>(out_ptr5[i0]);
+                        auto tmp2 = at::vec::Vectorized<float>(static_cast<float>(8));
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6_vec += tmp5;
+                        tmp7_vec += tmp0;
+                    }
+                    #pragma omp simd simdlen(4)  reduction(+:tmp6) reduction(+:tmp7)
+                    for(long i1=8; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (8*i0)];
+                        auto tmp1 = out_ptr5[i0];
+                        auto tmp2 = static_cast<float>(8);
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6 += tmp5;
+                        tmp7 += tmp0;
+                    }
+                    tmp6 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp6_vec);
+                    tmp7 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp7_vec);
+                    out_ptr6[i0] = tmp6;
+                    out_ptr7[i0] = tmp7;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr6 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(7));
+                auto tmp2 = tmp0 / tmp1;
+                tmp2.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=32; i0<32; i0+=1)
+            {
+                auto tmp0 = out_ptr6[i0];
+                auto tmp1 = static_cast<float>(7);
+                auto tmp2 = tmp0 / tmp1;
+                in_out_ptr0[i0] = tmp2;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+                    float tmp6 = 0;
+                    auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (8*i1));
+                        auto tmp1 = at::vec::Vectorized<float>(out_ptr7[i0]);
+                        auto tmp2 = at::vec::Vectorized<float>(static_cast<float>(8));
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6_vec += tmp5;
+                    }
+                    #pragma omp simd simdlen(4)  reduction(+:tmp6)
+                    for(long i1=8; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (8*i0)];
+                        auto tmp1 = out_ptr7[i0];
+                        auto tmp2 = static_cast<float>(8);
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6 += tmp5;
+                    }
+                    tmp6 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp6_vec);
+                    out_ptr8[i0] = tmp6;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr8 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(8));
+                auto tmp2 = tmp0 / tmp1;
+                tmp2.store(in_out_ptr1 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=32; i0<32; i0+=1)
+            {
+                auto tmp0 = out_ptr8[i0];
+                auto tmp1 = static_cast<float>(8);
+                auto tmp2 = tmp0 / tmp1;
+                in_out_ptr1[i0] = tmp2;
+            }
+        }
+    }
+    {
+        {
+            #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+            float tmp6 = 0;
+            auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
+            #pragma omp parallel num_threads(4)
+            {
+                #pragma omp for reduction(+:tmp6_vec)
+                for(long i0=0; i0<32; i0+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                    auto tmp1 = at::vec::Vectorized<float>(out_ptr4[0]);
+                    auto tmp2 = at::vec::Vectorized<float>(static_cast<float>(256));
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6_vec += tmp5;
+                }
+                #pragma omp for simd simdlen(4) reduction(+:tmp6)
+                for(long i0=256; i0<256; i0+=1)
+                {
+                    auto tmp0 = in_ptr0[i0];
+                    auto tmp1 = out_ptr4[0];
+                    auto tmp2 = static_cast<float>(256);
+                    auto tmp3 = tmp1 / tmp2;
+                    auto tmp4 = tmp0 - tmp3;
+                    auto tmp5 = tmp4 * tmp4;
+                    tmp6 += tmp5;
+                }
+            }
+            tmp6 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp6_vec);
+            out_ptr9[0] = tmp6;
+        }
+    }
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    float tmp1 = 0;
+                    for(long i1=0; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (32*i1)];
+                        tmp1 += tmp0;
+                    }
+                    out_ptr10[i0] = tmp1;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    float tmp6 = 0;
+                    float tmp7 = 0;
+                    for(long i1=0; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (32*i1)];
+                        auto tmp1 = out_ptr10[i0];
+                        auto tmp2 = static_cast<float>(8);
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6 += tmp5;
+                        tmp7 += tmp0;
+                    }
+                    out_ptr11[i0] = tmp6;
+                    out_ptr12[i0] = tmp7;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                auto tmp0 = out_ptr11[i0];
+                auto tmp1 = static_cast<float>(7.00000000000000);
+                auto tmp2 = tmp0 / tmp1;
+                auto tmp3 = std::sqrt(tmp2);
+                in_out_ptr2[i0] = tmp3;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<32; i0+=1)
+            {
+                {
+                    float tmp6 = 0;
+                    for(long i1=0; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (32*i1)];
+                        auto tmp1 = out_ptr12[i0];
+                        auto tmp2 = static_cast<float>(8);
+                        auto tmp3 = tmp1 / tmp2;
+                        auto tmp4 = tmp0 - tmp3;
+                        auto tmp5 = tmp4 * tmp4;
+                        tmp6 += tmp5;
+                    }
+                    out_ptr13[i0] = tmp6;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr13 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(8));
+                auto tmp2 = tmp0 / tmp1;
+                auto tmp3 = tmp2.sqrt();
+                tmp3.store(in_out_ptr3 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=32; i0<32; i0+=1)
+            {
+                auto tmp0 = out_ptr13[i0];
+                auto tmp1 = static_cast<float>(8);
+                auto tmp2 = tmp0 / tmp1;
+                auto tmp3 = std::sqrt(tmp2);
+                in_out_ptr3[i0] = tmp3;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<8; i1+=1)
+                {
+                    auto tmp0 = in_ptr0[i1 + (32*i0)];
+                    auto tmp1 = in_ptr0[8 + i1 + (32*i0)];
+                    auto tmp3 = in_ptr0[16 + i1 + (32*i0)];
+                    auto tmp5 = in_ptr0[24 + i1 + (32*i0)];
+                    auto tmp2 = tmp0 + tmp1;
+                    auto tmp4 = tmp2 + tmp3;
+                    auto tmp6 = tmp4 + tmp5;
+                    auto tmp7 = static_cast<float>(4);
+                    auto tmp8 = tmp6 / tmp7;
+                    auto tmp9 = tmp0 - tmp8;
+                    auto tmp10 = tmp9 * tmp9;
+                    auto tmp11 = tmp1 - tmp8;
+                    auto tmp12 = tmp11 * tmp11;
+                    auto tmp13 = tmp10 + tmp12;
+                    auto tmp14 = tmp3 - tmp8;
+                    auto tmp15 = tmp14 * tmp14;
+                    auto tmp16 = tmp13 + tmp15;
+                    auto tmp17 = tmp5 - tmp8;
+                    auto tmp18 = tmp17 * tmp17;
+                    auto tmp19 = tmp16 + tmp18;
+                    auto tmp20 = static_cast<float>(3.00000000000000);
+                    auto tmp21 = tmp19 / tmp20;
+                    out_ptr14[i1 + (8*i0)] = tmp21;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr14 + 8*i0);
+                auto tmp1 = tmp0.sqrt();
+                tmp1.store(in_out_ptr4 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=64; i0<64; i0+=1)
+            {
+                auto tmp0 = out_ptr14[i0];
+                auto tmp1 = std::sqrt(tmp0);
+                in_out_ptr4[i0] = tmp1;
+            }
+        }
+        #pragma omp single
+        {
+            {
+                auto tmp0 = out_ptr1[0];
+                auto tmp1 = static_cast<float>(255);
+                auto tmp2 = tmp0 / tmp1;
+                in_out_ptr5[0] = tmp2;
+            }
+        }
+        #pragma omp single
+        {
+            {
+                auto tmp0 = out_ptr3[0];
+                auto tmp1 = static_cast<float>(256);
+                auto tmp2 = tmp0 / tmp1;
+                in_out_ptr6[0] = tmp2;
+            }
+        }
+        #pragma omp single
+        {
+            {
+                auto tmp0 = out_ptr9[0];
+                auto tmp1 = static_cast<float>(256);
+                auto tmp2 = tmp0 / tmp1;
+                auto tmp3 = std::sqrt(tmp2);
+                in_out_ptr7[0] = tmp3;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((1, 1, 1, 1), (1, 1, 1, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((), (), device='cpu', dtype=torch.float32)
+    buf2 = empty_strided((1, 1, 1, 1), (1, 1, 1, 1), device='cpu', dtype=torch.float32)
+    buf3 = empty_strided((), (), device='cpu', dtype=torch.float32)
+    buf10 = empty_strided((1, 1, 1, 1), (1, 1, 1, 1), device='cpu', dtype=torch.float32)
+    buf4 = empty_strided((2, 4, 4, 1), (16, 4, 1, 32), device='cpu', dtype=torch.float32)
+    buf5 = empty_strided((2, 4, 4), (16, 4, 1), device='cpu', dtype=torch.float32)
+    buf7 = empty_strided((2, 4, 4, 1), (16, 4, 1, 32), device='cpu', dtype=torch.float32)
+    buf6 = buf5; del buf5  # reuse
+    buf8 = empty_strided((2, 4, 4), (16, 4, 1), device='cpu', dtype=torch.float32)
+    buf9 = buf8; del buf8  # reuse
+    buf11 = empty_strided((), (), device='cpu', dtype=torch.float32)
+    buf12 = empty_strided((1, 1, 4, 8), (32, 32, 8, 1), device='cpu', dtype=torch.float32)
+    buf13 = empty_strided((4, 8), (8, 1), device='cpu', dtype=torch.float32)
+    buf15 = empty_strided((1, 1, 4, 8), (32, 32, 8, 1), device='cpu', dtype=torch.float32)
+    buf14 = buf13; del buf13  # reuse
+    buf16 = empty_strided((4, 8), (8, 1), device='cpu', dtype=torch.float32)
+    buf17 = buf16; del buf16  # reuse
+    buf18 = empty_strided((2, 4, 1, 8), (32, 8, 64, 1), device='cpu', dtype=torch.float32)
+    buf19 = as_strided(buf18, (2, 4, 1, 8), (32, 8, 8, 1)); del buf18  # reuse
+    buf20 = buf1; del buf1  # reuse
+    buf21 = buf3; del buf3  # reuse
+    buf22 = buf11; del buf11  # reuse
+    kernel_cpp_0(c_void_p(buf6.data_ptr()), c_void_p(buf9.data_ptr()), c_void_p(buf14.data_ptr()), c_void_p(buf17.data_ptr()), c_void_p(buf19.data_ptr()), c_void_p(buf20.data_ptr()), c_void_p(buf21.data_ptr()), c_void_p(buf22.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf10.data_ptr()), c_void_p(buf4.data_ptr()), c_void_p(buf7.data_ptr()), c_void_p(buf12.data_ptr()), c_void_p(buf15.data_ptr()))
+    del arg0_1
+    return (buf20, buf21, buf6, buf9, buf22, buf14, buf17, buf19, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((2, 4, 4, 8), (128, 32, 8, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

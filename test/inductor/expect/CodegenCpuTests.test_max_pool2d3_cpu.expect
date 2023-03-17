@@ -1,0 +1,439 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0,
+                       long* out_ptr1,
+                       float* out_ptr2,
+                       long* out_ptr3)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<4; i1+=1)
+                {
+                    auto tmp0 = static_cast<long>((-1) + (2*i0));
+                    auto tmp1 = static_cast<long>(0);
+                    auto tmp2 = tmp0 >= tmp1;
+                    auto tmp3 = static_cast<long>(8);
+                    auto tmp4 = tmp0 < tmp3;
+                    auto tmp5 = tmp2 & tmp4;
+                    auto tmp6 = static_cast<long>((-1) + (2*i1));
+                    auto tmp7 = tmp6 >= tmp1;
+                    auto tmp8 = tmp6 < tmp3;
+                    auto tmp9 = tmp7 & tmp8;
+                    auto tmp10 = tmp5 & tmp9;
+                    auto tmp11 = [&]
+                    {
+                        auto tmp12 = in_ptr0[(-9) + (2*i1) + (16*i0)];
+                        return tmp12;
+                    }
+                    ;
+                    auto tmp13 = tmp10 ? tmp11() : -std::numeric_limits<decltype(tmp11())>::infinity();
+                    auto tmp14 = static_cast<long>(2*i1);
+                    auto tmp15 = tmp14 >= tmp1;
+                    auto tmp16 = tmp14 < tmp3;
+                    auto tmp17 = tmp15 & tmp16;
+                    auto tmp18 = tmp5 & tmp17;
+                    auto tmp19 = [&]
+                    {
+                        auto tmp20 = in_ptr0[(-8) + (2*i1) + (16*i0)];
+                        return tmp20;
+                    }
+                    ;
+                    auto tmp21 = tmp18 ? tmp19() : -std::numeric_limits<decltype(tmp19())>::infinity();
+                    auto tmp22 = (tmp13 != tmp13) ? tmp13 : std::max(tmp21, tmp13);
+                    auto tmp23 = static_cast<long>(1 + (2*i1));
+                    auto tmp24 = tmp23 >= tmp1;
+                    auto tmp25 = tmp23 < tmp3;
+                    auto tmp26 = tmp24 & tmp25;
+                    auto tmp27 = tmp5 & tmp26;
+                    auto tmp28 = [&]
+                    {
+                        auto tmp29 = in_ptr0[(-7) + (2*i1) + (16*i0)];
+                        return tmp29;
+                    }
+                    ;
+                    auto tmp30 = tmp27 ? tmp28() : -std::numeric_limits<decltype(tmp28())>::infinity();
+                    auto tmp31 = (tmp22 != tmp22) ? tmp22 : std::max(tmp30, tmp22);
+                    auto tmp32 = static_cast<long>(2*i0);
+                    auto tmp33 = tmp32 >= tmp1;
+                    auto tmp34 = tmp32 < tmp3;
+                    auto tmp35 = tmp33 & tmp34;
+                    auto tmp36 = tmp35 & tmp9;
+                    auto tmp37 = [&]
+                    {
+                        auto tmp38 = in_ptr0[(-1) + (2*i1) + (16*i0)];
+                        return tmp38;
+                    }
+                    ;
+                    auto tmp39 = tmp36 ? tmp37() : -std::numeric_limits<decltype(tmp37())>::infinity();
+                    auto tmp40 = (tmp31 != tmp31) ? tmp31 : std::max(tmp39, tmp31);
+                    auto tmp41 = tmp35 & tmp17;
+                    auto tmp42 = [&]
+                    {
+                        auto tmp43 = in_ptr0[(2*i1) + (16*i0)];
+                        return tmp43;
+                    }
+                    ;
+                    auto tmp44 = tmp41 ? tmp42() : -std::numeric_limits<decltype(tmp42())>::infinity();
+                    auto tmp45 = (tmp40 != tmp40) ? tmp40 : std::max(tmp44, tmp40);
+                    auto tmp46 = tmp35 & tmp26;
+                    auto tmp47 = [&]
+                    {
+                        auto tmp48 = in_ptr0[1 + (2*i1) + (16*i0)];
+                        return tmp48;
+                    }
+                    ;
+                    auto tmp49 = tmp46 ? tmp47() : -std::numeric_limits<decltype(tmp47())>::infinity();
+                    auto tmp50 = (tmp45 != tmp45) ? tmp45 : std::max(tmp49, tmp45);
+                    auto tmp51 = static_cast<long>(1 + (2*i0));
+                    auto tmp52 = tmp51 >= tmp1;
+                    auto tmp53 = tmp51 < tmp3;
+                    auto tmp54 = tmp52 & tmp53;
+                    auto tmp55 = tmp54 & tmp9;
+                    auto tmp56 = [&]
+                    {
+                        auto tmp57 = in_ptr0[7 + (2*i1) + (16*i0)];
+                        return tmp57;
+                    }
+                    ;
+                    auto tmp58 = tmp55 ? tmp56() : -std::numeric_limits<decltype(tmp56())>::infinity();
+                    auto tmp59 = (tmp50 != tmp50) ? tmp50 : std::max(tmp58, tmp50);
+                    auto tmp60 = tmp54 & tmp17;
+                    auto tmp61 = [&]
+                    {
+                        auto tmp62 = in_ptr0[8 + (2*i1) + (16*i0)];
+                        return tmp62;
+                    }
+                    ;
+                    auto tmp63 = tmp60 ? tmp61() : -std::numeric_limits<decltype(tmp61())>::infinity();
+                    auto tmp64 = (tmp59 != tmp59) ? tmp59 : std::max(tmp63, tmp59);
+                    auto tmp65 = tmp54 & tmp26;
+                    auto tmp66 = [&]
+                    {
+                        auto tmp67 = in_ptr0[9 + (2*i1) + (16*i0)];
+                        return tmp67;
+                    }
+                    ;
+                    auto tmp68 = tmp65 ? tmp66() : -std::numeric_limits<decltype(tmp66())>::infinity();
+                    auto tmp69 = (tmp64 != tmp64) ? tmp64 : std::max(tmp68, tmp64);
+                    auto tmp70 = [&]
+                    {
+                        auto tmp71 = in_ptr0[(-9) + (2*i1) + (16*i0)];
+                        return tmp71;
+                    }
+                    ;
+                    auto tmp72 = tmp10 ? tmp70() : -std::numeric_limits<decltype(tmp70())>::infinity();
+                    auto tmp73 = static_cast<long>((-9) + (2*i1) + (16*i0));
+                    auto tmp74 = [&]
+                    {
+                        auto tmp75 = in_ptr0[(-8) + (2*i1) + (16*i0)];
+                        return tmp75;
+                    }
+                    ;
+                    auto tmp76 = tmp18 ? tmp74() : -std::numeric_limits<decltype(tmp74())>::infinity();
+                    auto tmp77 = static_cast<long>((-8) + (2*i1) + (16*i0));
+                    auto tmp78 = tmp76 > tmp72;
+                    auto tmp79 = tmp78 ? tmp77 : tmp73;
+                    auto tmp80 = (tmp72 != tmp72) ? tmp72 : std::max(tmp76, tmp72);
+                    auto tmp81 = [&]
+                    {
+                        auto tmp82 = in_ptr0[(-7) + (2*i1) + (16*i0)];
+                        return tmp82;
+                    }
+                    ;
+                    auto tmp83 = tmp27 ? tmp81() : -std::numeric_limits<decltype(tmp81())>::infinity();
+                    auto tmp84 = static_cast<long>((-7) + (2*i1) + (16*i0));
+                    auto tmp85 = tmp83 > tmp80;
+                    auto tmp86 = tmp85 ? tmp84 : tmp79;
+                    auto tmp87 = (tmp80 != tmp80) ? tmp80 : std::max(tmp83, tmp80);
+                    auto tmp88 = [&]
+                    {
+                        auto tmp89 = in_ptr0[(-1) + (2*i1) + (16*i0)];
+                        return tmp89;
+                    }
+                    ;
+                    auto tmp90 = tmp36 ? tmp88() : -std::numeric_limits<decltype(tmp88())>::infinity();
+                    auto tmp91 = static_cast<long>((-1) + (2*i1) + (16*i0));
+                    auto tmp92 = tmp90 > tmp87;
+                    auto tmp93 = tmp92 ? tmp91 : tmp86;
+                    auto tmp94 = (tmp87 != tmp87) ? tmp87 : std::max(tmp90, tmp87);
+                    auto tmp95 = [&]
+                    {
+                        auto tmp96 = in_ptr0[(2*i1) + (16*i0)];
+                        return tmp96;
+                    }
+                    ;
+                    auto tmp97 = tmp41 ? tmp95() : -std::numeric_limits<decltype(tmp95())>::infinity();
+                    auto tmp98 = static_cast<long>((2*i1) + (16*i0));
+                    auto tmp99 = tmp97 > tmp94;
+                    auto tmp100 = tmp99 ? tmp98 : tmp93;
+                    auto tmp101 = (tmp94 != tmp94) ? tmp94 : std::max(tmp97, tmp94);
+                    auto tmp102 = [&]
+                    {
+                        auto tmp103 = in_ptr0[1 + (2*i1) + (16*i0)];
+                        return tmp103;
+                    }
+                    ;
+                    auto tmp104 = tmp46 ? tmp102() : -std::numeric_limits<decltype(tmp102())>::infinity();
+                    auto tmp105 = static_cast<long>(1 + (2*i1) + (16*i0));
+                    auto tmp106 = tmp104 > tmp101;
+                    auto tmp107 = tmp106 ? tmp105 : tmp100;
+                    auto tmp108 = (tmp101 != tmp101) ? tmp101 : std::max(tmp104, tmp101);
+                    auto tmp109 = [&]
+                    {
+                        auto tmp110 = in_ptr0[7 + (2*i1) + (16*i0)];
+                        return tmp110;
+                    }
+                    ;
+                    auto tmp111 = tmp55 ? tmp109() : -std::numeric_limits<decltype(tmp109())>::infinity();
+                    auto tmp112 = static_cast<long>(7 + (2*i1) + (16*i0));
+                    auto tmp113 = tmp111 > tmp108;
+                    auto tmp114 = tmp113 ? tmp112 : tmp107;
+                    auto tmp115 = (tmp108 != tmp108) ? tmp108 : std::max(tmp111, tmp108);
+                    auto tmp116 = [&]
+                    {
+                        auto tmp117 = in_ptr0[8 + (2*i1) + (16*i0)];
+                        return tmp117;
+                    }
+                    ;
+                    auto tmp118 = tmp60 ? tmp116() : -std::numeric_limits<decltype(tmp116())>::infinity();
+                    auto tmp119 = static_cast<long>(8 + (2*i1) + (16*i0));
+                    auto tmp120 = tmp118 > tmp115;
+                    auto tmp121 = tmp120 ? tmp119 : tmp114;
+                    auto tmp122 = (tmp115 != tmp115) ? tmp115 : std::max(tmp118, tmp115);
+                    auto tmp123 = [&]
+                    {
+                        auto tmp124 = in_ptr0[9 + (2*i1) + (16*i0)];
+                        return tmp124;
+                    }
+                    ;
+                    auto tmp125 = tmp65 ? tmp123() : -std::numeric_limits<decltype(tmp123())>::infinity();
+                    auto tmp126 = static_cast<long>(9 + (2*i1) + (16*i0));
+                    auto tmp127 = tmp125 > tmp122;
+                    auto tmp128 = tmp127 ? tmp126 : tmp121;
+                    auto tmp129 = (tmp122 != tmp122) ? tmp122 : std::max(tmp125, tmp122);
+                    auto tmp130 = [&]
+                    {
+                        auto tmp131 = in_ptr0[(-9) + (2*i1) + (16*i0)];
+                        return tmp131;
+                    }
+                    ;
+                    auto tmp132 = tmp10 ? tmp130() : -std::numeric_limits<decltype(tmp130())>::infinity();
+                    auto tmp133 = [&]
+                    {
+                        auto tmp134 = in_ptr0[(-8) + (2*i1) + (16*i0)];
+                        return tmp134;
+                    }
+                    ;
+                    auto tmp135 = tmp18 ? tmp133() : -std::numeric_limits<decltype(tmp133())>::infinity();
+                    auto tmp136 = (tmp132 != tmp132) ? tmp132 : std::max(tmp135, tmp132);
+                    auto tmp137 = [&]
+                    {
+                        auto tmp138 = in_ptr0[(-7) + (2*i1) + (16*i0)];
+                        return tmp138;
+                    }
+                    ;
+                    auto tmp139 = tmp27 ? tmp137() : -std::numeric_limits<decltype(tmp137())>::infinity();
+                    auto tmp140 = (tmp136 != tmp136) ? tmp136 : std::max(tmp139, tmp136);
+                    auto tmp141 = [&]
+                    {
+                        auto tmp142 = in_ptr0[(-1) + (2*i1) + (16*i0)];
+                        return tmp142;
+                    }
+                    ;
+                    auto tmp143 = tmp36 ? tmp141() : -std::numeric_limits<decltype(tmp141())>::infinity();
+                    auto tmp144 = (tmp140 != tmp140) ? tmp140 : std::max(tmp143, tmp140);
+                    auto tmp145 = [&]
+                    {
+                        auto tmp146 = in_ptr0[(2*i1) + (16*i0)];
+                        return tmp146;
+                    }
+                    ;
+                    auto tmp147 = tmp41 ? tmp145() : -std::numeric_limits<decltype(tmp145())>::infinity();
+                    auto tmp148 = (tmp144 != tmp144) ? tmp144 : std::max(tmp147, tmp144);
+                    auto tmp149 = [&]
+                    {
+                        auto tmp150 = in_ptr0[1 + (2*i1) + (16*i0)];
+                        return tmp150;
+                    }
+                    ;
+                    auto tmp151 = tmp46 ? tmp149() : -std::numeric_limits<decltype(tmp149())>::infinity();
+                    auto tmp152 = (tmp148 != tmp148) ? tmp148 : std::max(tmp151, tmp148);
+                    auto tmp153 = [&]
+                    {
+                        auto tmp154 = in_ptr0[7 + (2*i1) + (16*i0)];
+                        return tmp154;
+                    }
+                    ;
+                    auto tmp155 = tmp55 ? tmp153() : -std::numeric_limits<decltype(tmp153())>::infinity();
+                    auto tmp156 = (tmp152 != tmp152) ? tmp152 : std::max(tmp155, tmp152);
+                    auto tmp157 = [&]
+                    {
+                        auto tmp158 = in_ptr0[8 + (2*i1) + (16*i0)];
+                        return tmp158;
+                    }
+                    ;
+                    auto tmp159 = tmp60 ? tmp157() : -std::numeric_limits<decltype(tmp157())>::infinity();
+                    auto tmp160 = (tmp156 != tmp156) ? tmp156 : std::max(tmp159, tmp156);
+                    auto tmp161 = [&]
+                    {
+                        auto tmp162 = in_ptr0[9 + (2*i1) + (16*i0)];
+                        return tmp162;
+                    }
+                    ;
+                    auto tmp163 = tmp65 ? tmp161() : -std::numeric_limits<decltype(tmp161())>::infinity();
+                    auto tmp164 = (tmp160 != tmp160) ? tmp160 : std::max(tmp163, tmp160);
+                    auto tmp165 = [&]
+                    {
+                        auto tmp166 = in_ptr0[(-9) + (2*i1) + (16*i0)];
+                        return tmp166;
+                    }
+                    ;
+                    auto tmp167 = tmp10 ? tmp165() : -std::numeric_limits<decltype(tmp165())>::infinity();
+                    auto tmp168 = [&]
+                    {
+                        auto tmp169 = in_ptr0[(-8) + (2*i1) + (16*i0)];
+                        return tmp169;
+                    }
+                    ;
+                    auto tmp170 = tmp18 ? tmp168() : -std::numeric_limits<decltype(tmp168())>::infinity();
+                    auto tmp171 = tmp170 > tmp167;
+                    auto tmp172 = tmp171 ? tmp77 : tmp73;
+                    auto tmp173 = (tmp167 != tmp167) ? tmp167 : std::max(tmp170, tmp167);
+                    auto tmp174 = [&]
+                    {
+                        auto tmp175 = in_ptr0[(-7) + (2*i1) + (16*i0)];
+                        return tmp175;
+                    }
+                    ;
+                    auto tmp176 = tmp27 ? tmp174() : -std::numeric_limits<decltype(tmp174())>::infinity();
+                    auto tmp177 = tmp176 > tmp173;
+                    auto tmp178 = tmp177 ? tmp84 : tmp172;
+                    auto tmp179 = (tmp173 != tmp173) ? tmp173 : std::max(tmp176, tmp173);
+                    auto tmp180 = [&]
+                    {
+                        auto tmp181 = in_ptr0[(-1) + (2*i1) + (16*i0)];
+                        return tmp181;
+                    }
+                    ;
+                    auto tmp182 = tmp36 ? tmp180() : -std::numeric_limits<decltype(tmp180())>::infinity();
+                    auto tmp183 = tmp182 > tmp179;
+                    auto tmp184 = tmp183 ? tmp91 : tmp178;
+                    auto tmp185 = (tmp179 != tmp179) ? tmp179 : std::max(tmp182, tmp179);
+                    auto tmp186 = [&]
+                    {
+                        auto tmp187 = in_ptr0[(2*i1) + (16*i0)];
+                        return tmp187;
+                    }
+                    ;
+                    auto tmp188 = tmp41 ? tmp186() : -std::numeric_limits<decltype(tmp186())>::infinity();
+                    auto tmp189 = tmp188 > tmp185;
+                    auto tmp190 = tmp189 ? tmp98 : tmp184;
+                    auto tmp191 = (tmp185 != tmp185) ? tmp185 : std::max(tmp188, tmp185);
+                    auto tmp192 = [&]
+                    {
+                        auto tmp193 = in_ptr0[1 + (2*i1) + (16*i0)];
+                        return tmp193;
+                    }
+                    ;
+                    auto tmp194 = tmp46 ? tmp192() : -std::numeric_limits<decltype(tmp192())>::infinity();
+                    auto tmp195 = tmp194 > tmp191;
+                    auto tmp196 = tmp195 ? tmp105 : tmp190;
+                    auto tmp197 = (tmp191 != tmp191) ? tmp191 : std::max(tmp194, tmp191);
+                    auto tmp198 = [&]
+                    {
+                        auto tmp199 = in_ptr0[7 + (2*i1) + (16*i0)];
+                        return tmp199;
+                    }
+                    ;
+                    auto tmp200 = tmp55 ? tmp198() : -std::numeric_limits<decltype(tmp198())>::infinity();
+                    auto tmp201 = tmp200 > tmp197;
+                    auto tmp202 = tmp201 ? tmp112 : tmp196;
+                    auto tmp203 = (tmp197 != tmp197) ? tmp197 : std::max(tmp200, tmp197);
+                    auto tmp204 = [&]
+                    {
+                        auto tmp205 = in_ptr0[8 + (2*i1) + (16*i0)];
+                        return tmp205;
+                    }
+                    ;
+                    auto tmp206 = tmp60 ? tmp204() : -std::numeric_limits<decltype(tmp204())>::infinity();
+                    auto tmp207 = tmp206 > tmp203;
+                    auto tmp208 = tmp207 ? tmp119 : tmp202;
+                    auto tmp209 = (tmp203 != tmp203) ? tmp203 : std::max(tmp206, tmp203);
+                    auto tmp210 = [&]
+                    {
+                        auto tmp211 = in_ptr0[9 + (2*i1) + (16*i0)];
+                        return tmp211;
+                    }
+                    ;
+                    auto tmp212 = tmp65 ? tmp210() : -std::numeric_limits<decltype(tmp210())>::infinity();
+                    auto tmp213 = tmp212 > tmp209;
+                    auto tmp214 = tmp213 ? tmp126 : tmp208;
+                    auto tmp215 = (tmp209 != tmp209) ? tmp209 : std::max(tmp212, tmp209);
+                    out_ptr0[i1 + (4*i0)] = tmp69;
+                    out_ptr1[i1 + (4*i0)] = tmp128;
+                    out_ptr2[i1 + (4*i0)] = tmp164;
+                    out_ptr3[i1 + (4*i0)] = tmp214;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((1, 1, 4, 4), (16, 16, 4, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((1, 1, 4, 4), (16, 16, 4, 1), device='cpu', dtype=torch.int64)
+    buf2 = empty_strided((1, 1, 4, 4), (16, 16, 4, 1), device='cpu', dtype=torch.float32)
+    buf3 = empty_strided((1, 1, 4, 4), (16, 16, 4, 1), device='cpu', dtype=torch.int64)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf3.data_ptr()))
+    del arg0_1
+    return (buf0, buf1, buf2, buf3, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((1, 1, 8, 8), (64, 64, 8, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

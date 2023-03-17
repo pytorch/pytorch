@@ -1,0 +1,178 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<4; i1+=1)
+                {
+                    auto tmp0 = static_cast<long>((-1) + (2*i0));
+                    auto tmp1 = static_cast<long>(0);
+                    auto tmp2 = tmp0 >= tmp1;
+                    auto tmp3 = static_cast<long>(8);
+                    auto tmp4 = tmp0 < tmp3;
+                    auto tmp5 = tmp2 & tmp4;
+                    auto tmp6 = static_cast<long>((-1) + (2*i1));
+                    auto tmp7 = tmp6 >= tmp1;
+                    auto tmp8 = tmp6 < tmp3;
+                    auto tmp9 = tmp7 & tmp8;
+                    auto tmp10 = tmp5 & tmp9;
+                    auto tmp11 = [&]
+                    {
+                        auto tmp12 = in_ptr0[(-9) + (2*i1) + (16*i0)];
+                        return tmp12;
+                    }
+                    ;
+                    auto tmp13 = tmp10 ? tmp11() : static_cast<decltype(tmp11())>(0.0);
+                    auto tmp14 = static_cast<long>(2*i1);
+                    auto tmp15 = tmp14 >= tmp1;
+                    auto tmp16 = tmp14 < tmp3;
+                    auto tmp17 = tmp15 & tmp16;
+                    auto tmp18 = tmp5 & tmp17;
+                    auto tmp19 = [&]
+                    {
+                        auto tmp20 = in_ptr0[(-8) + (2*i1) + (16*i0)];
+                        return tmp20;
+                    }
+                    ;
+                    auto tmp21 = tmp18 ? tmp19() : static_cast<decltype(tmp19())>(0.0);
+                    auto tmp22 = tmp21 + tmp13;
+                    auto tmp23 = static_cast<long>(1 + (2*i1));
+                    auto tmp24 = tmp23 >= tmp1;
+                    auto tmp25 = tmp23 < tmp3;
+                    auto tmp26 = tmp24 & tmp25;
+                    auto tmp27 = tmp5 & tmp26;
+                    auto tmp28 = [&]
+                    {
+                        auto tmp29 = in_ptr0[(-7) + (2*i1) + (16*i0)];
+                        return tmp29;
+                    }
+                    ;
+                    auto tmp30 = tmp27 ? tmp28() : static_cast<decltype(tmp28())>(0.0);
+                    auto tmp31 = tmp30 + tmp22;
+                    auto tmp32 = static_cast<long>(2*i0);
+                    auto tmp33 = tmp32 >= tmp1;
+                    auto tmp34 = tmp32 < tmp3;
+                    auto tmp35 = tmp33 & tmp34;
+                    auto tmp36 = tmp35 & tmp9;
+                    auto tmp37 = [&]
+                    {
+                        auto tmp38 = in_ptr0[(-1) + (2*i1) + (16*i0)];
+                        return tmp38;
+                    }
+                    ;
+                    auto tmp39 = tmp36 ? tmp37() : static_cast<decltype(tmp37())>(0.0);
+                    auto tmp40 = tmp39 + tmp31;
+                    auto tmp41 = tmp35 & tmp17;
+                    auto tmp42 = [&]
+                    {
+                        auto tmp43 = in_ptr0[(2*i1) + (16*i0)];
+                        return tmp43;
+                    }
+                    ;
+                    auto tmp44 = tmp41 ? tmp42() : static_cast<decltype(tmp42())>(0.0);
+                    auto tmp45 = tmp44 + tmp40;
+                    auto tmp46 = tmp35 & tmp26;
+                    auto tmp47 = [&]
+                    {
+                        auto tmp48 = in_ptr0[1 + (2*i1) + (16*i0)];
+                        return tmp48;
+                    }
+                    ;
+                    auto tmp49 = tmp46 ? tmp47() : static_cast<decltype(tmp47())>(0.0);
+                    auto tmp50 = tmp49 + tmp45;
+                    auto tmp51 = static_cast<long>(1 + (2*i0));
+                    auto tmp52 = tmp51 >= tmp1;
+                    auto tmp53 = tmp51 < tmp3;
+                    auto tmp54 = tmp52 & tmp53;
+                    auto tmp55 = tmp54 & tmp9;
+                    auto tmp56 = [&]
+                    {
+                        auto tmp57 = in_ptr0[7 + (2*i1) + (16*i0)];
+                        return tmp57;
+                    }
+                    ;
+                    auto tmp58 = tmp55 ? tmp56() : static_cast<decltype(tmp56())>(0.0);
+                    auto tmp59 = tmp58 + tmp50;
+                    auto tmp60 = tmp54 & tmp17;
+                    auto tmp61 = [&]
+                    {
+                        auto tmp62 = in_ptr0[8 + (2*i1) + (16*i0)];
+                        return tmp62;
+                    }
+                    ;
+                    auto tmp63 = tmp60 ? tmp61() : static_cast<decltype(tmp61())>(0.0);
+                    auto tmp64 = tmp63 + tmp59;
+                    auto tmp65 = tmp54 & tmp26;
+                    auto tmp66 = [&]
+                    {
+                        auto tmp67 = in_ptr0[9 + (2*i1) + (16*i0)];
+                        return tmp67;
+                    }
+                    ;
+                    auto tmp68 = tmp65 ? tmp66() : static_cast<decltype(tmp66())>(0.0);
+                    auto tmp69 = tmp68 + tmp64;
+                    auto tmp70 = static_cast<float>(0.3333333333333333);
+                    auto tmp71 = tmp69 * tmp70;
+                    out_ptr0[i1 + (4*i0)] = tmp71;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((1, 1, 4, 4), (16, 16, 4, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()))
+    del arg0_1
+    return (buf0, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((1, 1, 8, 8), (64, 64, 8, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

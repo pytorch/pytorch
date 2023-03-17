@@ -36,7 +36,7 @@ if HAS_CPU:
     class DynamicShapesCodegenCpuTests(inductor_tests.DynamicShapesCpuTests):
         maxDiff = None
 
-        def common(self: TestCase, model, example_inputs, kwargs=None):
+        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
                 self=self,
                 model=model,
@@ -51,7 +51,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class DynamicShapesCodegenCudaTests(inductor_tests.DynamicShapesCudaTests):
         maxDiff = None
 
-        def common(self: TestCase, model, example_inputs, kwargs=None):
+        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
                 self=self,
                 model=model,

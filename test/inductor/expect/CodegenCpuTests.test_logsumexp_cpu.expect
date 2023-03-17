@@ -1,0 +1,235 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       float* in_out_ptr1,
+                       const float* in_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr3)
+{
+    auto out_ptr0 = in_out_ptr0;
+    auto out_ptr2 = in_out_ptr1;
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(max:at::vec::Vectorized<float>:omp_out = at::vec::maximum(omp_out, omp_in)) initializer(omp_priv={{-std::numeric_limits<float>::infinity()}})
+                    float tmp1 = -std::numeric_limits<float>::infinity();
+                    auto tmp1_vec = at::vec::Vectorized<float>(tmp1);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (8*i1));
+                        tmp1_vec = at::vec::maximum(tmp1_vec, tmp0);
+                    }
+                    #pragma omp simd simdlen(4)  reduction(max:tmp1)
+                    for(long i1=8; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (8*i0)];
+                        tmp1 = std::max(tmp1, tmp0);
+                    }
+                    tmp1 = std::max(tmp1, at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return at::vec::maximum(x, y);}, tmp1_vec));
+                    out_ptr0[i0] = tmp1;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+                    float tmp9 = 0;
+                    auto tmp9_vec = at::vec::Vectorized<float>(tmp9);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i0) + (8*i1));
+                        auto tmp1 = at::vec::Vectorized<float>(out_ptr0[i0]);
+                        auto tmp2 = tmp1.abs();
+                        auto tmp3 = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());
+                        auto tmp4 = to_float_mask(tmp2 == tmp3);
+                        auto tmp5 = at::vec::Vectorized<float>(static_cast<float>(0.0));
+                        auto tmp6 = decltype(tmp5)::blendv(tmp1, tmp5, tmp4);
+                        auto tmp7 = tmp0 - tmp6;
+                        auto tmp8 = tmp7.exp();
+                        tmp9_vec += tmp8;
+                    }
+                    #pragma omp simd simdlen(4)  reduction(+:tmp9)
+                    for(long i1=8; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (8*i0)];
+                        auto tmp1 = out_ptr0[i0];
+                        auto tmp2 = std::abs(tmp1);
+                        auto tmp3 = std::numeric_limits<float>::infinity();
+                        auto tmp4 = tmp2 == tmp3;
+                        auto tmp5 = static_cast<float>(0.0);
+                        auto tmp6 = tmp4 ? tmp5 : tmp1;
+                        auto tmp7 = tmp0 - tmp6;
+                        auto tmp8 = std::exp(tmp7);
+                        tmp9 += tmp8;
+                    }
+                    tmp9 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp9_vec);
+                    out_ptr1[i0] = tmp9;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<1; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr1 + 8*i0);
+                auto tmp2 = at::vec::Vectorized<float>::loadu(out_ptr0 + 8*i0);
+                auto tmp1 = tmp0.log();
+                auto tmp3 = tmp2.abs();
+                auto tmp4 = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());
+                auto tmp5 = to_float_mask(tmp3 == tmp4);
+                auto tmp6 = at::vec::Vectorized<float>(static_cast<float>(0.0));
+                auto tmp7 = decltype(tmp6)::blendv(tmp2, tmp6, tmp5);
+                auto tmp8 = tmp1 + tmp7;
+                tmp8.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=8; i0<8; i0+=1)
+            {
+                auto tmp0 = out_ptr1[i0];
+                auto tmp2 = out_ptr0[i0];
+                auto tmp1 = std::log(tmp0);
+                auto tmp3 = std::abs(tmp2);
+                auto tmp4 = std::numeric_limits<float>::infinity();
+                auto tmp5 = tmp3 == tmp4;
+                auto tmp6 = static_cast<float>(0.0);
+                auto tmp7 = tmp5 ? tmp6 : tmp2;
+                auto tmp8 = tmp1 + tmp7;
+                in_out_ptr0[i0] = tmp8;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                {
+                    float tmp1 = -std::numeric_limits<float>::infinity();
+                    for(long i1=0; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (8*i1)];
+                        tmp1 = std::max(tmp1, tmp0);
+                    }
+                    out_ptr2[i0] = tmp1;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                {
+                    float tmp9 = 0;
+                    for(long i1=0; i1<8; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (8*i1)];
+                        auto tmp1 = out_ptr2[i0];
+                        auto tmp2 = std::abs(tmp1);
+                        auto tmp3 = std::numeric_limits<float>::infinity();
+                        auto tmp4 = tmp2 == tmp3;
+                        auto tmp5 = static_cast<float>(0.0);
+                        auto tmp6 = tmp4 ? tmp5 : tmp1;
+                        auto tmp7 = tmp0 - tmp6;
+                        auto tmp8 = std::exp(tmp7);
+                        tmp9 += tmp8;
+                    }
+                    out_ptr3[i0] = tmp9;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<1; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr3 + 8*i0);
+                auto tmp2 = at::vec::Vectorized<float>::loadu(out_ptr2 + 8*i0);
+                auto tmp1 = tmp0.log();
+                auto tmp3 = tmp2.abs();
+                auto tmp4 = at::vec::Vectorized<float>(std::numeric_limits<float>::infinity());
+                auto tmp5 = to_float_mask(tmp3 == tmp4);
+                auto tmp6 = at::vec::Vectorized<float>(static_cast<float>(0.0));
+                auto tmp7 = decltype(tmp6)::blendv(tmp2, tmp6, tmp5);
+                auto tmp8 = tmp1 + tmp7;
+                auto tmp9 = at::vec::Vectorized<float>(static_cast<float>(2));
+                auto tmp10 = tmp8 - tmp9;
+                tmp10.store(in_out_ptr1 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=8; i0<8; i0+=1)
+            {
+                auto tmp0 = out_ptr3[i0];
+                auto tmp2 = out_ptr2[i0];
+                auto tmp1 = std::log(tmp0);
+                auto tmp3 = std::abs(tmp2);
+                auto tmp4 = std::numeric_limits<float>::infinity();
+                auto tmp5 = tmp3 == tmp4;
+                auto tmp6 = static_cast<float>(0.0);
+                auto tmp7 = tmp5 ? tmp6 : tmp2;
+                auto tmp8 = tmp1 + tmp7;
+                auto tmp9 = static_cast<float>(2);
+                auto tmp10 = tmp8 - tmp9;
+                in_out_ptr1[i0] = tmp10;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((8, 1), (1, 8), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((8, ), (1, ), device='cpu', dtype=torch.float32)
+    buf2 = as_strided(buf0, (8, ), (1, )); del buf0  # reuse
+    buf3 = empty_strided((1, 8), (8, 1), device='cpu', dtype=torch.float32)
+    buf4 = empty_strided((8, ), (1, ), device='cpu', dtype=torch.float32)
+    buf5 = as_strided(buf3, (8, ), (1, )); del buf3  # reuse
+    kernel_cpp_0(c_void_p(buf2.data_ptr()), c_void_p(buf5.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf4.data_ptr()))
+    del arg0_1
+    return (buf2, buf5, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((8, 8), (8, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

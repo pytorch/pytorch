@@ -1,0 +1,186 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0,
+                       const float* in_ptr0,
+                       float* out_ptr1)
+{
+    auto out_ptr0 = in_out_ptr0;
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for  collapse(2)
+            for(long i0=0; i0<2; i0+=1)
+            {
+                for(long i1=0; i1<80; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<118; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.4936708860759494);
+                        auto tmp8 = tmp6 * tmp7;
+                        auto tmp9 = static_cast<long>(tmp8);
+                        auto tmp10 = static_cast<long>(i2);
+                        auto tmp11 = static_cast<double>(tmp10);
+                        auto tmp12 = tmp11 * tmp2;
+                        auto tmp13 = tmp12 + tmp4;
+                        auto tmp14 = static_cast<float>(tmp13);
+                        auto tmp15 = static_cast<float>(0.49572649572649574);
+                        auto tmp16 = tmp14 * tmp15;
+                        auto tmp17 = static_cast<long>(tmp16);
+                        auto tmp18 = in_ptr0[tmp17 + (59*tmp9) + (2360*i0)];
+                        auto tmp19 = static_cast<float>(1.0);
+                        auto tmp20 = static_cast<float>(tmp9);
+                        auto tmp21 = tmp8 - tmp20;
+                        auto tmp22 = tmp19 - tmp21;
+                        auto tmp23 = tmp18 * tmp22;
+                        auto tmp24 = std::ceil(tmp8);
+                        auto tmp25 = static_cast<float>(39);
+                        auto tmp26 = (tmp25 != tmp25) ? tmp25 : std::min(tmp24, tmp25);
+                        auto tmp27 = static_cast<long>(tmp26);
+                        auto tmp28 = in_ptr0[tmp17 + (59*tmp27) + (2360*i0)];
+                        auto tmp29 = tmp28 * tmp21;
+                        auto tmp30 = tmp23 + tmp29;
+                        out_ptr0[i2 + (118*i1) + (9440*i0)] = tmp30;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for  collapse(2)
+            for(long i0=0; i0<2; i0+=1)
+            {
+                for(long i1=0; i1<80; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<118; i2+=1)
+                    {
+                        auto tmp0 = static_cast<long>(i1);
+                        auto tmp1 = static_cast<double>(tmp0);
+                        auto tmp2 = static_cast<double>(1);
+                        auto tmp3 = tmp1 * tmp2;
+                        auto tmp4 = static_cast<double>(0);
+                        auto tmp5 = tmp3 + tmp4;
+                        auto tmp6 = static_cast<float>(tmp5);
+                        auto tmp7 = static_cast<float>(0.4936708860759494);
+                        auto tmp8 = tmp6 * tmp7;
+                        auto tmp9 = static_cast<long>(tmp8);
+                        auto tmp10 = static_cast<long>(i2);
+                        auto tmp11 = static_cast<double>(tmp10);
+                        auto tmp12 = tmp11 * tmp2;
+                        auto tmp13 = tmp12 + tmp4;
+                        auto tmp14 = static_cast<float>(tmp13);
+                        auto tmp15 = static_cast<float>(0.49572649572649574);
+                        auto tmp16 = tmp14 * tmp15;
+                        auto tmp17 = std::ceil(tmp16);
+                        auto tmp18 = static_cast<float>(58);
+                        auto tmp19 = (tmp18 != tmp18) ? tmp18 : std::min(tmp17, tmp18);
+                        auto tmp20 = static_cast<long>(tmp19);
+                        auto tmp21 = in_ptr0[tmp20 + (59*tmp9) + (2360*i0)];
+                        auto tmp22 = static_cast<float>(1.0);
+                        auto tmp23 = static_cast<float>(tmp9);
+                        auto tmp24 = tmp8 - tmp23;
+                        auto tmp25 = tmp22 - tmp24;
+                        auto tmp26 = tmp21 * tmp25;
+                        auto tmp27 = std::ceil(tmp8);
+                        auto tmp28 = static_cast<float>(39);
+                        auto tmp29 = (tmp28 != tmp28) ? tmp28 : std::min(tmp27, tmp28);
+                        auto tmp30 = static_cast<long>(tmp29);
+                        auto tmp31 = in_ptr0[tmp20 + (59*tmp30) + (2360*i0)];
+                        auto tmp32 = tmp31 * tmp24;
+                        auto tmp33 = tmp26 + tmp32;
+                        out_ptr1[i2 + (118*i1) + (9440*i0)] = tmp33;
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<160; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<118; i1+=1)
+                {
+                    auto tmp0 = out_ptr0[i1 + (118*i0)];
+                    auto tmp16 = out_ptr1[i1 + (118*i0)];
+                    auto tmp1 = static_cast<float>(1.0);
+                    auto tmp2 = static_cast<long>(i1);
+                    auto tmp3 = static_cast<double>(tmp2);
+                    auto tmp4 = static_cast<double>(1);
+                    auto tmp5 = tmp3 * tmp4;
+                    auto tmp6 = static_cast<double>(0);
+                    auto tmp7 = tmp5 + tmp6;
+                    auto tmp8 = static_cast<float>(tmp7);
+                    auto tmp9 = static_cast<float>(0.49572649572649574);
+                    auto tmp10 = tmp8 * tmp9;
+                    auto tmp11 = static_cast<long>(tmp10);
+                    auto tmp12 = static_cast<float>(tmp11);
+                    auto tmp13 = tmp10 - tmp12;
+                    auto tmp14 = tmp1 - tmp13;
+                    auto tmp15 = tmp0 * tmp14;
+                    auto tmp17 = tmp16 * tmp13;
+                    auto tmp18 = tmp15 + tmp17;
+                    in_out_ptr0[i1 + (118*i0)] = tmp18;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((1, 2, 80, 118), (18880, 9440, 118, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((1, 2, 80, 118), (18880, 9440, 118, 1), device='cpu', dtype=torch.float32)
+    buf2 = buf0; del buf0  # reuse
+    kernel_cpp_0(c_void_p(buf2.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(buf1.data_ptr()))
+    del arg0_1
+    return (buf2, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((1, 2, 40, 59), (4720, 2360, 59, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

@@ -1,0 +1,129 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       long* out_ptr0,
+                       long* out_ptr1,
+                       long* out_ptr2,
+                       long* out_ptr3)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<144; i0+=1)
+            {
+                {
+                    struct IndexValue_3 {size_t index; float value;};
+                    IndexValue_3 tmp1{0, -std::numeric_limits<float>::infinity()};
+                    #pragma omp declare reduction(argmax : struct IndexValue_3 :\
+                        omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
+                        omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
+                        initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+                    struct IndexValue_4 {size_t index; float value;};
+                    IndexValue_4 tmp2{0, std::numeric_limits<float>::infinity()};
+                    #pragma omp declare reduction(argmin : struct IndexValue_4 :\
+                        omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
+                        omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
+                        initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+                    for(long i1=0; i1<144; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i0 + (144*i1)];
+                        if (tmp1.value < tmp0) {
+                            tmp1.index = i1; tmp1.value = tmp0;
+                        }
+                        if (tmp2.value > tmp0) {
+                            tmp2.index = i1; tmp2.value = tmp0;
+                        }
+                    }
+                    out_ptr0[i0] = tmp1.index;
+                    out_ptr1[i0] = tmp2.index;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<144; i0+=1)
+            {
+                {
+                    struct IndexValue_5 {size_t index; float value;};
+                    IndexValue_5 tmp1{0, -std::numeric_limits<float>::infinity()};
+                    #pragma omp declare reduction(argmax : struct IndexValue_5 :\
+                        omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
+                        omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
+                        initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+                    struct IndexValue_6 {size_t index; float value;};
+                    IndexValue_6 tmp2{0, std::numeric_limits<float>::infinity()};
+                    #pragma omp declare reduction(argmin : struct IndexValue_6 :\
+                        omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
+                        omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
+                        initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+                    for(long i1=0; i1<144; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (144*i0)];
+                        if (tmp1.value < tmp0) {
+                            tmp1.index = i1; tmp1.value = tmp0;
+                        }
+                        if (tmp2.value > tmp0) {
+                            tmp2.index = i1; tmp2.value = tmp0;
+                        }
+                    }
+                    out_ptr2[i0] = tmp1.index;
+                    out_ptr3[i0] = tmp2.index;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, = args
+    args.clear()
+    buf0 = empty_strided((144, ), (1, ), device='cpu', dtype=torch.int64)
+    buf1 = empty_strided((144, ), (1, ), device='cpu', dtype=torch.int64)
+    buf2 = empty_strided((144, ), (1, ), device='cpu', dtype=torch.int64)
+    buf3 = empty_strided((144, ), (1, ), device='cpu', dtype=torch.int64)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf3.data_ptr()))
+    del arg0_1
+    return (buf0, buf1, buf2, buf3, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((144, 144), (144, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

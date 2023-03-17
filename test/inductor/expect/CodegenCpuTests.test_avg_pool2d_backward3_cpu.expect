@@ -1,0 +1,99 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<2016; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<21; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<21; i2+=1)
+                    {
+                        auto tmp0 = static_cast<int>(((1 + i1) / 2));
+                        auto tmp1 = static_cast<int>(((1 + i2) / 2));
+                        auto tmp2 = static_cast<int>(1 + (i1 / 2));
+                        auto tmp3 = static_cast<int>(1 + (i2 / 2));
+                        auto tmp4 = static_cast<int>(0);
+                        auto tmp5 = (tmp4 != tmp4) ? tmp4 : std::max(tmp0, tmp4);
+                        auto tmp6 = (tmp4 != tmp4) ? tmp4 : std::max(tmp1, tmp4);
+                        auto tmp7 = static_cast<int>(11);
+                        auto tmp8 = (tmp7 != tmp7) ? tmp7 : std::min(tmp2, tmp7);
+                        auto tmp9 = (tmp7 != tmp7) ? tmp7 : std::min(tmp3, tmp7);
+                        auto tmp10 = tmp5 + tmp4;
+                        auto tmp11 = tmp6 + tmp4;
+                        auto tmp12 = static_cast<int>(1);
+                        auto tmp13 = tmp8 - tmp12;
+                        auto tmp14 = (tmp13 != tmp13) ? tmp13 : std::min(tmp10, tmp13);
+                        auto tmp15 = tmp9 - tmp12;
+                        auto tmp16 = (tmp15 != tmp15) ? tmp15 : std::min(tmp11, tmp15);
+                        auto tmp17 = in_ptr0[tmp16 + (11*tmp14) + (121*i0)];
+                        auto tmp18 = tmp17 / 1;
+                        auto tmp19 = tmp10 < tmp8;
+                        auto tmp20 = tmp11 < tmp9;
+                        auto tmp21 = tmp19 & tmp20;
+                        auto tmp22 = static_cast<float>(0.0);
+                        auto tmp23 = tmp21 ? tmp18 : tmp22;
+                        out_ptr0[i2 + (21*i1) + (441*i0)] = tmp23;
+                    }
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1 = args
+    args.clear()
+    buf0 = empty_strided((1, 2016, 21, 21), (889056, 441, 21, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()))
+    del arg0_1
+    return (buf0, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((1, 2016, 11, 11), (243936, 121, 11, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((1, 2016, 21, 21), (889056, 441, 21, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

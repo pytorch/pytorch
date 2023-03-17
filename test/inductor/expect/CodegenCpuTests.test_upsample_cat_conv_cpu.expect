@@ -1,0 +1,171 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       const float* in_ptr1,
+                       const float* in_ptr2,
+                       float* out_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr2)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<2; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<24; i2+=1)
+                    {
+                        #pragma GCC ivdep
+                        for(long i3=0; i3<52; i3+=1)
+                        {
+                            auto tmp0 = static_cast<long>(i2);
+                            auto tmp1 = static_cast<double>(tmp0);
+                            auto tmp2 = static_cast<double>(1);
+                            auto tmp3 = tmp1 * tmp2;
+                            auto tmp4 = static_cast<double>(0);
+                            auto tmp5 = tmp3 + tmp4;
+                            auto tmp6 = static_cast<float>(tmp5);
+                            auto tmp7 = static_cast<float>(0.5);
+                            auto tmp8 = tmp6 * tmp7;
+                            auto tmp9 = static_cast<long>(tmp8);
+                            auto tmp10 = static_cast<long>(i3);
+                            auto tmp11 = static_cast<double>(tmp10);
+                            auto tmp12 = tmp11 * tmp2;
+                            auto tmp13 = tmp12 + tmp4;
+                            auto tmp14 = static_cast<float>(tmp13);
+                            auto tmp15 = tmp14 * tmp7;
+                            auto tmp16 = static_cast<long>(tmp15);
+                            auto tmp17 = in_ptr0[tmp16 + (26*tmp9) + (312*i1) + (624*i0)];
+                            out_ptr0[i3 + (52*i2) + (1248*i1) + (9984*i0)] = tmp17;
+                        }
+                    }
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                for(long i1=0; i1<936; i1+=1)
+                {
+                    auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr1 + (8*i1) + (7488*i0));
+                    tmp0.store(out_ptr1 + (8*i1) + (9984*i0));
+                }
+                #pragma omp simd simdlen(4)
+                for(long i1=7488; i1<7488; i1+=1)
+                {
+                    auto tmp0 = in_ptr1[i1 + (7488*i0)];
+                    out_ptr1[i1 + (9984*i0)] = tmp0;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<8; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<1; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<156; i2+=1)
+                    {
+                        float tmp1[8*8] __attribute__ ((aligned (8)));
+                        for (long i1_inner = 0; i1_inner < 8; i1_inner++)
+                        {
+                            auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr2 + (8*i2) + (1248*i1_inner) + (9984*i0) + (9984*i1));
+                            tmp0.store(tmp1 + 8*i1_inner);
+                        }
+                        at::vec::transpose_mxn<float,8,8>(tmp1, 8, out_ptr2 + (8*i1) + (64*i2) + (9984*i0), 8);
+                    }
+                    #pragma GCC ivdep
+                    for(long i2=1248; i2<1248; i2+=1)
+                    {
+                        for (long i1_inner = 0; i1_inner < 8; i1_inner++)
+                        {
+                            auto tmp0 = in_ptr2[i2 + (1248*i1_inner) + (9984*i0) + (9984*i1)];
+                            out_ptr2[i1_inner + (8*i1) + (8*i2) + (9984*i0)] = tmp0;
+                        }
+                    }
+                }
+                #pragma GCC ivdep
+                for(long i1=8; i1<8; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<1248; i2+=1)
+                    {
+                        auto tmp0 = in_ptr2[i2 + (1248*i1) + (9984*i0)];
+                        out_ptr2[i1 + (8*i2) + (9984*i0)] = tmp0;
+                    }
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1, arg2_1, arg3_1 = args
+    args.clear()
+    buf2 = empty_strided((8, 8, 24, 52), (9984, 1248, 52, 1), device='cpu', dtype=torch.float32)
+    buf0 = as_strided(buf2, (8, 2, 24, 52), (9984, 1248, 52, 1))  # alias
+    buf1 = as_strided(buf2, (8, 6, 24, 52), (9984, 1248, 52, 1), 2496)  # alias
+    buf3 = empty_strided((8, 8, 24, 52), (9984, 1, 416, 8), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg2_1.data_ptr()), c_void_p(arg3_1.data_ptr()), c_void_p(buf2.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf3.data_ptr()))
+    del arg2_1
+    del arg3_1
+    del buf0
+    del buf1
+    del buf2
+    buf4 = torch.ops.mkldnn._convolution_pointwise(buf3, arg0_1, arg1_1, (0, 0), (1, 1), (1, 1), 1, 'none', [], '')
+    assert_size_stride(buf4, (8, 5, 24, 52), (6240, 1, 260, 5))
+    del arg0_1
+    del arg1_1
+    return (buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((5, 8, 1, 1), (1, 0, 0, 0), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((5, ), (1, ), device='cpu', dtype=torch.float32)
+    arg2_1 = rand_strided((8, 2, 12, 26), (624, 312, 26, 1), device='cpu', dtype=torch.float32)
+    arg3_1 = rand_strided((8, 6, 24, 52), (7488, 1248, 52, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1, arg2_1, arg3_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

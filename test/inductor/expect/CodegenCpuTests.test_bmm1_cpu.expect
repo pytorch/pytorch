@@ -1,0 +1,137 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       const float* in_ptr1,
+                       float* out_ptr0,
+                       float* out_ptr1)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<16; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(1));
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=128; i0<128; i0+=1)
+            {
+                auto tmp0 = in_ptr0[i0];
+                auto tmp1 = static_cast<float>(1);
+                auto tmp2 = tmp0 + tmp1;
+                out_ptr0[i0] = tmp2;
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<10; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr1 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(2));
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(out_ptr1 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=80; i0<80; i0+=1)
+            {
+                auto tmp0 = in_ptr1[i0];
+                auto tmp1 = static_cast<float>(2);
+                auto tmp2 = tmp0 + tmp1;
+                out_ptr1[i0] = tmp2;
+            }
+        }
+    }
+}
+''')
+
+
+kernel_cpp_1 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<20; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(3));
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=160; i0<160; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = static_cast<float>(3);
+                auto tmp2 = tmp0 + tmp1;
+                in_out_ptr0[i0] = tmp2;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1 = args
+    args.clear()
+    buf0 = empty_strided((1, 16, 10), (160, 10, 1), device='cpu', dtype=torch.float32)
+    extern_kernels.bmm(arg0_1, arg1_1, out=buf0)
+    buf1 = empty_strided((1, 16, 8), (128, 8, 1), device='cpu', dtype=torch.float32)
+    buf2 = empty_strided((1, 8, 10), (80, 10, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(arg1_1.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()))
+    del arg0_1
+    del arg1_1
+    buf3 = empty_strided((1, 16, 10), (160, 10, 1), device='cpu', dtype=torch.float32)
+    extern_kernels.bmm(buf1, buf2, out=buf3)
+    del buf1
+    del buf2
+    buf4 = buf3; del buf3  # reuse
+    kernel_cpp_1(c_void_p(buf4.data_ptr()))
+    return (buf0, buf4, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((1, 16, 8), (128, 8, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((1, 8, 10), (80, 10, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

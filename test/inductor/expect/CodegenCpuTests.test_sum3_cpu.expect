@@ -1,0 +1,114 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       const float* in_ptr1,
+                       float* out_ptr0,
+                       float* out_ptr1,
+                       float* out_ptr2)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<10; i0+=1)
+            {
+                {
+                    #pragma omp declare reduction(+:at::vec::Vectorized<float>:omp_out += omp_in) initializer(omp_priv={{0}})
+                    float tmp3 = 0;
+                    auto tmp3_vec = at::vec::Vectorized<float>(tmp3);
+                    for(long i1=0; i1<1; i1+=1)
+                    {
+                        auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + (8*i1) + (10*i0));
+                        auto tmp1 = at::vec::Vectorized<float>::loadu(in_ptr1 + 8*i1);
+                        auto tmp2 = tmp0 + tmp1;
+                        tmp2.store(out_ptr0 + (8*i1) + (10*i0));
+                        tmp3_vec += tmp2;
+                    }
+                    #pragma omp simd simdlen(4)  reduction(+:tmp3)
+                    for(long i1=8; i1<10; i1+=1)
+                    {
+                        auto tmp0 = in_ptr0[i1 + (10*i0)];
+                        auto tmp1 = in_ptr1[i1];
+                        auto tmp2 = tmp0 + tmp1;
+                        out_ptr0[i1 + (10*i0)] = tmp2;
+                        tmp3 += tmp2;
+                    }
+                    tmp3 += at::vec::vec_reduce_all<float>([](at::vec::Vectorized<float>& x, at::vec::Vectorized<float>&y) {return x + y;}, tmp3_vec);
+                    out_ptr1[i0] = tmp3;
+                }
+            }
+        }
+        {
+            #pragma omp for
+            for(long i0=0; i0<1; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr1 + 8*i0);
+                auto tmp1 = at::vec::Vectorized<float>(static_cast<float>(10));
+                auto tmp2 = tmp0 + tmp1;
+                tmp2.store(out_ptr2 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=8; i0<10; i0+=1)
+            {
+                auto tmp0 = in_ptr1[i0];
+                auto tmp1 = static_cast<float>(10);
+                auto tmp2 = tmp0 + tmp1;
+                out_ptr2[i0] = tmp2;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1 = args
+    args.clear()
+    buf0 = empty_strided((10, 10), (10, 1), device='cpu', dtype=torch.float32)
+    buf1 = empty_strided((10, ), (1, ), device='cpu', dtype=torch.float32)
+    buf2 = empty_strided((10, ), (1, ), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(arg1_1.data_ptr()), c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()), c_void_p(buf2.data_ptr()))
+    del arg0_1
+    del arg1_1
+    return (buf0, buf1, buf2, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((10, 10), (10, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((1, 10), (10, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

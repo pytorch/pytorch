@@ -91,7 +91,7 @@ if HAS_CPU:
     class CodegenCpuTests(inductor_tests.CpuTests):
         maxDiff = None
 
-        def common(self: TestCase, model, example_inputs, kwargs=None):
+        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
                 self=self,
                 model=model,
@@ -106,7 +106,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     class CodegenCudaTests(inductor_tests.CudaTests):
         maxDiff = None
 
-        def common(self: TestCase, model, example_inputs, kwargs=None):
+        def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
                 self=self,
                 model=model,

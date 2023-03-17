@@ -1,0 +1,106 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       const float* in_ptr1,
+                       float* out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<2; i1+=1)
+                {
+                    float tmp0[8*8] __attribute__ ((aligned (8)));
+                    at::vec::transpose_mxn<float,8,8>(in_ptr0 + (8*i0) + (256*i1), 32, tmp0, 8);
+                    float tmp4[8*8] __attribute__ ((aligned (8)));
+                    for (long i0_inner = 0; i0_inner < 8; i0_inner++)
+                    {
+                        auto tmp1 = at::vec::Vectorized<float>::loadu(tmp0 + 8*i0_inner);
+                        auto tmp2 = at::vec::Vectorized<float>::loadu(in_ptr1 + (8*i1) + (16*i0_inner) + (128*i0));
+                        auto tmp3 = tmp1 + tmp2;
+                        tmp3.store(tmp4 + 8*i0_inner);
+                    }
+                    at::vec::transpose_mxn<float,8,8>(tmp4, 8, out_ptr0 + (8*i0) + (256*i1), 32);
+                }
+                #pragma GCC ivdep
+                for(long i1=16; i1<16; i1+=1)
+                {
+                    for (long i0_inner = 0; i0_inner < 8; i0_inner++)
+                    {
+                        auto tmp0 = in_ptr0[i0_inner + (8*i0) + (32*i1)];
+                        auto tmp1 = in_ptr1[i1 + (16*i0_inner) + (128*i0)];
+                        auto tmp2 = tmp0 + tmp1;
+                        out_ptr0[i0_inner + (8*i0) + (32*i1)] = tmp2;
+                    }
+                }
+            }
+            #pragma omp for
+            for(long i0=32; i0<32; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<16; i1+=1)
+                {
+                    auto tmp0 = in_ptr0[i0 + (32*i1)];
+                    auto tmp1 = in_ptr1[i1 + (16*i0)];
+                    auto tmp2 = tmp0 + tmp1;
+                    out_ptr0[i0 + (32*i1)] = tmp2;
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1 = args
+    args.clear()
+    buf0 = empty_strided((32, 16), (1, 32), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg0_1.data_ptr()), c_void_p(arg1_1.data_ptr()), c_void_p(buf0.data_ptr()))
+    del arg0_1
+    del arg1_1
+    return (buf0, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((16, 32), (32, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((32, 16), (16, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

@@ -11,14 +11,9 @@ aten = torch.ops.aten
 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
 async_compile = AsyncCompile()
 
-import triton
-import triton.language as tl
-from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
-from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-
 
 kernel_cpp_0 = async_compile.cpp('''
-#include "/tmp/torchinductor_nkaretnikov/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
 extern "C" void kernel(const float* in_ptr0,
                        float* out_ptr0,
                        float* out_ptr1,
@@ -26,12 +21,13 @@ extern "C" void kernel(const float* in_ptr0,
                        float* out_ptr3,
                        float* out_ptr4)
 {
-    #pragma omp parallel num_threads(24)
+    #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for  collapse(2)
+            #pragma omp for
             for(long i0=0; i0<8; i0+=1)
             {
+                #pragma GCC ivdep
                 for(long i1=0; i1<74; i1+=1)
                 {
                     auto tmp0 = static_cast<long>(i1);
@@ -51,9 +47,10 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for  collapse(2)
+            #pragma omp for
             for(long i0=0; i0<8; i0+=1)
             {
+                #pragma GCC ivdep
                 for(long i1=0; i1<70; i1+=1)
                 {
                     auto tmp0 = static_cast<long>(i1);
@@ -72,9 +69,10 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for  collapse(2)
+            #pragma omp for
             for(long i0=0; i0<8; i0+=1)
             {
+                #pragma GCC ivdep
                 for(long i1=0; i1<45; i1+=1)
                 {
                     auto tmp0 = static_cast<long>(i1);
@@ -93,9 +91,10 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for  collapse(2)
+            #pragma omp for
             for(long i0=0; i0<8; i0+=1)
             {
+                #pragma GCC ivdep
                 for(long i1=0; i1<36; i1+=1)
                 {
                     auto tmp0 = static_cast<long>(i1);

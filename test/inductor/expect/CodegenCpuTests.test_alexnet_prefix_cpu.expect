@@ -1,0 +1,106 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const float* in_ptr0,
+                       float* out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<1024; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<27; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<27; i2+=1)
+                    {
+                        auto tmp0 = in_ptr0[(2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp2 = in_ptr0[1 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp5 = in_ptr0[2 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp8 = in_ptr0[55 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp11 = in_ptr0[56 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp14 = in_ptr0[57 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp17 = in_ptr0[110 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp20 = in_ptr0[111 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp23 = in_ptr0[112 + (2*i2) + (110*i1) + (3025*i0)];
+                        auto tmp1 = tmp0 * (tmp0>0);
+                        auto tmp3 = tmp2 * (tmp2>0);
+                        auto tmp4 = (tmp1 != tmp1) ? tmp1 : std::max(tmp3, tmp1);
+                        auto tmp6 = tmp5 * (tmp5>0);
+                        auto tmp7 = (tmp4 != tmp4) ? tmp4 : std::max(tmp6, tmp4);
+                        auto tmp9 = tmp8 * (tmp8>0);
+                        auto tmp10 = (tmp7 != tmp7) ? tmp7 : std::max(tmp9, tmp7);
+                        auto tmp12 = tmp11 * (tmp11>0);
+                        auto tmp13 = (tmp10 != tmp10) ? tmp10 : std::max(tmp12, tmp10);
+                        auto tmp15 = tmp14 * (tmp14>0);
+                        auto tmp16 = (tmp13 != tmp13) ? tmp13 : std::max(tmp15, tmp13);
+                        auto tmp18 = tmp17 * (tmp17>0);
+                        auto tmp19 = (tmp16 != tmp16) ? tmp16 : std::max(tmp18, tmp16);
+                        auto tmp21 = tmp20 * (tmp20>0);
+                        auto tmp22 = (tmp19 != tmp19) ? tmp19 : std::max(tmp21, tmp19);
+                        auto tmp24 = tmp23 * (tmp23>0);
+                        auto tmp25 = (tmp22 != tmp22) ? tmp22 : std::max(tmp24, tmp22);
+                        out_ptr0[i2 + (27*i1) + (729*i0)] = tmp25;
+                    }
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1, arg2_1 = args
+    args.clear()
+    buf0 = aten.convolution(arg2_1, arg1_1, arg0_1, (4, 4), (2, 2), (1, 1), False, (0, 0), 1)
+    assert_size_stride(buf0, (16, 64, 55, 55), (193600, 3025, 55, 1))
+    del arg0_1
+    del arg1_1
+    del arg2_1
+    buf1 = empty_strided((16, 64, 27, 27), (46656, 729, 27, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(buf0.data_ptr()), c_void_p(buf1.data_ptr()))
+    return (buf1, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((64, ), (1, ), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((64, 3, 11, 11), (363, 121, 11, 1), device='cpu', dtype=torch.float32)
+    arg2_1 = rand_strided((16, 3, 224, 224), (150528, 50176, 224, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([arg0_1, arg1_1, arg2_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

@@ -1,0 +1,297 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(const long* in_ptr0,
+                       const float* in_ptr1,
+                       float* out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<128; i0+=1)
+            {
+                #pragma GCC ivdep
+                for(long i1=0; i1<3; i1+=1)
+                {
+                    #pragma GCC ivdep
+                    for(long i2=0; i2<4; i2+=1)
+                    {
+                        auto tmp0 = static_cast<int>(i2 + (4*i1));
+                        auto tmp1 = static_cast<int>((-2) + i1);
+                        auto tmp2 = static_cast<int>((-2) + i2);
+                        auto tmp3 = static_cast<int>(3 + i1);
+                        auto tmp4 = static_cast<int>(3 + i2);
+                        auto tmp5 = static_cast<int>(0);
+                        auto tmp6 = (tmp5 != tmp5) ? tmp5 : std::max(tmp1, tmp5);
+                        auto tmp7 = (tmp5 != tmp5) ? tmp5 : std::max(tmp2, tmp5);
+                        auto tmp8 = static_cast<int>(3);
+                        auto tmp9 = (tmp8 != tmp8) ? tmp8 : std::min(tmp3, tmp8);
+                        auto tmp10 = static_cast<int>(4);
+                        auto tmp11 = (tmp10 != tmp10) ? tmp10 : std::min(tmp4, tmp10);
+                        auto tmp12 = tmp6 + tmp5;
+                        auto tmp13 = tmp7 + tmp5;
+                        auto tmp14 = static_cast<int>(1);
+                        auto tmp15 = tmp9 - tmp14;
+                        auto tmp16 = (tmp15 != tmp15) ? tmp15 : std::min(tmp12, tmp15);
+                        auto tmp17 = tmp11 - tmp14;
+                        auto tmp18 = (tmp17 != tmp17) ? tmp17 : std::min(tmp13, tmp17);
+                        auto tmp19 = in_ptr0[tmp18 + (4*tmp16) + (12*i0)];
+                        auto tmp20 = in_ptr1[tmp18 + (4*tmp16) + (12*i0)];
+                        auto tmp21 = tmp19 == tmp0;
+                        auto tmp22 = static_cast<float>(0.0);
+                        auto tmp23 = tmp21 ? tmp20 : tmp22;
+                        auto tmp24 = tmp7 + tmp14;
+                        auto tmp25 = (tmp17 != tmp17) ? tmp17 : std::min(tmp24, tmp17);
+                        auto tmp26 = in_ptr0[tmp25 + (4*tmp16) + (12*i0)];
+                        auto tmp27 = in_ptr1[tmp25 + (4*tmp16) + (12*i0)];
+                        auto tmp28 = tmp26 == tmp0;
+                        auto tmp29 = tmp12 < tmp9;
+                        auto tmp30 = tmp24 < tmp11;
+                        auto tmp31 = tmp29 & tmp30;
+                        auto tmp32 = tmp31 & tmp28;
+                        auto tmp33 = tmp23 + tmp27;
+                        auto tmp34 = tmp32 ? tmp33 : tmp23;
+                        auto tmp35 = static_cast<int>(2);
+                        auto tmp36 = tmp7 + tmp35;
+                        auto tmp37 = (tmp17 != tmp17) ? tmp17 : std::min(tmp36, tmp17);
+                        auto tmp38 = in_ptr0[tmp37 + (4*tmp16) + (12*i0)];
+                        auto tmp39 = in_ptr1[tmp37 + (4*tmp16) + (12*i0)];
+                        auto tmp40 = tmp38 == tmp0;
+                        auto tmp41 = tmp36 < tmp11;
+                        auto tmp42 = tmp29 & tmp41;
+                        auto tmp43 = tmp42 & tmp40;
+                        auto tmp44 = tmp34 + tmp39;
+                        auto tmp45 = tmp43 ? tmp44 : tmp34;
+                        auto tmp46 = tmp7 + tmp8;
+                        auto tmp47 = (tmp17 != tmp17) ? tmp17 : std::min(tmp46, tmp17);
+                        auto tmp48 = in_ptr0[tmp47 + (4*tmp16) + (12*i0)];
+                        auto tmp49 = in_ptr1[tmp47 + (4*tmp16) + (12*i0)];
+                        auto tmp50 = tmp48 == tmp0;
+                        auto tmp51 = tmp46 < tmp11;
+                        auto tmp52 = tmp29 & tmp51;
+                        auto tmp53 = tmp52 & tmp50;
+                        auto tmp54 = tmp45 + tmp49;
+                        auto tmp55 = tmp53 ? tmp54 : tmp45;
+                        auto tmp56 = tmp7 + tmp10;
+                        auto tmp57 = (tmp17 != tmp17) ? tmp17 : std::min(tmp56, tmp17);
+                        auto tmp58 = in_ptr0[tmp57 + (4*tmp16) + (12*i0)];
+                        auto tmp59 = in_ptr1[tmp57 + (4*tmp16) + (12*i0)];
+                        auto tmp60 = tmp58 == tmp0;
+                        auto tmp61 = tmp56 < tmp11;
+                        auto tmp62 = tmp29 & tmp61;
+                        auto tmp63 = tmp62 & tmp60;
+                        auto tmp64 = tmp55 + tmp59;
+                        auto tmp65 = tmp63 ? tmp64 : tmp55;
+                        auto tmp66 = tmp6 + tmp14;
+                        auto tmp67 = (tmp15 != tmp15) ? tmp15 : std::min(tmp66, tmp15);
+                        auto tmp68 = in_ptr0[tmp18 + (4*tmp67) + (12*i0)];
+                        auto tmp69 = in_ptr1[tmp18 + (4*tmp67) + (12*i0)];
+                        auto tmp70 = tmp68 == tmp0;
+                        auto tmp71 = tmp66 < tmp9;
+                        auto tmp72 = tmp13 < tmp11;
+                        auto tmp73 = tmp71 & tmp72;
+                        auto tmp74 = tmp73 & tmp70;
+                        auto tmp75 = tmp65 + tmp69;
+                        auto tmp76 = tmp74 ? tmp75 : tmp65;
+                        auto tmp77 = in_ptr0[tmp25 + (4*tmp67) + (12*i0)];
+                        auto tmp78 = in_ptr1[tmp25 + (4*tmp67) + (12*i0)];
+                        auto tmp79 = tmp77 == tmp0;
+                        auto tmp80 = tmp71 & tmp30;
+                        auto tmp81 = tmp80 & tmp79;
+                        auto tmp82 = tmp76 + tmp78;
+                        auto tmp83 = tmp81 ? tmp82 : tmp76;
+                        auto tmp84 = in_ptr0[tmp37 + (4*tmp67) + (12*i0)];
+                        auto tmp85 = in_ptr1[tmp37 + (4*tmp67) + (12*i0)];
+                        auto tmp86 = tmp84 == tmp0;
+                        auto tmp87 = tmp71 & tmp41;
+                        auto tmp88 = tmp87 & tmp86;
+                        auto tmp89 = tmp83 + tmp85;
+                        auto tmp90 = tmp88 ? tmp89 : tmp83;
+                        auto tmp91 = in_ptr0[tmp47 + (4*tmp67) + (12*i0)];
+                        auto tmp92 = in_ptr1[tmp47 + (4*tmp67) + (12*i0)];
+                        auto tmp93 = tmp91 == tmp0;
+                        auto tmp94 = tmp71 & tmp51;
+                        auto tmp95 = tmp94 & tmp93;
+                        auto tmp96 = tmp90 + tmp92;
+                        auto tmp97 = tmp95 ? tmp96 : tmp90;
+                        auto tmp98 = in_ptr0[tmp57 + (4*tmp67) + (12*i0)];
+                        auto tmp99 = in_ptr1[tmp57 + (4*tmp67) + (12*i0)];
+                        auto tmp100 = tmp98 == tmp0;
+                        auto tmp101 = tmp71 & tmp61;
+                        auto tmp102 = tmp101 & tmp100;
+                        auto tmp103 = tmp97 + tmp99;
+                        auto tmp104 = tmp102 ? tmp103 : tmp97;
+                        auto tmp105 = tmp6 + tmp35;
+                        auto tmp106 = (tmp15 != tmp15) ? tmp15 : std::min(tmp105, tmp15);
+                        auto tmp107 = in_ptr0[tmp18 + (4*tmp106) + (12*i0)];
+                        auto tmp108 = in_ptr1[tmp18 + (4*tmp106) + (12*i0)];
+                        auto tmp109 = tmp107 == tmp0;
+                        auto tmp110 = tmp105 < tmp9;
+                        auto tmp111 = tmp110 & tmp72;
+                        auto tmp112 = tmp111 & tmp109;
+                        auto tmp113 = tmp104 + tmp108;
+                        auto tmp114 = tmp112 ? tmp113 : tmp104;
+                        auto tmp115 = in_ptr0[tmp25 + (4*tmp106) + (12*i0)];
+                        auto tmp116 = in_ptr1[tmp25 + (4*tmp106) + (12*i0)];
+                        auto tmp117 = tmp115 == tmp0;
+                        auto tmp118 = tmp110 & tmp30;
+                        auto tmp119 = tmp118 & tmp117;
+                        auto tmp120 = tmp114 + tmp116;
+                        auto tmp121 = tmp119 ? tmp120 : tmp114;
+                        auto tmp122 = in_ptr0[tmp37 + (4*tmp106) + (12*i0)];
+                        auto tmp123 = in_ptr1[tmp37 + (4*tmp106) + (12*i0)];
+                        auto tmp124 = tmp122 == tmp0;
+                        auto tmp125 = tmp110 & tmp41;
+                        auto tmp126 = tmp125 & tmp124;
+                        auto tmp127 = tmp121 + tmp123;
+                        auto tmp128 = tmp126 ? tmp127 : tmp121;
+                        auto tmp129 = in_ptr0[tmp47 + (4*tmp106) + (12*i0)];
+                        auto tmp130 = in_ptr1[tmp47 + (4*tmp106) + (12*i0)];
+                        auto tmp131 = tmp129 == tmp0;
+                        auto tmp132 = tmp110 & tmp51;
+                        auto tmp133 = tmp132 & tmp131;
+                        auto tmp134 = tmp128 + tmp130;
+                        auto tmp135 = tmp133 ? tmp134 : tmp128;
+                        auto tmp136 = in_ptr0[tmp57 + (4*tmp106) + (12*i0)];
+                        auto tmp137 = in_ptr1[tmp57 + (4*tmp106) + (12*i0)];
+                        auto tmp138 = tmp136 == tmp0;
+                        auto tmp139 = tmp110 & tmp61;
+                        auto tmp140 = tmp139 & tmp138;
+                        auto tmp141 = tmp135 + tmp137;
+                        auto tmp142 = tmp140 ? tmp141 : tmp135;
+                        auto tmp143 = tmp6 + tmp8;
+                        auto tmp144 = (tmp15 != tmp15) ? tmp15 : std::min(tmp143, tmp15);
+                        auto tmp145 = in_ptr0[tmp18 + (4*tmp144) + (12*i0)];
+                        auto tmp146 = in_ptr1[tmp18 + (4*tmp144) + (12*i0)];
+                        auto tmp147 = tmp145 == tmp0;
+                        auto tmp148 = tmp143 < tmp9;
+                        auto tmp149 = tmp148 & tmp72;
+                        auto tmp150 = tmp149 & tmp147;
+                        auto tmp151 = tmp142 + tmp146;
+                        auto tmp152 = tmp150 ? tmp151 : tmp142;
+                        auto tmp153 = in_ptr0[tmp25 + (4*tmp144) + (12*i0)];
+                        auto tmp154 = in_ptr1[tmp25 + (4*tmp144) + (12*i0)];
+                        auto tmp155 = tmp153 == tmp0;
+                        auto tmp156 = tmp148 & tmp30;
+                        auto tmp157 = tmp156 & tmp155;
+                        auto tmp158 = tmp152 + tmp154;
+                        auto tmp159 = tmp157 ? tmp158 : tmp152;
+                        auto tmp160 = in_ptr0[tmp37 + (4*tmp144) + (12*i0)];
+                        auto tmp161 = in_ptr1[tmp37 + (4*tmp144) + (12*i0)];
+                        auto tmp162 = tmp160 == tmp0;
+                        auto tmp163 = tmp148 & tmp41;
+                        auto tmp164 = tmp163 & tmp162;
+                        auto tmp165 = tmp159 + tmp161;
+                        auto tmp166 = tmp164 ? tmp165 : tmp159;
+                        auto tmp167 = in_ptr0[tmp47 + (4*tmp144) + (12*i0)];
+                        auto tmp168 = in_ptr1[tmp47 + (4*tmp144) + (12*i0)];
+                        auto tmp169 = tmp167 == tmp0;
+                        auto tmp170 = tmp148 & tmp51;
+                        auto tmp171 = tmp170 & tmp169;
+                        auto tmp172 = tmp166 + tmp168;
+                        auto tmp173 = tmp171 ? tmp172 : tmp166;
+                        auto tmp174 = in_ptr0[tmp57 + (4*tmp144) + (12*i0)];
+                        auto tmp175 = in_ptr1[tmp57 + (4*tmp144) + (12*i0)];
+                        auto tmp176 = tmp174 == tmp0;
+                        auto tmp177 = tmp148 & tmp61;
+                        auto tmp178 = tmp177 & tmp176;
+                        auto tmp179 = tmp173 + tmp175;
+                        auto tmp180 = tmp178 ? tmp179 : tmp173;
+                        auto tmp181 = tmp6 + tmp10;
+                        auto tmp182 = (tmp15 != tmp15) ? tmp15 : std::min(tmp181, tmp15);
+                        auto tmp183 = in_ptr0[tmp18 + (4*tmp182) + (12*i0)];
+                        auto tmp184 = in_ptr1[tmp18 + (4*tmp182) + (12*i0)];
+                        auto tmp185 = tmp183 == tmp0;
+                        auto tmp186 = tmp181 < tmp9;
+                        auto tmp187 = tmp186 & tmp72;
+                        auto tmp188 = tmp187 & tmp185;
+                        auto tmp189 = tmp180 + tmp184;
+                        auto tmp190 = tmp188 ? tmp189 : tmp180;
+                        auto tmp191 = in_ptr0[tmp25 + (4*tmp182) + (12*i0)];
+                        auto tmp192 = in_ptr1[tmp25 + (4*tmp182) + (12*i0)];
+                        auto tmp193 = tmp191 == tmp0;
+                        auto tmp194 = tmp186 & tmp30;
+                        auto tmp195 = tmp194 & tmp193;
+                        auto tmp196 = tmp190 + tmp192;
+                        auto tmp197 = tmp195 ? tmp196 : tmp190;
+                        auto tmp198 = in_ptr0[tmp37 + (4*tmp182) + (12*i0)];
+                        auto tmp199 = in_ptr1[tmp37 + (4*tmp182) + (12*i0)];
+                        auto tmp200 = tmp198 == tmp0;
+                        auto tmp201 = tmp186 & tmp41;
+                        auto tmp202 = tmp201 & tmp200;
+                        auto tmp203 = tmp197 + tmp199;
+                        auto tmp204 = tmp202 ? tmp203 : tmp197;
+                        auto tmp205 = in_ptr0[tmp47 + (4*tmp182) + (12*i0)];
+                        auto tmp206 = in_ptr1[tmp47 + (4*tmp182) + (12*i0)];
+                        auto tmp207 = tmp205 == tmp0;
+                        auto tmp208 = tmp186 & tmp51;
+                        auto tmp209 = tmp208 & tmp207;
+                        auto tmp210 = tmp204 + tmp206;
+                        auto tmp211 = tmp209 ? tmp210 : tmp204;
+                        auto tmp212 = in_ptr0[tmp57 + (4*tmp182) + (12*i0)];
+                        auto tmp213 = in_ptr1[tmp57 + (4*tmp182) + (12*i0)];
+                        auto tmp214 = tmp212 == tmp0;
+                        auto tmp215 = tmp186 & tmp61;
+                        auto tmp216 = tmp215 & tmp214;
+                        auto tmp217 = tmp211 + tmp213;
+                        auto tmp218 = tmp216 ? tmp217 : tmp211;
+                        out_ptr0[i2 + (4*i1) + (12*i0)] = tmp218;
+                    }
+                }
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    arg0_1, arg1_1, arg2_1 = args
+    args.clear()
+    buf0 = empty_strided((2, 64, 3, 4), (768, 12, 4, 1), device='cpu', dtype=torch.float32)
+    kernel_cpp_0(c_void_p(arg2_1.data_ptr()), c_void_p(arg0_1.data_ptr()), c_void_p(buf0.data_ptr()))
+    del arg0_1
+    del arg2_1
+    return (buf0, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    arg0_1 = rand_strided((2, 64, 3, 4), (768, 12, 4, 1), device='cpu', dtype=torch.float32)
+    arg1_1 = rand_strided((2, 64, 3, 4), (768, 12, 4, 1), device='cpu', dtype=torch.float32)
+    arg2_1 = rand_strided((2, 64, 3, 4), (768, 12, 4, 1), device='cpu', dtype=torch.int64)
+    print_performance(lambda: call([arg0_1, arg1_1, arg2_1]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+

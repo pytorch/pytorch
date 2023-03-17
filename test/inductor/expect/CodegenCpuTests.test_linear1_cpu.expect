@@ -1,0 +1,79 @@
+
+from ctypes import c_void_p, c_long
+import torch
+import math
+import random
+from torch import empty_strided, as_strided, device
+from torch._inductor.codecache import AsyncCompile
+from torch._inductor.select_algorithm import extern_kernels
+
+aten = torch.ops.aten
+assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+async_compile = AsyncCompile()
+
+
+kernel_cpp_0 = async_compile.cpp('''
+#include "/tmp/torchinductor_jenkins/ao/caomrguwaptybystzop6sbmdii67jqxwyhyzjizs5gbwosh2mdkg.h"
+extern "C" void kernel(float* in_out_ptr0)
+{
+    #pragma omp parallel num_threads(4)
+    {
+        {
+            #pragma omp for
+            for(long i0=0; i0<4; i0+=1)
+            {
+                auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
+                auto tmp1 = decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp());
+                tmp1.store(in_out_ptr0 + 8*i0);
+            }
+            #pragma omp for simd simdlen(4)
+            for(long i0=32; i0<32; i0+=1)
+            {
+                auto tmp0 = in_out_ptr0[i0];
+                auto tmp1 = decltype(tmp0)(1) / (decltype(tmp0)(1) + std::exp(-tmp0));
+                in_out_ptr0[i0] = tmp1;
+            }
+        }
+    }
+}
+''')
+
+
+async_compile.wait(globals())
+del async_compile
+
+def call(args):
+    primals_1, primals_2, primals_3 = args
+    args.clear()
+    buf0 = empty_strided((2, 16), (16, 1), device='cpu', dtype=torch.float32)
+    extern_kernels.addmm(primals_2, primals_3, as_strided(primals_1, (8, 16), (1, 8)), alpha=1, beta=1, out=buf0)
+    del primals_1
+    del primals_2
+    buf1 = buf0; del buf0  # reuse
+    kernel_cpp_0(c_void_p(buf1.data_ptr()))
+    return (buf1, primals_3, buf1, )
+
+
+def benchmark_compiled_module():
+    from torch._dynamo.testing import rand_strided
+    from torch._inductor.utils import print_performance
+    primals_1 = rand_strided((16, 8), (8, 1), device='cpu', dtype=torch.float32)
+    primals_2 = rand_strided((16, ), (1, ), device='cpu', dtype=torch.float32)
+    primals_3 = rand_strided((2, 8), (8, 1), device='cpu', dtype=torch.float32)
+    print_performance(lambda: call([primals_1, primals_2, primals_3]))
+
+
+if __name__ == "__main__":
+    import argparse
+    from torch._inductor.utils import benchmark_all_kernels
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")
+    parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")
+    args = parser.parse_args()
+
+    if args.benchmark_kernels:
+        benchmark_all_kernels('None', args.benchmark_all_configs)
+    else:
+        benchmark_compiled_module()
+
