@@ -855,19 +855,17 @@ class TestAutograd(TestCase):
             self.assertEqual(x.grad, expected_grad)
             self.assertIsNone(x_list[i].grad)
 
-    def test_grad_zero_grad_unused(self):
-        x = torch.tensor(0.5, dtype=torch.float32, requires_grad=True)
-        a = torch.tensor(1, dtype=torch.float32, requires_grad=True)
+    def test_materialized_grad(self):
+        x = torch.tensor(0.5, requires_grad=True)
+        a = torch.tensor(1.0, requires_grad=True)
         y = x * a
-        dydx = torch.autograd.grad(y, x, create_graph=True, allow_unused=True, zero_grad_unused=True)
-        d2ydx2_None = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True)
-        d2ydx2 = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True, zero_grad_unused=True)
-        self.assertIsNone(d2ydx2_None[0])
-        self.assertEqual(d2ydx2[0], 0)
-        try:
-            d3ydx3 = torch.autograd.grad(d2ydx2, x, allow_unused=True, zero_grad_unused=True)
-        except RuntimeError as e:
-            assert False, "Should not raise error"
+        dydx = torch.autograd.grad(y, x, create_graph=True)
+        d2ydx2_none = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True)
+        d2ydx2 = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True, materialized_grad=True)
+        d3ydx3 = torch.autograd.grad(d2ydx2, x, allow_unused=True, materialized_grad=True)
+        self.assertIsNone(d2ydx2_none[0])
+        self.assertEqual(d2ydx2[0].item(), 0)
+        self.assertEqual(d3ydx3[0].item(), 0)
 
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
