@@ -180,6 +180,7 @@ def _rebuild_tensor_v2(
 
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
 
+
 # In _legacy_load() in serialization.py we unpickle storages after the sparse
 # tensors have been already unpickled. Those storages contain data necessary for
 # validating sparse tensors: indices and values. That's why sparse tensors are
