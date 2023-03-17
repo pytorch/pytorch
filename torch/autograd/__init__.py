@@ -251,8 +251,8 @@ def grad(
         create_graph (bool, optional): If ``True``, graph of the derivative will
             be constructed, allowing to compute higher order derivative products.
             Default: ``False``.
-        allow_unused (Optional[bool], optional): If ``False``, specifying inputs 
-            that were not used when computing outputs (and therefore their grad is 
+        allow_unused (Optional[bool], optional): If ``False``, specifying inputs
+            that were not used when computing outputs (and therefore their grad is
             always zero) is an error. Defaults to the value of ``materialize_grads``.
         is_grads_batched (bool, optional): If ``True``, the first dimension of each
             tensor in ``grad_outputs`` will be interpreted as the batch dimension.
@@ -320,7 +320,7 @@ def grad(
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
     if materialize_grads:
-        result = tuple(output if output is not None else torch.zeros_like(input, requires_grad=True) 
+        result = tuple(output if output is not None else torch.zeros_like(input, requires_grad=True)
                        for (output, input) in zip(result, t_inputs))
     return result
 
