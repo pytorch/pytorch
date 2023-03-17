@@ -4056,6 +4056,9 @@ else:
         self.assertEqual((2, 0), w.index_select(0, ind_01).shape)
         ind_01_int32 = torch.tensor([0, 1], dtype=torch.int32, device=device)
         self.assertEqual((2, 0), w.index_select(0, ind_01_int32).shape)
+        s = torch.randn([], device=device)
+        ind_0 = torch.tensor([0], dtype=torch.int32, device=device)
+        self.assertEqual([], s.index_select(0, ind_0).shape)
         if device == 'cpu':
             w = torch.randn((0, 3), device=device)
             with self.assertRaisesRegex(RuntimeError, "self indexing axis dim should be positive"):
@@ -4063,6 +4066,8 @@ else:
             ind_05 = torch.tensor([0, 5], dtype=torch.int64, device=device)
             with self.assertRaisesRegex(RuntimeError, "INDICES element is out of DATA bounds"):
                 torch.index_select(w, 1, ind_05)
+            with self.assertRaisesRegex(RuntimeError, "Index to scalar can have only 1 value"):
+                torch.index_select(s, 0, ind_empty)
         self.assertRaises(RuntimeError, lambda: torch.ones([]).index_select(0, torch.Tensor([0, 0]).int()))
 
     # FIXME: find a test suite for the pdist operator
@@ -6489,30 +6494,30 @@ class TestTorch(TestCase):
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
         self.assertEqual(torch.ByteStorage.from_buffer(a).tolist(), [1, 2, 3, 4])
-        shorts = torch.ShortStorage.from_buffer(a, 'big')
+        shorts = torch.ShortStorage.from_buffer(a, 'big' if sys.byteorder == 'little' else 'little')
         self.assertEqual(shorts.size(), 2)
         self.assertEqual(shorts.tolist(), [258, 772])
-        ints = torch.IntStorage.from_buffer(a, 'little')
+        ints = torch.IntStorage.from_buffer(a, 'little' if sys.byteorder == 'little' else 'big')
         self.assertEqual(ints.size(), 1)
         self.assertEqual(ints[0], 67305985)
         f = bytearray([0x40, 0x10, 0x00, 0x00])
-        floats = torch.FloatStorage.from_buffer(f, 'big')
+        floats = torch.FloatStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
         self.assertEqual(floats.size(), 1)
         self.assertEqual(floats[0], 2.25)
 
         f = bytearray([0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x10, 0x40])
-        bools = torch.BoolStorage.from_buffer(f, 'big')
+        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
         self.assertEqual(bools.size(), 8)
         self.assertEqual(bools.tolist(), [False, True, True, True, True, True, True, True])
         self.assertEqual(bools.type(), 'torch.BoolStorage')
         self.assertTrue(isinstance(bools, torch.BoolStorage))
 
         f = bytearray(b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9')
-        bools = torch.BoolStorage.from_buffer(f, 'big')
+        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
         self.assertEqual(bools.size(), 19)
 
         f = bytearray(b'\0x4A')
-        bools = torch.BoolStorage.from_buffer(f, 'big')
+        bools = torch.BoolStorage.from_buffer(f, 'big' if sys.byteorder == 'little' else 'little')
         self.assertEqual(bools.size(), 4)
         self.assertEqual(bools.tolist(), [False, True, True, True])
         bytes = torch.ByteStorage.from_buffer(a)
