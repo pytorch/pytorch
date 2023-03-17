@@ -101,7 +101,7 @@ namespace {
           *out_ptr_NCHW = out_acc;
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        std::fesetround(FE_TONEAREST);
+        std::fesetround(FP_INT_TONEAREST);
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
@@ -284,7 +284,7 @@ namespace {
           *out_ptr_NCDHW = out_acc;
         }
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        std::fesetround(FE_TONEAREST);
+        std::fesetround(FP_INT_TONEAREST);
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
         index_t iz_nearest = static_cast<index_t>(std::nearbyint(iz));
@@ -433,7 +433,7 @@ namespace {
         gGrid_ptr_NHW[1] = giy_mult * giy;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
-          std::fesetround(FE_TONEAREST);
+          std::fesetround(FP_INT_TONEAREST);
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
@@ -723,7 +723,7 @@ namespace {
         gGrid_ptr_NDHW[2] = giz_mult * giz;
       } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
         if (input_requires_grad) {
-          std::fesetround(FE_TONEAREST);
+          std::fesetround(FP_INT_TONEAREST);
           auto ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           auto iy_nearest = static_cast<index_t>(std::nearbyint(iy));
           auto iz_nearest = static_cast<index_t>(std::nearbyint(iz));
