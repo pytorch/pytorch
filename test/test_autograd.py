@@ -855,17 +855,22 @@ class TestAutograd(TestCase):
             self.assertEqual(x.grad, expected_grad)
             self.assertIsNone(x_list[i].grad)
 
-    def test_materialized_grad(self):
+    def test_materialize_grad(self):
         x = torch.tensor(0.5, requires_grad=True)
         a = torch.tensor(1.0, requires_grad=True)
         y = x * a
         dydx = torch.autograd.grad(y, x, create_graph=True)
         d2ydx2_none = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True)
-        d2ydx2 = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True, materialized_grad=True)
-        d3ydx3 = torch.autograd.grad(d2ydx2, x, allow_unused=True, materialized_grad=True)
+        d2ydx2 = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True, materialize_grad=True)
+        d3ydx3 = torch.autograd.grad(d2ydx2, x, materialize_grad=True)  # set allow_unused=True implicitly
         self.assertIsNone(d2ydx2_none[0])
         self.assertEqual(d2ydx2[0].item(), 0)
         self.assertEqual(d3ydx3[0].item(), 0)
+        try:
+            torch.autograd.grad(y, x, allow_unused=False, materialize_grad=True)
+            assert False, "allow_unused=False and materialize_grad=True should raise an error"
+        except ValueError:
+            pass
 
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute
