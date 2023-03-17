@@ -287,7 +287,7 @@ test_perf_for_dashboard() {
 
   for dtype in amp float32; do
     # Run accuracy test
-    # This can be skipped once the CI accuracy checking is stable enough
+    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
     for backend in eager aot_eager; do
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --backend "$backend" "$@" \
@@ -306,7 +306,7 @@ test_perf_for_dashboard() {
         --output "$TEST_REPORTS_DIR/{$backend}_with_cudagraphs_{$suite}_{$dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
-    # Skip dynamo-eager and aot-eager here
+    # Skip dynamo-eager and aot-eager for performance test
     # Run performance test for inductor with different configs
     # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
@@ -884,7 +884,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
-  test_dynamo_benchmark huggingface ""
+  test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   install_timm
@@ -903,7 +903,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench ""
+    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
