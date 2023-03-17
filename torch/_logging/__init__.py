@@ -7,6 +7,5 @@
 #    to log.debug(<instance here>)
 # 2. register the top-level log for your component (also in loggable_types)
 #    (See loggable_types module for examples or the above design doc)
-from ._internal import _init_logs, set_logs, getArtifactLogger
-
 import torch._logging._registrations
+from ._internal import _init_logs, getArtifactLogger, set_logs
