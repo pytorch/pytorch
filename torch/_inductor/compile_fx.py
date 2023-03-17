@@ -475,13 +475,6 @@ def compile_fx(
 
     @dynamo_utils.dynamo_timed
     def fw_compiler(model: torch.fx.GraphModule, example_inputs):
-        if overrides.is_quantized_graph_module(model):
-            # For the quant_per_tensor node, there is a input node of input_scale.
-            # It's a scalar tensor which generates a `torch.ops.aten._local_scalar_dense.default`
-            # by AotAutograd and lowering to DynamicScalar node which aren't supported by inductor.
-            # `torch.ops.aten._local_scalar_dense.default` is a dead code and can be eliminate here.
-            model.graph.eliminate_dead_code()
-            model.recompile()
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
