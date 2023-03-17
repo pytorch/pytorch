@@ -374,6 +374,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
         return c10::DispatchKey::ORT;
       case c10::DeviceType::HPU:
         return c10::DispatchKey::HPU;
+      case c10::DeviceType::MTIA:
+        return c10::DispatchKey::MTIA;
       case c10::DeviceType::PrivateUse1:
         return c10::DispatchKey::PrivateUse1;
       default:
