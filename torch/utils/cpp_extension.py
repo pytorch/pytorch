@@ -552,7 +552,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -2112,10 +2112,13 @@ def _write_ninja_file(path,
     config = ['ninja_required_version = 1.3']
     config.append(f'cxx = {compiler}')
     if with_cuda or cuda_dlink_post_cflags:
-        if IS_HIP_EXTENSION:
-            nvcc = _join_rocm_home('bin', 'hipcc')
+        if "PYTORCH_NVCC" in os.environ:
+            nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
         else:
-            nvcc = _join_cuda_home('bin', 'nvcc')
+            if IS_HIP_EXTENSION:
+                nvcc = _join_rocm_home('bin', 'hipcc')
+            else:
+                nvcc = _join_cuda_home('bin', 'nvcc')
         config.append(f'nvcc = {nvcc}')
 
     if IS_HIP_EXTENSION:

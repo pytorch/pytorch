@@ -1,5 +1,4 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import os
 import warnings
 from typing import List, Optional, Sequence, TypeVar, Union
 
@@ -105,7 +104,8 @@ class DeviceMesh:
         self,
         device_type: str,
         mesh: MeshExprT,
-        init_process_groups: bool = True,
+        *,
+        _init_process_groups: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (
@@ -116,36 +116,14 @@ class DeviceMesh:
         # always try to create default (world) pg, even if it is not initialized
         # already. The world pg is used for device mesh identity (rank) on each
         # process (we need to know if the current global rank is in the mesh or not)
-        default_pg = self._get_or_create_default_group()
-        if init_process_groups:
+        self._get_or_create_default_group()
+        if _init_process_groups:
             self._dim_groups = self._init_process_groups()
 
     def _get_or_create_default_group(self):
+        self._backend = "gloo" if self.device_type == "cpu" else "nccl"
         if not is_initialized():
-            unique_mesh_values = self.mesh.unique(sorted=True)
-            # assume we are using env:// and with env vars set, TODO: add some check here
-            world_size = int(os.getenv("WORLD_SIZE", unique_mesh_values[-1] + 1))
-
-            if unique_mesh_values.numel() != self.mesh.numel():
-                raise RuntimeError(
-                    f"DeviceMesh cannot have duplicate values, but found {self.mesh.tolist()}"
-                )
-
-            # ranks in mesh must start from 0
-            if unique_mesh_values[0] != 0:
-                raise RuntimeError(
-                    "DeviceMesh ranks must start from 0, "
-                    f"but found min rank = {unique_mesh_values[0]}"
-                )
-
-            # mesh must be contiguous (i.e. from 0 to N-1)
-            if 2 * unique_mesh_values.sum().item() != world_size * (world_size - 1):
-                raise RuntimeError(
-                    f"DeviceMesh should have all ranks of WORLD, but found {self.mesh.tolist()}"
-                )
-
-            _backend = "gloo" if self.device_type == "cpu" else "nccl"
-            init_process_group(backend=_backend)
+            init_process_group(backend=self._backend)
         else:
             world_size = get_world_size()
             if self.mesh.numel() > world_size:
@@ -154,19 +132,6 @@ class DeviceMesh:
                 )
 
         # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
-
-        # calculate the coordinates of the current global rank on the mesh
-        rank_coords = (self.mesh == get_rank()).nonzero()
-        assert rank_coords.size(0) in (0, 1)
-        self._coordinate_on_dim: Optional[List[int]] = (
-            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
-        )
-
-        return _get_default_group()
-
-    def _init_process_groups(self):
-        default_pg = _get_default_group()
-        self._backend = default_pg._get_backend_name()
         # TODO: if user want to pass pg_options, offer a way to do it
         # check default pg backend, should support device_type
         if self.device_type == "cpu":
@@ -184,6 +149,16 @@ class DeviceMesh:
                 f"DeviceMesh only support cpu or cuda device type, but got {self.device_type}"
             )
 
+        # calculate the coordinates of the current global rank on the mesh
+        rank_coords = (self.mesh == get_rank()).nonzero()
+        assert rank_coords.size(0) in (0, 1)
+        self._coordinate_on_dim: Optional[List[int]] = (
+            rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+        )
+        return _get_default_group()
+
+    def _init_process_groups(self):
+        default_pg = _get_default_group()
         unique_mesh_values = self.mesh.unique(sorted=True)
         if unique_mesh_values.numel() != self.mesh.numel():
             raise RuntimeError(
@@ -194,7 +169,7 @@ class DeviceMesh:
         # one valid process group per rank
         dim_groups: List[ProcessGroup] = []
 
-        if self.mesh.ndim == 1 and unique_mesh_values[-1] == get_world_size() - 1:
+        if self.mesh.ndim == 1 and len(unique_mesh_values) == get_world_size() - 1:
             # if the mesh is the same as world_pg, we just append the default
             # pg to the first dim goups, as new_group cannot have the exact
             # same ranks as world
