@@ -22,6 +22,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
+from .padding import pad_mm 
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .graph import GraphLowering
@@ -129,6 +130,7 @@ def count_bytes_inner(gm, example_inputs, num_fixed=0, **kwargs):
     return make_boxed_func(gm.forward)
 
 
+
 @DebugContext.wrap
 @torch.utils._python_dispatch._disable_current_modes()
 def compile_fx_inner(
@@ -157,6 +159,9 @@ def compile_fx_inner(
         f"graph {graph_id}",
     )
     V.debug.fx_graph(gm, example_inputs)
+
+    if config.shape_padding == True:
+        gm = pad_mm(gm)
 
     if cudagraphs is None:
         cudagraphs = config.triton.cudagraphs
