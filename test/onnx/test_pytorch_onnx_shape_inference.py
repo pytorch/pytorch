@@ -328,7 +328,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
         self.opset_version = _constants.ONNX_MAX_OPSET
 
     def test_setType_maintains_output_shape_for_single_custom_op(self):
-
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
         class CustomInverse(torch.nn.Module):
@@ -363,7 +362,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             self.assertEqual(dim.dim_value, rank)
 
     def test_no_setType_for_single_custom_op(self):
-
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
         class CustomInverse(torch.nn.Module):
@@ -398,7 +396,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
     def test_setType_maintains_output_shape_for_single_custom_op_with_dynamic_axes(
         self,
     ):
-
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
         class CustomInverse(torch.nn.Module):
@@ -438,7 +435,6 @@ class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
             self.assertEqual(dims[i].dim_value, x.size()[i])
 
     def test_setType_maintains_output_shape_for_single_custom_op_with_onnx_ops(self):
-
         self.addCleanup(torch.onnx.unregister_custom_op_symbolic, "::linalg_inv", 9)
 
         class CustomInverse(torch.nn.Module):
