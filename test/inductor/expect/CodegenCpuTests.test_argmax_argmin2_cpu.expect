@@ -23,7 +23,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<144; i0+=1)
             {
                 {
@@ -32,13 +32,13 @@ extern "C" void kernel(const float* in_ptr0,
                     #pragma omp declare reduction(argmax : struct IndexValue_3 :\
                         omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
                         omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
-                        initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+                    	initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
                     struct IndexValue_4 {size_t index; float value;};
                     IndexValue_4 tmp2{0, std::numeric_limits<float>::infinity()};
                     #pragma omp declare reduction(argmin : struct IndexValue_4 :\
                         omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
                         omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
-                        initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+                    	initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
                     for(long i1=0; i1<144; i1+=1)
                     {
                         auto tmp0 = in_ptr0[i0 + (144*i1)];
@@ -55,7 +55,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<144; i0+=1)
             {
                 {
@@ -64,13 +64,13 @@ extern "C" void kernel(const float* in_ptr0,
                     #pragma omp declare reduction(argmax : struct IndexValue_5 :\
                         omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
                         omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
-                        initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+                    	initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
                     struct IndexValue_6 {size_t index; float value;};
                     IndexValue_6 tmp2{0, std::numeric_limits<float>::infinity()};
                     #pragma omp declare reduction(argmin : struct IndexValue_6 :\
                         omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
                         omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
-                        initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+                    	initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
                     for(long i1=0; i1<144; i1+=1)
                     {
                         auto tmp0 = in_ptr0[i1 + (144*i0)];

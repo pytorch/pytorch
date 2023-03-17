@@ -23,7 +23,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 auto tmp0 = in_ptr0[10*i0];
@@ -35,7 +35,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 for(long i1=0; i1<0; i1+=1)
@@ -47,7 +47,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp4 = tmp2 + tmp3;
                     tmp4.store(out_ptr1 + (2*i0) + (8*i1));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=0; i1<2; i1+=1)
                 {
                     auto tmp0 = in_ptr0[1 + i1 + (10*i0)];
@@ -60,7 +60,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 for(long i1=0; i1<0; i1+=1)
@@ -72,7 +72,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp4 = tmp2 + tmp3;
                     tmp4.store(out_ptr2 + (3*i0) + (8*i1));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=0; i1<3; i1+=1)
                 {
                     auto tmp0 = in_ptr0[3 + i1 + (10*i0)];
@@ -85,7 +85,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 for(long i1=0; i1<0; i1+=1)
@@ -97,7 +97,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp4 = tmp2 + tmp3;
                     tmp4.store(out_ptr3 + (4*i0) + (8*i1));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=0; i1<4; i1+=1)
                 {
                     auto tmp0 = in_ptr0[6 + i1 + (10*i0)];

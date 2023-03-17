@@ -20,7 +20,7 @@ extern "C" void kernel(float* in_out_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<512; i0+=1)
             {
                 auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
@@ -30,7 +30,7 @@ extern "C" void kernel(float* in_out_ptr0,
                 auto tmp4 = tmp2 + tmp3;
                 tmp4.store(in_out_ptr0 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=4096; i0<4096; i0+=1)
             {
                 auto tmp0 = in_ptr0[i0];
@@ -64,7 +64,7 @@ KernelFunc load_cpp_kernel(const char* so_filename) {
 std::vector<at::Tensor> call_2(std::vector<at::Tensor> args) {
     at::Tensor arg0_1;
     arg0_1 = args[0];
-    auto buf0 = at::empty_strided({64, 64}, {64, 1}, at::ScalarType::Float);
+    auto buf0 = at::empty_strided({64, 64}, {64, 1}, at::ScalarType::Float); 
     auto buf1 = at::as_strided(buf0, {8, 8, 64}, {512, 64, 1}); buf0.reset();  // reuse
     static auto kernel_cpp_0 = load_cpp_kernel<void (*)(float*,const float*)>("/tmp/torchinductor_jenkins/xw/cxwzoxmfcrnz7vlw7u6l4mt5vwd7wnxklhpqapyt32vk5llbbofs.so");
     kernel_cpp_0((float*)(buf1.data_ptr()), (float*)(arg0_1.data_ptr()));

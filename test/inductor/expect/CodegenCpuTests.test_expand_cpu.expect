@@ -21,7 +21,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<12; i0+=1)
             {
                 #pragma GCC ivdep
@@ -39,7 +39,7 @@ extern "C" void kernel(const float* in_ptr0,
                             auto tmp4 = tmp2 + tmp3;
                             tmp4.store(out_ptr0 + (2*i2) + (6*i1) + (8*i3) + (12*i0));
                         }
-                        #pragma omp simd simdlen(4)
+                        #pragma omp simd simdlen(4) 
                         for(long i3=0; i3<2; i3+=1)
                         {
                             auto tmp0 = in_ptr0[i3 + (2*i1)];
@@ -69,7 +69,7 @@ extern "C" void kernel(const float* in_ptr0,
                             auto tmp2 = tmp0 + tmp1;
                             tmp2.store(out_ptr1 + (2*i2) + (6*i1) + (8*i3) + (12*i0));
                         }
-                        #pragma omp simd simdlen(4)
+                        #pragma omp simd simdlen(4) 
                         for(long i3=0; i3<2; i3+=1)
                         {
                             auto tmp0 = in_ptr0[i3 + (2*i1)];

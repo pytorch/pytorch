@@ -62,7 +62,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 #pragma GCC ivdep
@@ -85,7 +85,7 @@ extern "C" void kernel(const float* in_ptr0,
                         auto tmp8 = decltype(tmp6())::blendv(at::vec::Vectorized<float>(6.0), tmp6(), to_float_mask(tmp5));
                         tmp8.store(out_ptr1 + (4*i1) + (8*i2) + (44*i0));
                     }
-                    #pragma omp simd simdlen(4)
+                    #pragma omp simd simdlen(4) 
                     for(long i2=0; i2<4; i2+=1)
                     {
                         auto tmp0 = static_cast<long>((-3) + i1);

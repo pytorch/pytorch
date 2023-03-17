@@ -19,14 +19,14 @@ extern "C" void kernel(float* in_out_ptr0)
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 auto tmp0 = at::vec::Vectorized<float>::loadu(in_out_ptr0 + 8*i0);
                 auto tmp1 = decltype(tmp0)(1)/(decltype(tmp0)(1) + tmp0.neg().exp());
                 tmp1.store(in_out_ptr0 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=32; i0<32; i0+=1)
             {
                 auto tmp0 = in_out_ptr0[i0];

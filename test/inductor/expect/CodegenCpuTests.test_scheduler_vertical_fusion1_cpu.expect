@@ -24,7 +24,7 @@ extern "C" void kernel(float* in_out_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<135252; i0+=1)
             {
                 auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
@@ -45,7 +45,7 @@ extern "C" void kernel(float* in_out_ptr0,
                 tmp11.store(in_out_ptr0 + 8*i0);
                 tmp14.store(out_ptr1 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=1082016; i0<1082016; i0+=1)
             {
                 auto tmp0 = in_ptr0[i0];
@@ -68,7 +68,7 @@ extern "C" void kernel(float* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<41616; i0+=1)
             {
                 for(long i1=0; i1<3; i1+=1)
@@ -78,7 +78,7 @@ extern "C" void kernel(float* in_out_ptr0,
                     auto tmp2 = tmp0 * tmp1;
                     tmp2.store(in_out_ptr0 + (8*i1) + (26*i0));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=24; i1<26; i1+=1)
                 {
                     auto tmp0 = in_out_ptr0[i1 + (26*i0)];
@@ -89,7 +89,7 @@ extern "C" void kernel(float* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<135252; i0+=1)
             {
                 auto tmp0 = at::vec::Vectorized<float>::loadu(out_ptr1 + 8*i0);
@@ -97,7 +97,7 @@ extern "C" void kernel(float* in_out_ptr0,
                 auto tmp2 = tmp0 + tmp1;
                 tmp2.store(in_out_ptr1 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=1082016; i0<1082016; i0+=1)
             {
                 auto tmp0 = out_ptr1[i0];

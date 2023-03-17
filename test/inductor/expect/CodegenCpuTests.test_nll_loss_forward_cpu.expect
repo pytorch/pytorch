@@ -27,7 +27,7 @@ extern "C" void kernel(float* in_out_ptr0,
             float tmp11 = 0;
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(+:tmp4) reduction(+:tmp11)
+                #pragma omp for reduction(+:tmp4) reduction(+:tmp11) 
                 for(long i0=0; i0<5; i0+=1)
                 {
                     auto tmp0 = in_ptr0[i0];

@@ -30,10 +30,10 @@ extern "C" void kernel(const float* in_ptr0,
             #pragma omp declare reduction(argmax : struct IndexValue_10 :\
                 omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
                 omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
-                initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+            	initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(+:tmp1) reduction(max:tmp2) reduction(min:tmp3) reduction(argmax:tmp4)
+                #pragma omp for reduction(+:tmp1) reduction(max:tmp2) reduction(min:tmp3) reduction(argmax:tmp4) 
                 for(long i0=0; i0<4; i0+=1)
                 {
                     auto tmp0 = in_ptr0[i0];

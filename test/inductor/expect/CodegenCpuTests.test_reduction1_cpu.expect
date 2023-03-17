@@ -31,13 +31,13 @@ extern "C" void kernel(const float* in_ptr0,
             #pragma omp declare reduction(argmax : struct IndexValue_7 :\
                 omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
                 omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
-                initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+            	initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
             struct IndexValue_8 {size_t index; float value;};
             IndexValue_8 tmp5{0, std::numeric_limits<float>::infinity()};
             #pragma omp declare reduction(argmin : struct IndexValue_8 :\
                 omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
                 omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
-                initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+            	initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
             for(long i0=0; i0<3; i0+=1)
             {
                 auto tmp0 = in_ptr0[i0];

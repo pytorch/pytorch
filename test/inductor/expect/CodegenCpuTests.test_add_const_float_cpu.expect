@@ -20,7 +20,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<4; i0+=1)
             {
                 auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr0 + 8*i0);
@@ -28,7 +28,7 @@ extern "C" void kernel(const float* in_ptr0,
                 auto tmp2 = tmp0 + tmp1;
                 tmp2.store(out_ptr0 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=32; i0<32; i0+=1)
             {
                 auto tmp0 = in_ptr0[i0];

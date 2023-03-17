@@ -22,7 +22,7 @@ extern "C" void kernel(const bool* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<6; i0+=1)
             {
                 auto tmp9 = in_ptr1[i0];

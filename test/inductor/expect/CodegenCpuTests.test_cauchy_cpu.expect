@@ -25,7 +25,7 @@ extern "C" void kernel(const float* in_ptr0,
             auto tmp6_vec = at::vec::Vectorized<float>(tmp6);
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(+:tmp6) reduction(+:tmp6_vec)
+                #pragma omp for reduction(+:tmp6) reduction(+:tmp6_vec) 
                 for(long i0=0; i0<32; i0+=1)
                 {
                     for(long i1=0; i1<4; i1+=1)

@@ -25,7 +25,7 @@ extern "C" void kernel(bool* in_out_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<16; i0+=1)
             {
                 {
@@ -47,7 +47,7 @@ extern "C" void kernel(bool* in_out_ptr0,
             bool tmp5 = 0;
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(||:tmp2) reduction(||:tmp5)
+                #pragma omp for reduction(||:tmp2) reduction(||:tmp5) 
                 for(long i0=0; i0<128; i0+=1)
                 {
                     auto tmp0 = in_ptr0[i0];
@@ -65,7 +65,7 @@ extern "C" void kernel(bool* in_out_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 {
@@ -84,7 +84,7 @@ extern "C" void kernel(bool* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 auto tmp0 = out_ptr3[i0];

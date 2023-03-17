@@ -23,7 +23,7 @@ extern "C" void kernel(float* in_out_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<16; i0+=1)
             {
                 {
@@ -47,7 +47,7 @@ extern "C" void kernel(float* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<16; i0+=1)
             {
                 {
@@ -79,7 +79,7 @@ extern "C" void kernel(float* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<16; i0+=1)
             {
                 for(long i1=0; i1<4; i1+=1)
@@ -89,7 +89,7 @@ extern "C" void kernel(float* in_out_ptr0,
                     auto tmp2 = tmp0 / tmp1;
                     tmp2.store(in_out_ptr0 + (8*i1) + (32*i0));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=32; i1<32; i1+=1)
                 {
                     auto tmp0 = out_ptr1[i1 + (32*i0)];

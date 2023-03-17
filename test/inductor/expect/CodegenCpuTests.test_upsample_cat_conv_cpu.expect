@@ -24,7 +24,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 #pragma GCC ivdep
@@ -61,7 +61,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 for(long i1=0; i1<936; i1+=1)
@@ -69,7 +69,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp0 = at::vec::Vectorized<float>::loadu(in_ptr1 + (8*i1) + (7488*i0));
                     tmp0.store(out_ptr1 + (8*i1) + (9984*i0));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=7488; i1<7488; i1+=1)
                 {
                     auto tmp0 = in_ptr1[i1 + (7488*i0)];
@@ -78,7 +78,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 #pragma GCC ivdep

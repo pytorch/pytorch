@@ -26,7 +26,7 @@ extern "C" void kernel(const float* in_ptr0,
             auto tmp2 = tmp0 * tmp1;
             tmp2.store(out_ptr0 + 8*i0);
         }
-        #pragma omp simd simdlen(4)
+        #pragma omp simd simdlen(4) 
         for(long i0=8*(ks0 / 8); i0<ks0; i0+=1)
         {
             auto tmp0 = in_ptr0[i0];

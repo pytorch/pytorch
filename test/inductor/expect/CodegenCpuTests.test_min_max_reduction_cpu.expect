@@ -29,7 +29,7 @@ extern "C" void kernel(const half* in_ptr0,
             float tmp9 = std::numeric_limits<float>::infinity();
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(max:tmp3) reduction(min:tmp4) reduction(max:tmp7) reduction(min:tmp9)
+                #pragma omp for reduction(max:tmp3) reduction(min:tmp4) reduction(max:tmp7) reduction(min:tmp9) 
                 for(long i0=0; i0<64; i0+=1)
                 {
                     auto tmp0 = static_cast<float>(in_ptr0[i0]);

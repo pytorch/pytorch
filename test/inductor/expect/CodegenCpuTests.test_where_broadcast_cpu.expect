@@ -22,7 +22,7 @@ extern "C" void kernel(const bool* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<34; i0+=1)
             {
                 float g_tmp_buffer_in_ptr0[8] = {0};
@@ -33,7 +33,7 @@ extern "C" void kernel(const bool* in_ptr0,
                 auto tmp3 = decltype(tmp1)::blendv(tmp2, tmp1, tmp0);
                 tmp3.store(out_ptr0 + 8*i0);
             }
-            #pragma omp for simd simdlen(4)
+            #pragma omp for simd simdlen(4) 
             for(long i0=272; i0<273; i0+=1)
             {
                 auto tmp0 = in_ptr0[0];

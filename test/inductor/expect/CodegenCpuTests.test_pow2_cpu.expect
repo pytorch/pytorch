@@ -21,7 +21,7 @@ extern "C" void kernel(const double* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<256; i0+=1)
             {
                 auto tmp1 = in_ptr0[i0];

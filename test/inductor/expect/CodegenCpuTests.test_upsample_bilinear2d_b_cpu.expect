@@ -115,7 +115,7 @@ extern "C" void kernel(float* in_out_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<160; i0+=1)
             {
                 #pragma GCC ivdep

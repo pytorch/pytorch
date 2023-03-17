@@ -22,7 +22,7 @@ extern "C" void kernel(const float* in_ptr0,
     #pragma omp parallel num_threads(4)
     {
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<1024; i0+=1)
             {
                 for(long i1=0; i1<0; i1+=1)
@@ -33,7 +33,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp3 = tmp0 * tmp2;
                     tmp3.store(out_ptr0 + (4*i0) + (8*i1));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=0; i1<4; i1+=1)
                 {
                     auto tmp0 = in_ptr0[i1 + (8*i0)];
@@ -45,7 +45,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<8; i0+=1)
             {
                 for(long i1=0; i1<64; i1+=1)
@@ -56,7 +56,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp3 = tmp0 * tmp2;
                     tmp3.store(out_ptr1 + (8*i1) + (512*i0));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=512; i1<512; i1+=1)
                 {
                     auto tmp0 = in_ptr0[i1 + (1024*i0)];
@@ -68,7 +68,7 @@ extern "C" void kernel(const float* in_ptr0,
             }
         }
         {
-            #pragma omp for
+            #pragma omp for 
             for(long i0=0; i0<128; i0+=1)
             {
                 for(long i1=0; i1<4; i1+=1)
@@ -79,7 +79,7 @@ extern "C" void kernel(const float* in_ptr0,
                     auto tmp3 = tmp0 * tmp2;
                     tmp3.store(out_ptr2 + (8*i1) + (32*i0));
                 }
-                #pragma omp simd simdlen(4)
+                #pragma omp simd simdlen(4) 
                 for(long i1=32; i1<32; i1+=1)
                 {
                     auto tmp0 = in_ptr0[i1 + (64*i0)];

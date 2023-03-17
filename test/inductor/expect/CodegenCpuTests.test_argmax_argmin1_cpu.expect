@@ -25,16 +25,16 @@ extern "C" void kernel(const float* in_ptr0,
             #pragma omp declare reduction(argmax : struct IndexValue_1 :\
                 omp_out.value = omp_in.value < omp_out.value ? omp_out.value : omp_in.value,\
                 omp_out.index = omp_in.value < omp_out.value ? omp_out.index : omp_in.index)\
-                initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
+            	initializer(omp_priv = {0, -std::numeric_limits<float>::infinity()})
             struct IndexValue_2 {size_t index; float value;};
             IndexValue_2 tmp2{0, std::numeric_limits<float>::infinity()};
             #pragma omp declare reduction(argmin : struct IndexValue_2 :\
                 omp_out.value = omp_in.value > omp_out.value ? omp_out.value : omp_in.value,\
                 omp_out.index = omp_in.value > omp_out.value ? omp_out.index : omp_in.index)\
-                initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
+            	initializer(omp_priv = {0, std::numeric_limits<float>::infinity()})
             #pragma omp parallel num_threads(4)
             {
-                #pragma omp for reduction(argmax:tmp1) reduction(argmin:tmp2)
+                #pragma omp for reduction(argmax:tmp1) reduction(argmin:tmp2) 
                 for(long i0=0; i0<524288; i0+=1)
                 {
                     auto tmp0 = in_ptr0[i0];

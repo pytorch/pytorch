@@ -370,6 +370,7 @@ code = 'SPACES'
 include_patterns = ['**']
 exclude_patterns = [
     '**/contrib/**',
+    '**/*.expect',
     '**/*.diff',
     '**/*.patch',
     'third_party/**',
@@ -398,6 +399,7 @@ exclude_patterns = [
     '**/*.svg',
     '**/*Makefile',
     '**/contrib/**',
+    '**/*.expect',
     'third_party/**',
     '**/.gitattributes',
     '**/.gitmodules',
