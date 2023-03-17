@@ -206,12 +206,10 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
         model = Seq.to(torch.device("mps"))
         x = torch.randn(10, device="mps")
 
-        # Not sure if there's a better way to test this
-        assert torch.compile(model) == torch._dynamo.optimize(backend="aot_eager")(
-            model
-        )
-        model = torch._dynamo.optimize("inductor")(model)
-        model(x)
+        # Not sure yet if there's a better way to test this
+        assert torch.compile(model, backend="inductor") == torch._dynamo.optimize(
+            backend="aot_eager"
+        )(model)
 
 
 if __name__ == "__main__":
