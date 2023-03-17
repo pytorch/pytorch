@@ -463,16 +463,17 @@ bool ProcessGroupNCCL::WorkNCCL::checkTimeout() {
   return true;
 }
 
-void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(
-    ErrorHandlingMode asyncErrorHandling) {
+void ProcessGroupNCCL::WorkNCCL::handleException(
+    ErrorHandlingMode errorHandling) {
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
         "asynchronous nature of CUDA kernels, subsequent GPU operations ",
         "might run on corrupted/incomplete data.");
     LOG(ERROR) << exceptionMsg;
-    C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleNCCLGuard");
-    if (asyncErrorHandling == TearDown) {
+    C10_LOG_API_USAGE_ONCE("ProcessGroupNCCL.WorkNCCL.handleException");
+
+    if (errorHandling == TearDown) {
       auto tearDownMsg = c10::str(
           "To avoid data inconsistency, we are taking the entire process down.");
       LOG(ERROR) << tearDownMsg;
@@ -524,8 +525,8 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       LOG(ERROR) << exceptionMsg;
       // Abort NCCL communicators
       abort();
-      // Throw exception
-      handleNCCLGuard(TearDown);
+      // Throw exception (from main thread here)
+      handleException(TearDown);
     }
     // Yield
     std::this_thread::sleep_for(
@@ -887,7 +888,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
           LOG(ERROR) << desyncMsg;
         }
         // Throw exception
-        work.handleNCCLGuard(asyncErrorHandling_);
+        work.handleException(asyncErrorHandling_);
       }
 
       // Work status logging for desync debug
