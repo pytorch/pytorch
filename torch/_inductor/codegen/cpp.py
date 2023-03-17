@@ -2266,7 +2266,12 @@ class KernelGroup:
         )
         if enable_kernel_profile:
             code.writelines(["#include <ATen/record_function.h>"])
-        code.writelines([cpp_prefix(), "" f'extern "C" void kernel({arg_defs})'])
+        kernel_decl_name = kernel_name if V.graph.aot_mode else "kernel"
+
+        if not V.graph.aot_mode or self.count == 1:
+            code.writeline(cpp_prefix())
+
+        code.writeline(f'extern "C" void {kernel_decl_name}({arg_defs})')
         with code.indent():
             if enable_kernel_profile:
                 graph_id = V.graph.graph_id
@@ -2281,9 +2286,12 @@ class KernelGroup:
             code.splice(self.loops_code)
 
         codecache_def = IndentedBuffer()
-        codecache_def.writeline("async_compile.cpp('''")
-        codecache_def.splice(code)
-        codecache_def.writeline("''')")
+        if V.graph.aot_mode:
+            codecache_def.splice(code)
+        else:
+            codecache_def.writeline("async_compile.cpp('''")
+            codecache_def.splice(code)
+            codecache_def.writeline("''')")
 
         codecache_str = codecache_def.getvalue()
         # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
