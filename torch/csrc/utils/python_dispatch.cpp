@@ -489,6 +489,9 @@ void initDispatchBindings(PyObject* module) {
     return c10::toString(k);
   });
   m.def("_dispatch_key_parse", [](c10::DispatchKey k) { return k; });
+  m.def("_to_functionality_key", [](c10::DispatchKey k) {
+    return c10::toFunctionalityKey(k);
+  });
   m.def("_dispatch_num_backends", []() { return c10::num_backends; });
 
 #define DEF_ONE(n) .value(#n, c10::DispatchKey::n)

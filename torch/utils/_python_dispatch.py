@@ -1,8 +1,10 @@
 import contextlib
+from typing import Optional
 
 import warnings
+import torch
 from torch._C import _len_torch_dispatch_stack, _get_dispatch_stack_at,\
-    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack
+    _pop_torch_dispatch_stack, _push_on_torch_dispatch_stack, DispatchKey
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -45,11 +47,11 @@ class TorchDispatchMode:
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self)
+        _push_mode(self, self.__dict__.get("__dispatch_key", None))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _pop_mode()
+        _pop_mode(self.__dict__.get("__dispatch_key", None))
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -66,12 +68,24 @@ def _get_current_dispatch_mode_stack():
     stack_len = _len_torch_dispatch_stack()
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
-def _push_mode(mode):
-    _push_on_torch_dispatch_stack(mode)
+def _push_mode(mode, k: Optional[DispatchKey] = None):
+    if k is not None:
+        from torch._ops import push_mode_for_key, get_cached_ops
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        # Clear the cache of every op that has been used so far, for this particular key.
+        for op in get_cached_ops():
+            op._uncache_dispatch(k)
+        push_mode_for_key(k, mode)
+    else:
+        _push_on_torch_dispatch_stack(mode)
 
 
-def _pop_mode():
-    return _pop_torch_dispatch_stack()
+def _pop_mode(k: Optional[DispatchKey] = None):
+    if k is not None:
+        from torch._ops import pop_mode_for_key
+        return pop_mode_for_key(k)
+    else:
+        return _pop_torch_dispatch_stack()
 
 
 @contextlib.contextmanager

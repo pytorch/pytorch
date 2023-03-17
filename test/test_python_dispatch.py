@@ -6,6 +6,7 @@ from copy import deepcopy
 from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
+from torch._dispatch.python import enable_python_dispatcher
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
@@ -1106,6 +1107,20 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         self.assertTrue(all_same_mode([x, x, x]))
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
+
+    def test_pre_autograd_mode_stack(self):
+        x = LoggingTensorMode()
+        x.__dict__['__dispatch_key'] = torch._C.DispatchKey.AutogradFunctionality
+        with capture_logs(is_mode=True) as logs:
+            with enable_python_dispatcher(), x:
+                a = torch.ones(4, 4)
+                out = torch.matmul(a, a)
+        # We expect to see matmul in the trace - it should NOT be decomposed into mm.
+        # Also, torch.ones() doesn't show up in the trace.
+        # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
+        # so our mode never sees it - it goes directly to the BackendSelect key.
+        self.assertExpectedInline("\n".join(logs), """$1 = torch._ops.aten.matmul.default($0, $0)""")
+
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
