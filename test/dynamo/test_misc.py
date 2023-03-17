@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
+from torch._C import FileCheck
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -31,7 +32,7 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import ifunspec
+from torch._dynamo.utils import CompileProfiler, ifunspec
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
@@ -5077,6 +5078,36 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
 
+    def test_compilation_profiler(self):
+        class Model(torch.nn.Module):
+
+            def forward(self, input):
+                return input + input
+        
+        model = Model()
+        prof = CompileProfiler()
+        compiled = torch.compile(model, backend=prof)
+
+        input = torch.rand((2,3,4))
+        _ = compiled(input)
+        FileCheck() \
+            .check("Torchdynamo Profiler Report") \
+            .check("Graph Breaks") \
+            .check("No graph breaks detected.") \
+            .check("Recompilation") \
+            .check("No recompilation detected.") \
+            .run(prof.report())
+        
+        new_shape_input = torch.rand((2,3,5))
+        _ = compiled(new_shape_input)
+        FileCheck() \
+            .check("Torchdynamo Profiler Report") \
+            .check("Graph Breaks") \
+            .check("No graph breaks detected.") \
+            .check("Recompilation") \
+            .check("strides mismatch") \
+            .run(prof.report())
+ 
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
