@@ -268,7 +268,7 @@ Common Mistakes To Avoid
       description of the contents of the PR: it's easier to review code
       if we know what's inside!
 
--  **Comments for subtle things?** In cases where the behavior of your code
+-  **Comments on subtle things?** In cases where the behavior of your code
    is nuanced, please include extra comments and documentation to allow
    us to better understand the intention of your code.
 -  **Did you add a hack?** Sometimes, the right answer is a hack. But
