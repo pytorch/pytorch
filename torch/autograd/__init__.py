@@ -272,13 +272,11 @@ def grad(
             will be raised. Defaults to ``False``.
 
     """
-    if materialize_grads:
-        if allow_unused is False:
-            raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True, "
-                             "but got: allow_unused=False.")
-        allow_unused = True  # materialize_grads=True implies allow_unused=True
+    if allow_unused is False and materialize_grads is True:
+        raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True, "
+                         "but got: allow_unused=False.")
     if allow_unused is None:
-        allow_unused = False
+        allow_unused = materialize_grads
     t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
     t_inputs = cast(Tuple[torch.Tensor, ...], (inputs,) if is_tensor_like(inputs) else tuple(inputs))
     overridable_args = t_outputs + t_inputs
