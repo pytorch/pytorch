@@ -179,7 +179,6 @@ inline c10::complex<double> floor_impl (c10::complex<double> z) {
 
 template <typename TYPE>
 inline TYPE round_impl (TYPE z) {
-  std::fesetround(FP_INT_TONEAREST);
   return std::nearbyint(z);
 }
 
