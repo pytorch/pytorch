@@ -13,7 +13,7 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
   - [Graph](#graph)
   - [GraphModule](#graphmodule)
 - [Tracing](#symbolic-tracing)
-  - [Tracer](#tracer)
+  - [Tracer](#symbolic-tracer)
     - [TorchDynamo](#torchdynamo)
   - [Proxy](#proxy)
 - [The FX IR](#the-fx-ir)
