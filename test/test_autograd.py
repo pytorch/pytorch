@@ -855,7 +855,7 @@ class TestAutograd(TestCase):
             self.assertEqual(x.grad, expected_grad)
             self.assertIsNone(x_list[i].grad)
 
-    def test_materialize_grads(self):
+    def test_grad_materialize_grads(self):
         x = torch.tensor(0.5, requires_grad=True)
         a = torch.tensor(1.0, requires_grad=True)
         y = x * a
@@ -867,11 +867,8 @@ class TestAutograd(TestCase):
         self.assertIsNone(d2ydx2_none[0])
         self.assertEqual(d2ydx2[0].item(), 0)
         self.assertEqual(d3ydx3[0].item(), 0)
-        try:
+        with self.assertRaisesRegex(ValueError, "Expected allow_unused to be True or not passed when"):
             torch.autograd.grad(y, x, allow_unused=False, materialize_grads=True)
-            assert False, "allow_unused=False and materialize_grads=True should raise an error"
-        except ValueError:
-            pass
 
     def test_hook_with_no_name(self):
         # Create a hook that do not have a __name__ attribute

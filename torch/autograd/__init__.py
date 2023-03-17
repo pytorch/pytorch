@@ -274,7 +274,7 @@ def grad(
     """
     if materialize_grads:
         if allow_unused is False:
-            raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True,"
+            raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True, "
                              "but got: allow_unused=False.")
         allow_unused = True  # materialize_grads=True implies allow_unused=True
     if allow_unused is None:
