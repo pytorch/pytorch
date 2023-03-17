@@ -1676,10 +1676,10 @@
 
 # DO NOT define a backward for to_dense
 # See [Note: Sometimes view derivatives]
-# - name: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+# - name: to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
 #
-- name: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
-  self: to_dense_backward(grad, self)
+- name: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
+  self: to_dense_backward(grad, self, masked_grad)
 
 - name: to_sparse(Tensor self, *, Layout? layout=None, int[2]? blocksize=None, int? dense_dim=None) -> Tensor
   self: to_sparse_backward(grad, self.layout(), self.sym_blocksize())
