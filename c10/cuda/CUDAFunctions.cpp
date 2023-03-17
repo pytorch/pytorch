@@ -189,7 +189,7 @@ cudaError_t GetDeviceCount(int* dev_count) {
 }
 
 cudaError_t GetDevice(int* device) {
-  if(CUDA_LAST_SAVED_DEVICE>=0) {
+  if (CUDA_LAST_SAVED_DEVICE >= 0) {
     *device = CUDA_LAST_SAVED_DEVICE;
     return cudaSuccess;
   }
@@ -200,11 +200,13 @@ cudaError_t SetDevice(int device) {
   TORCH_CHECK(device >= 0, "device id must be positive!");
   CUDA_LAST_SAVED_DEVICE = -1;
   int curdev = -1;
-  cudaGetDevice(&curdev);
+  C10_CUDA_CHECK(cudaGetDevice(&curdev));
   if (device == curdev) {
     return cudaSuccess;
   }
-  return cudaSetDevice(device);
+  cudaError_t err = cudaSetDevice(device);
+  C10_CUDA_CHECK(cudaFree(0)); // Just to mimic cuda 12 on cuda 11 for testing purposes
+  return err;
 }
 
 cudaError_t MaybeSetDevice(int device) {
