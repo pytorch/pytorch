@@ -411,9 +411,6 @@ class TritonTemplate:
         # TODO(nmacchioni) fix bug here in CI tests
         # assert list(call_args) == expected_args, (call_args, expected_args)
         if list(call_args) != expected_args:
-            import pdb
-
-            pdb.set_trace()  # TODO
             return None
         extra_args = V.graph.sizevars.size_hints(
             map(sympy.expand, call_args[len(expected_args) :])
