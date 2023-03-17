@@ -174,7 +174,6 @@ namespace {
                   }
                 }
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-                std::fesetround(FE_TONEAREST);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -412,7 +411,6 @@ namespace {
                 gGrid_ptr_NDHW[1] = giy_mult * giy;
                 gGrid_ptr_NDHW[2] = giz_mult * giz;
               } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-                std::fesetround(FE_TONEAREST);
                 int64_t ix_nearest = static_cast<int64_t>(std::nearbyint(ix));
                 int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
@@ -540,7 +538,6 @@ Tensor _grid_sampler_2d_cpu_quantized(
             res += within_bounds_2d(iy_se, ix_se, inp_H, inp_W)
                 ? inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW] * se
                 : zero_point * se;
-            std::fesetround(FE_TONEAREST);
             *out_ptr_NCHW = std::nearbyint(res);
           }
         }
