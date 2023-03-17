@@ -53,7 +53,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 template <typename func_t>
 void gpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride, const func_t& f) {
   int num_indices = index_size.size();
-  AT_ASSERT(num_indices == index_stride.size());
+  AT_ASSERT(static_cast<size_t>(num_indices) == index_stride.size());
   AT_ASSERT(num_indices == iter.ntensors() - 2);
 
   if (iter.numel() == 0) {
