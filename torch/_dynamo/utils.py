@@ -1074,21 +1074,20 @@ class CompileProfiler:
                 max_recompiles = max([num_recompiles(code) for code in gf])
                 recomp_table = tabulate(
                     summarized_gf,
-                    headers=["Function", "Num Recompiles", "Recompile Reasons"],
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
                 )
-                return textwrap.dedent(f"""
-                    {recomp_table}
-                    
+                return recomp_table + textwrap.dedent(
+                    f"""
+
                     Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
-                """)
+                """
+                )
 
-                
-
-        return textwrap.dedent(
+        report = textwrap.dedent(
             f"""
             Torchdynamo Profiler Report
-            
-           
+            ===========================
+
             Graph Breaks
             ------------
             Graph breaks happen when torchdynamo encounters code it can't safely trace.
@@ -1096,18 +1095,21 @@ class CompileProfiler:
             You may gain additional insight by passing `fullgraph=True` to torch.compile,
             to stop at the first break.
 
-            {graph_break_report() or "No graph breaks detected."}
-
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected.\n"
+        report += textwrap.dedent(
+            f"""
             Recompilation
             -------------
             These subgraphs were recompiled more than once due to guard failures
             Guard failures indicate some condition assumed to be static by the tracer changed,
             making it unsafe to reuse the compiled program.
-            
 
-            {recompilation_report() or "No recompilation detected."}
-        """)
-
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls

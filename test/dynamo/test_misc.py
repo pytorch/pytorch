@@ -18,11 +18,11 @@ from unittest.mock import patch
 
 import numpy as np
 import torch
-from torch._C import FileCheck
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+from torch._C import FileCheck
 from torch._dynamo import bytecode_transformation, graph_break
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
@@ -5078,36 +5078,40 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(seen_frames[0].name, "fn")
         self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
 
-    def test_compilation_profiler(self):
+    def test_compile_profiler(self):
         class Model(torch.nn.Module):
-
             def forward(self, input):
                 return input + input
-        
+
         model = Model()
         prof = CompileProfiler()
         compiled = torch.compile(model, backend=prof)
-
-        input = torch.rand((2,3,4))
+        base_checker = (
+            lambda: FileCheck()
+            .check("Torchdynamo Profiler Report")
+            .check("Graph Breaks")
+            .check("No graph breaks detected.")
+            .check("Recompilation")
+        )
+        input = torch.rand((2, 3, 4))
         _ = compiled(input)
-        FileCheck() \
-            .check("Torchdynamo Profiler Report") \
-            .check("Graph Breaks") \
-            .check("No graph breaks detected.") \
-            .check("Recompilation") \
-            .check("No recompilation detected.") \
-            .run(prof.report())
-        
-        new_shape_input = torch.rand((2,3,5))
+        base_checker().check("No recompilation detected.").run(prof.report())
+
+        new_shape_input = torch.rand((3, 3, 4))
         _ = compiled(new_shape_input)
-        FileCheck() \
-            .check("Torchdynamo Profiler Report") \
-            .check("Graph Breaks") \
-            .check("No graph breaks detected.") \
-            .check("Recompilation") \
-            .check("strides mismatch") \
-            .run(prof.report())
- 
+
+        # Not an exhaustive test of dynamic shapes behavior, but some sanity
+        if (
+            not torch._dynamo.config.dynamic_shapes
+            or torch._dynamo.config.assume_static_by_default
+        ):
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "cache_size_limit to 1"
+            ).run(prof.report())
+        else:
+            base_checker().check("No recompilation detected.").run(prof.report())
+
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
