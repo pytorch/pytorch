@@ -67,10 +67,13 @@ bool _hasPrimaryContext(int64_t device_index) {
   return ctx_is_active == 1;
 }
 
-// Register function back to c10_cuda
+// Register hasPrimaryContext back to c10::cuda
 struct _Initializer {
   _Initializer() {
       c10::cuda::_internal::setHasPrimaryContext(_hasPrimaryContext);
+  }
+  ~_Initializer() {
+      c10::cuda::_internal::setHasPrimaryContext(nullptr);
   }
 } initializer;
 } // anonymous namespace

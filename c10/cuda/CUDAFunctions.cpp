@@ -3,8 +3,7 @@
 
 #include <limits>
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 namespace {
 // returns -1 on failure
@@ -166,18 +165,21 @@ c10::optional<int64_t> getDeviceIndexWithPrimaryContext() {
   }
   return c10::nullopt;
 }
+
 namespace _internal {
 bool dummyHasPrimaryContext(C10_UNUSED int64_t device_index) {
   TORCH_CHECK(false, "Should never been called");
 }
 bool (*hasPrimaryContext)(int64_t) = dummyHasPrimaryContext;
 
+// Private api to be called from CUDAHooks.cpp
 C10_CUDA_API void setHasPrimaryContext(bool (*func)(int64_t)) {
-  hasPrimaryContext = func;
+  hasPrimaryContext = func ? func : dummyHasPrimaryContext;
 }
 } // namespace _internal
+
 bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
-} // namespace cuda
-} // namespace c10
+
+} // namespace c10::cuda
