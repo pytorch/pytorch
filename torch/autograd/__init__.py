@@ -272,7 +272,7 @@ def grad(
             will be raised. Defaults to ``False``.
 
     """
-    if allow_unused is False and materialize_grads is True:
+    if materialize_grads and allow_unused is False:
         raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True, "
                          "but got: allow_unused=False.")
     if allow_unused is None:
