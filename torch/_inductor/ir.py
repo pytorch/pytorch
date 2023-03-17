@@ -1073,6 +1073,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         if freeze:
             if want_contiguous:
                 x.data.freeze_layout()
+                assert x.data.layout.is_contiguous()
             elif stride_order is not None:
                 x.data.freeze_layout_with_stride_order(stride_order)
             else:
@@ -1986,7 +1987,7 @@ class Buffer(IRNode):
         return False
 
     def freeze_layout(self):
-        if not isinstance(self.layout, MultiOutputLayout):
+        if not isinstance(self.layout, (MultiOutputLayout, AliasedLayout)):
             self.layout = self.layout.as_fixed()
 
     def freeze_layout_with_stride_order(self, order):
