@@ -182,9 +182,6 @@ enforce_cond_guards_match = True
 # about optimize_ddp behavior.
 optimize_ddp = True
 
-# Whether to skip guarding on FSDP managed modules' parameters
-skip_fsdp_param_guards = False
-
 # If True, raises exception if TorchDynamo is called with a context manager
 raise_on_ctx_manager_usage = True
 
