@@ -477,8 +477,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeStreams() {
   }
 
   if (avoidRecordStreams_) {
-    // TORCH_INTERNAL_ASSERT(outputs_->size() > 0);
-    // TORCH_INTERNAL_ASSERT(stashed_for_allocator_safety_->size() > 0);
     stashed_for_allocator_safety_->clear();
   }
 }
@@ -629,7 +627,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       parseEnvVarIntDefault(NCCL_ASYNC_ERROR_HANDLING, 0));
   desyncDebug_ = parseEnvVarFlag(NCCL_DESYNC_DEBUG) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  avoidRecordStreams_ = parseEnvVarFlag(NCCL_AVOID_RECORD_STREAMS);
+  avoidRecordStreams_ = parseEnvVarFlag(TORCH_NCCL_AVOID_RECORD_STREAMS);
 
   if (blockingWait_) {
     if (asyncErrorHandling_ != NoHandling || desyncDebug_) {
@@ -1686,7 +1684,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   // and the present call has no way to know it's not an isend.
   // Therefore, we warn and fall back to the typical recordStream logic:
   TORCH_WARN_ONCE(
-      !avoidRecordStreams_,
+      avoidRecordStreams_,
       "NCCL_AVOID_RECORD_STREAMS=1 has no effect for point-to-point "
       "collectives.");
 
