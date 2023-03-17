@@ -1488,7 +1488,7 @@ def merge(pr_num: int, repo: GitRepo,
         ignore_current_checks_info = failing
         if len(pending) == 0:
             raise RuntimeError(
-                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use" +
+                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use " +
                 "-f/--force instead."
             )
 
