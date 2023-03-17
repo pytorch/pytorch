@@ -223,7 +223,6 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
-
     """
     if weight is None:
         weight = fd.define_null_tensor()
@@ -565,7 +564,6 @@ def register_native_batch_norm():
         momentum: float,
         eps: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
         if torch._prims_common.is_complex_dtype(input.dtype):
             raise NotImplementedError("Complex tensors are not supported")
 

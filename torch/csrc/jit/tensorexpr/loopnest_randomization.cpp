@@ -68,7 +68,7 @@ std::tuple<std::vector<T>, std::vector<int>> select_n_randomly(
 
   std::vector<T> selected_objects;
   std::vector<int> selected_indices;
-  if (indices.size() < n) {
+  if (static_cast<int>(indices.size()) < n) {
     return std::make_tuple(selected_objects, selected_indices);
   }
   for (int i = 0; i < n; i++) {
@@ -393,8 +393,8 @@ void loopnestRandomization(int64_t seed, LoopNest& l) {
 
           // Find pairs of axes that can be reordered
           std::vector<std::pair<ForPtr, ForPtr>> valid_pairs;
-          for (int i = 0; i < loops.size(); i++) {
-            for (int j = i + 1; j < loops.size(); j++) {
+          for (const auto i : c10::irange(loops.size())) {
+            for (const auto j : c10::irange(i + 1, loops.size())) {
               if (LoopNest::findOuterFor(loops[i], loops[j])) {
                 valid_pairs.emplace_back(loops[i], loops[j]);
               }
