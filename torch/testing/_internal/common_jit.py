@@ -1,5 +1,3 @@
-import os
-
 # Torch
 import torch
 import torch.cuda
@@ -171,9 +169,7 @@ class JitCommonTestCase(TestCase):
         if not also_test_file:
             return imported
 
-        # Use the process ID as prefix to uniquely identify which process the temp file
-        # belongs to, and also to avoid clashing on Windows
-        with TemporaryFileName(prefix=str(os.getpid())) as fname:
+        with TemporaryFileName() as fname:
             torch.jit.save(imported, fname)
             return torch.jit.load(fname, map_location=map_location)
 
