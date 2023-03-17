@@ -87,4 +87,4 @@ runs:
     - name: Disables Windows Defender scheduled and real-time scanning for files in directories used by PyTorch
       shell: powershell
       run: |
-        Add-MpPreference -ExclusionPath $(Get-Location).tostring() $Env:TMPDIR -ErrorAction Ignore
+        Add-MpPreference -ExclusionPath $(Get-Location).tostring(),$Env:TMPDIR -ErrorAction Ignore
