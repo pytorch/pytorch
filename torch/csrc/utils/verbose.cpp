@@ -3,6 +3,7 @@
 
 namespace torch {
 
+// NOLINTNEXTLINE(clang-diagnostic-missing-prototypes)
 void initVerboseBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
