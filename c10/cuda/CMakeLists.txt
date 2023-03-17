@@ -22,7 +22,6 @@ configure_file(
 set(C10_CUDA_SRCS
     CUDACachingAllocator.cpp
     CUDADeviceAssertionHost.cpp
-    CUDADriverAPI.cpp
     CUDAException.cpp
     CUDAFunctions.cpp
     CUDAMallocAsyncAllocator.cpp
@@ -34,7 +33,6 @@ set(C10_CUDA_SRCS
 set(C10_CUDA_HEADERS
     CUDACachingAllocator.h
     CUDADeviceAssertionHost.h
-    CUDADriverAPI.h
     CUDAException.h
     CUDAFunctions.h
     CUDAGuard.h

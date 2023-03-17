@@ -1,4 +1,3 @@
-#include <c10/cuda/CUDADriverAPI.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Macros.h>
 
@@ -183,33 +182,33 @@ bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 
-static int CUDA_LAST_SAVED_DEVICE = 0;
-static std::shared_ptr<c10::cuda::CUDADriverAPI> driver_api =
-    std::make_shared<c10::cuda::CUDADriverAPI>();
-
+static int CUDA_LAST_SAVED_DEVICE = -1;
 // Wrappers for raw CUDA device management functions
 cudaError_t GetDeviceCount(int* dev_count) {
   return cudaGetDeviceCount(dev_count);
 }
 
 cudaError_t GetDevice(int* device) {
-  *device = CUDA_LAST_SAVED_DEVICE;
-  return cudaSuccess;
+  if(CUDA_LAST_SAVED_DEVICE>=0) {
+    *device = CUDA_LAST_SAVED_DEVICE;
+    return cudaSuccess;
+  }
+  return cudaGetDevice(device);
 }
 
 cudaError_t SetDevice(int device) {
   TORCH_CHECK(device >= 0, "device id must be positive!");
+  CUDA_LAST_SAVED_DEVICE = -1;
   int curdev = -1;
-  CUDA_LAST_SAVED_DEVICE = device;
   cudaGetDevice(&curdev);
-  if (device != curdev) {
-    return cudaSetDevice(device);
+  if (device == curdev) {
+    return cudaSuccess;
   }
-  return cudaSuccess;
+  return cudaSetDevice(device);
 }
 
 cudaError_t MaybeSetDevice(int device) {
-  if (driver_api->hasPrimaryContext(device)) {
+  if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
   CUDA_LAST_SAVED_DEVICE = device;

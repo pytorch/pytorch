@@ -8291,7 +8291,6 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertion.h", ("c10/hip/HIPDeviceAssertion.h", API_C10)),
         ("c10/cuda/CUDADeviceAssertionHost.h", ("c10/hip/HIPDeviceAssertionHost.h", API_C10)),
-        ("c10/cuda/CUDADriverAPI.h", ("c10/hip/HIPDriverAPI.h", API_C10)),
         ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
