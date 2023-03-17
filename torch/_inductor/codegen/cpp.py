@@ -1148,7 +1148,7 @@ class CppVecKernel(CppKernel):
             )
             line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
         elif V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"load_bf16_as_float({var_expr})"
+            line = f"load_bf16_as_float({var})"
         elif is_broadcast:
             line = f"at::vec::Vectorized<float>({var_expr})"
         else:
