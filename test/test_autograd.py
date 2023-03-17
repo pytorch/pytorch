@@ -864,7 +864,6 @@ class TestAutograd(TestCase):
         d2ydx2 = torch.autograd.grad(dydx, x, allow_unused=True, zero_grad_unused=True)
         self.assertIsNone(d2ydx2_None[0])
         self.assertEqual(d2ydx2[0], 0)
-        print(d2ydx2[0].requires_grad, d2ydx2)
         try:
             d3ydx3 = torch.autograd.grad(d2ydx2, x, allow_unused=True, zero_grad_unused=True)
         except RuntimeError as e:
