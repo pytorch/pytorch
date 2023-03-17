@@ -23,6 +23,7 @@ from . import config
 from .fx_utils import matches_module_function_pattern
 
 from .mkldnn import mkldnn_fuse_fx
+from .utils import has_triton
 
 log = logging.getLogger(__name__)
 
@@ -576,7 +577,14 @@ def rand_like(x, **kwargs):
     return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
 
 
-replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
-# Keep track of any replacement functions that use triton random,
-# so they can be avoided when fallback_random is set
-replacements_using_triton_random = {lowmem_dropout, rand_like}
+if has_triton():
+    replacements = {
+        torch.nn.functional.dropout: lowmem_dropout,
+        torch.rand_like: rand_like,
+    }
+    # Keep track of any replacement functions that use triton random,
+    # so they can be avoided when fallback_random is set
+    replacements_using_triton_random = {lowmem_dropout, rand_like}
+else:
+    replacements = {torch.rand_like: rand_like}
+    replacements_using_triton_random = {rand_like}

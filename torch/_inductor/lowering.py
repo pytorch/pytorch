@@ -37,7 +37,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, pad_list, sympy_product
+from .utils import ceildiv, developer_warning, has_triton, pad_list, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -1059,8 +1059,8 @@ def native_dropout(x, p, train):
 @register_lowering(aten.bernoulli_, type_promotion_kind=None)
 def bernoulli_(x, *args):
     assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+        config.fallback_random or not has_triton()
+    ), "this should be handled in decomps unless config.fallback_random or not has_triton()"
     x.realize()
     V.graph.realize_users_of(x.get_name())
     ir.InplaceBernoulliFallback(x, *args)
@@ -1070,8 +1070,8 @@ def bernoulli_(x, *args):
 @register_lowering(aten.bernoulli.p, type_promotion_kind=None)
 def bernoulli_p(x, *args):
     assert (
-        config.fallback_random
-    ), "this should be handled in decomps unless config.fallback_random"
+        config.fallback_random or not has_triton()
+    ), "this should be handled in decomps unless config.fallback_random or not has_triton()"
     return bernoulli_(clone(x), *args)
 
 
