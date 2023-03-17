@@ -2,11 +2,34 @@ import torch._dynamo.test_case
 import unittest.mock
 import os
 import contextlib
+import torch._logging
 import torch._logging._internal
 import logging
 
+@contextlib.contextmanager
+def preserve_log_state():
+    prev_state = torch._logging._internal._get_log_state()
+    torch._logging._internal._set_log_state(torch._logging._internal.LogState())
+    try:
+        yield
+    finally:
+        torch._logging._internal._set_log_state(prev_state)
+        torch._logging._internal._init_logs()
+
 def log_settings(settings):
-    return unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": settings})
+    exit_stack = contextlib.ExitStack()
+    settings_patch = unittest.mock.patch.dict(os.environ, {"TORCH_LOGS": settings})
+    exit_stack.enter_context(preserve_log_state())
+    exit_stack.enter_context(settings_patch)
+    torch._logging._internal._init_logs()
+    return exit_stack
+
+def log_api(**kwargs):
+    exit_stack = contextlib.ExitStack()
+    exit_stack.enter_context(preserve_log_state())
+    torch._logging.set_logs(**kwargs)
+    return exit_stack
+
 
 def kwargs_to_settings(**kwargs):
     INT_TO_VERBOSITY = {10: "+", 20: "", 40: "-"}
@@ -42,17 +65,15 @@ def make_logging_test(**kwargs):
             torch._dynamo.reset()
             records = []
             # run with env var
-            with log_settings(kwargs_to_settings(**kwargs)):
-                torch._logging._init_logs()
-                with self._handler_watcher(records):
-                    fn(self, records)
+            with log_settings(kwargs_to_settings(**kwargs)), self._handler_watcher(records):
+                fn(self, records)
 
             # run with API
             torch._dynamo.reset()
             records.clear()
-            torch._logging.set_logs(**kwargs)
-            with self._handler_watcher(records):
+            with log_api(**kwargs), self._handler_watcher(records):
                 fn(self, records)
+
 
         return test_fn
 
@@ -64,10 +85,8 @@ def make_settings_test(settings):
             torch._dynamo.reset()
             records = []
             # run with env var
-            with log_settings(settings):
-                torch._logging._init_logs()
-                with self._handler_watcher(records):
-                    fn(self, records)
+            with log_settings(settings), self._handler_watcher(records):
+                fn(self, records)
 
         return test_fn
 
@@ -87,6 +106,7 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls._exit_stack.close()
+        torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
 
     # This patches the emit method of each handler to gather records

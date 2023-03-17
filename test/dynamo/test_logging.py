@@ -20,7 +20,6 @@ requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda"
 def example_fn(a):
     output = a.mul(torch.ones(1000, 1000))
     output = output.add(torch.ones(1000, 1000))
-    output.sum().backward()
     return output
 
 
@@ -71,7 +70,7 @@ def single_record_test(**kwargs):
 class LoggingTests(LoggingTestCase):
 
     test_bytecode = multi_record_test(2, bytecode=True)
-    test_output_code = multi_record_test(2, output_code=True)
+    test_output_code = multi_record_test(1, output_code=True)
 
     @requires_cuda()
     @make_logging_test(schedule=True)
@@ -93,7 +92,7 @@ class LoggingTests(LoggingTestCase):
         self.assertEqual(len(records), 1)
 
     test_aot = multi_record_test(3, aot=logging.DEBUG)
-    test_inductor_debug = within_range_record_test(5, 15, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test(dynamo=logging.ERROR)

@@ -1,4 +1,5 @@
 import functools
+import itertools
 import logging
 import os
 import re
@@ -24,6 +25,11 @@ class LogRegistry:
     # this is populated lazily, as calls to getArtifactLogger
     # occur
     artifact_log_qnames: Set[str] = field(default_factory=set)
+
+    # child logs of registered logs if specified via open
+    # registration by the user (ie placing "torch._dynamo.output_graph" in the env var)
+    # these need to be tracked so their levels can be reset properly
+    child_log_qnames: Set[str] = field(default_factory=set)
 
     # artifact names, populated by register_artifact
     artifact_names: Set[str] = field(default_factory=set)
@@ -58,11 +64,17 @@ class LogRegistry:
     def register_artifact_log(self, artifact_log_qname):
         self.artifact_log_qnames.add(artifact_log_qname)
 
+    def register_child_log(self, log_qname):
+        self.child_log_qnames.add(log_qname)
+
     def get_log_qnames(self):
         return set(self.log_alias_to_log_qname.values())
 
     def get_artifact_log_qnames(self):
         return set(self.artifact_log_qnames)
+
+    def get_child_log_qnames(self):
+        return set(self.child_log_qnames)
 
     def is_off_by_default(self, artifact_qname):
         return artifact_qname in self.off_by_default_artifact_names
@@ -275,6 +287,8 @@ def _parse_log_settings(settings):
         elif _is_valid_module(name):
             if not _has_registered_parent(name):
                 log_registry.register_log(name, name)
+            else:
+                log_registry.register_child_log(name)
             log_state.enable_log(name, level)
         else:
             raise ValueError(
@@ -345,16 +359,29 @@ def _clear_handlers(log):
 
 
 def _reset_logs():
-    for log_name in log_registry.get_log_qnames():
-        log = logging.getLogger(log_name)
+    # reset all registered logs
+    for log_qname in log_registry.get_log_qnames():
+        log = logging.getLogger(log_qname)
         log.setLevel(logging.WARNING)
         log.propagate = False
         _clear_handlers(log)
 
-    for artifact_log_qname in log_registry.get_artifact_log_qnames():
+    # reset all artifact and child logs
+    for artifact_log_qname in itertools.chain(
+        log_registry.get_artifact_log_qnames(), log_registry.get_child_log_qnames()
+    ):
         log = logging.getLogger(artifact_log_qname)
         log.setLevel(logging.NOTSET)
         log.propagate = True
+
+
+def _get_log_state():
+    return log_state
+
+
+def _set_log_state(state):
+    global log_state
+    log_state = state
 
 
 def _init_logs(log_file_name=None):
