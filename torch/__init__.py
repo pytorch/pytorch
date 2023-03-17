@@ -1590,7 +1590,7 @@ def compile(model: Optional[Callable] = None, *,
     if torch.backends.mps.is_available():
         backend = "aot_eager"
     if mode is None and options is None:
-        mode = "default" 
+        mode = "default"
     if backend == "inductor":
         backend = _TorchCompileInductorWrapper(mode, options, dynamic)
 

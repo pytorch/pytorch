@@ -199,6 +199,7 @@ class NormalizeIRTests(torch._dynamo.test_case.TestCase):
         res = optimized_fn(a, b)
         self.assertTrue(same(ref, res))
 
+
 class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
     def test_mps_not_supported(self):
@@ -206,9 +207,12 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
         x = torch.randn(10, device="mps")
 
         # Not sure if there's a better way to test this
-        assert torch.compile(model, backend="inductor") == torch._dynamo.optimize(backend="aot_eager")(model)
+        assert torch.compile(model) == torch._dynamo.optimize(backend="aot_eager")(
+            model
+        )
         model = torch._dynamo.optimize("inductor")(model)
         model(x)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
