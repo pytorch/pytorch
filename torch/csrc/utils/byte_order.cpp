@@ -462,7 +462,7 @@ void THP_encodeComplexFloatBuffer(
   }
 }
 
-void THP_encodeCompelxDoubleBuffer(
+void THP_encodeComplexDoubleBuffer(
     uint8_t* dst,
     const c10::complex<double>* src,
     THPByteOrder order,
