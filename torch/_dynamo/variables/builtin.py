@@ -28,6 +28,7 @@ from .constant import ConstantVariable, EnumVariable
 from .dicts import ConstDictVariable
 from .lists import BaseListVariable, ListIteratorVariable, ListVariable, TupleVariable
 from .tensor import FakeItemVariable, SymNodeVariable, UnspecializedPythonVariable
+from .torch import CollectiveVariable
 from .user_defined import UserDefinedVariable
 
 log = logging.getLogger(__name__)
@@ -1009,7 +1010,9 @@ class BuiltinVariable(VariableTracker):
                 return GetAttrVariable(obj, name, **options)
         elif isinstance(obj, TorchVariable):
             member = getattr(obj.value, name)
-            if is_allowed(member):
+            if CollectiveVariable.is_collective(member):
+                return CollectiveVariable(member, **options)
+            elif is_allowed(member):
                 return TorchVariable(member, **options)
             elif ConstantVariable.is_literal(member):
                 return ConstantVariable(member, **options)

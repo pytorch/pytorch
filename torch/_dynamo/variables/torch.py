@@ -10,7 +10,6 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import get_fake_value
-from torch._dynamo.variables import SymNodeVariable
 from torch._guards import GuardsCheckpointState
 
 from .. import config, variables
@@ -125,6 +124,9 @@ class TorchVariable(VariableTracker):
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
+
+        if value == torch.distributed._functional_collectives.all_reduce:
+            breakpoint()
 
         if value in tensor_dunder_fns_remap:
             value = tensor_dunder_fns_remap[value]
@@ -800,6 +802,7 @@ class TorchPyOperator(VariableTracker):
         from . import (
             ListVariable,
             NestedUserFunctionVariable,
+            SymNodeVariable,
             TensorVariable,
             UserFunctionVariable,
         )
@@ -1044,3 +1047,36 @@ class TorchPyOperator(VariableTracker):
             ),
             example_value=example_value,
         )
+
+
+class CollectiveVariable(TorchVariable):
+
+    @staticmethod
+    def is_collective(value):
+        return value in {
+            torch.distributed._functional_collectives.all_reduce,
+            torch.distributed._functional_collectives.all_gather_into_tensor,
+            torch.distributed._functional_collectives.reduce_scatter_tensor,
+        }
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if self.value == torch.distributed._functional_collectives.all_reduce:
+
+            tag_ranks_groupsize = tx.inline_user_function_return(
+                variables.UserFunctionVariable(
+                    torch.distributed._functional_collectives._expand_group, **options
+                ),
+                args[2:],
+                {},
+            )
+            ar_args = args[:2] + tag_ranks_groupsize.items
+            all_reduce = TorchVariable(
+                torch.ops.aten.all_reduce, **options
+            ).call_function(tx, ar_args, {})
+
+            return TorchVariable(torch._C._nn.wait_tensor, **options).call_function(
+                tx, [all_reduce], {}
+            ) 
