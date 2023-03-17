@@ -346,12 +346,16 @@ class TracingContext:
 
     @staticmethod
     @contextlib.contextmanager
-    def current_loc(filename, lineno, frame_name):
+    def current_loc(filename, lineno):
         tc = TracingContext.get()
         assert (
             tc is not None
         ), "Loc context manager must be called within an ongoing trace."
-        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        if len(tc.frame_summary_stack) > 0:
+            current_frame_name = tc.frame_summary_stack[-1].name
+        else:
+            current_frame_name = "<unknown>"
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, current_frame_name)
         try:
             yield
         finally:

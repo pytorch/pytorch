@@ -47,7 +47,11 @@ void copy_cast_mps(at::Tensor& dst,
                    bool non_blocking = true) {
   using namespace mps;
 
-  using CachedGraph = MPSUnaryCachedGraph;
+  struct CachedGraph : public MPSCachedGraph {
+    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
 
   MPSStream* stream = getCurrentMPSStream();
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();

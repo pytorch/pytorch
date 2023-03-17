@@ -16,8 +16,6 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
-import torch._dynamo.config as dynamo_config
-
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
@@ -865,11 +863,7 @@ class Reduction(Loops):
                 ranges,
             )
 
-        split_reduction = is_triton(device) and reduction_type not in {
-            "argmax",
-            "argmin",
-        }
-        if split_reduction and not dynamo_config.dynamic_shapes:
+        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -899,10 +893,6 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
-        elif split_reduction and dynamo_config.dynamic_shapes:
-            log.warning(
-                "Could not do split reduction due to dynamic shapes; performance may be worse"
-            )
 
         return TensorBox.create(
             Reduction(
@@ -1532,12 +1522,10 @@ class ReinterpretView(BaseView):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        namespace = V.graph.wrapper_code.namespace
+        as_strided = V.graph.wrapper_code.as_strided
         if offset != "0":
-            return (
-                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
-            )
-        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
+            return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
+        return f"{as_strided}({self.get_name()}, {size}, {stride})"
 
 
 class SliceView(View):
