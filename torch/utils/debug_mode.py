@@ -89,9 +89,12 @@ def is_valid_check(check):
 class DebugMode(TorchDispatchMode):
     def __init__(self,
                  checks: Union[str, List[str]] = 'all',  # Selection of checks provided by PyTorch
-                 pre_checks: Optional[Union[Iterable[Callable], Callable]] = None,  # Additional pre-checks (callables) user can pass
-                 post_checks: Optional[Union[Iterable[Callable], Callable]] = None,  # Additional post-checks (callables) user can pass
-                 custom_error_handler: Optional[Callable] = None) -> None:  # custom_error_handler for an uncaught error
+                 # Additional pre-checks (callables) user can pass
+                 pre_checks: Optional[Union[Iterable[Callable], Callable]] = None,
+                 # Additional post-checks (callables) user can pass
+                 post_checks: Optional[Union[Iterable[Callable], Callable]] = None,
+                 # custom_error_handler for an uncaught error
+                 custom_error_handler: Optional[Callable] = None) -> None:
 
         if isinstance(checks, str):
             is_valid_check(checks)
