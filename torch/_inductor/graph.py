@@ -130,6 +130,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
+        self.device_idxs: Set[int] = set()
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -319,6 +320,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
+        if example.device.type == "cuda":
+            self.device_idxs.add(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -487,7 +490,6 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
-                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
@@ -619,11 +621,11 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code = self.codegen()
+        code, linemap = self.codegen()
         if config.debug:
             print(code)
 
-        mod = PyCodeCache.load(code)
+        mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
             setattr(mod, name, value)
 

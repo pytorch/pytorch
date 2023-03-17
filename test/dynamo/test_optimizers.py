@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_adam in OptimizerTests)
+"""
 # Owner(s): ["module: dynamo"]
 
 import inspect
@@ -48,9 +52,7 @@ class OptimizerTests(torch._dynamo.test_case.TestCase):
     # furthermore, the break is inside a for loop, so we bail on the frame
     # entirely.  This is basically an xfail; if the frame count goes up
     # you done good
-    test_radam = torch._dynamo.testing.skip_if_pytest(
-        make_test(torch.optim.RAdam, exp_graph_count=0)
-    )
+    test_radam = make_test(torch.optim.RAdam, exp_graph_count=0)
 
 
 # exclude SparseAdam because other areas of the stack don't support it yet
