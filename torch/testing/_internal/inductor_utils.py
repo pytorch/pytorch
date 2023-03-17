@@ -1,7 +1,7 @@
 from subprocess import CalledProcessError
 
 from torch._inductor.codecache import CppCodeCache
-from torch._inductor.utils import has_triton, has_mps
+from torch._inductor.utils import has_triton
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     TEST_WITH_ROCM,
@@ -21,4 +21,3 @@ except (
     pass
 
 HAS_CUDA = has_triton() and not TEST_WITH_ROCM
-HAS_MPS = has_mps()

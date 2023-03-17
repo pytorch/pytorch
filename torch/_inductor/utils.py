@@ -47,16 +47,6 @@ def has_triton():
     except ImportError:
         return False
 
-
-@functools.lru_cache(None)
-def has_mps():
-    try:
-        torch.randn(1).to("mps")
-        return True
-    except RuntimeError:
-        return False
-
-
 @functools.lru_cache(None)
 def has_torchvision_roi_align():
     try:

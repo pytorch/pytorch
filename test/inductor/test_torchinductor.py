@@ -74,7 +74,7 @@ from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
 from torch.fx.experimental.symbolic_shapes import FloorDiv
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, HAS_MPS
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
@@ -7832,28 +7832,8 @@ if HAS_CPU:
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
 
-
-if HAS_MPS:
-
-    class MPSNotSupportedTest(TestCase):
-        class ToyModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(1, 1)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        def test_mps_not_supported(self):
-            model = MPSNotSupportedTest.ToyModel().to(torch.device("mps"))
-            x = torch.randn(1).to(torch.device("mps"))
-            with self.assertRaises(RuntimeError):
-                model = torch._dynamo.optimize("inductor")(model)
-                model(x)
-
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if (HAS_CPU or HAS_CUDA or HAS_MPS) and not TEST_WITH_ROCM:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ROCM:
         run_tests(needs="filelock")
