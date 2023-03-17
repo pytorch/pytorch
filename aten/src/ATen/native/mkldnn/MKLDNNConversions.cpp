@@ -23,7 +23,7 @@ namespace at { namespace native {
 
 #if AT_MKLDNN_ENABLED()
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(mkldnn_tensor.scalar_type() == ScalarType::Float ||
               mkldnn_tensor.scalar_type() == ScalarType::BFloat16,
               "mkldnn_to_dense expects float or bfloat16 tensor input");
@@ -269,7 +269,7 @@ TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
 
 #else
 
-Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype) {
+Tensor mkldnn_to_dense(const Tensor& mkldnn_tensor, c10::optional<ScalarType> dtype, c10::optional<bool> masked_grad) {
   TORCH_CHECK(false, "MKL-DNN build is disabled");
 }
 
@@ -342,4 +342,5 @@ TORCH_LIBRARY_IMPL(mkl, MkldnnCPU, m) {
 }
 
 #endif // AT_MKL_ENABLED && AT_MKLDNN_ENABLED
+
 }}
