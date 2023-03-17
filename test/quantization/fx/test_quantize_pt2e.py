@@ -199,7 +199,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             def __init__(self, use_relu: bool = False, inplace_relu: bool = False):
                 super().__init__()
                 self.use_relu = use_relu
-                self.conv1 = nn.Conv2d(1, 1, 1)
+                self.conv1 = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
                 self.relu = nn.ReLU(inplace=inplace_relu)
 
             def forward(self, x):
@@ -212,9 +212,11 @@ class TestQuantizePT2E(QuantizationTestCase):
             with torch.no_grad():
                 for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
                     m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
-                    example_inputs = (torch.randn(1, 1, 1, 1),)
+                    example_inputs = (torch.randn(2, 3, 4, 4),)
                     # program capture
-                    m, guards = torchdynamo.export(
+                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
+                    # https://github.com/pytorch/pytorch/issues/96274
+                    export_module, guards = torchdynamo.export(
                         m,
                         *copy.deepcopy(example_inputs),
                         aten_graph=True,
@@ -224,10 +226,10 @@ class TestQuantizePT2E(QuantizationTestCase):
                     qconfig = get_default_qconfig("x86")
                     qconfig_mapping = QConfigMapping().set_global(qconfig)
                     backend_config = get_inductor_pt2e_backend_config()
-                    m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
-                    m(*example_inputs)
-                    m = convert_pt2e(m)
-                    m(*example_inputs)
+                    prepare_module = prepare_pt2e(export_module, qconfig_mapping, example_inputs, backend_config)
+                    prepare_module(*example_inputs)
+                    convert_module = convert_pt2e(prepare_module)
+                    convert_module(*example_inputs)
 
                     # Fake quant should only be inserted at start and end
                     node_occurrence = {
@@ -254,7 +256,9 @@ class TestQuantizePT2E(QuantizationTestCase):
                             ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
                             ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                         ]
-                    self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence, expected_node_list=node_list)
+                    self.checkGraphModuleNodes(convert_module,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
