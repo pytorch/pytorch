@@ -857,11 +857,11 @@ class TestAutograd(TestCase):
 
     def test_grad_zero_grad_unused(self):
         x = torch.tensor(0.5, dtype=torch.float32, requires_grad=True)
-        y = torch.tensor(1, dtype=torch.float32, requires_grad=True)
-        z = x * y
-        dydx = torch.autograd.grad(z, x, create_graph=True, allow_unused=True)
-        d2ydx2_None = torch.autograd.grad(dydx, x, allow_unused=True)
-        d2ydx2 = torch.autograd.grad(dydx, x, allow_unused=True, zero_grad_unused=True)
+        a = torch.tensor(1, dtype=torch.float32, requires_grad=True)
+        y = x * a
+        dydx = torch.autograd.grad(y, x, create_graph=True, allow_unused=True, zero_grad_unused=True)
+        d2ydx2_None = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True)
+        d2ydx2 = torch.autograd.grad(dydx, x, create_graph=True, allow_unused=True, zero_grad_unused=True)
         self.assertIsNone(d2ydx2_None[0])
         self.assertEqual(d2ydx2[0], 0)
         try:
