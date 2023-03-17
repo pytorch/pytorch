@@ -863,7 +863,7 @@ def register_onednn_fusion_ops():
             stride,
             dilation,
             groups,
-            attr,
+            attr: str,
             scalars,
             algorithm,
         ):

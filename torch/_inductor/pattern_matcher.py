@@ -598,6 +598,217 @@ def addmm(match, mat1, mat2, inp):
         return L[aten.add](inp, L[aten.mm](mat1, mat2))
 
 
+if torch._C.has_mkldnn:
+    mkldnn = torch.ops.mkldnn
+    # _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), KeywordArg('attr'), Arg(),  Arg(),)
+    _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
+    _user_1 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=1)]
+    _user_2 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=2)]
+    _user_3 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=3)]
+    _user_4 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=4)]
+
+    gelu_fusion_1 = lambda compute_call: CallFunction(
+        aten.mul,
+        CallFunction(aten.mul, compute_call, 0.5),
+        CallFunction(
+            aten.add,
+            CallFunction(
+                aten.erf, CallFunction(aten.mul, compute_call, 0.7071067811865476)
+            ),
+            1,
+        ),
+    )
+
+    gelu_fusion_2 = lambda compute_call: CallFunction(
+        aten.mul,
+        CallFunction(aten.mul, compute_call, 0.5),
+        CallFunction(
+            aten.add,
+            CallFunction(
+                aten.tanh,
+                CallFunction(
+                    aten.mul,
+                    CallFunction(
+                        aten.add,
+                        compute_call,
+                        CallFunction(
+                            aten.mul,
+                            CallFunction(
+                                aten.mul,
+                                CallFunction(aten.mul, compute_call, compute_call),
+                                compute_call,
+                            ),
+                            0.044715,
+                        ),
+                    ),
+                    0.7978845608028654,
+                ),
+            ),
+            1,
+        ),
+    )
+
+    hardswish_fusion = lambda compute_call: CallFunction(
+        aten.div,
+        CallFunction(
+            aten.mul,
+            compute_call,
+            CallFunction(
+                aten.clamp_max,
+                CallFunction(
+                    aten.clamp_min, CallFunction(aten.add, compute_call, 3), 0
+                ),
+                6,
+            ),
+        ),
+        6,
+    )
+
+    silu_fusion = lambda compute_call: CallFunction(
+        aten.mul, compute_call, CallFunction(aten.sigmoid, compute_call)
+    )
+
+    hardsigmoid_fusion = lambda compute_call: CallFunction(
+        aten.div,
+        CallFunction(
+            aten.clamp_max,
+            CallFunction(aten.clamp_min, CallFunction(aten.add, compute_call, 3), 0),
+            6,
+        ),
+        6,
+    )
+
+    relu_fusion = lambda compute_call: CallFunction(aten.relu, compute_call)
+
+    sigmoid_fusion = lambda compute_call: CallFunction(aten.sigmoid, compute_call)
+
+    tanh_fusion = lambda compute_call: CallFunction(aten.tanh, compute_call)
+
+    leaky_relu_fusion = lambda compute_call: CallFunction(
+        aten.where,
+        CallFunction(aten.gt, compute_call, 0),
+        compute_call,
+        CallFunction(aten.mul, compute_call, KeywordArg("negative_slope")),
+    )
+
+    hardtanh_fusion = lambda compute_call: CallFunction(
+        aten.clamp_max,
+        CallFunction(aten.clamp_min, compute_call, KeywordArg("min_value")),
+        KeywordArg("max_value"),
+    )
+
+    class UnaryAttr:
+        def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
+            self.op_name = op_name
+            self.scalars_attr = scalars_attr if scalars_attr else []
+            self.algorithm_attr = algorithm_attr if algorithm_attr else ""
+
+    replacement_unary_fusion_patterns = {
+        UnaryAttr("gelu", algorithm_attr="tanh"): [gelu_fusion_2(u) for u in _user_4],
+        UnaryAttr("gelu", algorithm_attr="none"): [gelu_fusion_1(u) for u in _user_2],
+        UnaryAttr("hardswish"): [hardswish_fusion(u) for u in _user_2],
+        UnaryAttr("hardsigmoid"): [hardsigmoid_fusion(u) for u in _user_1],
+        UnaryAttr("swish"): [silu_fusion(u) for u in _user_2],
+        UnaryAttr("relu"): [relu_fusion(u) for u in _user_1],
+        UnaryAttr("sigmoid"): [sigmoid_fusion(u) for u in _user_1],
+        UnaryAttr("tanh"): [tanh_fusion(u) for u in _user_1],
+    }
+
+    def register_mkldnn_replacement_pattern(unary_op, pattern):
+        @register_replacement_pattern(pattern)
+        def fn(input, weight, bias, padding, stride, dilation, groups):
+            return torch.ops.mkldnn._convolution_pointwise(
+                input,
+                weight,
+                bias,
+                padding,
+                stride,
+                dilation,
+                groups,
+                unary_op.op_name,
+                unary_op.scalars_attr,
+                unary_op.algorithm_attr,
+            )
+
+        return fn
+
+    for unary_op, patterns in replacement_unary_fusion_patterns.items():
+        register_mkldnn_replacement_pattern(unary_op, patterns[0])
+
+    @register_lowering_pattern(CallFunction(aten.mkldnn_convolution, *_conv_args))
+    def single_conv_lowering(
+        match, input, weight, bias, padding, stride, dilation, groups
+    ):
+        return L[torch.ops.mkldnn._convolution_pointwise](
+            input, weight, bias, padding, stride, dilation, groups, "none", [], ""
+        )
+
+    @register_lowering_pattern(leaky_relu_fusion(_user_3[0]))
+    def conv_leaky_relu(
+        match, input, weight, bias, padding, stride, dilation, groups, negative_slope
+    ):
+        if isinstance(negative_slope, ir.TensorBox):
+            matched = False
+        else:  # inp is a Number
+            matched = True
+        if matched:
+            return L[torch.ops.mkldnn._convolution_pointwise](
+                input,
+                weight,
+                bias,
+                padding,
+                stride,
+                dilation,
+                groups,
+                "leaky_relu",
+                [negative_slope],
+                "",
+            )
+        else:
+            conv_out = L[torch.ops.mkldnn._convolution_pointwise](
+                input, weight, bias, padding, stride, dilation, groups, "none", [], ""
+            )
+            return L[aten.where](
+                L[aten.gt](conv_out, 0), conv_out, L[aten.mul](conv_out, negative_slope)
+            )
+
+    @register_lowering_pattern(hardtanh_fusion(_user_1[0]))
+    def conv_hardtanh(
+        match,
+        input,
+        weight,
+        bias,
+        padding,
+        stride,
+        dilation,
+        groups,
+        min_value,
+        max_value,
+    ):
+        if isinstance(min_value, ir.TensorBox) or isinstance(max_value, ir.TensorBox):
+            matched = False
+        else:  # inp is a Number
+            matched = True
+        if matched:
+            return L[torch.ops.mkldnn._convolution_pointwise](
+                input,
+                weight,
+                bias,
+                padding,
+                stride,
+                dilation,
+                groups,
+                "hardtanh",
+                [min_value, max_value],
+                "",
+            )
+        else:
+            conv_out = L[torch.ops.mkldnn._convolution_pointwise](
+                input, weight, bias, padding, stride, dilation, groups, "none", [], ""
+            )
+            return L[aten.clamp_max](L[aten.clamp_min](conv_out, min_value), max_value)
+
+
 # This slows things down:
 """
 @register_replacement_pattern(

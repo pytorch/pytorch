@@ -645,6 +645,33 @@ def meta_conv(
     return out
 
 
+@register_meta(aten.mkldnn_convolution)
+def meta_mkldnn_convolutuon(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    padding: List[int],
+    stride: List[int],
+    dilation: List[int],
+    groups: int,
+):
+    shape_out = calc_conv_nd_return_shape(
+        input_tensor,
+        weight,
+        stride,
+        padding,
+        dilation,
+        False,
+        groups,
+        None,
+    )
+
+    out = input_tensor.new_empty(shape_out)
+    out_memory_format = torch.channels_last
+    out = out.to(memory_format=out_memory_format)  # type: ignore[call-overload]
+    return out
+
+
 if torch._C.has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_mkldnn = torch.library.Library(
         "mkldnn", "IMPL", "Meta"
