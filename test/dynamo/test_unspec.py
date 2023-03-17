@@ -10,7 +10,7 @@ import torch._dynamo.testing
 from torch._dynamo.testing import same
 
 
-@torch._dynamo.config.patch(dynamic_shapes=True)
+@torch._dynamo.config.patch(dynamic_shapes=True, specialize_int=False)
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_numpy_correctness(self):
         def fn(x, y, z):

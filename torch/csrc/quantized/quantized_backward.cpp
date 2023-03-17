@@ -31,15 +31,17 @@ class PackedLinearWeightDynamicBackward
                 bool)>();
     auto output = op.redispatch(
         DispatchKeySet({DispatchKey::CPU}), input, packed_weight, reduce_range);
-    ctx->saved_data["weight"] = packed_weight;
+    // TO-DO: passing packed_weight as saved_data requires more work in adding
+    // LinearPackedParamsBase in ivalue For now, we can simply pass a weight
+    // itself. Referenced :
+    // https://github.com/pytorch/pytorch/blob/master/aten/src/ATen/core/ivalue.h
+    auto unpacked_parameters = packed_weight->unpack();
+    ctx->saved_data["weight"] = std::get<0>(unpacked_parameters);
     return output;
   }
 
   static tensor_list backward(AutogradContext* ctx, tensor_list grad_outputs) {
-    auto packed_weight =
-        ctx->saved_data["weight"].toCustomClass<LinearPackedParamsBase>();
-    auto unpacked_parameters = packed_weight->unpack();
-    auto original_weight = std::get<0>(unpacked_parameters);
+    auto original_weight = ctx->saved_data["weight"].toTensor();
     original_weight = at::permute(original_weight, {1, 0});
     auto grad_output = grad_outputs[0];
     static auto op = at::Dispatcher::singleton()

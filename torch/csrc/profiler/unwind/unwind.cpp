@@ -1,8 +1,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 
-#if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
-    !__has_include("ext/stdio_filebuf.h")
+#if !defined(__linux__) || !defined(__x86_64__)
 namespace torch {
 namespace unwind {
 std::vector<void*> unwind() {
