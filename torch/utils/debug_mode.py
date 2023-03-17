@@ -2,8 +2,8 @@ import torch
 from torch.utils._python_dispatch import TorchDispatchMode
 import torch.utils._pytree as pytree
 
-from collections.abc import Iterable, Callable
-from typing import Union, List, Optional
+from collections.abc import Callable
+from typing import Union, List, Optional, Iterable
 from functools import partial
 
 
