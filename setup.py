@@ -1217,7 +1217,7 @@ def main():
         'utils/model_dump/code.js',
         'utils/model_dump/*.mjs',
     ]
-    if cmake_cache_vars['BUILD_NVFUSER']:
+    if get_cmake_cache_vars()['BUILD_NVFUSER']:
         torch_package_data.extend([
             'share/cmake/nvfuser/*.cmake',
             'include/nvfuser/*.h',
