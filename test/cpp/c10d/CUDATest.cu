@@ -7,7 +7,7 @@ namespace test {
 namespace {
 __global__ void waitClocks(const uint64_t count) {
   // Few AMD specific GPUs have different clock intrinsic
-#ifdef __GFX11__
+#if defined(__GFX11__) && defined(USE_ROCM) && !defined(__CUDA_ARCH__)
   clock_t start = wall_clock64();
 #else
   clock_t start = clock64();
