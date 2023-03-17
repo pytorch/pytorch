@@ -6377,7 +6377,8 @@ if HAS_CPU:
                 traced = make_fx(fn)(x, y)
                 compiled = compile_fx_inner(traced, [x, y])
                 assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
-                assert metrics.generated_cpp_vec_kernel_count == 1
+                if codecache.valid_vec_isa_list():
+                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
