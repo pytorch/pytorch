@@ -874,6 +874,8 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     checkout_install_torchbench
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench ""
   fi
+elif [[ "${TEST_CONFIG}" == 'inductor_codegen' ]]; then
+  test_inductor_codegen
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor

@@ -40,8 +40,6 @@ jobs:
       docker-image-name: pytorch-linux-focal-py3.8-gcc7
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
-          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "inductor_codegen", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
