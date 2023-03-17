@@ -6702,11 +6702,11 @@
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
-- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
   variants: method
 
 # Special case of to_dense with custom derivative
-- func: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+- func: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_to_dense
@@ -6714,7 +6714,7 @@
     MkldnnCPU: mkldnn_to_dense
   autogen: _to_dense.out
 
-- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
+- func: to_dense_backward(Tensor grad, Tensor input, bool? masked_grad=None) -> Tensor
 
 - func: sparse_dim(Tensor self) -> int
   variants: method
