@@ -214,7 +214,7 @@ def grad(
     only_inputs: bool = True,
     allow_unused: Optional[bool] = None,
     is_grads_batched: bool = False,
-    materialize_grad: bool = False,
+    materialize_grads: bool = False,
 ) -> Tuple[torch.Tensor, ...]:
     r"""Computes and returns the sum of gradients of outputs with respect to
     the inputs.
@@ -253,7 +253,7 @@ def grad(
             Default: ``False``.
         allow_unused (Optional[bool], optional): If ``False``, specifying inputs 
             that were not used when computing outputs (and therefore their grad is 
-            always zero) is an error. Defaults to the value of ``materialize_grad``.
+            always zero) is an error. Defaults to the value of ``materialize_grads``.
         is_grads_batched (bool, optional): If ``True``, the first dimension of each
             tensor in ``grad_outputs`` will be interpreted as the batch dimension.
             Instead of computing a single vector-Jacobian product, we compute a
@@ -266,17 +266,17 @@ def grad(
             cliffs. Please use ``torch._C._debug_only_display_vmap_fallback_warnings(True)``
             to show any performance warnings and file an issue on github if warnings exist
             for your use case. Defaults to ``False``.
-        materialize_grad (bool, optional): If ``True``, set the gradient for unused inputs
+        materialize_grads (bool, optional): If ``True``, set the gradient for unused inputs
             to zero instead of None. This is useful when computing higher-order derivatives.
-            If ``materialized_grad`` is ``True`` and ``allow_unused`` is ``False``, an error
+            If ``materialize_grads`` is ``True`` and ``allow_unused`` is ``False``, an error
             will be raised. Defaults to ``False``.
 
     """
-    if materialize_grad:
+    if materialize_grads:
         if allow_unused is False:
-            raise ValueError("Expected allow_unused to be True or not passed when materialize_grad=True,"
+            raise ValueError("Expected allow_unused to be True or not passed when materialize_grads=True,"
                              "but got: allow_unused=False.")
-        allow_unused = True  # materialized_grad=True implies allow_unused=True
+        allow_unused = True  # materialize_grads=True implies allow_unused=True
     if allow_unused is None:
         allow_unused = False
     t_outputs = cast(Tuple[torch.Tensor, ...], (outputs,) if is_tensor_like(outputs) else tuple(outputs))
@@ -294,7 +294,7 @@ def grad(
             only_inputs=only_inputs,
             allow_unused=allow_unused,
             is_grads_batched=is_grads_batched,
-            materialize_grad=materialize_grad,
+            materialize_grads=materialize_grads,
         )
 
     if not only_inputs:
@@ -321,7 +321,7 @@ def grad(
         result = Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
             t_outputs, grad_outputs_, retain_graph, create_graph, t_inputs,
             allow_unused, accumulate_grad=False)  # Calls into the C++ engine to run the backward pass
-    if materialize_grad:
+    if materialize_grads:
         result = tuple(output if output is not None else torch.zeros_like(input, requires_grad=True) 
                        for (output, input) in zip(result, t_inputs))
     return result
