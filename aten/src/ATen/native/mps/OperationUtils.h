@@ -148,30 +148,12 @@ struct MPSUnaryCachedGraph : public MPSCachedGraph
   MPSGraphTensor *outputTensor_ = nil;
 };
 
-struct MPSUnaryGradCachedGraph : public MPSCachedGraph
-{
-  MPSUnaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *gradOutputTensor_ = nil;
-  MPSGraphTensor *inputTensor_ = nil;
-  MPSGraphTensor *outputTensor_ = nil; // some backward input is actually the forward's output
-  MPSGraphTensor *gradInputTensor_ = nil;
-};
-
 struct MPSBinaryCachedGraph : public MPSCachedGraph
 {
   MPSBinaryCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
   MPSGraphTensor *inputTensor_ = nil;
   MPSGraphTensor *otherTensor_ = nil;
   MPSGraphTensor *outputTensor_ = nil;
-};
-
-struct MPSBinaryGradCachedGraph : public MPSCachedGraph
-{
-  MPSBinaryGradCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *gradOutputTensor_ = nil;
-  MPSGraphTensor *inputTensor_ = nil;
-  MPSGraphTensor *otherTensor_ = nil;
-  MPSGraphTensor *gradInputTensor_ = nil;
 };
 
 // TODO: Improve the overall design of MPSGraphCache.

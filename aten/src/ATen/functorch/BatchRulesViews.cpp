@@ -563,32 +563,12 @@ Tensor trace_decomp(const Tensor& tensor) {
   return tensor.diagonal().sum();
 }
 
-std::tuple<Tensor,optional<int64_t>> tril_batch_rule(
-    const Tensor& self,
-    optional<int64_t> self_bdim,
-    int64_t diagonal = 0) {
-  TORCH_CHECK(self.dim() >= 2, "tril: The input tensor must have at least 2 dimensions.");
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::tril(self_, diagonal);
-  return std::make_tuple(std::move(result), 0);
-}
-
-std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
-    const Tensor& self,
-    optional<int64_t> self_bdim,
-    int64_t diagonal = 0) {
-  TORCH_CHECK(self.dim() >= 2, "triu: The input tensor must have at least 2 dimensions.");
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto result = at::triu(self_, diagonal);
-  return std::make_tuple(std::move(result), 0);
-}
-
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
-  VMAP_SUPPORT(tril, tril_batch_rule);
-  VMAP_SUPPORT(triu, triu_batch_rule);
+  VMAP_SUPPORT(tril, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(tril)));
+  VMAP_SUPPORT(triu, VARIADIC_BDIMS_BATCH_RULE(ATEN_FN(triu)));
   VMAP_SUPPORT(repeat, repeat_batch_rule);
   VMAP_SUPPORT(_unsafe_view, _unsafe_view_batch_rule);
   VMAP_SUPPORT(unsqueeze, unsqueeze_batch_rule);

@@ -348,8 +348,8 @@ AARCH64_ASM_MICROKERNEL_SRCS = [
     "XNNPACK/src/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-cortex-a55.S",
     "XNNPACK/src/qu8-igemm/gen/qu8-igemm-4x16c4-minmax-rndnu-asm-aarch64-neondot-ld128.S",
 ] + [
-    "XNNPACK/src/qc8-gemm/gen/qc8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
-    "XNNPACK/src/qs8-gemm/gen/qs8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
+    "xnnpack_wrappers/qc8-gemm/gen/qc8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
+    "xnnpack_wrappers/qs8-gemm/gen/qs8-gemm-4x16c4-minmax-none-asm-aarch64-neondot-cortex-a55.S",
 ] if native.read_config("pt", "is_oss", "0") == "0" else []
 
 ALL_ARMSIMD32_MICROKERNEL_SRCS = [
@@ -5094,14 +5094,7 @@ ALL_SSE2_MICROKERNEL_SRCS = [
     "XNNPACK/src/x64-transposec/gen/x64-transposec-2x2-reuse-switch-sse2.c",
     "XNNPACK/src/xx-fill/xx-fill-sse2-x64.c",
     "XNNPACK/src/xx-pad/xx-pad-sse2.c",
-] + [
-    "XNNPACK/src/qc8-gemm/gen/qc8-gemm-1x4c8-minmax-none-sse2-ld64.c",
-    "XNNPACK/src/qc8-gemm/gen/qc8-gemm-2x4c8-minmax-none-sse2-ld64.c",
-    "XNNPACK/src/qc8-gemm/gen/qc8-gemm-3x4c8-minmax-none-sse2-ld64.c",
-    "XNNPACK/src/qs8-gemm/gen/qs8-gemm-1x4c8-minmax-none-sse2-ld64.c",
-    "XNNPACK/src/qs8-gemm/gen/qs8-gemm-2x4c8-minmax-none-sse2-ld64.c",
-    "XNNPACK/src/qs8-gemm/gen/qs8-gemm-3x4c8-minmax-none-sse2-ld64.c",
-] if native.read_config("pt", "is_oss", "0") == "0" else []
+]
 
 ALL_SSE41_MICROKERNEL_SRCS = [
     "XNNPACK/src/f16-f32-vcvt/gen/f16-f32-vcvt-sse41-int16-x8.c",

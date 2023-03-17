@@ -3796,6 +3796,8 @@ class TestVmapOperatorsOpInfo(TestCase):
             'scatter',
             'square',
             'sub',
+            'tril',
+            'triu',
             'trunc',
             'xlogy',
         )
