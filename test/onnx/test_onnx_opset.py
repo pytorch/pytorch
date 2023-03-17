@@ -494,7 +494,6 @@ class TestONNXOpset(pytorch_test_common.ExportTestCase):
             ("zeros", "border", "reflection"),
             (True, False),
         ):
-
             args = (
                 torch.randn(n, c, h_in, w_in),  # x
                 torch.randn(n, h_out, w_out, 2),  # grid,

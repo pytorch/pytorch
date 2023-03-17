@@ -6475,6 +6475,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((1,), (0,))
         # input.numel() == 0
         helper((0,), (0,))
+        # none of dims that needs to be flipped
+        helper((1, 3), [0])
 
     # Test index select
     def test_index_select(self):
@@ -10068,7 +10070,7 @@ class TestNoRegression(TestCase):
         # If this test is successful, that means that all operations in the comparison logic are supported natively on
         # the MPS backend. Please remove this test as well as the compatibility logic in
         # torch.testing._comparison.TensorLikePair._equalize_attributes
-        actual = torch.tensor(1.0, device="mps")
+        actual = torch.zeros(2, 3, 4, 5, device="mps")
         expected = actual.clone()
 
         # We can't use assert_close or TensorLikePair.compare() directly, since that would hit the compatibility logic
