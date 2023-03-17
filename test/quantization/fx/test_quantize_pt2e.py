@@ -213,8 +213,8 @@ class TestQuantizePT2E(QuantizationTestCase):
         use_relu_list = [True, False]
         inplace_relu_list = [True, False]
         with override_quantized_engine("x86"):
-            for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
-                with torch.no_grad():
+            with torch.no_grad():
+                for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
                     m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
                     example_inputs = (torch.randn(2, 3, 4, 4),)
                     # program capture
