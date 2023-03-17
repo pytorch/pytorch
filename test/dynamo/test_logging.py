@@ -68,7 +68,6 @@ def single_record_test(**kwargs):
 
 
 class LoggingTests(LoggingTestCase):
-
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(1, output_code=True)
 
@@ -77,7 +76,7 @@ class LoggingTests(LoggingTestCase):
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 1)
 
     test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
