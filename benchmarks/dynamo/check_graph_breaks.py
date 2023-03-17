@@ -11,30 +11,26 @@ def get_field(csv, model_name: str, field: str, typ=float):
 
 
 def check_graph_breaks(actual_csv, expected_csv, expected_filename):
-
     failed = []
     improved = []
 
     for model in actual_csv["name"]:
-
         graph_breaks = get_field(actual_csv, model, "graph_breaks", typ=int)
         expected_graph_breaks = get_field(expected_csv, model, "graph_breaks", typ=int)
 
         if graph_breaks == expected_graph_breaks:
             status = "PASS"
+            print(f"{model:34}  {status}")
+            continue
+
         elif graph_breaks > expected_graph_breaks:
-            status = "FAIL"
+            status = "FAIL:"
             failed.append(model)
         elif graph_breaks < expected_graph_breaks:
-            status = "IMPROVED"
+            status = "IMPROVED:"
             improved.append(model)
         print(
-            f"""
-            {model:34}:
-                graph_breaks={graph_breaks},
-                expected_graph_breaks={expected_graph_breaks},
-                {status}
-            """
+            f"{model:34}  {status:9} graph_breaks={graph_breaks}, expected={expected_graph_breaks}"
         )
 
     msg = ""
