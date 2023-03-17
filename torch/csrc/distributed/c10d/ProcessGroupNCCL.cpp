@@ -444,9 +444,33 @@ void ProcessGroupNCCL::WorkNCCL::checkAndThrowException() {
   }
 }
 
+void ProcessGroupNCCL::WorkNCCL::checkTimeout() {
+  // There is already an error, we don't override it
+  if (exception()) return;
+
+  if (timedOut()) {
+    auto currentTimepoint = std::chrono::steady_clock::now();
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        currentTimepoint - workStartTime_);
+    std::string exceptionMsg = c10::str(
+        "[Rank ",
+        rank_,
+        "] ",
+        "Watchdog caught collective operation timeout: ",
+        *this,
+        " ran for ",
+        timeElapsed.count(),
+        " milliseconds before timing out.");
+
+    LOG(ERROR) << exceptionMsg;
+    std::exception_ptr exception_ptr =
+        std::make_exception_ptr(std::runtime_error(exceptionMsg));
+    setException(exception_ptr);
+  }
+}
+
 void ProcessGroupNCCL::WorkNCCL::handleNCCLGuard(
     ErrorHandlingMode asyncErrorHandling) {
-  std::lock_guard<std::mutex> lock(mutex_);
   if (exception_) {
     auto exceptionMsg = c10::str(
         "Some NCCL operations have failed or timed out. Due to the ",
@@ -567,7 +591,10 @@ bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
 }
 
 void ProcessGroupNCCL::WorkNCCL::abort() {
-  TORCH_CHECK(false, "ProcessGroupNCCL::WorkNCCL::abort not implemented.");
+  // Abort all communicators of this work
+  for (const auto& ncclComm : ncclComms_) {
+    ncclComm->ncclCommAbort();  // TODO: abort reason
+  }
 }
 
 bool ProcessGroupNCCL::WorkNCCL::timedOut() {
@@ -664,9 +691,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       std::thread(&ProcessGroupNCCL::ncclCommWatchdog, this);
 #endif
 
+  /*
   if (asyncErrorHandling_ != NoHandling) {
     workCleanupThread_ = std::thread(&ProcessGroupNCCL::workCleanupLoop, this);
   }
+  */
 
   init();
   LOG(INFO) << "[Rank " << rank_
@@ -797,7 +826,7 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
 
   if (asyncErrorHandling_ != NoHandling) {
     workMetaListCV_.notify_one();
-    workCleanupThread_.join();
+    //workCleanupThread_.join();
   }
 
   // Abort all NCCL Communicators on Process Group Destruction
@@ -848,7 +877,8 @@ void ProcessGroupNCCL::abortTimedOutCollectives(
 void ProcessGroupNCCL::ncclCommWatchdog() {
   try {
     LOG(INFO) << "[Rank " << rank_ << "] NCCL watchdog thread started!";
-    ncclCommWatchdogInternal();
+    //ncclCommWatchdogInternal();
+    workCleanupLoop();
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
@@ -987,71 +1017,85 @@ void ProcessGroupNCCL::ncclCommWatchdogInternal() {
   }
 }
 
+void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
+  if (work.startTraceUpdated_) return;
+
+  if (terminateProcessGroup_.load() || storeError_) return;
+
+  work.startTraceUpdated_ = true;
+  storeError_ = !c10d::traceUpdate(
+      store_,
+      traceKeyStart_,
+      work.seq_,
+      opTypeToString(work.opType_));
+}
+
+void ProcessGroupNCCL::logWorkEnd(WorkNCCL& work) {
+  if (terminateProcessGroup_.load() || storeError_) return;
+
+  // In case the start of the work hasn't been logged
+  if (!work.startTraceUpdated_) {
+    logWorkStart(work);
+  }
+
+  storeError_ = !c10d::traceUpdate(
+      store_,
+      traceKeyEnd_,
+      work.seq_,
+      opTypeToString(work.opType_));
+}
+
 void ProcessGroupNCCL::workCleanupLoop() {
   bool done = false;
-  while (!terminateProcessGroup_.load() || !done) {
-    std::list<WorkNCCL> doneWorks;
-    {
-      std::unique_lock<std::mutex> lock(workMetaListMutex_);
-      // We busy-poll the work vector every kWatchdogThreadSleepMillis
-      // milliseconds as long as the atomic is True.
-      workMetaListCV_.wait_for(
-          lock,
-          std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
-          [&]() -> bool { return terminateProcessGroup_.load(); });
+  while (!done ||
+         !terminateProcessGroup_.load()) {
+    std::unique_lock<std::mutex> lock(workMetaListMutex_);
+    // We busy-poll the work vector every kWatchdogThreadSleepMillis
+    // milliseconds as long as the atomic is True.
+    workMetaListCV_.wait_for(
+        lock,
+        std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
+        [&]() -> bool { return terminateProcessGroup_.load(); });
 
-      for (auto it = workMetaList_.begin(); it != workMetaList_.end();
-           /* no increment*/) {
-        auto& work = *it;
+    for (auto it = workMetaList_.begin(); it != workMetaList_.end();
+          /* no increment*/) {
+      auto& work = *it;
+      work.checkAndSetException();
+      work.checkTimeout();
 
-        if (desyncDebug_ && !work.exception()) {
-          if (!work.startTraceUpdated_ && work.isStarted() &&
-              !terminateProcessGroup_.load() && !storeError_) {
-            work.startTraceUpdated_ = true;
-            storeError_ = !c10d::traceUpdate(
-                store_,
-                traceKeyStart_,
-                work.seq_,
-                opTypeToString(work.opType_));
-          }
+      // If work hits an exception (either an error or timeout)
+      if (work.exception()) {
+        // Abort work and corresponding communicators
+        work.abort();
+        // Report desync state in case of timeout
+        if (desyncDebug_ && work.timedOut()) {
+          auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
+          LOG(ERROR) << desyncMsg;
         }
+        // Throw exception
+        work.handleNCCLGuard(asyncErrorHandling_);
+      }
 
+      // Work status logging for desync debug
+      if (desyncDebug_) {
+        if (work.isStarted()) {
+          logWorkStart(work);
+        }
         if (work.isCompleted()) {
-          if (desyncDebug_ && !work.exception()) {
-            // To close the window between the check of work.isStarted() and
-            // the check of work.isCompleted().
-            if (!work.startTraceUpdated_ && !terminateProcessGroup_.load() &&
-                !storeError_) {
-              storeError_ = !c10d::traceUpdate(
-                  store_,
-                  traceKeyStart_,
-                  work.seq_,
-                  opTypeToString(work.opType_));
-            }
-            if (!terminateProcessGroup_.load() && !storeError_) {
-              storeError_ = !c10d::traceUpdate(
-                  store_,
-                  traceKeyEnd_,
-                  work.seq_,
-                  opTypeToString(work.opType_));
-            }
-          }
-          // Handle Exceptions on failed GPU operations and remove completed
-          // workNCCL objects from work vector.
-          if (!terminateProcessGroup_.load()) {
-            work.handleNCCLGuard(asyncErrorHandling_);
-          }
-          doneWorks.push_back(std::move(*it));
-          it = workMetaList_.erase(it);
-        } else {
-          // Increment the iterator if the current WorkNCCL object is not
-          // completed.
-          ++it;
+          logWorkEnd(work);
         }
       }
-      done = workMetaList_.empty();
+
+      // Clean up completed work
+      if (work.isCompleted()) {
+        it = workMetaList_.erase(it);
+      } else {
+        // Increment the iterator if the current WorkNCCL object is not
+        // completed.
+        ++it;
+      }
     }
-    doneWorks.clear();
+    done = workMetaList_.empty();
   }
 }
 

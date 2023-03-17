@@ -153,6 +153,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // and False otherwise.
     bool timedOut();
 
+    // Helper function that checks timeout and set exception
+    void checkTimeout();
+
     std::vector<at::Tensor> result() override;
 
    protected:
@@ -561,6 +564,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void workCleanupLoop();
 
+  void logWorkStart(WorkNCCL& work);
+
+  void logWorkEnd(WorkNCCL& work);
+
  protected:
   static const int64_t kWatchdogThreadSleepMillis;
   static const int64_t kWorkCleanupThreadSleepMillis;
@@ -711,6 +718,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   // Counting for the sequential number of NCCL collective call.
   uint64_t seq_{0};
+
+  std::exception_ptr watchDogException_ = nullptr;
 
 #ifdef USE_NCCL_WITH_UCC
   // ProcessGroupUCC shared library handle and ProcessGroup pointer
