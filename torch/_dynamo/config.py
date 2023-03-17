@@ -56,6 +56,7 @@ constant_functions = {
 }
 
 # Here for bw compat, will be removed (mlazos)
+# see above notes for log_level on how to configure the new logging system
 output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph

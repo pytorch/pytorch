@@ -339,7 +339,7 @@ def _setup_handlers(create_handler_fn, log):
     log.addHandler(debug_handler)
 
 
-handlers = WeakSet()
+handlers = WeakSet()  # type: ignore[var-annotated]
 
 
 # mark handlers that we've created
