@@ -80,7 +80,7 @@ runs:
     - name: Get temporary directory used by Windows Python
       shell: bash
       run: |
-        TMPDIR=$(python -c 'import tempfile; print(tempfile.gettempdir());')
+        TMPDIR=$(python -c 'import os; import tempfile; print(os.path.expanduser(tempfile.gettempdir()));')
         echo "${TMPDIR}" >> "${GITHUB_ENV}"
 
     # Since it's just a defensive command, the workflow should continue even the command fails
