@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+"""
 # Owner(s): ["module: dynamo"]
 import collections
 import contextlib
@@ -20,7 +24,6 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
-from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -1572,7 +1575,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, 10)
 
     def test_sort_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -1607,7 +1609,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(ref, res))
 
     def test_sigmoid_out(self):
-
         dtype = torch.float32
         device = "cpu"
 
@@ -2315,7 +2316,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2362,7 +2362,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -2398,6 +2397,23 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
         self.assertTrue(same(exported(*args), f(*args)))
+
+    def test_size_typematch(self):
+        def f(x, y):
+            if isinstance(x, torch.Size):
+                return y + 1
+            else:
+                return y + 2
+
+        y = torch.zeros(1)
+        x1 = torch.Size((3,))
+        x2 = (3,)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_f = torch._dynamo.optimize(cnt, nopython=True)(f)
+        self.assertTrue(same(f(x1, y), opt_f(x1, y)))
+        self.assertTrue(same(f(x2, y), opt_f(x2, y)))
+        self.assertEqual(cnt.frame_count, 2)
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", False)
     def test_not_rewrite_assert(self):
