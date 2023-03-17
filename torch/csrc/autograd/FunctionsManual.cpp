@@ -100,26 +100,6 @@ Tensor copysign_tensor_self_backward(
   return grad * ratio;
 }
 
-// Helper for determining behavior of
-// _scaled_dot_product_efficient_attention_backward based on forward inputs
-bool chunk_grad_outputs_efficient_attention(
-    const Tensor& query,
-    const Tensor& key,
-    const Tensor& value,
-    bool is_causal) {
-  int64_t M = query.size(2);
-  int64_t N = key.size(2);
-
-  bool grad_kv_needs_init = is_causal && N > M;
-  bool is_aliased = query.storage().is_alias_of(key.storage()) &&
-      query.storage().is_alias_of(value.storage());
-  bool equal_seq_len = query.size(2) == key.size(2);
-  bool q_v_same_head_dim = query.size(3) == value.size(3);
-  bool chunk_grad_outputs =
-      (!grad_kv_needs_init && equal_seq_len && q_v_same_head_dim && is_aliased);
-  return chunk_grad_outputs;
-}
-
 template <typename T>
 T not_implemented_base(const char* name, const char* reason) {
   std::string msg =
