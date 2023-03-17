@@ -533,7 +533,7 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
 
  protected:
   /// True if it's cheap enough to take parameters by value. Doing so avoids
-  /// overhead related to mitigations for reference invalidation.
+  /// overhead related to mitigation for reference invalidation.
   static constexpr bool TakesParamByValue = sizeof(T) <= 2 * sizeof(void*);
 
   /// Either const T& or T, depending on whether it's cheap enough to take

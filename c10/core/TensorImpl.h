@@ -783,7 +783,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
-   * valid as long as the tensor is live and not restrided.
+   * valid as long as the tensor is live and not restricted.
    */
   IntArrayRef strides() const {
     if (C10_UNLIKELY(matches_policy(SizesStridesPolicy::CustomStrides))) {

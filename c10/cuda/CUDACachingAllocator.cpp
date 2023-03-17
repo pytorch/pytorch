@@ -392,7 +392,7 @@ struct PrivatePool {
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
   // distinguish private blocks by adding a "pool id" check above the stream
-  // check in BlockComparator. BlockComparator is performance- critial though,
+  // check in BlockComparator. BlockComparator is performance- critical though,
   // I'd rather not add more logic to it.
   BlockPool large_blocks;
   BlockPool small_blocks;
@@ -626,7 +626,7 @@ size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
         }
         TORCH_CHECK(
             llvm::isPowerOf2_64(val2),
-            "For roundups, the divisons has to be power of 2 ",
+            "For roundups, the divisions has to be power of 2 ",
             "");
 
         if (val1.compare(">") == 0) {
@@ -672,7 +672,7 @@ size_t CachingAllocatorConfig::parseRoundUpPower2Divisions(
       size_t val1 = stoi(config[i]);
       TORCH_CHECK(
           llvm::isPowerOf2_64(val1),
-          "For roundups, the divisons has to be power of 2 ",
+          "For roundups, the divisions has to be power of 2 ",
           "");
       std::fill(
           m_roundup_power2_divisions.begin(),
@@ -1142,7 +1142,7 @@ class DeviceCachingAllocator {
 
     block->allocated = false;
 
-    // following logic might modifying underlaying Block, causing the size
+    // following logic might modifying underlying Block, causing the size
     // changed. We store ahead for reporting
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
@@ -1622,7 +1622,7 @@ class DeviceCachingAllocator {
   // For example, if we need to round-up 1200 and number of divisions is 4,
   // the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
   // them, the values are 1024, 1280, 1536, and 1792. So the function will
-  // return 1280 as the nearest ceiling of power-2 divison.
+  // return 1280 as the nearest ceiling of power-2 division.
   static size_t roundup_power2_next_division(size_t size, size_t divisions) {
     if (C10_UNLIKELY(size <= 4 || divisions <= 1)) {
       return size;
@@ -1634,14 +1634,14 @@ class DeviceCachingAllocator {
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
     size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
+    size_t power2_division =
         power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
+    if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
-    size_t round_size_floor = size & (~(power2_divison - 1));
+    size_t round_size_floor = size & (~(power2_division - 1));
     return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
+                                      : round_size_floor + power2_division;
   }
 
   static size_t round_size(size_t size) {

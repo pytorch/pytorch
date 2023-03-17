@@ -70,7 +70,7 @@ struct DeviceStats {
   // released via cudaFree)
   StatArray inactive_split;
 
-  // SUM: bytes allocated by this memory alocator
+  // SUM: bytes allocated by this memory allocator
   StatArray allocated_bytes;
   // SUM: bytes reserved by this memory allocator (both free and used)
   StatArray reserved_bytes;
@@ -144,7 +144,7 @@ struct TraceEntry {
                     // This event is generated when a free actually completes.
     SEGMENT_ALLOC, // a call to cudaMalloc to get more memory from the OS
     SEGMENT_FREE, // a call to cudaFree to return memory to the OS (e.g. to
-                  // defragement or empty_caches)
+                  // defragment or empty_caches)
     SNAPSHOT, // a call to snapshot, used to correlate memory snapshots to trace
               // events
     OOM // the allocator threw an OutOfMemoryError (addr_ is the amount of free

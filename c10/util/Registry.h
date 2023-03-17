@@ -206,7 +206,7 @@ class Registerer {
 // DEFINE - in Windows compilers, this generates a warning that dllimport and
 // dllexport are mixed, but the warning is fine and linker will be properly
 // exporting the symbol. Same thing happens in the gflags flag declaration and
-// definition caes.
+// definition case.
 #define C10_DECLARE_TYPED_REGISTRY(                                      \
     RegistryName, SrcType, ObjectType, PtrType, ...)                     \
   C10_API ::c10::Registry<SrcType, PtrType<ObjectType>, ##__VA_ARGS__>*  \

@@ -864,7 +864,7 @@ class sherwood_v3_table : private EntryAlloc, private Hasher, private Equal {
   }
 
   void swap_adjacent_nodes(EntryPointer before, EntryPointer after) {
-    // sentinel stays consant, so before->prev cannot equal after
+    // sentinel stays constant, so before->prev cannot equal after
     auto before_prev = before->prev;
     auto after_next = after->next;
 

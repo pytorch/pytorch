@@ -146,7 +146,7 @@ struct C10_API Device final {
     return type_ == DeviceType::CPU;
   }
 
-  /// Return true if the device supports arbirtary strides.
+  /// Return true if the device supports arbitrary strides.
   bool supports_as_strided() const noexcept {
     return type_ != DeviceType::IPU && type_ != DeviceType::XLA &&
         type_ != DeviceType::Lazy;
