@@ -162,41 +162,8 @@ TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
-# Tests need to be run with pytest.
-USE_PYTEST_LIST = [
-    "distributed/pipeline/sync/skip/test_api",
-    "distributed/pipeline/sync/skip/test_gpipe",
-    "distributed/pipeline/sync/skip/test_inspect_skip_layout",
-    "distributed/pipeline/sync/skip/test_leak",
-    "distributed/pipeline/sync/skip/test_portal",
-    "distributed/pipeline/sync/skip/test_stash_pop",
-    "distributed/pipeline/sync/skip/test_tracker",
-    "distributed/pipeline/sync/skip/test_verify_skippables",
-    "distributed/pipeline/sync/test_balance",
-    "distributed/pipeline/sync/test_bugs",
-    "distributed/pipeline/sync/test_checkpoint",
-    "distributed/pipeline/sync/test_copy",
-    "distributed/pipeline/sync/test_deferred_batch_norm",
-    "distributed/pipeline/sync/test_dependency",
-    "distributed/pipeline/sync/test_inplace",
-    "distributed/pipeline/sync/test_microbatch",
-    "distributed/pipeline/sync/test_phony",
-    "distributed/pipeline/sync/test_pipe",
-    "distributed/pipeline/sync/test_pipeline",
-    "distributed/pipeline/sync/test_stream",
-    "distributed/pipeline/sync/test_transparency",
-    "distributed/pipeline/sync/test_worker",
-    "distributions/test_constraints",
-    "distributions/test_transforms",
-    "distributions/test_utils",
-    "test_typing",
-    "distributed/elastic/events/lib_test",
-    "distributed/elastic/agent/server/test/api_test",
-    "test_deploy",
-    "distributed/test_c10d_error_logger"
-]
-
 WINDOWS_BLOCKLIST = [
+    "test_ops_jit",  # TODO: Broken on Windows https://github.com/pytorch/pytorch/issues/96858
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
@@ -230,7 +197,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -239,12 +205,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -256,7 +220,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -265,12 +228,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -318,6 +279,7 @@ CI_SERIAL_LIST = [
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    '_nvfuser/test_torchscript',  # OOM on test_issue_1785
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -466,6 +428,11 @@ def run_test(
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+    if test_module in PYTEST_SKIP_RETRIES:
+        if not options.pytest:
+            raise RuntimeError("A test running without pytest cannot skip retries using "
+                               "the PYTEST_SKIP_RETRIES set.")
+        unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(options)
@@ -672,6 +639,7 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
+    exclude_module_list = []
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests
@@ -686,6 +654,7 @@ def run_doctests(test_module, test_directory, options):
         'autograd_profiler': 0,
         'cpp_ext': 0,
         'monitor': 0,
+        "onnx": "auto",
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -709,6 +678,17 @@ def run_doctests(test_module, test_directory, options):
         else:
             enabled['qengine'] = True
 
+    if enabled["onnx"] == "auto":
+        try:
+            import onnx  # NOQA
+            import onnxscript  # NOQA
+            import onnxruntime  # NOQA
+        except ImportError:
+            exclude_module_list.append("torch.onnx._internal.fx.*")
+            enabled["onnx"] = False
+        else:
+            enabled["onnx"] = True
+
     # Set doctest environment variables
     if enabled['cuda']:
         os.environ['TORCH_DOCTEST_CUDA'] = '1'
@@ -731,6 +711,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['monitor']:
         os.environ['TORCH_DOCTEST_MONITOR'] = '1'
 
+    if enabled["onnx"]:
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+
     if 0:
         # TODO: could try to enable some of these
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
@@ -738,7 +721,6 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
         os.environ['TORCH_DOCTEST_HUB'] = '1'
         os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
-        os.environ['TORCH_DOCTEST_ONNX'] = '1'
         os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
@@ -756,7 +738,8 @@ def run_doctests(test_module, test_directory, options):
     xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
-        command=options.xdoctest_command, argv=[])
+        command=options.xdoctest_command, argv=[],
+        exclude=exclude_module_list)
     result = 1 if run_summary.get('n_failed', 0) else 0
     return result
 
@@ -801,7 +784,8 @@ def get_pytest_args(options):
     pytest_args = [
         "--use-pytest",
         "-vv",
-        "-rfEX"
+        "-rfEX",
+        "-p", "no:xdist",
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -881,6 +865,11 @@ CUSTOM_HANDLERS = {
     # not a test_ops file, but takes 2 hrs on some architectures and
     # run_test_ops is good at parallelizing things
     "test_decomp": run_test_ops,
+}
+
+
+PYTEST_SKIP_RETRIES = {
+    'test_public_bindings'
 }
 
 
@@ -1132,6 +1121,10 @@ def must_serial(file: str) -> bool:
     )
 
 
+def can_run_in_pytest(test):
+    return os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0'
+
+
 def get_selected_tests(options):
     selected_tests = options.include
 
@@ -1342,7 +1335,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1360,7 +1353,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:

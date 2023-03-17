@@ -568,8 +568,6 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
-aten::addmv
-aten::addmv.out
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
@@ -578,8 +576,6 @@ aten::alias_copy.out
 aten::all_gather_into_tensor
 aten::all_reduce
 aten::allclose
-aten::aminmax
-aten::aminmax.out
 aten::angle
 aten::angle.out
 aten::argmax
@@ -892,6 +888,7 @@ aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
+aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward
@@ -960,8 +957,6 @@ aten::nanmedian
 aten::nanmedian.dim
 aten::nanmedian.dim_values
 aten::nanmedian.out
-aten::nansum
-aten::nansum.out
 aten::native_group_norm.out
 aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype

@@ -4,6 +4,7 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
+
 from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
@@ -42,8 +43,10 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
+# whether or not to specialize on int inputs.  This only has an effect with
+# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
+# inputs
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -102,6 +105,12 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Print guards
+print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
+
+# Show a warning for every specialization
+print_specializations = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -203,7 +212,11 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-if is_fbcode():
+DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+
+if DEBUG_DIR_VAR_NAME in os.environ:
+    debug_dir_root = os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+elif is_fbcode():
     debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
 else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")

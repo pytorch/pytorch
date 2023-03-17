@@ -11,13 +11,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Unio
 
 import torch.nn
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    tracing,
-    TracingContext,
-)
+from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -356,17 +350,13 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             var = f"___{name}_{i}"
             if var not in existing:
-                self.code_options["co_varnames"] = self.code_options["co_varnames"] + (
-                    var,
-                )
+                self.code_options["co_varnames"] += (var,)
                 return var
 
     def update_co_names(self, name):
         """Ensure self.code_options.co_names contains name"""
         if name not in self.code_options["co_names"]:
-            self.code_options["co_names"] = tuple(self.code_options["co_names"]) + (
-                name,
-            )
+            self.code_options["co_names"] += (name,)
 
     @staticmethod
     def module_has_hooks(mod, only_check_unsupported=False):
@@ -622,8 +612,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        with tracing(self.tracing_context):
-            compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -814,6 +803,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
+        elif kind == "call_module":
+            # For modules we store the class
+            rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

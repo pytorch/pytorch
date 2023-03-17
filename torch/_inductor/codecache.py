@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import types
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
@@ -120,9 +121,9 @@ class PersistentCache:
             1. Check global_cache[name][inputs][choice], return benchmark if cached.
             2. Check local_cache[name][inputs][choice], return benchmark if cached.
             3.
-                a. `max_autotune=True`: benchmark the choice, update
+                a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[name][inputs][choice], and return the benchmark.
-                b. `max_autotune=False`: don't benchmark the choice, return nothing.
+                b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
         """
 
         gc_log = partial(global_cache_log, self.dinfo, self.vinfo, name, inputs)
@@ -145,7 +146,7 @@ class PersistentCache:
                         callback(choice_hash, cached=False)
             return hit
 
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not check_cache(
@@ -534,6 +535,52 @@ def cpp_compile_command(
     ).strip()
 
 
+class AotCodeCache:
+    cache = dict()
+    clear = staticmethod(cache.clear)
+
+    @classmethod
+    def compile(cls, source_code):
+        from .codegen.wrapper import CppWrapperCodeGen
+
+        # TODO: update cpp_compile_command for different platforms
+        picked_vec_isa = pick_vec_isa()
+        key, input_path = write(
+            source_code,
+            "cpp",
+            code_hash(repr(cpp_compile_command("i", "o", vec_isa=picked_vec_isa))),
+        )
+        if key not in cls.cache:
+            from filelock import FileLock
+
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_so = (
+                    os.path.join(os.getcwd(), f"{config.aot_codegen_output_prefix}.so")
+                    if config.aot_codegen_output_prefix
+                    else f"{input_path[:-3]}.so"
+                )
+
+                output_header = f"{output_so[:-3]}.h"
+                with open(output_header, "w") as header_file:
+                    header_file.writelines("#include <torch/torch.h>\n\n")
+                    header_file.writelines(f"{CppWrapperCodeGen.decl_str};\n")
+
+                log.info(f"AOT-Inductor compiles code into: {output_so}")
+                if not os.path.exists(output_so):
+                    cmd = cpp_compile_command(
+                        input=input_path, output=output_so, vec_isa=picked_vec_isa
+                    ).split(" ")
+                    try:
+                        subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+                    except subprocess.CalledProcessError as e:
+                        raise exc.CppCompileError(cmd, e.output) from e
+
+                cls.cache[key] = output_so
+        return cls.cache[key]
+
+
 class CppCodeCache:
     cache = dict()
     clear = staticmethod(cache.clear)
@@ -589,10 +636,11 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code, extra=""):
+    def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
@@ -608,7 +656,35 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
+                cls.linemaps[path] = linemap
+
         return cls.cache[key]
+
+    @classmethod
+    @functools.lru_cache(None)
+    def stack_frames_for_code(cls, path, lineno):
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        linemap = cls.linemaps[path]
+        p = bisect_right(linemap, lineno, key=lambda x: x[0])
+        if p == 0:
+            return None
+        _, entry = linemap[p - 1]
+        if not entry:
+            return None
+
+        def parse_stack_trace(stack_trace):
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:

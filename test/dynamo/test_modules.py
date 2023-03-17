@@ -682,6 +682,22 @@ class ModuleForwardHasGraphBreak(torch.nn.Module):
         return x * self.scale
 
 
+class ModuleGuardNameIsValid(torch.nn.ModuleDict):
+    # Guard names should be valid python identifier as we use eval() to get
+    # corresponding guard value. Some guard names come from source(module path)
+    # where special symbols are valid. But they are not valid python identifier,
+    # we should identify these pattern and rewrite them with getattr.
+    def __init__(self):
+        super().__init__()
+        for i in range(2):
+            self.add_module("l@yer-%d" % (i + 1), BasicModule())
+
+    def forward(self, x):
+        for _, layer in self.items():
+            x = layer(x)
+        return x
+
+
 class ModulePatch1(torch.nn.Module):
     pass
 
@@ -746,6 +762,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_forward_directly = make_test(CallForwardDirectly())
     test_module_name_string = make_test(ModuleNameString())
     test_module_attribute_precedence = make_test(ModuleAttributePrecedence())
+    test_module_guard_name_is_valid = make_test(ModuleGuardNameIsValid())
 
     def test_module_forward_has_graph_break(self):
         m = ModuleForwardHasGraphBreak()
@@ -830,7 +847,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.config.traceable_tensor_subclasses.add(TensorProxy)
 
         try:
-
             x = torch.randn(1).as_subclass(TensorProxy)
             cnt = torch._dynamo.testing.CompileCounter()
             out1 = foo(x)
@@ -845,7 +861,6 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_with_closure(self):
         def run():
-
             counter = 0
 
             def foo(x):
@@ -1080,7 +1095,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
 
         # Check parameteres and buffers
-        for (p1, p2) in zip(mod.parameters(), opt_mod.parameters()):
+        for p1, p2 in zip(mod.parameters(), opt_mod.parameters()):
             self.assertTrue(id(p1) == id(p2))
 
     def test_recursion(self):
