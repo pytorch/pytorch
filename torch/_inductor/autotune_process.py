@@ -8,9 +8,10 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import PyCodeCache
 
-from torch._inductor.select_algorithm import ChoiceCaller
 from .utils import do_bench
 from .virtualized import V
+
+DEBUG = False
 
 
 @dataclasses.dataclass
@@ -66,33 +67,58 @@ class BenchmarkRequest:
     input_tensors: List[TensorMeta]
     output_tensor: TensorMeta
 
+    def benchmark(self, *input_tensors, output_tensor=None) -> float:
+        if DEBUG:
+            start_ts = time.time()
+
+        mod = PyCodeCache.load_by_key_path(self.module_cache_key, self.module_path)
+        run = getattr(mod, self.kernel_name).run
+
+        if DEBUG:
+            load_elapse = time.time() - start_ts
+            start_ts = time.time()
+
+        # create args and out tensor
+        if output_tensor is None:
+            assert len(input_tensors) == 0
+            input_tensors = [x.to_tensor() for x in self.input_tensors]
+            output_tensor = self.output_tensor.to_tensor()
+
+        if DEBUG:
+            create_tensor_elapse = time.time() - start_ts
+            start_ts = time.time()
+
+        def worker():
+            return run(
+                *input_tensors,
+                output_tensor,
+                *self.extra_args,
+                grid=self.grid,
+                num_stages=self.num_stages,
+                num_warps=self.num_warps,
+            )
+
+        out = do_bench(worker)[0]
+        torch.cuda.synchronize()  # shake out any CUDA errors
+
+        if DEBUG:
+            bench_elapse = time.time() - start_ts
+            print(
+                f"InChidProcess {self.module_cache_key}: load {load_elapse}, "
+                + f"create tensor {create_tensor_elapse}, bench {bench_elapse}"
+            )
+        return out
+
 
 def process_main(bmreq: BenchmarkRequest, timings: torch.Tensor):
     """
     The main function for the child process.
     """
-    mod = PyCodeCache.load_by_key_path(bmreq.module_cache_key, bmreq.module_path)
-    run = getattr(mod, bmreq.kernel_name).run
-
-    # create args and out tensor
-    input_tensors = [x.to_tensor() for x in bmreq.input_tensors]
-    output_tensor = bmreq.output_tensor.to_tensor()
-
-    def worker():
-        return run(
-            *input_tensors,
-            output_tensor,
-            *bmreq.extra_args,
-            grid=bmreq.grid,
-            num_stages=bmreq.num_stages,
-            num_warps=bmreq.num_warps,
-        )
-
-    timings[0] = do_bench(worker)[0]
+    timings[0] = bmreq.benchmark()
 
 
 def benchmark_in_sub_process(
-    choice: ChoiceCaller,
+    choice: "ChoiceCaller",
 ) -> float:
     assert choice.bmreq is not None
 

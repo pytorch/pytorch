@@ -18,6 +18,7 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
+from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -38,7 +39,6 @@ class KernelNamespace:
 
 
 # these objects are imported from the generated wrapper code
-template_kernels = KernelNamespace()
 extern_kernels = KernelNamespace()
 
 
@@ -405,7 +405,6 @@ class TritonTemplate:
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
-            run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
@@ -418,21 +417,7 @@ class TritonTemplate:
         )
         assert not extra_args, "TODO: dynamic shapes"
 
-        def call(*args, out):
-            return run(
-                *args,
-                out,
-                *extra_args,
-                grid=self.grid(*out.size(), kwargs),
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
-
-        call.key = mod.key
-        call.__file__ = mod.__file__
-
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
-        setattr(template_kernels, kernel_hash_name, call)
 
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
@@ -448,24 +433,19 @@ class TritonTemplate:
             )
             return kernel, render
 
-        # create the BenchmarkRequest if we do autotuning in subprocess
-        bmreq = None
-        if config.autotune_in_subproc:
-            from .autotune_process import BenchmarkRequest, TensorMeta
-
-            # the request we will send to sub process to do the benchmarking
-            grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
-            bmreq = BenchmarkRequest(
-                module_path=mod.__file__,
-                module_cache_key=mod.key,
-                kernel_name=kernel_name,
-                grid=grid,
-                extra_args=extra_args,
-                num_stages=num_stages,
-                num_warps=num_warps,
-                input_tensors=TensorMeta.from_irnodes(input_nodes),
-                output_tensor=TensorMeta.from_irnodes(layout),
-            )
+        # create the BenchmarkRequest
+        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
+        bmreq = BenchmarkRequest(
+            module_path=mod.__file__,
+            module_cache_key=mod.key,
+            kernel_name=kernel_name,
+            grid=grid,
+            extra_args=extra_args,
+            num_stages=num_stages,
+            num_warps=num_warps,
+            input_tensors=TensorMeta.from_irnodes(input_nodes),
+            output_tensor=TensorMeta.from_irnodes(layout),
+        )
 
         return TritonTemplateCaller(
             kernel_hash_name,
@@ -566,14 +546,11 @@ class TritonTemplateCaller(ChoiceCaller):
     def call_name(self):
         return f"template_kernels.{self.name}"
 
-    def to_callable(self):
-        return getattr(template_kernels, self.name)
-
     def hash_key(self):
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
-                self.to_callable().key,
+                self.bmreq.module_cache_key,
             ]
         )
 
@@ -736,14 +713,15 @@ class AlgorithmSelectorCache(PersistentCache):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
             else:
                 # triton templates want the base pointer for sliced tensors
-                result = choice.benchmark(*example_inputs, out=out)
+                assert choice.bmreq is not None
+                result = choice.bmreq.benchmark(*example_inputs, output_tensor=out)
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return result[0]
+            return result
 
         def benchmark_in_sub_process(choice):
             # only benchmark triton kernel in sub process for now.
