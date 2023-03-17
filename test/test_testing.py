@@ -1498,11 +1498,11 @@ class TestMakeTensor(TestCase):
 
         self.assertTrue((t != 1).all(), """\
         If you see this message, it seems that you have fixed https://github.com/pytorch/pytorch/issues/96947!
-        Please delete the conditional returns in 
-        
+        Please delete the conditional returns in
+
         - test_testing.TestMakeTensor.test_low_high_smoke
         - test_testing.TestMakeTensor.test_low_high_default_smoke
-        
+
         that link to the same issue. If these tests are passing now, feel free to delete this test.
         """)
 
