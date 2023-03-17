@@ -51,6 +51,8 @@ from .utils import compile_times
 
 log = logging.getLogger(__name__)
 
+from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental import proxy_tensor
 
 always_optimize_code_objects = utils.ExactWeakKeyDictionary()
@@ -634,7 +636,7 @@ def export(
     graph = None
     out_guards = None
     graph_captured_input = None
-    example_fake_inputs = None
+    example_fake_inputs = []
     graph_captured_result: Optional[Tuple[torch.Tensor, ...]] = None
 
     def produce_matching(source_args, candidate_args):
@@ -769,10 +771,12 @@ def export(
                 return torch.fx.Interpreter(graph).run(*args)
 
         fake_tensor_mode = null_context()
-        if example_fake_inputs is not None and len(example_fake_inputs) > 0:
-            fake_tensor_mode = example_fake_inputs[0].fake_mode
+        for val in example_fake_inputs:
+            if isinstance(val, FakeTensor):
+                fake_tensor_mode = val.fake_mode
+                break
 
-        with fake_tensor_mode:
+        with enable_python_dispatcher(), fake_tensor_mode:
             graph = make_fx(
                 graph_with_interpreter,
                 decomposition_table=decomposition_table,
