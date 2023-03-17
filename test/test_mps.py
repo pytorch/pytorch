@@ -5723,6 +5723,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
         # verify if a change in shape of padding would cause problems with graph caching
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
+        # case where input_d == pad_front/back for ReplicationPad3d
+        helper((3, 4, 5, 6, 7), (1, 2, 3, 4, 5, 6), nn.ReplicationPad3d)
         # Constant Pad 3D
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # input size < pad size
