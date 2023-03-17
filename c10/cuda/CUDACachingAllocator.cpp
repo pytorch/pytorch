@@ -162,7 +162,7 @@ void update_stat_array(
 
 struct Block;
 struct PrivatePool;
-typedef bool (*Comparison)(const  Block*, const Block*);
+typedef bool (*Comparison)(const Block*, const Block*);
 
 struct BlockPool {
   BlockPool(
@@ -180,7 +180,6 @@ struct HistoryChain {
   std::unique_ptr<HistoryChain> next; // when blocks are merged we keep records
                                       // of what used to be in the block
 };
-
 
 struct ExpandableSegment;
 
@@ -229,27 +228,29 @@ struct Block {
   }
 };
 
-#define C10_CUDA_DRIVER_CHECK(EXPR)                                                                               \
-  do {                                                                                                           \
-    CUresult __err = EXPR;                                                                                       \
-    if (__err != CUDA_SUCCESS) {                                                                                 \
-      const char* err_str;                                                                                       \
-      CUresult get_error_str_err C10_UNUSED = cuGetErrorString(__err, &err_str);  \
-      if (get_error_str_err != CUDA_SUCCESS) {                                                                   \
-        AT_ERROR("CUDA driver error: unknown error");                                                            \
-      } else {                                                                                                   \
-        AT_ERROR("CUDA driver error: ", err_str);                                                                \
-      }                                                                                                          \
-    }                                                                                                            \
+#define C10_CUDA_DRIVER_CHECK(EXPR)                   \
+  do {                                                \
+    CUresult __err = EXPR;                            \
+    if (__err != CUDA_SUCCESS) {                      \
+      const char* err_str;                            \
+      CUresult get_error_str_err C10_UNUSED =         \
+          cuGetErrorString(__err, &err_str);          \
+      if (get_error_str_err != CUDA_SUCCESS) {        \
+        AT_ERROR("CUDA driver error: unknown error"); \
+      } else {                                        \
+        AT_ERROR("CUDA driver error: ", err_str);     \
+      }                                               \
+    }                                                 \
   } while (0)
 
 struct ExpandableSegment {
   ExpandableSegment(int device, cudaStream_t stream, size_t size)
-  : device_(device), max_handles_(0), stream_(stream), kSegmentSize(size) {
+      : device_(device), stream_(stream), max_handles_(0), kSegmentSize(size) {
     cudaDeviceProp prop;
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
     max_handles_ = num_segments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
-    C10_CUDA_DRIVER_CHECK(cuMemAddressReserve(&ptr_, kSegmentSize * max_handles_, 0ULL, 0, 0ULL));
+    C10_CUDA_DRIVER_CHECK(
+        cuMemAddressReserve(&ptr_, kSegmentSize * max_handles_, 0ULL, 0, 0ULL));
   }
   // expandSize tries to expand requested bytes
   // returns 0 if it cannot succeed
@@ -269,7 +270,7 @@ struct ExpandableSegment {
       auto status = cuMemCreate(&handle, kSegmentSize, &prop, 0);
       if (status == CUDA_ERROR_OUT_OF_MEMORY) {
         for (auto j : c10::irange(i)) {
-          (void) j;
+          (void)j;
           C10_CUDA_DRIVER_CHECK(cuMemRelease(handles_.back()));
           handles_.pop_back();
         }
@@ -279,14 +280,23 @@ struct ExpandableSegment {
       handles_.push_back(handle);
     }
     for (auto i : c10::irange(num_segments_to_add)) {
-      C10_CUDA_DRIVER_CHECK(cuMemMap(ptr_ + (expand_begin + i) * kSegmentSize, kSegmentSize, 0, handles_.at(expand_begin + i), 0ULL));
+      C10_CUDA_DRIVER_CHECK(cuMemMap(
+          ptr_ + (expand_begin + i) * kSegmentSize,
+          kSegmentSize,
+          0,
+          handles_.at(expand_begin + i),
+          0ULL));
     }
 
     CUmemAccessDesc desc;
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
     desc.location.id = device_;
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
-    C10_CUDA_DRIVER_CHECK(cuMemSetAccess(ptr_ + expand_begin*kSegmentSize, num_segments_to_add*kSegmentSize, &desc, 1));
+    C10_CUDA_DRIVER_CHECK(cuMemSetAccess(
+        ptr_ + expand_begin * kSegmentSize,
+        num_segments_to_add * kSegmentSize,
+        &desc,
+        1));
     return num_segments_to_add * kSegmentSize;
   }
 
@@ -302,17 +312,25 @@ struct ExpandableSegment {
     // stream to finish before this memory is truly free.
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(num_segments_to_remove)) {
+      (void)i;
       CUmemGenericAllocationHandle h = handles_.back();
       handles_.pop_back();
-      C10_CUDA_DRIVER_CHECK(cuMemUnmap(ptr_ + kSegmentSize * handles_.size(), kSegmentSize));
+      C10_CUDA_DRIVER_CHECK(
+          cuMemUnmap(ptr_ + kSegmentSize * handles_.size(), kSegmentSize));
       C10_CUDA_DRIVER_CHECK(cuMemRelease(h));
     }
     return kSegmentSize * num_segments_to_remove;
   }
 
-  size_t remainingSize() const { return kSegmentSize * (max_handles_ - handles_.size()); }
-  void* ptr() const { return (void*) ptr_; }
-  size_t size() const { return handles_.size() * kSegmentSize; }
+  size_t remainingSize() const {
+    return kSegmentSize * (max_handles_ - handles_.size());
+  }
+  void* ptr() const {
+    return (void*)ptr_;
+  }
+  size_t size() const {
+    return handles_.size() * kSegmentSize;
+  }
   ~ExpandableSegment() {
     auto sz = size();
     if (sz > 0) {
@@ -321,7 +339,8 @@ struct ExpandableSegment {
     }
     C10_CUDA_DRIVER_CHECK(cuMemAddressFree(ptr_, kSegmentSize * max_handles_));
   }
-private:
+
+ private:
   size_t num_segments(size_t size) {
     return (size + kSegmentSize - 1) / kSegmentSize;
   }
@@ -1868,13 +1887,18 @@ class DeviceCachingAllocator {
     return blocks;
   }
 
-  Block* find_expandable_block(cudaStream_t stream, BlockPool* pool, size_t size) {
+  Block* find_expandable_block(
+      cudaStream_t stream,
+      BlockPool* pool,
+      size_t size) {
     Block* candidate = nullptr;
     // Free blocks have extra space before the segment we will expand.
     // So try to find one with the most free space
     // to reduce the amount we allocate.
     auto possible_candidate = [&](Block* b) {
-      return b->stream == stream && b->expandable_segment_ && b->size + b->expandable_segment_->remainingSize() >= size && b->pool == pool;
+      return b->stream == stream && b->expandable_segment_ &&
+          b->size + b->expandable_segment_->remainingSize() >= size &&
+          b->pool == pool;
     };
     for (Block* b : pool->blocks) {
       if (!possible_candidate(b)) {
@@ -1899,7 +1923,12 @@ class DeviceCachingAllocator {
     }
     return candidate;
   }
-  Block* try_allocate_expandable_block(int device, cudaStream_t stream, BlockPool* pool, size_t size, const std::shared_ptr<GatheredContext>& ctx) {
+  Block* try_allocate_expandable_block(
+      int device,
+      cudaStream_t stream,
+      BlockPool* pool,
+      size_t size,
+      const std::shared_ptr<GatheredContext>& ctx) {
     Block* candidate = find_expandable_block(stream, pool, size);
 
     // 3 cases:
@@ -1911,7 +1940,8 @@ class DeviceCachingAllocator {
     ExpandableSegment* segment;
     if (!candidate) {
       auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
-      new_segment = std::make_unique<ExpandableSegment>(device, stream, segment_size);
+      new_segment =
+          std::make_unique<ExpandableSegment>(device, stream, segment_size);
       segment = new_segment.get();
     } else {
       segment = candidate->expandable_segment_.get();
@@ -1937,7 +1967,8 @@ class DeviceCachingAllocator {
       candidate->expandable_segment_ = std::move(new_segment);
     } else if (candidate->allocated) {
       Block* prev = candidate;
-      candidate = new Block(device, stream, expanded, pool, ((char *)prev->ptr + prev->size));
+      candidate = new Block(
+          device, stream, expanded, pool, ((char*)prev->ptr + prev->size));
       prev->next = candidate;
       candidate->prev = prev;
       candidate->expandable_segment_ = std::move(prev->expandable_segment_);
@@ -1947,7 +1978,12 @@ class DeviceCachingAllocator {
     }
 
     auto new_size = candidate->expandable_segment_->size();
-    record_trace_segment_change(ctx, candidate->expandable_segment_->ptr(), new_size - expanded, new_size, stream);
+    record_trace_segment_change(
+        ctx,
+        candidate->expandable_segment_->ptr(),
+        new_size - expanded,
+        new_size,
+        stream);
 
     return candidate;
   }
@@ -2114,7 +2150,6 @@ class DeviceCachingAllocator {
     }
   }
 
-
   bool get_free_block(AllocParams& p) {
     BlockPool& pool = *p.pool;
 
@@ -2136,12 +2171,16 @@ class DeviceCachingAllocator {
     // This means that we someimtes have to search for blocks with bigger 'size'
     // before choosing this segment.
     if ((*it)->expandable_segment_.get()) {
-      auto expandable_size = [](Block * b) {
-        return b->size + (b->expandable_segment_ ? b->expandable_segment_->remainingSize() : 0);
+      auto expandable_size = [](Block* b) {
+        return b->size +
+            (b->expandable_segment_ ? b->expandable_segment_->remainingSize()
+                                    : 0);
       };
       auto next = it;
       next++;
-      while ((*it)->expandable_segment_.get() && next != pool.blocks.end() && (*next)->stream == p.stream() && expandable_size(*next) < expandable_size(*it)) {
+      while ((*it)->expandable_segment_.get() && next != pool.blocks.end() &&
+             (*next)->stream == p.stream() &&
+             expandable_size(*next) < expandable_size(*it)) {
         it = next++;
       }
     }
@@ -2225,7 +2264,10 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool alloc_block(AllocParams& p, bool isRetry, const std::shared_ptr<GatheredContext>& ctx) {
+  bool alloc_block(
+      AllocParams& p,
+      bool isRetry,
+      const std::shared_ptr<GatheredContext>& ctx) {
     // Defensively checks for preexisting CUDA error state.
     C10_CUDA_CHECK(cudaGetLastError());
 
@@ -2241,7 +2283,8 @@ class DeviceCachingAllocator {
       p.err = cudaErrorMemoryAllocation;
       return false;
     } else if (expandable_segments_ && !p.pool->owner_PrivatePool) {
-      p.block = try_allocate_expandable_block(p.device(), p.stream(), p.pool, p.size(), ctx);
+      p.block = try_allocate_expandable_block(
+          p.device(), p.stream(), p.pool, p.size(), ctx);
       if (!p.block) {
         p.err = cudaErrorMemoryAllocation;
       }
@@ -2285,12 +2328,12 @@ class DeviceCachingAllocator {
     // p.block came from new, not cudaMalloc. It should not be nullptr here.
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
     if (record_history) {
-        record_trace(
-            TraceEntry::SEGMENT_ALLOC,
-            int64_t(p.block->ptr),
-            p.block->size,
-            p.stream(),
-            ctx);
+      record_trace(
+          TraceEntry::SEGMENT_ALLOC,
+          int64_t(p.block->ptr),
+          p.block->size,
+          p.stream(),
+          ctx);
     }
     return true;
   }
@@ -2376,7 +2419,9 @@ class DeviceCachingAllocator {
       // memory in pointer was allocated in the expandable segment
       // rathern than with cudaMalloc, free the exapandable segment
       // to reclaim it.
-      TORCH_INTERNAL_ASSERT(block->size == block->expandable_segment_->size(), "block disagrees with segment");
+      TORCH_INTERNAL_ASSERT(
+          block->size == block->expandable_segment_->size(),
+          "block disagrees with segment");
       block->expandable_segment_.reset();
     } else {
       C10_CUDA_CHECK(cudaFree((void*)block->ptr));
@@ -2413,25 +2458,22 @@ class DeviceCachingAllocator {
     delete block;
   }
 
-  void record_trace_segment_change(const std::shared_ptr<GatheredContext> ctx, void* ptr, size_t old_size, size_t new_size, cudaStream_t stream) {
+  void record_trace_segment_change(
+      const std::shared_ptr<GatheredContext> ctx,
+      void* ptr,
+      size_t old_size,
+      size_t new_size,
+      cudaStream_t stream) {
     if (!record_history || old_size == new_size) {
       return;
     }
     if (old_size != 0) {
       record_trace(
-            TraceEntry::SEGMENT_FREE,
-            int64_t(ptr),
-            old_size,
-            stream,
-            ctx);
+          TraceEntry::SEGMENT_FREE, int64_t(ptr), old_size, stream, ctx);
     }
     if (new_size != 0) {
       record_trace(
-          TraceEntry::SEGMENT_ALLOC,
-          int64_t(ptr),
-          new_size,
-          stream,
-          ctx);
+          TraceEntry::SEGMENT_ALLOC, int64_t(ptr), new_size, stream, ctx);
     }
   }
 
@@ -2457,7 +2499,12 @@ class DeviceCachingAllocator {
       int64_t trimmed = block->expandable_segment_->trimSize(block->size);
       // TODO: update stats
       auto new_size = block->expandable_segment_->size();
-      record_trace_segment_change(block->history ? block->history->h.context : nullptr, block->expandable_segment_->ptr(), new_size + trimmed, new_size, block->stream);
+      record_trace_segment_change(
+          block->history ? block->history->h.context : nullptr,
+          block->expandable_segment_->ptr(),
+          new_size + trimmed,
+          new_size,
+          block->stream);
       block->size -= trimmed;
       if (block->size == 0) {
         Block* prev = block->prev;
