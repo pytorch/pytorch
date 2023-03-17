@@ -280,7 +280,6 @@ inline void errorIfCapturingNonCapturableNCCL() {
 
 } // namespace
 
-const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 10000;
 const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
 constexpr int64_t kWaitForAbortCommStoreKey = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
@@ -891,129 +890,31 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   }
 }
 
-void ProcessGroupNCCL::ncclCommWatchdogInternal() {
-  while (!terminateProcessGroup_.load()) {
-    std::unordered_set<std::string> abortedCommIds;
-    std::unordered_set<std::string> allCommIds;
+void ProcessGroupNCCL::abortAllComms() {
+  // We are aborting all communicators on this process due to an error in
+  // at least one of these communicators
+  std::lock_guard<std::mutex> lock(mutex_);
+  // The process may control multiple devices, loop through the communicators on each device
+  for (auto& it : devNCCLCommMap_) {
+    auto& devName = it.first;
+    auto& ncclComms = it.second;
+    LOG(INFO)
+        << "[Rank " << rank_
+        << "] Aborting all " << ncclComms.size()
+        << "communicators on CUDA device " << devName;
 
-    {
-      // Loop through the cache of communicators for NCCL errors.
-      std::lock_guard<std::mutex> lock(mutex_);
-      for (auto& it : devNCCLCommMap_) {
-        auto& ncclComms = it.second;
-
-        for (const auto& ncclComm : ncclComms) {
-          allCommIds.emplace(buildNcclUniqueIdStr(ncclComm->getNcclId()));
-        }
-        std::exception_ptr ncclErrorException = checkForNCCLErrors(ncclComms);
-        if (ncclErrorException) {
-          auto exceptionMsg =
-              getExceptionMsgFromExceptionPtr(ncclErrorException);
-          LOG(INFO)
-              << "[Rank " << rank_
-              << "] Received NCCL errors for communicators in the cache: \n"
-              << "NCCL error: \n"
-              << exceptionMsg;
-
-          if (blockingWait_ || asyncErrorHandling_ != NoHandling) {
-            LOG(INFO) << "[Rank " << rank_
-                      << "] Aborting communicators that received errors";
-            // We abort NCCL communicators that have received errors from this
-            // thread, and exceptions are set on the corresponding work objects.
-            // The workCleanupThread will then loop through the unfinished
-            // collectives and throw exceptions if an exception has been set on
-            // any of the work objects from this thread.
-            for (const auto& ncclComm : ncclComms) {
-              // We are aborting remaining communicators due to an error in
-              // at least one of these communicators, so propagate that reason
-              // for better debugability.
-              ncclComm->ncclCommAbort(exceptionMsg);
-              // Note that we don't remove the aborted communicators from the
-              // cache. The reason is that if we do remove the communicator
-              // from the cache, it is possible that a new collective operation
-              // calls `ncclCommInitRank` to create a new communicator whereas
-              // other ranks might have failed/timed out and didn't enter
-              // `ncclCommInitRank`. As a result, when there is a failure on
-              // a communicator the application receives an exception and its
-              // their responsibility to destroy the process group and recreate
-              // it to recover from errors.
-              abortedCommIds.emplace(
-                  buildNcclUniqueIdStr(ncclComm->getNcclId()));
-            }
-          }
-        }
-      }
+    for (const auto& ncclComm : ncclComms) {
+      ncclComm->ncclCommAbort();
+      // Note that we don't remove the aborted communicators from the
+      // cache. The reason is that if we do remove the communicator
+      // from the cache, it is possible that a new collective operation
+      // calls `ncclCommInitRank` to create a new communicator whereas
+      // other ranks might have failed/timed out and didn't enter
+      // `ncclCommInitRank`. As a result, when there is a failure on
+      // a communicator the application receives an exception and its
+      // their responsibility to destroy the process group and recreate
+      // it to recover from errors.
     }
-
-    if (asyncErrorHandling_ != NoHandling) {
-      abortTimedOutCollectives(abortedCommIds);
-    }
-
-    if (blockingWait_) {
-      // When we abort a communicator on one rank, it is likely that might cause
-      // other ranks to hang indefinitely. As a result, whenever we abort a
-      // communicator, we write its ID to the store. The watchdog on other ranks
-      // then monitor the store, find an aborted communicator ID and abort their
-      // respective communicator as well.
-
-      // Record the aborted communicators locally and in the store.
-      for (const auto& abortedCommId : abortedCommIds) {
-        abortedComms_.emplace(abortedCommId);
-        const auto& storeKey = getNcclAbortedCommStoreKey(abortedCommId);
-        auto rankStr = std::to_string(rank_);
-        store_->set(storeKey, rankStr);
-        LOG(INFO) << "[Rank " << rank_
-                  << "] Watchdog wrote aborted communicator id to store: "
-                  << storeKey;
-      }
-
-      // Check for any communicators in the store and abort them if needed.
-      for (const auto& commId : allCommIds) {
-        if (abortedComms_.find(commId) == abortedComms_.end()) {
-          // Check if we need to abort them if not already aborted (shouldn't
-          // wait more than the watchdog sleep time.).
-          const auto& storeKey = getNcclAbortedCommStoreKey(commId);
-          try {
-            store_->wait(
-                {storeKey},
-                std::chrono::milliseconds(kWaitForAbortCommStoreKey));
-            auto val = store_->get(storeKey);
-            std::string rank(reinterpret_cast<char*>(val.data()), val.size());
-            std::stringstream ss;
-            ss << "[Rank " << rank_ << "] Found key in store: " << storeKey
-               << ", from rank: " << rank
-               << ". This means that rank has aborted its NCCL communicators previously and is not in a healthy state."
-               << ". Aborting appropriate communicators";
-            std::string abortReason = ss.str();
-            LOG(WARNING) << abortReason;
-
-            // Now abort the appropriate communicators.
-            std::lock_guard<std::mutex> lock(mutex_);
-            auto it = ncclIdToCommMap_.find(commId);
-            TORCH_INTERNAL_ASSERT(it != ncclIdToCommMap_.end());
-            for (const auto& ncclComm : it->second) {
-              // The reason we are aborting is because some other ranks have
-              // aborted their communicators originally, so propagate that
-              // reason.
-              ncclComm->ncclCommAbort(abortReason);
-            }
-            abortedComms_.emplace(commId);
-            LOG(INFO) << "[Rank " << rank_
-                      << "] Aborted communicators for key in store: "
-                      << storeKey;
-          } catch (std::exception& e) {
-            VLOG(1) << "Did not find key in store: " << storeKey
-                    << ", error: " << e.what();
-          }
-        }
-      }
-    }
-
-    std::unique_lock<std::mutex> lock(watchdogCVMutex_);
-    watchdogCV_.wait_for(
-        lock,
-        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
-        [&]() -> bool { return terminateProcessGroup_.load(); });
   }
 }
 
@@ -1067,6 +968,8 @@ void ProcessGroupNCCL::workCleanupLoop() {
       if (work.exception()) {
         // Abort work and corresponding communicators
         work.abort();
+        // Abort all other communicators on this rank
+        abortAllComms();
         // Report desync state in case of timeout
         if (desyncDebug_ && work.timedOut()) {
           auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);

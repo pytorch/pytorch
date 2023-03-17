@@ -568,8 +568,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
   void logWorkEnd(WorkNCCL& work);
 
+  void abortAllComms();
+
  protected:
-  static const int64_t kWatchdogThreadSleepMillis;
   static const int64_t kWorkCleanupThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
