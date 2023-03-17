@@ -153,8 +153,7 @@ def main() -> None:
             # no existing pr, so make a new one and approve it
             pr_num = make_pr(args.repo_name, branch_name)
             approve_pr(pr_num)
-        # comment to merge if all checks are green
-        make_comment(pr_num, "@pytorchbot merge -g")
+        make_comment(pr_num, "@pytorchbot merge")
     else:
         print(
             f"tried to update from old hash: {old_hash} to new hash: {hash} but the old hash seems to be newer, not creating pr"
