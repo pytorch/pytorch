@@ -5407,6 +5407,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         grad_max_abs = input.grad.abs().max().item()
         self.assertLessEqual(grad_max_abs, 1.0)
 
+    @onlyCUDA
     def test_smoothl1loss_backward_zero_beta_cuda(self):
         input = torch.randn(300, 256, requires_grad=True, device='cuda')
         target = input.detach()
