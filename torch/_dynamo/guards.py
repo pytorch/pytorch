@@ -99,6 +99,8 @@ class GuardBuilder(GuardBuilderBase):
         else:
             scope = dict()
         self.scope: Dict[str, object] = scope
+        self.cse_context: Dict[str, object] = {}
+        self.cse_names: Dict[str, str] = {}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -142,8 +144,40 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str) -> Any:
-        return eval(name, self.scope, CLOSURE_VARS)
+    def get(self, guard_or_name) -> Any:
+        if isinstance(guard_or_name, str):
+            return eval(guard_or_name, self.scope, CLOSURE_VARS)
+        guard = guard_or_name
+        new_name = self.cse(guard.name)
+        guard.name = new_name
+        return eval(new_name, {**self.scope, **self.cse_context}, CLOSURE_VARS)
+
+    def cse(self, name):
+        name_split = name.split(".")
+        if len(name_split) == 1:
+            return name
+        # This is a valid cse candidate, because the name used for local access
+        # goes through at least 1 property check.
+        # We will take everything before the last property access, as that is a valid cse slug.
+        # While we can have more complex CSE here in the future, where we look at other parts of the split,
+        # and use that to truncate the scope/search space, we don't need that for this.
+        param = name_split[-1]
+        cse_candidates = name_split[:-1]
+        if len(cse_candidates) == 1:
+            # foo.bar needs no cse
+            return name
+        cse_candidate = "_".join(map(str, cse_candidates))
+        # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
+        cse_candidate = re.sub(r"\[(\d+)\]", r"_\g<1>", cse_candidate)
+        # e.g. replace abc.xyz_123.qkv with abc_xyz_123_qkv
+        cse_candidate = re.sub(r"[^a-zA-Z0-9]", "_", cse_candidate)
+
+        if cse_candidate not in self.cse_context:
+            real_name = ".".join(map(str, cse_candidates))
+            real_obj = eval(real_name, {**self.scope, **self.cse_context}, CLOSURE_VARS)
+            self.cse_context[cse_candidate] = real_obj
+            self.cse_names[cse_candidate] = real_name
+        return f"{cse_candidate}.{param}"
 
     # Registers the usage of the source name referenced by the
     # string (or stored in the Guard) as being guarded upon.  It's important
@@ -166,7 +200,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
-        t = type(self.get(guard.name))
+        t = type(self.get(guard))
         obj_id = self.id_ref(t)
         code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
@@ -184,8 +218,9 @@ class GuardBuilder(GuardBuilderBase):
         # the purpose of using this guard, which itself is supposed to be a faster alternative
         # to DICT_KEYS.
         ref = self.arg_ref(guard)
-        code = f"not {ref}"
-        self._produce_guard_code(guard, [code])
+        real_obj = self.get(guard)
+        code = f"not {guard.name}"
+        self._produce_guard_code(guard, [code], provided_guarded_object=real_obj)
 
     def ID_MATCH(self, guard: Guard):
         # ___check_obj_id is same as `id(x) == y`
@@ -196,12 +231,13 @@ class GuardBuilder(GuardBuilderBase):
                 Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
             )
 
-        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
+        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard))})"
         self._produce_guard_code(guard, [code])
 
     def NAME_MATCH(self, guard: Guard):
-        obj = self.get(guard.name)
-        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__}"
+        ref = self.arg_ref(guard)
+        obj = self.get(guard)
+        code = f"{guard.name}.__name__ == {obj.__name__}"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
@@ -220,7 +256,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def EQUALS_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         t = type(val)
         np_types = (
             (
@@ -301,7 +337,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def CONSTANT_MATCH(self, guard: Guard):
-        val = self.get(guard.name)
+        val = self.get(guard)
         if istype(val, (bool, type(None))):
             self.ID_MATCH(guard)
         else:
@@ -310,7 +346,7 @@ class GuardBuilder(GuardBuilderBase):
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
 
         def setup_guard():
             assert istype(val.training, bool)
@@ -335,7 +371,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def LIST_LENGTH(self, guard):
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = list()
@@ -346,7 +382,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TUPLE_ITERATOR_LEN(self, guard):
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = list()
@@ -357,7 +393,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def DICT_KEYS(self, guard):
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = list()
@@ -378,7 +414,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE_PARAM_NAMES(self, guard):
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
 
@@ -391,7 +427,7 @@ class GuardBuilder(GuardBuilderBase):
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = list()
@@ -401,7 +437,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def OBJECT_MUTATION(self, guard: Guard):
-        mutation_guard.watch(self.get(guard.name), self.check_fn_manager)
+        mutation_guard.watch(self.get(guard), self.check_fn_manager)
 
     def GRAD_MODE(self, guard: Guard):
         """Guard on the initial grad state"""
@@ -434,7 +470,7 @@ class GuardBuilder(GuardBuilderBase):
         if guard.is_nn_module():
             self.ID_MATCH(guard)
         else:
-            value = self.get(guard.name)
+            value = self.get(guard)
             assert isinstance(value, torch.Tensor)
             tensor_name = self.arg_ref(guard)
             # [Note - On Export Tensor Guards]
@@ -555,9 +591,10 @@ class GuardBuilder(GuardBuilderBase):
 
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
+            # TODO(voz): Squash these cases, let's make provided_guarded_object required
             name_valid = guard.name is not None and guard.name != ""
 
-            guarded_object = self.get(guard.name) if name_valid else None
+            guarded_object = self.get(guard) if name_valid else None
         else:
             guarded_object = provided_guarded_object
 
@@ -655,7 +692,7 @@ class CheckFunctionManager:
         assert not (set(local_builder.argnames) & set(global_builder.argnames))
         # see parallel handling of ".0" / "___implicit0" in _eval_frame.c
         largs = [a for a in local_builder.scope.keys() if a == "___implicit0"]
-        largs += [a for a in local_builder.argnames if a != "___implicit0"]
+        largs += [a for a in local_builder.argnames if a != "___implicit0" and a not in local_builder.cse_names]
         largs += ["**___kwargs_ignored"]
         args = ",".join(largs)
 
@@ -732,6 +769,12 @@ class CheckFunctionManager:
             + list(SYMPY_INTERP.items())
         )
         closure_vars.update(CLOSURE_VARS)
+        cse_prefix = []
+        for name, value in local_builder.cse_names.items():
+            cse_prefix.append(f"({name} := {value})")
+        cse_prefix = " and ".join(cse_prefix)
+        if len(cse_prefix) > 0:
+            code = cse_prefix + " and " + code
         py_code = f"""\
 def ___make_guard_fn({','.join(closure_vars.keys())}):
     return lambda {args}: {code}
