@@ -114,7 +114,7 @@ Reporting Issues
 If you've identified an issue, first search through the `list of
 existing issues <https://github.com/pytorch/pytorch/issues>`__ on the
 repo. If you are unable to find a similar issue, then create a new one.
-Supply as much information you can to reproduce the problematic
+Supply as much information as you can to reproduce the problematic
 behavior. Also, include any additional insights like the behavior you
 expect.
 
