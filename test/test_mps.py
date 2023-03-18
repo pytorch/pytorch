@@ -2356,6 +2356,12 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(y, ref_y)
             self.assertEqual(x.grad, cpu_x.grad)
 
+            # test in-place with storage_offset
+            y = x.detach()[1].tanh_()
+            ref_y = cpu_x.detach()[1].tanh_()
+
+            self.assertEqual(y, ref_y)
+
         helper((2, 3, 4, 5))
         helper((2, 3, 4))
         helper((2, 8, 4, 5))

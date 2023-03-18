@@ -14,19 +14,29 @@ bool is_empty_tensor(const Tensor& self) {
 }
 
 void unary_op(const Tensor& self,
-              const Tensor& output,
+              const Tensor& output_,
               std::string op_name,
               UnaryOpBlock unaryBlock,
               is_noop_p is_noop = is_empty_tensor) {
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
+
   if (is_noop(self)) {
-    output.copy_(self);
+    output_.copy_(self);
     return;
   }
+
+  auto output = output_;
+  bool needsCopyToOutput = false;
+  if (self.is_alias_of(output_)) {
+    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    needsCopyToOutput = true;
+  } else {
+    if (!output.is_same_size(self)) {
+      output.resize_(self.sizes());
+    }
+  }
+
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, output});
@@ -62,6 +72,10 @@ void unary_op(const Tensor& self,
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
         @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+
+    if (needsCopyToOutput) {
+      output_.copy_(output);
+    }
   }
 }
 
