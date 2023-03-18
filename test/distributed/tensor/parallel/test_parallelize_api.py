@@ -60,7 +60,7 @@ class TensorParallelAPITests(DTensorTestBase):
         new_mesh = _create_1d_device_mesh(mesh, 1)
         expected_mesh = DeviceMesh(
             self.device_type,
-            one_dimention_mesh_shape
+            one_dimention_mesh_shape,
             _init_process_groups=False
         )
         expected_mesh._dim_groups = [pg]
@@ -73,7 +73,7 @@ class TensorParallelAPITests(DTensorTestBase):
         new_mesh = _create_1d_device_mesh(mesh, 0)
         expected_mesh = DeviceMesh(
             self.device_type,
-            one_dimention_mesh_shape
+            one_dimention_mesh_shape,
             _init_process_groups=False
         )
         expected_mesh._dim_groups = [pg]
