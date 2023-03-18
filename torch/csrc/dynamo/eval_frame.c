@@ -465,14 +465,16 @@ inline static const char* name(THP_EVAL_API_FRAME_OBJECT* frame) {
 static PyObject* call_guard_fail_hook(
     PyObject* hook,
     CacheEntry* e,
+    CacheEntry* prev,
     PyObject* f_locals) {
   // call debugging logic when a guard fails
   PyObject* args = PyTuple_Pack(
-      4,
+      5,
       e->check_fn,
       e->code,
       f_locals,
-      (e->next == NULL ? Py_True : Py_False));
+      (e->next == NULL ? Py_True : Py_False),
+      (prev == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
   Py_DECREF(args);
@@ -523,7 +525,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     if (guard_error_hook != NULL) {
       PyObject *type, *value, *traceback;
       PyErr_Fetch(&type, &value, &traceback);
-      PyObject* r = call_guard_fail_hook(guard_error_hook, e, f_locals);
+      PyObject* r = call_guard_fail_hook(guard_error_hook, e, prev, f_locals);
       if (r == NULL) {
         return NULL;
       }
@@ -546,7 +548,7 @@ static PyObject* lookup(CacheEntry* e, THP_EVAL_API_FRAME_OBJECT *frame, CacheEn
     return (PyObject*)e->code;
   }
   if (unlikely(guard_fail_hook != NULL)) {
-    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, f_locals);
+    PyObject* r = call_guard_fail_hook(guard_fail_hook, e, prev, f_locals);
     if (r == NULL) {
       return NULL;
     }
