@@ -80,8 +80,10 @@ if HAS_CPU:
 if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesCudaTests(TestCase):
-        common = check_model_cuda
         device = "cuda"
+
+        def common(*args, **kwargs):
+            raise Exception("testing, please ignore")
 
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCudaTests, "cuda", test_skips)
 
