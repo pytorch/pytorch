@@ -244,8 +244,16 @@ struct Block {
   } while (0)
 
 struct ExpandableSegment {
-  ExpandableSegment(int device, cudaStream_t stream, size_t size)
-      : device_(device), stream_(stream), max_handles_(0), kSegmentSize(size) {
+  ExpandableSegment(
+      int device,
+      cudaStream_t stream,
+      size_t size,
+      const std::vector<int>& peers)
+      : device_(device),
+        stream_(stream),
+        max_handles_(0),
+        kSegmentSize(size),
+        peers_(peers) {
     cudaDeviceProp prop;
     C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
     max_handles_ = num_segments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
@@ -288,16 +296,25 @@ struct ExpandableSegment {
           0ULL));
     }
 
+    setAccess(device_, expand_begin);
+    for (auto p : peers_) {
+      setAccess(p, expand_begin);
+    }
+
+    return num_segments_to_add * kSegmentSize;
+  }
+
+  void setAccess(int device, size_t begin) {
+    auto num_segments_to_add = handles_.size() - begin;
     CUmemAccessDesc desc;
     desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
-    desc.location.id = device_;
+    desc.location.id = device;
     desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
     C10_CUDA_DRIVER_CHECK(cuMemSetAccess(
-        ptr_ + expand_begin * kSegmentSize,
+        ptr_ + begin * kSegmentSize,
         num_segments_to_add * kSegmentSize,
         &desc,
         1));
-    return num_segments_to_add * kSegmentSize;
   }
 
   // trims at most requested from the size
@@ -310,6 +327,10 @@ struct ExpandableSegment {
     // note: unlike cudaFree, MemUnmap and MemRelease do
     // not appear to synchronize in all cases, so we have to wait for the
     // stream to finish before this memory is truly free.
+
+    // cannot call c10::cuda::stream_synchronize because
+    // it might grab the GIL which can lead to a deadlock
+    // Locking order must be GIL -> Allocator Lock
     C10_CUDA_CHECK(cudaStreamSynchronize(stream_));
     for (auto i : c10::irange(num_segments_to_remove)) {
       (void)i;
@@ -331,6 +352,12 @@ struct ExpandableSegment {
   size_t size() const {
     return handles_.size() * kSegmentSize;
   }
+
+  void addPeer(int device) {
+    peers_.push_back(device);
+    setAccess(device, 0);
+  }
+
   ~ExpandableSegment() {
     auto sz = size();
     if (sz > 0) {
@@ -350,6 +377,7 @@ struct ExpandableSegment {
   size_t max_handles_;
   size_t kSegmentSize;
   std::vector<CUmemGenericAllocationHandle> handles_;
+  std::vector<int> peers_;
 };
 
 // BlockState, BlockPoolState, and PrivatePoolState contain the information
@@ -926,11 +954,14 @@ class DeviceCachingAllocator {
       cuda_events;
 
   // record used memory.
-  size_t total_allocated_memory = 0;
+  int64_t total_allocated_memory = 0;
 
   size_t allowed_memory_maximum = 0;
 
   bool expandable_segments_ = true;
+  std::atomic<bool> has_previously_allocated_expandable_segments_ = false;
+  std::vector<int> devices_with_peer_access_;
+
   bool set_fraction = false;
 
   bool record_history = false;
@@ -1022,8 +1053,7 @@ class DeviceCachingAllocator {
     auto& pool = get_pool(size, stream);
     const size_t alloc_size = get_allocation_size(size);
     AllocParams params(device, size, stream, &pool, alloc_size, stats);
-    params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
+    params.stat_types = get_stat_types_for_pool(pool);
 
     // First, try to get a block from the existing pool.
     bool block_found =
@@ -1182,7 +1212,6 @@ class DeviceCachingAllocator {
       remaining->size -= size;
       bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
-
       if (record_history) {
         trimHistoryBefore(remaining, (char*)block->ptr + size);
       }
@@ -1271,10 +1300,7 @@ class DeviceCachingAllocator {
     auto orig_block_ptr = block->ptr;
     auto orig_block_size = block->size;
 
-    StatTypes stat_types = {false};
-    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*(block->pool)))] =
-        true;
+    StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.allocation[stat_type], -1);
       update_stat(
@@ -1505,9 +1531,7 @@ class DeviceCachingAllocator {
           stats);
       pool.blocks.erase(curr_block);
       params.block = curr_block;
-      params.stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-      params.stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] =
-          true;
+      params.stat_types = get_stat_types_for_pool(pool);
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
@@ -1841,11 +1865,29 @@ class DeviceCachingAllocator {
     }
   }
 
+  bool hasPreviouslyAllocatedExpandableSegments() {
+    return has_previously_allocated_expandable_segments_;
+  }
+
+  void addPeerAccess(int dev_to_access) {
+    devices_with_peer_access_.push_back(dev_to_access);
+    if (has_previously_allocated_expandable_segments_) {
+      // we don't keep a list of all the expandable segments around
+      // but a Peer is only ever added once, and the act
+      // of adding a peer is expensive anyway.
+      for (Block* b : get_all_blocks()) {
+        if (b->expandable_segment_) {
+          b->expandable_segment_->addPeer(dev_to_access);
+        }
+      }
+    }
+  }
+
  private:
   // All private methods do not acquire the allocator mutex.
 
-  std::vector<const Block*> get_all_blocks() const {
-    std::vector<const Block*> blocks;
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
     blocks.insert(
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
@@ -1940,8 +1982,9 @@ class DeviceCachingAllocator {
     ExpandableSegment* segment;
     if (!candidate) {
       auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
-      new_segment =
-          std::make_unique<ExpandableSegment>(device, stream, segment_size);
+      new_segment = std::make_unique<ExpandableSegment>(
+          device, stream, segment_size, devices_with_peer_access_);
+      has_previously_allocated_expandable_segments_ = true;
       segment = new_segment.get();
     } else {
       segment = candidate->expandable_segment_.get();
@@ -1961,10 +2004,15 @@ class DeviceCachingAllocator {
       return nullptr;
     }
 
+    StatTypes st = get_stat_types_for_pool(*pool);
+
     if (!candidate) {
       // TODO: update stat for increase in number of segments
       candidate = new Block(device, stream, expanded, pool, segment->ptr());
       candidate->expandable_segment_ = std::move(new_segment);
+      for_each_selected_stat_type(st, [&](size_t stat_type) {
+        update_stat(stats.segment[stat_type], 1);
+      });
     } else if (candidate->allocated) {
       Block* prev = candidate;
       candidate = new Block(
@@ -1972,10 +2020,22 @@ class DeviceCachingAllocator {
       prev->next = candidate;
       candidate->prev = prev;
       candidate->expandable_segment_ = std::move(prev->expandable_segment_);
+
+      for_each_selected_stat_type(st, [&](size_t stat_type) {
+        update_stat(stats.inactive_split[stat_type], 1);
+      });
     } else {
       pool->blocks.erase(candidate);
       candidate->size += expanded;
     }
+
+    for_each_selected_stat_type(st, [&](size_t stat_type) {
+      update_stat(stats.reserved_bytes[stat_type], expanded);
+      if (candidate->is_split()) {
+        update_stat(stats.inactive_split_bytes[stat_type], expanded);
+      }
+    });
+    total_allocated_memory += expanded;
 
     auto new_size = candidate->expandable_segment_->size();
     record_trace_segment_change(
@@ -2029,9 +2089,8 @@ class DeviceCachingAllocator {
       net_change_inactive_split_size += block->size;
     }
 
-    StatTypes stat_types = {false};
-    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(pool))] = true;
+    StatTypes stat_types = get_stat_types_for_pool(pool);
+
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(
           stats.inactive_split[stat_type], net_change_inactive_split_blocks);
@@ -2126,13 +2185,17 @@ class DeviceCachingAllocator {
     }
   }
 
-  StatType get_stat_type_for_pool(const BlockPool& pool) {
-    return pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL;
+  StatTypes get_stat_types_for_pool(const BlockPool& pool) {
+    StatTypes stat_types = {false};
+    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
+    stat_types[static_cast<size_t>(
+        pool.is_small ? StatType::SMALL_POOL : StatType::LARGE_POOL)] = true;
+    return stat_types;
   }
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small) {
+    if (block->pool->is_small || expandable_segments_) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < CachingAllocatorConfig::max_split_size()) &&
@@ -2285,7 +2348,9 @@ class DeviceCachingAllocator {
     } else if (expandable_segments_ && !p.pool->owner_PrivatePool) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
-      if (!p.block) {
+      if (p.block) {
+        p.err = cudaSuccess;
+      } else {
         p.err = cudaErrorMemoryAllocation;
       }
       return bool(p.block);
@@ -2435,9 +2500,7 @@ class DeviceCachingAllocator {
       pool->owner_PrivatePool->cudaMalloc_count--;
     }
 
-    StatTypes stat_types = {false};
-    stat_types[static_cast<size_t>(StatType::AGGREGATE)] = true;
-    stat_types[static_cast<size_t>(get_stat_type_for_pool(*pool))] = true;
+    StatTypes stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
       update_stat(stats.segment[stat_type], -1);
       update_stat(
@@ -2497,7 +2560,6 @@ class DeviceCachingAllocator {
     for (Block* block : to_trim) {
       // we can shorten the expandable segment to increase free memory
       int64_t trimmed = block->expandable_segment_->trimSize(block->size);
-      // TODO: update stats
       auto new_size = block->expandable_segment_->size();
       record_trace_segment_change(
           block->history ? block->history->h.context : nullptr,
@@ -2506,6 +2568,16 @@ class DeviceCachingAllocator {
           new_size,
           block->stream);
       block->size -= trimmed;
+      auto st = get_stat_types_for_pool(*block->pool);
+      for_each_selected_stat_type(st, [&](size_t stat_type) {
+        update_stat(stats.reserved_bytes[stat_type], -trimmed);
+        update_stat(stats.inactive_split_bytes[stat_type], -trimmed);
+        if (block->size == 0) {
+          update_stat(stats.inactive_split[stat_type], -1);
+        }
+      });
+      total_allocated_memory -= trimmed;
+
       if (block->size == 0) {
         Block* prev = block->prev;
         prev->next = nullptr;
@@ -2975,9 +3047,41 @@ class NativeCachingAllocator : public CUDAAllocator {
     malloc(&r, device, nbytes, stream);
     return r;
   }
-  bool needsPoolSpecificPeerAccess() override {
-    return false;
+
+  void enablePeerAccess(int dev, int dev_to_access) override {
+    c10::cuda::CUDAGuard device_guard(dev);
+    cudaError_t err = cudaDeviceEnablePeerAccess(dev_to_access, 0);
+    if (err == cudaErrorPeerAccessAlreadyEnabled) {
+      // ignore and clear the error if access was already enabled
+      cudaGetLastError();
+    } else {
+      C10_CUDA_CHECK(err);
+    }
+    device_allocator[dev_to_access]->addPeerAccess(dev);
   }
+
+  cudaError_t memcpyAsync(
+      void* dst,
+      int dstDevice,
+      const void* src,
+      int srcDevice,
+      size_t count,
+      cudaStream_t stream,
+      bool p2p_enabled) override {
+    if (p2p_enabled || // memcpy ok because memory is mapped in both devices
+        srcDevice == dstDevice || // memcpy ok on a single device
+        // memcpy ok because both dst and src must have come from cudaMalloc
+        (!device_allocator[dstDevice]
+              ->hasPreviouslyAllocatedExpandableSegments() &&
+         !device_allocator[srcDevice]
+              ->hasPreviouslyAllocatedExpandableSegments())) {
+      return cudaMemcpyAsync(dst, src, count, cudaMemcpyDeviceToDevice, stream);
+    }
+    // when p2p is not enabled, only cudaMemcpyPeerAsync correctly handles
+    // memory not allocated via cudaMalloc
+    return cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);
+  }
+
   void raw_delete(void* ptr) override {
     this->free(ptr);
   }
