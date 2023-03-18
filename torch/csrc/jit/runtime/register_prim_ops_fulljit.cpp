@@ -1,4 +1,5 @@
 #include <torch/csrc/jit/runtime/register_ops_utils.h>
+#include <torch/csrc/jit/codegen/fuser/interface.h>
 
 #include <ATen/core/ivalue.h>
 #include <c10/util/irange.h>
