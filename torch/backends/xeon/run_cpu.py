@@ -589,7 +589,7 @@ def _add_multi_instance_params(parser):
 otherwise ncores_per_instance will be assigned sequentially to ninstances. Please refer to \
 https://github.com/intel/intel-extension-for-pytorch/blob/master/docs/tutorials/performance_tuning/launch_script.md")
     group.add_argument("--latency-mode", "--latency_mode", action="store_true", default=False,
-                       help="By detault 4 core per instance and use all physical cores")
+                       help="By default 4 core per instance and use all physical cores")
     group.add_argument("--throughput-mode", "--throughput_mode", action="store_true", default=False,
                        help="By default one instance per node and use all physical cores")
     group.add_argument("--node-id", "--node_id", metavar="\b", default=-1, type=int,
