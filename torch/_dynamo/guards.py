@@ -788,6 +788,7 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reason = part
             break
+    guard_failures[orig_code_map[code]].append(reason)
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -798,9 +799,6 @@ def guard_fail_hook(
             "Failure in guard_fail_fn callback - raising here will cause a NULL Error on guard eval",
             exc_info=True,
         )
-
-    if last:
-        guard_failures[orig_code_map[code]].append(reason)
 
 
 def guard_error_hook(
