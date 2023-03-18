@@ -69,7 +69,7 @@ def _convert_to_wrapped_module_name(module_name: str) -> str:
 
 def _param_name_infos(
     module: nn.Module, fsdp_state: _FSDPState
-) -> Iterator[Optional[Tuple[str, str, str]]]:
+) -> Iterator[Tuple[str, str, str]]:
     """ """
     if not _has_fsdp_params(fsdp_state, module):
         return
