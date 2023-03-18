@@ -793,12 +793,23 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
     LOG(INFO) << "[Rank " << rank_
               << "] NCCL watchdog thread terminated normally";
   } catch (std::exception& e) {
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated with exception: "
-              << e.what();
+    // Append error message reported from workCleanupLoop
+    const auto exitMsg = c10::str(
+      "[Rank ", rank_,
+      "] NCCL watchdog thread terminated with exception: ",
+      e.what()
+    );
+    LOG(ERROR) << exitMsg;
+    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+    std::rethrow_exception(watchDogException_);
   } catch (...) {
-    LOG(INFO) << "[Rank " << rank_
-              << "] NCCL watchdog thread terminated with unknown exception";
+    const auto exitMsg = c10::str(
+      "[Rank ", rank_,
+      "] NCCL watchdog thread terminated with exception: unknown"
+    );
+    LOG(ERROR) << exitMsg;
+    watchDogException_ = std::make_exception_ptr(std::runtime_error(exitMsg));
+    std::rethrow_exception(watchDogException_);
   }
 }
 
