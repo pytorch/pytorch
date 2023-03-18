@@ -198,7 +198,7 @@ def backward(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment below is that
+    # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
     Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
@@ -294,7 +294,7 @@ def grad(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment several times below is because
+    # The reason we repeat the same comment several times below is because
     # some Python versions print out the first line of multi-line function
     # calls in the traceback and some print out the last line
     if is_grads_batched:

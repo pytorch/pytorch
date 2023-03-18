@@ -20,6 +20,7 @@
 #include <cmath>
 #include <type_traits>
 #include <bitset>
+#include <climits>
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
@@ -803,17 +804,30 @@ inline Vectorized<T> operator~(const Vectorized<T>& a) {
 }
 
 template <class T> Vectorized<T> inline operator<<(const Vectorized<T> &a, const Vectorized<T> &b) {
+  constexpr T max_shift = sizeof(T) * CHAR_BIT;
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] << b[i];
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = 0;
+    } else {
+      c[i] = static_cast<std::make_unsigned_t<T>>(a[i]) << shift;
+    }
   }
   return c;
 }
 
 template <class T> Vectorized<T> inline operator>>(const Vectorized<T> &a, const Vectorized<T> &b) {
+  // right shift value to retain sign bit for signed and no bits for unsigned
+  constexpr T max_shift = sizeof(T) * CHAR_BIT - std::is_signed_v<T>;
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
-    c[i] = a[i] >> b[i];
+    T shift = b[i];
+    if ((static_cast<std::make_signed_t<T>>(shift) < 0) || (shift >= max_shift)) {
+      c[i] = a[i] >> max_shift;
+    } else {
+      c[i] = a[i] >> shift;
+    }
   }
   return c;
 }
