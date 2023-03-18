@@ -204,7 +204,7 @@ def segsum(data):
         for b in seg['blocks']:
             active = b['state'] == 'active_allocated'
             if 'history' in b:
-                # use the more accurate real_size to account for internal fragmenetation if we have it
+                # use the more accurate real_size to account for internal fragmentation if we have it
                 for h in b['history']:
                     if active:
                         all_ranges.append((h['addr'] - seg['address'], h['real_size'], active))
