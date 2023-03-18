@@ -38,7 +38,17 @@ class TestFlattenParams(FSDPTest):
         return 1
 
     def _get_default_config(self):
-        return (HandleShardingStrategy.FULL_SHARD, False, None, None, False)
+        return (
+            torch.device("cuda"),
+            HandleShardingStrategy.FULL_SHARD,
+            False,
+            None,
+            None,
+            False,
+            self.process_group,
+            False,
+            False,
+        )
 
     def _get_transformer(self, seed=0):
         torch.manual_seed(seed)  # keep everything deterministic
@@ -141,15 +151,12 @@ class TestFlattenParams(FSDPTest):
             module = module.half()
         with self.assertRaisesRegex(
             ValueError,
-            "Cannot initialize a `FlatParameter` from an empty parameter list",
+            "Cannot construct a FlatParamHandle with an empty parameter list",
         ):
             FlatParamHandle(
                 [],
                 module,
-                torch.device("cuda"),
                 *self._get_default_config(),
-                self.process_group,
-                False,
             )
 
     @skip_if_lt_x_gpu(1)
@@ -218,10 +225,7 @@ class TestFlattenParams(FSDPTest):
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
             module,
-            torch.device("cuda"),
             *self._get_default_config(),
-            self.process_group,
-            False,
         )
         self.assertEqual(ref_numel, flat_param_handle.flat_param.numel())
 
@@ -319,10 +323,7 @@ class TestFlattenParams(FSDPTest):
         flat_param_handle = FlatParamHandle(
             params_to_flatten,
             module,
-            torch.device("cuda"),
             *self._get_default_config(),
-            self.process_group,
-            False,
         )
 
         def _test(kwargs, expected):
@@ -340,7 +341,7 @@ class TestFlattenParams(FSDPTest):
             flat_param = flat_param_handle.flat_param
             (
                 flat_param._shard_param_offsets,
-                flat_param._shard_indices,
+                flat_param._shard_param_indices,
             ) = flat_param_handle._get_shard_metadata(kwargs["start"], kwargs["end"])
             self.assertEqual(
                 flat_param_handle.shard_metadata(),
