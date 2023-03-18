@@ -60,12 +60,7 @@ void unary_op(const Tensor& self,
       });
     }
 
-    bool gatherTensorData = true;
-    if (!output.is_contiguous() || output.is_view()) {
-      gatherTensorData = false;
-    }
-
-    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, /*mpsShape=*/nullptr, gatherTensorData);
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, /*mpsShape=*/nullptr, true);
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : output_, /*mpsShape=*/nullptr, false);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
