@@ -5,7 +5,6 @@ import itertools
 import logging
 import sys
 import textwrap
-import time
 from io import StringIO
 
 from typing import Any, List
@@ -18,7 +17,6 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
 from . import config, ir
-from .autotune_process import BenchmarkRequest, TensorMeta
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -39,6 +37,7 @@ class KernelNamespace:
 
 
 # these objects are imported from the generated wrapper code
+template_kernels = KernelNamespace()
 extern_kernels = KernelNamespace()
 
 
@@ -405,6 +404,7 @@ class TritonTemplate:
                 + "-"
             )
             mod = PyCodeCache.load(code, extra)
+            run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
@@ -417,7 +417,21 @@ class TritonTemplate:
         )
         assert not extra_args, "TODO: dynamic shapes"
 
+        def call(*args, out):
+            return run(
+                *args,
+                out,
+                *extra_args,
+                grid=self.grid(*out.size(), kwargs),
+                num_stages=num_stages,
+                num_warps=num_warps,
+            )
+
+        call.key = mod.key
+        call.__file__ = mod.__file__
+
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
+        setattr(template_kernels, kernel_hash_name, call)
 
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
@@ -433,27 +447,12 @@ class TritonTemplate:
             )
             return kernel, render
 
-        # create the BenchmarkRequest
-        grid = self.grid(*V.graph.sizevars.size_hints(layout.size), kwargs)
-        bmreq = BenchmarkRequest(
-            module_path=mod.__file__,
-            module_cache_key=mod.key,
-            kernel_name=kernel_name,
-            grid=grid,
-            extra_args=extra_args,
-            num_stages=num_stages,
-            num_warps=num_warps,
-            input_tensors=TensorMeta.from_irnodes(input_nodes),
-            output_tensor=TensorMeta.from_irnodes(layout),
-        )
-
         return TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
             layout,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
-            bmreq,
         )
 
     @staticmethod
@@ -539,17 +538,10 @@ class ChoiceCaller:
 
 
 class TritonTemplateCaller(ChoiceCaller):
-    def __init__(
-        self, name, input_nodes, layout, make_kernel_render, debug_extra, bmreq
-    ):
+    def __init__(self, name, input_nodes, layout, make_kernel_render, debug_extra):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
-        self.bmreq = bmreq
-
-    def benchmark(self, *args, out):
-        assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
 
     def __str__(self):
         return (
@@ -559,11 +551,14 @@ class TritonTemplateCaller(ChoiceCaller):
     def call_name(self):
         return f"template_kernels.{self.name}"
 
+    def to_callable(self):
+        return getattr(template_kernels, self.name)
+
     def hash_key(self):
         return "-".join(
             [
                 self.name.rsplit("_", 1)[0],
-                self.bmreq.module_cache_key,
+                self.to_callable().key,
             ]
         )
 
@@ -682,20 +677,18 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
             return timing
 
-        autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
             choices[0].name,
             repr([self.key_of(x) for x in input_nodes]),
             autotune,
         )
-        autotune_elapse = time.time() - autotune_start_ts
         if timings == {} or choices[0] not in timings:
             return choices[0].output_node()
 
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
-            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+            self.log_results(choices[0].name, input_nodes, timings)
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -723,36 +716,18 @@ class AlgorithmSelectorCache(PersistentCache):
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
             expected = out_extern.clone()
 
-        def benchmark_in_current_process(choice):
+        def benchmark(choice):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
-                result = choice.benchmark(*example_inputs_extern, out=out_extern)[0]
+                result = choice.benchmark(*example_inputs_extern, out=out_extern)
             else:
                 # triton templates want the base pointer for sliced tensors
                 result = choice.benchmark(*example_inputs, out=out)
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
-            return result
-
-        def benchmark_in_sub_process(choice):
-            # only benchmark triton kernel in sub process for now.
-            # ATen/Extern kernel are still benchmarked in the current process.
-            if isinstance(choice, ExternKernelCaller):
-                return benchmark_in_current_process(choice)
-
-            from . import autotune_process
-
-            return autotune_process.benchmark_in_sub_process(
-                choice,
-            )
-
-        benchmark = (
-            benchmark_in_sub_process
-            if config.autotune_in_subproc
-            else benchmark_in_current_process
-        )
+            return min(result)
 
         def debug_str():
             def tensor_repr(x):
@@ -773,7 +748,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return benchmark
 
     @staticmethod
-    def log_results(name, input_nodes, timings, elapse):
+    def log_results(name, input_nodes, timings):
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
         sizes = ", ".join(
@@ -789,11 +764,6 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in top_k:
             result = timings[choice]
             sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
-
-        autotune_type_str = (
-            "SubProcess" if config.autotune_in_subproc else "SingleProcess"
-        )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):
