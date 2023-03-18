@@ -354,12 +354,12 @@ int64_t get_available_workspace() {
 
 static nlohmann::json errata_json_handle;
 
-bool plan_errata_exception(const cudnnHandle_t handle, const std::string & executionPlanTag) {
+bool plan_errata_exception(const cudnnHandle_t handle, const std::string & executionPlanTag, const cudnn_frontend::OperationGraph& opGraph) {
   static bool has_json = cudnn_frontend::load_from_config(errata_json_handle, "");
   if (!has_json) {
     return false;
   } else {
-    bool plan_errata_exception(const cudnnHandle_t handle, const std::string & executionPlanTag, const cudnn_frontend::OperationGraph& opGraph) {
+    return cudnn_frontend::check_errata_with_opgraph(errata_json_handle, executionPlanTag, handle, opGraph, [](){return true;});
   }
 }
 
