@@ -363,7 +363,7 @@ Value applied: {os.environ[env_name]}. Value ignored: {env_value}")
         """
         Set multi-thread configuration and enable Intel openMP and TCMalloc/JeMalloc.
         By default, GNU openMP and PTMalloc are used in PyTorch. but Intel openMP and TCMalloc/JeMalloc are better alternatives
-        to get performance benifit.
+        to get performance benefit.
         """
         self.set_memory_allocator(enable_tcmalloc, enable_jemalloc, use_default_allocator)
         self.set_env("OMP_NUM_THREADS", str(ncores_per_instance))
