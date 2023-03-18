@@ -253,7 +253,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
 
     def add_lib_preload(self, lib_type):
         """
-        Enale TCMalloc/JeMalloc/intel OpenMP
+        Enable TCMalloc/JeMalloc/intel OpenMP
         """
         library_paths = []
         if "CONDA_PREFIX" in os.environ:
