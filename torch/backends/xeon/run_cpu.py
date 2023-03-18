@@ -481,7 +481,7 @@ won\'t take effect even if it is set explicitly.')
                     enable_taskset = True
                 else:
                     logger.warning("Core binding with numactl is not available, and --disable_taskset is set. \
-                    Please unset --disable_taskset to use taskset insetad of numactl.")
+                    Please unset --disable_taskset to use taskset instead of numactl.")
                     exit(-1)
 
         if not args.disable_taskset:
