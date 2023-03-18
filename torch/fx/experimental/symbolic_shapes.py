@@ -1416,7 +1416,7 @@ class ShapeEnv:
 
         if val < 0:
             from torch._dynamo.source import NegateSource
-            return -self.create_symbol(-val, NegateSource(source), dyn)
+            return -self.create_symbol(-val, NegateSource(source), duck)
 
         if duck or val not in self.val_to_var or not self.duck_shape:
             # If a value is never before seen, or dynamic, we want to create an expression
