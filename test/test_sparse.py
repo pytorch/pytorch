@@ -2941,7 +2941,7 @@ class TestSparse(TestSparseBase):
             self.skipTest(f'requires_grad==True requires float or complex dtype, got {dtype}')
 
         self._test_empty_full(device, dtype, requires_grad)
-        if torch.cuda.device_count() > 0:
+        if torch.cuda.is_available():
             self._test_empty_full(None, dtype, requires_grad)
             self._test_empty_full(torch.device('cuda:0'), dtype, requires_grad)
 
