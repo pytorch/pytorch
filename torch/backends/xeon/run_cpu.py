@@ -175,7 +175,7 @@ class _CPUinfo():
             self.node_nums = int(max([line[3] for line in self.cpuinfo])) + 1
             self.node_physical_cores: List[List[int]] = []  # node_id is index
             self.node_logical_cores: List[List[int]] = []   # node_id is index
-            self.physical_core_node_map = {}  # phyical core to numa node id
+            self.physical_core_node_map = {}  # physical core to numa node id
             self.logical_core_node_map = {}   # logical core to numa node id
 
             for node_id in range(self.node_nums):
