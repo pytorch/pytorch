@@ -642,10 +642,6 @@ class PyCodeCache:
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
-        return cls.load_by_key_path(key, path)
-
-    @classmethod
-    def load_by_key_path(cls, key, path):
         if key not in cls.cache:
             with open(path) as f:
                 try:
