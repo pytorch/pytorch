@@ -469,7 +469,7 @@ class Optimizer:
                             else:
                                 per_device_and_dtype_grads[p.grad.device][p.grad.dtype].append(p.grad)
             if foreach:
-                for _, per_dtype_grads in per_device_and_dtype_grads.items():
+                for per_dtype_grads in per_device_and_dtype_grads.values():
                     for grads in per_dtype_grads.values():
                         torch._foreach_zero_(grads)
 

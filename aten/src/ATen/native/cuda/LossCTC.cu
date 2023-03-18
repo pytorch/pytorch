@@ -226,8 +226,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   TORCH_CHECK((0 <= BLANK) && (BLANK < num_labels), "blank must be in label range");
-  TORCH_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
-  TORCH_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
+  TORCH_CHECK(input_lengths.size() == static_cast<size_t>(batch_size), "input_lengths must be of size batch_size");
+  TORCH_CHECK(target_lengths.size() == static_cast<size_t>(batch_size), "target_lengths must be of size batch_size");
 
   int64_t tg_target_stride;
 
