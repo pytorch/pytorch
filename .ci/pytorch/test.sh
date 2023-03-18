@@ -884,6 +884,7 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
+  id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
@@ -898,6 +899,7 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
   install_torchtext
   install_torchvision
+  id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
