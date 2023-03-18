@@ -88,6 +88,7 @@ pw_cast_for_int_to_real = partial(
     type_casts, type_promotion=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
 )
 
+
 # This expands x until x.dim() == dim. Might be useful as an operator
 def _unsqueeze_to_dim(x: Tensor, dim: int):
     for _ in range(dim - x.dim()):
@@ -619,7 +620,6 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -1136,11 +1136,17 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
     return out + beta * self
 
 
-@register_decomposition(aten._int_mm)
+@register_decomposition(aten.addmv)
 @out_wrapper()
 @pw_cast_for_opmath
-def _int_mm(self: Tensor, mat1: Tensor, mat2: Tensor):
-    return torch._int_mm(mat1, mat2)
+def addmv(self: Tensor, mat1: Tensor, vec: Tensor, beta: int = 1, alpha: int = 1):
+    if not self.is_floating_point() and not self.is_complex():
+        beta = int(beta)
+        alpha = int(alpha)
+    out = alpha * torch.mv(mat1, vec)
+    if beta == 0:
+        return out
+    return out + beta * self
 
 
 @register_decomposition(aten.native_group_norm_backward)
@@ -3058,7 +3064,7 @@ def mv(self, vec):
     )
     utils.check(
         self.size(1) == vec.size(0),
-        lambda: f"size mismatch, got {self.size(0)}x{self.size(1)},{vec.size(0)}",
+        lambda: f"size mismatch, got input ({self.size(0)}x{self.size(1)}), vec ({vec.size(0)})",
     )
     return (self * vec).sum(dim=1)
 
@@ -3337,16 +3343,6 @@ def upsample_bicubic2d_vec(
 def aminmax(self, *, dim=None, keepdim=False):
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
-    if (
-        keepdim
-        and dim is not None
-        and self.ndimension() == 0
-        and self.device.type == "cpu"
-    ):
-        # the behavior of aminmax differs from amin/amax for 0D tensors on CPU
-        # https://github.com/pytorch/pytorch/issues/96042
-        amin = amin.expand([1])
-        amax = amax.expand([1])
     return amin, amax
 
 

@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <c10/util/UniqueVoidPtr.h>
 #include <unordered_set>
 #if AT_CUDNN_ENABLED()
 
@@ -485,7 +486,7 @@ PyObject* THCPModule_hasPrimaryContext(PyObject* _unused, PyObject* arg) {
   THPUtils_assert(
       THPUtils_checkLong(arg), "invalid argument to has_primary_context");
   int64_t device_index = static_cast<int64_t>(THPUtils_unpackLong(arg));
-  if (at::cuda::detail::hasPrimaryContext(device_index)) {
+  if (c10::cuda::hasPrimaryContext(device_index)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -883,8 +884,6 @@ static void registerCudaDeviceProperties(PyObject* module) {
       });
 }
 
-void no_op_delete(void* ptr){};
-
 // We choose to ignore certain blocks that are currently allocated
 // when we set the pool to its checkpoint. For those blocks, we need
 // to swap out the deleter function of their corresponding blocks
@@ -898,7 +897,7 @@ void removeStorageDeleterFns(
     TORCH_CHECK(allocated_pointer != definitely_stale_pointers.end());
     auto t = c10::cuda::CUDACachingAllocator::get();
     bool succeeded = stale_storage->data_ptr().compare_exchange_deleter(
-        t->raw_deleter(), &no_op_delete);
+        t->raw_deleter(), &c10::detail::deleteNothing);
 
     TORCH_CHECK(
         succeeded,
@@ -907,12 +906,11 @@ void removeStorageDeleterFns(
 }
 
 void addStorageDeleterFns(
-    std::vector<at::Tensor>& tensors_to_add_deleters_to,
+    std::vector<c10::StorageImpl*>& storages_to_add_deleters_to,
     c10::cuda::CUDACachingAllocator::CheckpointDelta& delta) {
   std::unordered_map<void*, c10::StorageImpl*> storages;
-  for (auto& tensor : tensors_to_add_deleters_to) {
-    storages[tensor.storage().data_ptr().get()] =
-        tensor.storage().unsafeGetStorageImpl();
+  for (auto& storage : storages_to_add_deleters_to) {
+    storages[storage->data_ptr().get()] = storage;
   }
 
   for (auto& data_ptr : delta.dataptrs_allocd) {
@@ -998,41 +996,31 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             self.set_record_stream_fn(func);
           })
       .def(
-          "set_capture_begin_fn",
+          "set_begin_allocate_stream_to_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType =
-                void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t);
+            using FuncType = void(int, cudaStream_t, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_begin_fn(func);
+            self.set_begin_allocate_stream_to_pool(func);
           })
       .def(
-          "set_capture_about_to_end_fn",
+          "set_end_allocate_stream_to_pool_fn",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
+            using FuncType = void(int, cudaStream_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_about_to_end_fn(func);
+            self.set_end_allocate_stream_to_pool_fn(func);
           })
       .def(
-          "set_capture_ended_fn",
-          [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
-             uint64_t func_ptr) {
-            using FuncType = void(int, c10::cuda::CaptureId_t);
-            std::function<FuncType> func =
-                reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_ended_fn(func);
-          })
-      .def(
-          "set_capture_destroy_fn",
+          "set_release_pool",
           [](torch::cuda::CUDAPluggableAllocator::CUDAPluggableAllocator& self,
              uint64_t func_ptr) {
             using FuncType = void(int, c10::cuda::MempoolId_t);
             std::function<FuncType> func =
                 reinterpret_cast<FuncType*>(func_ptr);
-            self.set_capture_destroy_fn(func);
+            self.set_release_pool(func);
           });
   m.def("_cuda_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
     using MallocFuncType = void*(size_t, int, cudaStream_t);
@@ -1054,21 +1042,56 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return c10::cuda::CUDACachingAllocator::getCheckpointState(device, id);
   });
 
+  m.def("_free_And_Remove_DeleterFn", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    bool succeeded = storage_impl->data_ptr().compare_exchange_deleter(
+        alloc->raw_deleter(), c10::detail::deleteNothing);
+    TORCH_CHECK("Expected standard deleter");
+    c10::cuda::CUDACachingAllocator::raw_delete(data_ptr);
+  });
+
+  m.def("_has_Standard_Deleter", [](size_t storage_impl_ptr) {
+    c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
+    auto alloc = c10::cuda::CUDACachingAllocator::get();
+    auto data_ptr = storage_impl->data_ptr().get();
+    return (storage_impl->data_ptr().get_deleter() == alloc->raw_deleter());
+  });
+
+  m.def(
+      "_cuda_beginAllocateCurrentStreamToPool",
+      [](int device, at::cuda::MempoolId_t mempool_id) {
+        auto stream = at::cuda::getCurrentCUDAStream(device);
+        TORCH_CHECK(stream, "Expected stream capture to be under way");
+        c10::cuda::CUDACachingAllocator::beginAllocateStreamToPool(
+            device, stream, mempool_id);
+      });
+
+  m.def("_cuda_endAllocateCurrentStreamToPool", [](int device) {
+    auto stream = at::cuda::getCurrentCUDAStream(device);
+    TORCH_CHECK(stream, "Expected stream capture to be under way");
+    c10::cuda::CUDACachingAllocator::endAllocateStreamToPool(device, stream);
+  });
+
+  m.def("_cuda_releasePool", [](int device, at::cuda::MempoolId_t mempool_id) {
+    c10::cuda::CUDACachingAllocator::releasePool(device, mempool_id);
+  });
+
   m.def(
       "_cuda_setCheckpointPoolState",
       [](int device,
          std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps,
-         std::vector<at::Tensor> stale_tensors,
-         std::vector<at::Tensor> tensors_to_add_deleters_to = {}) {
-        // Could pass in Storage Pointers instead
+         std::vector<size_t> stale_storages_ptr,
+         std::vector<size_t> storages_to_add_deleters_to_ptr = {}) {
         std::unordered_set<c10::StorageImpl*> ptr_set;
         // iterate on std::vector for determinism
         std::vector<c10::StorageImpl*> ptrs;
-        for (const auto& ten : stale_tensors) {
-          auto ptr = ten.storage().unsafeGetStorageImpl();
+        for (size_t ptr_int : stale_storages_ptr) {
+          c10::StorageImpl* ptr = (c10::StorageImpl*)ptr_int;
           if (!ptr_set.count(ptr)) {
-            ptrs.push_back(ten.storage().unsafeGetStorageImpl());
-            ptr_set.insert(ten.storage().unsafeGetStorageImpl());
+            ptrs.push_back(ptr);
+            ptr_set.insert(ptr);
           }
         }
         auto delta = c10::cuda::CUDACachingAllocator::setCheckpointPoolState(
@@ -1098,8 +1121,12 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             " must be passed to set checkpoint");
 
         removeStorageDeleterFns(ptrs, freed_pointer_set);
+        std::vector<c10::StorageImpl*> storages_to_add_deleters_to;
+        for (size_t ptr_int : storages_to_add_deleters_to_ptr) {
+          storages_to_add_deleters_to.push_back((c10::StorageImpl*)ptr_int);
+        }
 
-        addStorageDeleterFns(tensors_to_add_deleters_to, delta);
+        addStorageDeleterFns(storages_to_add_deleters_to, delta);
       });
 }
 

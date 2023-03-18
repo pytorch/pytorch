@@ -767,13 +767,22 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
+stashed_first_fail_reason = None
+
+
 def guard_fail_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    last: bool,
+    first: bool,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    if not guard_fn.guard_fail_fn and not last:
+    global stashed_first_fail_reason
+    # Don't waste time computing the fail reason for guards we aren't going to report out.
+    if not guard_fn.guard_fail_fn and not (first or last):
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
@@ -788,7 +797,22 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reason = part
             break
-    guard_failures[orig_code_map[code]].append(reason)
+
+    if first:
+        stashed_first_fail_reason = reason
+
+    if not last:
+        return
+
+    # Technically, we're failing our last guard, which is our oldest guard due to the
+    # eval_frame.c logic that moves newest frames to head, but for logging purposes
+    # it's more useful to see the 'first' failure (if we never got a hit) since it's
+    # likely not yet been logged as a failure reason in a case of repeating failures.
+    assert stashed_first_fail_reason
+    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
+    stashed_first_fail_reason = None
+
+    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(

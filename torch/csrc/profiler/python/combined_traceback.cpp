@@ -56,6 +56,16 @@ struct PythonTraceback : public CapturedTraceback::Python {
     py::str name_s = "name";
     py::str filename_s = "filename";
 
+    auto torch = py::module::import("torch");
+    py::object stack_frames_for_code;
+    if (py::hasattr(torch, "_inductor")) {
+      py::object inductor = torch.attr("_inductor");
+      if (py::hasattr(inductor, "codecache")) {
+        stack_frames_for_code = inductor.attr("codecache")
+                                    .attr("PyCodeCache")
+                                    .attr("stack_frames_for_code");
+      }
+    }
     for (const auto& f : to_symbolize) {
       auto f_code = (PyCodeObject*)f.code;
       py::handle filename = f_code->co_filename;
@@ -67,6 +77,20 @@ struct PythonTraceback : public CapturedTraceback::Python {
           py::cast<std::string>(filename),
           py::cast<std::string>(funcname),
           (uint64_t)lineno});
+      // find all the additional frames associated with inductor generated
+      // code
+      if (stack_frames_for_code.ptr()) {
+        py::object extra = stack_frames_for_code(filename, lineno);
+        if (!extra.is_none()) {
+          for (py::handle h : extra) {
+            result.tracebacks.back().push_back(result.all_frames.size());
+            result.all_frames.emplace_back(unwind::Frame{
+                py::cast<std::string>(h[filename_s]),
+                py::cast<std::string>(h[name_s]),
+                py::cast<uint64_t>(h[line_s])});
+          }
+        }
+      }
     }
   }
 };

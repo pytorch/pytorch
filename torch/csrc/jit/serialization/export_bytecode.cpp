@@ -269,7 +269,7 @@ IValue convertMobileFunctionToCodeTable(
 
   std::vector<IValue> operators;
   operators.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (unsigned i = 0; i < code.op_names_.size(); ++i) {
     const auto& opname = code.op_names_[i];
     const int size = code.operator_input_sizes_[i];
     if (compilation_options.enable_default_value_for_unspecified_arg) {
