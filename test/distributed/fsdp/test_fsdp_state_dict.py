@@ -570,6 +570,7 @@ class TestFSDPStateDict(FSDPTest):
     @parametrize("mixed_precision", [True, False])
     @parametrize("state_dict_rank0_and_offload", [True, False])
     @parametrize("use_orig_params", [True, False])
+    @parametrize("align_addresses", [True, False])
     def test_buffers_save_and_load_state_dict(
         self,
         state_dict_type: str,
@@ -577,6 +578,7 @@ class TestFSDPStateDict(FSDPTest):
         mixed_precision: bool,
         state_dict_rank0_and_offload: bool,
         use_orig_params: bool,
+        align_addresses: bool,
     ):
         """
         Tests that we can save a state_dict and load it for modules with persistent buffers, including
@@ -600,6 +602,7 @@ class TestFSDPStateDict(FSDPTest):
             cpu_offload=cpu_offload,
             use_orig_params=use_orig_params,
             mixed_precision=mixed_precision,
+            align_addresses=align_addresses,
         )
         model = model_call()
         ctx = self._get_state_dict_mgr(

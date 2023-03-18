@@ -623,8 +623,9 @@ def _sharded_pre_load_state_dict_hook(
     )
     flat_param = handle.flat_param
     loaded_flat_tensor.to(flat_param.device)
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, flat_param._shapes)), (
-        f"The original shapes in FSDP are {flat_param._shapes}. "
+    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
+    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
+        f"The original shapes in FSDP are {expected_shapes}. "
         f"The loaded shapes are {loaded_shapes}. "
         f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
     )
