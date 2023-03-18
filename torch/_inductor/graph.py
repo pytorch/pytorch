@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
+import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
@@ -47,6 +48,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
 def supported_dtype_of_cpp_wrapper(dtype):
@@ -629,6 +631,8 @@ class GraphLowering(torch.fx.Interpreter):
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        log.debug(f"Output code written to: {mod.__file__}")
+        output_code_log.debug(f"Output code: \n{code}")
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)

@@ -117,6 +117,7 @@ jobs:
           PR_BODY: ${{ github.event.pull_request.body }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
+          CONTINUE_THROUGH_ERROR: ${{ needs.filter.outputs.keep-going }}
         shell: arch -arch arm64 bash {0}
         run: |
           # shellcheck disable=SC1090
