@@ -256,7 +256,7 @@ test_inductor() {
 }
 
 test_inductor_codegen() {
-  python test/run_test.py --include inductor/test_torchinductor_codegen --verbose
+  python test/run_test.py --include inductor/test_torchinductor_codegen_dynamic_shapes --verbose
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
