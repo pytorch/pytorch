@@ -195,21 +195,34 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 # inclusive both ways
-def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_directive=False):
     """
-    Constrain range takes a symbol, and records a valid value range for it in the graph.
-    That value range is the narrowest intersection of the current value range for the symbol.
+    Constrain range takes a ``SymInt`` or ``int``, and records a valid value range for it in the graph.
+    That value range is the intersection of the current value range for the symbol.
 
-    Ex:
+    Example usage:
+
     constrain_range(x, min=3, max=10)
     constrain_range(x, min=4, max=12)
 
-    Would have a range of (4, 10)
+    Would have a range of ``[4, 10]``.
 
-    min and max are optional, and not specifying one will leave the range unbounded, but
-    still constrained to any past min or maxes, as in the comment above.
+    :param a: The value to constrain the range for.
+    :type a: SymInt or int
+    :param min: The minimum value of the range (inclusive). Optional, default is ``None``.
+    :type min: int or None
+    :param max: The maximum value of the range (inclusive). Optional, default is ``None``.
+    :type max: int or None
 
-    In this way, it is a one directional api - it can only constrain ranges for a shape further.
+    ``min`` and ``max`` are optional, and not specifying one will leave the range unbounded, but
+    still constrained to any past ``min`` or ``max`` values.
+
+    In this way, it is a one directional API - it can only constrain ranges for a shape further.
+
+    The user_directive flag is used for recording a constrain_range that comes from a manually
+    user specified constrain_range.
+
+    In the dynamo case, this means it is downstream of mark_dynamic_constrain.
 
     Setting this flag records the range into the user_constrained field on shape_env. See the docs on that field
     for more information.
@@ -230,6 +243,8 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
+    if user_directive:
+        a.node.shape_env.user_constrained.add(a.node.expr)
 
 
 def constrain_unify(a, b):
@@ -314,7 +329,7 @@ def eval_guards(gm, *args):
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
-class DIM_DYNAMISM_STATE(Enum):
+class DimDynamismState(Enum):
     # The default state today, a dim is both allocated dynamic and duck shaped
     DUCK = 1
     # Static, no symbol is allocated for this dim.
@@ -1253,6 +1268,13 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: Dict[int, "sympy.Expr"] = {}
+        # [NOTE - on user_constrained]
+        # User constrained symbols have an entry in var_to_range, but some of their range
+        # comes from manual user directives like dynamo's constrain api. This distinction is maintained
+        # for the purposes of protecting and enforcing user directives. In strict_mark_dyn mode, we do not
+        # allow ANY constraining of values for a given symbol. However, if this symbol is user constrained, we
+        # relax this requirement in favor of honoring the user directive and allowing the user specified range.
+        self.user_constrained: Set["sympy.Symbol"] = set()
         if specialize_zero_one:
             self.val_to_var = {0: sympy.Integer(0), 1: sympy.Integer(1)}
         self.unbacked_symfloat_counter = itertools.count()
@@ -1281,14 +1303,14 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex: torch.Tensor,
                            source: Source,
-                           dims: Dict[int, DIM_DYNAMISM_STATE]) -> List[sympy.Expr]:
+                           dims: Dict[int, DimDynamismState]) -> List[sympy.Expr]:
         if dims is None:
             dims = {}
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(ex.size()):
             if i not in dims:
-                dim_state = DIM_DYNAMISM_STATE.DUCK
+                dim_state = DimDynamismState.DUCK
             else:
                 dim_state = dims[i]
             size.append(self.create_symbol(
@@ -1300,8 +1322,8 @@ class ShapeEnv:
                                                      ex: torch.Tensor,
                                                      source: Source,
                                                      *,
-                                                     dynamic_dims: Dict[int, DIM_DYNAMISM_STATE],
-                                                     constraint_dims: Dict[int, "MinMaxConstraint"]):
+                                                     dynamic_dims: Dict[int, DimDynamismState],
+                                                     constraint_dims: Optional[Dict[int, "MinMaxConstraint"]]):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
@@ -1347,10 +1369,10 @@ class ShapeEnv:
             user_constrained = constraint_dims and i in constraint_dims
             if user_constrained:
                 msg = "Illegal state. User constrained dims must be marked as such in dynamic_dims"
-                assert dynamic_dims and dynamic_dims[i] == DIM_DYNAMISM_STATE.DYNAMIC, msg
+                assert dynamic_dims and dynamic_dims[i] == DimDynamismState.DYNAMIC, msg
                 constraint = constraint_dims[i]
                 if constraint != MinMaxConstraint.NONE():
-                    constrain_range(sym_size, min=constraint.min, max=constraint.max)
+                    constrain_range(sym_size, min=constraint.min, max=constraint.max, user_directive=True)
 
         sym_stride = []
         for i, stride_expr in enumerate(stride):
@@ -1385,18 +1407,18 @@ class ShapeEnv:
     # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
     # but there may be a replacement that allows it to be immediately
     # simplified
-    def create_symbol(self, val: int, source: Source, dim_state: DIM_DYNAMISM_STATE = DIM_DYNAMISM_STATE.DUCK) -> "sympy.Expr":
+    def create_symbol(self, val: int, source: Source, dim_state: DimDynamismState = DimDynamismState.DUCK) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
-        if dim_state == DIM_DYNAMISM_STATE.STATIC:
+        if dim_state == DimDynamismState.STATIC:
             return sympy.Integer(val)
 
-        dyn = dim_state == DIM_DYNAMISM_STATE.DYNAMIC
+        duck = dim_state == DimDynamismState.DYNAMIC
 
         if val < 0:
             from torch._dynamo.source import NegateSource
             return -self.create_symbol(-val, NegateSource(source), dyn)
 
-        if dyn or val not in self.val_to_var or not self.duck_shape:
+        if duck or val not in self.val_to_var or not self.duck_shape:
             # If a value is never before seen, or dynamic, we want to create an expression
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             # We always associate vars to vals
@@ -1404,14 +1426,14 @@ class ShapeEnv:
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
 
-            if not dyn:
+            if not duck:
                 # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
                 self.val_to_var[val] = sympy_expr
 
             # We also infer that it must be not 0/1
             self.var_to_range[sympy_expr] = _default_value_range(specialize_zero_one=self.specialize_zero_one)
 
-        if not dyn and self.duck_shape:
+        if not duck and self.duck_shape:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.duck_int(val)
@@ -1459,7 +1481,7 @@ class ShapeEnv:
     # some equality guards are nontrivial!  It would be nice to get simplified
     # output to print them too).  It's private because it's not
     # intended for normal use
-    def produce_guards(self, placeholders, sources, dynamic_ranges: Optional[Dict[int, "MinMaxConstraint"]],
+    def produce_guards(self, placeholders, sources, dynamic_ranges: Optional[List[Dict[int, "MinMaxConstraint"]]],
                        source_ref=lambda n: n.name(), *, strict_mark_dyn=False, _simplified=False) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
@@ -1561,7 +1583,7 @@ class ShapeEnv:
             # user directives about relationships, we can remove this check from
             # verification.
             if len(expr.free_symbols) == 1:
-                symbol = expr.free_symbols.pop()
+                symbol = next(iter(expr.free_symbols))
                 # NOTE! Manual user directives override the rule around not allowing any constraining of dynamic dims
                 # [NOTE - on user_constrained]
                 # User constrained symbols have an entry in var_to_range, but some of their range
@@ -1572,7 +1594,7 @@ class ShapeEnv:
                 # We do this by checking of the range is unconstrained*.
                 #
                 # *unconstrained might mean a default unsound 0/1 constraint.
-                if self.var_to_range[symbol] != _default_value_range(specialize_zero_one=self.specialize_zero_one):
+                if symbol in self.user_constrained:
                     return
                 srcs = symbol_to_source[symbol]
                 for src in srcs:
@@ -1604,8 +1626,8 @@ class ShapeEnv:
                                                "which violates user's constraints")
 
                         vr = dyn_range[i].to_range()
-                        if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
-                            for symbol in ss.node.expr.free_symbols:
+                        for symbol in ss.node.expr.free_symbols:
+                            if symbol in self.user_constrained:
                                 self._verify_valid_range(symbol, vr)
                         dynamic_sources.append(property_source)
             for i, ss in enumerate(t.stride()):

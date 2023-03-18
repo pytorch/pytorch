@@ -5,7 +5,7 @@ from typing import ContextManager, Dict, Optional
 
 import torch
 from torch._guards import Source
-from torch.fx.experimental.symbolic_shapes import DIM_DYNAMISM_STATE, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
 
@@ -166,7 +166,7 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[Dict[int, DIM_DYNAMISM_STATE]] = None,
+        dynamic_dims: Optional[Dict[int, DimDynamismState]] = None,
         constraint_dims: Optional[Dict[int, MinMaxConstraint]] = None,
     ):
         if source is None:
@@ -307,7 +307,6 @@ class MetaConverter:
                         torch._C.DispatchKey.ADInplaceOrView, False
                     )
                     try:
-
                         if base.dtype == t.dtype:
                             pass
                         elif is_c_of_r(base.dtype, t.dtype):

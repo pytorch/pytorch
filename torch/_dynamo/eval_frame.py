@@ -599,9 +599,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
-    constraints: List[
-        Constraint,
-    ] = None,
+    constraints: List[Constraint,] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """

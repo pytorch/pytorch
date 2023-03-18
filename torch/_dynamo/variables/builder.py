@@ -1060,7 +1060,7 @@ class TrackedFake:
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    from torch.fx.experimental.symbolic_shapes import DIM_DYNAMISM_STATE
+    from torch.fx.experimental.symbolic_shapes import DimDynamismState
 
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
@@ -1073,7 +1073,7 @@ def wrap_to_fake_tensor_and_record(
             assert not static_shapes, tensor_static_reason_to_message(reason)
 
         if not static_shapes:
-            dynamic_dims: Dict[int, DIM_DYNAMISM_STATE] = dynamic_dims_from_tensor(
+            dynamic_dims: Dict[int, DimDynamismState] = dynamic_dims_from_tensor(
                 e, dynamic_ranges
             )
         else:

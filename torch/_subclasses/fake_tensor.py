@@ -19,7 +19,7 @@ from torch._prims_common import (
     is_integer_dtype,
 )
 from torch._subclasses.meta_utils import MetaConverter
-from torch.fx.experimental.symbolic_shapes import DIM_DYNAMISM_STATE, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
@@ -1399,7 +1399,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=False,
         ignore_subclass=False,
         source: Optional[Source] = None,
-        dynamic_dims: Optional[Dict[int, DIM_DYNAMISM_STATE]] = None,
+        dynamic_dims: Optional[Dict[int, DimDynamismState]] = None,
         constraint_dims: Optional[Dict[int, MinMaxConstraint]] = None,
     ):
         if static_shapes:
