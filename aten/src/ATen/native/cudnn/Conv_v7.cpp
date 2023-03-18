@@ -24,6 +24,7 @@
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 #include <ATen/native/utils/ParamsHash.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
