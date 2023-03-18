@@ -222,7 +222,7 @@ class _CPUinfo():
 
     def numa_aware_check(self, core_list):
         """
-        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce perforamnce.
+        Check whether all cores in core_list are in the same NUMA node. cross NUMA will reduce performance.
         We strongly advice to not use cores on different nodes.
         """
         cores_numa_map = self.logical_core_node_map
