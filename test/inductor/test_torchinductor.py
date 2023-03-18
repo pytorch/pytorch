@@ -5725,29 +5725,33 @@ class CommonTemplate:
             raise unittest.SkipTest("cpp_wrapper only supports cpu")
 
         device = "cpu"
-        for name in [
-            "test_as_strided",  # buffer reuse
-            "test_bitwise",  # int32
-            "test_bmm1",
-            "test_bmm2",
-            "test_cat",  # alias
-            "test_linear1",
-            "test_linear2",
-            "test_lowmem_dropout1",  # None as output
-            "test_mm_views",
-            "test_profiler_mark_wrapper_call",  # TODO: fallback to default wrapper for now
-            "test_reduction1",  # Reduction
-            "test_relu",  # multiple inputs
-            "test_silu",  # single input, single output
-            "test_sum_dtype",  # float64
-            "test_sum_int",  # bool, int64, int8, uint8
-            "test_transpose",  # multiple outputs, buffer clear
+        for name, supported in [
+            ["test_as_strided", True],  # buffer reuse
+            ["test_bitwise", True],  # int32
+            ["test_bmm1", True],
+            ["test_bmm2", True],
+            ["test_cat", True],  # alias
+            ["test_linear1", True],
+            ["test_linear2", True],
+            ["test_lowmem_dropout1", True],  # None as output
+            ["test_mm_views", True],
+            [
+                "test_profiler_mark_wrapper_call",
+                False,
+            ],  # TODO: fallback to default wrapper for now
+            ["test_reduction1", True],  # Reduction
+            ["test_relu", True],  # multiple inputs
+            ["test_silu", True],  # single input, single output
+            ["test_sum_dtype", True],  # float64
+            ["test_sum_int", True],  # bool, int64, int8, uint8
+            ["test_transpose", True],  # multiple outputs, buffer clear
         ]:
             test_name = f"{name}_{device}"
             assert hasattr(self, test_name), "undefined function"
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
-            func()
+            code = run_and_get_cpp_code(func, [])
+            self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
     def test_pixel_shuffle_channels_last(self):
@@ -5829,6 +5833,26 @@ class CommonTemplate:
             return a * b
 
         self.common(fn, (torch.rand(1), torch.rand(2)))
+
+    def test_view_on_aliased(self):
+        # https://github.com/pytorch/pytorch/issues/96728
+        def fn1(a, b):
+            a = a.max(0).values
+            c = torch.cat((a, b))
+            c = c.round()
+            b >= a[0]
+            return c
+
+        some_const = torch.tensor(6324)
+
+        def fn2():
+            a = torch.tensor([[0.6324]])
+            ret = torch.cat((a, a), dim=0)
+            some_const >= a[0]
+            return ret
+
+        self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
+        self.common(fn2, ())
 
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
@@ -6581,6 +6605,27 @@ if HAS_CPU:
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
         @patch("torch.cuda.is_available", lambda: False)
+        def test_maxpool2d_with_pre_loop_collapse_cpu_only(self):
+            x1 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            x2 = torch.randn(2, 3, 20, 20).to(memory_format=torch.channels_last)
+            maxpool = torch.nn.MaxPool2d(kernel_size=3, stride=2, ceil_mode=True)
+
+            def func(x1, x2):
+                y = x1 + x2
+                return maxpool(y)
+
+            with patch.object(config.cpp, "simdlen", None):
+                torch._dynamo.reset()
+                metrics.reset()
+                graph = torch.compile(func, backend="inductor")
+                graph(x1, x2)
+                assert same(graph(x1, x2), func(x1, x2), equal_nan=True)
+                assert metrics.generated_cpp_vec_kernel_count == 2
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
         def test_sign_cpu_only(self):
             def fn(x):
                 return (torch.sign(x),)
@@ -7043,6 +7088,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(num_transpose_matmul, 1)
 
             self.assertTrue(torch.allclose(module(input), traced(input)))
+
+        def test_memory_history_inductor(self):
+            def called_inside_compile(x, w, b):
+                a = x @ w + b
+                return torch.sigmoid(a)
+
+            @torch.compile
+            def fn(x, w, b):
+                x = called_inside_compile(x, w, b)
+                return called_inside_compile(x, w, b)
+
+            w = torch.rand(3, 3, device="cuda")
+            b = torch.rand(3, device="cuda")
+            x = torch.rand(3, device="cuda")
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(True)
+                r = fn(x, w, b)
+            finally:
+                torch.cuda.memory._record_memory_history(False)
+            snapshot = str(torch.cuda.memory._snapshot())
+            self.assertTrue("called_inside_compile" in snapshot)
 
     copy_tests(CommonTemplate, CudaTests, "cuda")
 
