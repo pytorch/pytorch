@@ -140,7 +140,7 @@ logger = logging.getLogger(__name__)
 
 class _CPUinfo():
     """
-    Get CPU inforamation, such as cores list and NUMA information.
+    Get CPU information, such as cores list and NUMA information.
     """
     def __init__(self, test_input=""):
 
