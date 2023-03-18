@@ -87,7 +87,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -649,20 +649,29 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            if getattr(value, "_is_fsdp_managed_module", False):
-                # Note: we can't do this assert inside FSDP constructor,
-                # since we don't know yet whether dynamo will be used
-                assert getattr(
-                    value, "_fsdp_use_orig_params", False
-                ), "Dynamo only supports FSDP with use_orig_params=True"
+            return UnspecializedNNModuleVariable(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False):
+            # Note: we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            guard_create_fns = [GuardBuilder.TYPE_MATCH]
+            if torch._dynamo.config.skip_fsdp_guards:
+                # Add an `ID_MATCH` on the FSDP managed module as a minimal
+                # guard to differentiate compiled functions across modules
+                guard_create_fns.append(GuardBuilder.ID_MATCH)
 
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
-            return UnspecializedNNModuleVariable(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            return FSDPNNModuleVariable(
+                value, guards=self.make_guards(*guard_create_fns)
             )
         else:
             return self.tx.output.register_attr_or_module(

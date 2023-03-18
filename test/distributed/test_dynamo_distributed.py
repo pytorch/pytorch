@@ -244,6 +244,14 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(1)
     def test_fsdp_aot_eager(self):
+        self._test_fsdp_aot_eager()
+
+    @skip_if_lt_x_gpu(1)
+    def test_fsdp_aot_eager_skip_guards(self):
+        torch._dynamo.config.skip_fsdp_guards = True
+        self._test_fsdp_aot_eager()
+
+    def _test_fsdp_aot_eager(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
@@ -268,6 +276,15 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(1)
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_fsdp_inductor(self):
+        self._test_fsdp_inductor()
+
+    @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    def test_fsdp_inductor_skip_guards(self):
+        torch._dynamo.config.skip_fsdp_guards = True
+        self._test_fsdp_inductor()
+
+    def _test_fsdp_inductor(self):
         with _dynamo_dist_per_rank_init(self.rank, self.world_size):
             # Test with basic FSDP wrapping (outer wrap around whole model)
             m, inputs, correct_outputs = get_model(f"cuda:{self.rank}")
@@ -295,6 +312,17 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config.triton, "cudagraphs", False)
     @patch.object(torch._inductor.config, "fallback_random", True)
     def test_hf_bert_fsdp(self):
+        self._test_hf_bert_fsdp()
+
+    @import_transformers_or_skip()
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @patch.object(torch._inductor.config.triton, "cudagraphs", False)
+    @patch.object(torch._inductor.config, "fallback_random", True)
+    def test_hf_bert_fsdp_skip_guards(self):
+        torch._dynamo.config.skip_fsdp_guards = True
+        self._test_hf_bert_fsdp()
+
+    def _test_hf_bert_fsdp(self):
         from transformers.models.bert.modeling_bert import BertLayer
 
         def apply_fsdp(model, wrap_policy):

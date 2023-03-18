@@ -12,7 +12,7 @@ from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource, NotNNModuleSource
 from ..utils import (
     get_custom_getattr,
     is_lazy_module,
@@ -562,8 +562,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     def __init__(self, value, **kwargs):
         super().__init__(value=value, **kwargs)
         if self.source and self.source.is_nn_module():
-            # force guard checks even when `not config.guard_nn_modules``
-            self.source = NotNNModuleSource(self.source)
+            # force guard checks even when `not config.guard_nn_modules`
+            self._source_rewrite()
+
+    def _source_rewrite(self):
+        self.source = NotNNModuleSource(self.source)
 
     @staticmethod
     @functools.lru_cache(None)
@@ -659,6 +662,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
             if id(method.__code__) in self._nn_module_method_ids():
-                unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+                unimplemented(f"{self.__class__.__name__} missing {name}")
 
         return super().call_method(tx, name, args, kwargs)
+
+
+class FSDPNNModuleVariable(UnspecializedNNModuleVariable):
+    def __init__(self, value, **kwargs):
+        super().__init__(value=value, **kwargs)
+        if torch._dynamo.config.skip_fsdp_guards and self.source:
+            self._source_rewrite()
+
+    def _source_rewrite(self):
+        # No need to wrap with `FSDPNNModuleSource` if already one
+        if not isinstance(self.source, FSDPNNModuleSource):
+            self.source = FSDPNNModuleSource(self.source)

@@ -367,9 +367,16 @@ class NNModuleSource(Source):
         return self.inner.name()
 
 
+@dataclasses.dataclass
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
         return _GUARD_SOURCE_NOT_NN_MODULE[self.inner.guard_source()]
+
+
+@dataclasses.dataclass
+class FSDPNNModuleSource(NNModuleSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_NN_MODULE[self.inner.guard_source()]
 
 
 @dataclasses.dataclass
