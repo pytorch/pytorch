@@ -21,6 +21,10 @@ void unary_op(const Tensor& self,
   TORCH_CHECK(!(!is_macos_13_or_newer() && self.scalar_type() == ScalarType::Byte),
               "MPS support unary op with uint8 natively starting from macOS 13.0");
 
+  if (!output_.is_same_size(self)) {
+    output_.resize_(self.sizes());
+  }
+
   if (is_noop(self)) {
     output_.copy_(self);
     return;
@@ -28,13 +32,9 @@ void unary_op(const Tensor& self,
 
   auto output = output_;
   bool needsCopyToOutput = false;
-  if (self.is_alias_of(output_)) {
-    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+  if (output.storage_offset() || !output.is_contiguous()) {
+    output = at::native::empty_mps(output.sizes(), output.scalar_type(), c10::nullopt, kMPS);
     needsCopyToOutput = true;
-  } else {
-    if (!output.is_same_size(self)) {
-      output.resize_(self.sizes());
-    }
   }
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
@@ -66,7 +66,8 @@ void unary_op(const Tensor& self,
     }
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self, /*mpsShape=*/nullptr, gatherTensorData);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output, /*mpsShape=*/nullptr, false);
+    Placeholder outputPlaceholder =
+        Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : output_, /*mpsShape=*/nullptr, false);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =
         @{selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()};
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
