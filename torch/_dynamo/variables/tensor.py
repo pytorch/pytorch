@@ -12,7 +12,6 @@ from .. import config, variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource
-
 from ..utils import (
     fqn,
     get_fake_value,
@@ -250,8 +249,17 @@ class TensorVariable(VariableTracker):
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
-            sizes = [variables.ConstantVariable(x) for x in self.size]
-            constant_result = SizeVariable(sizes, **options)
+            if "dim" in kwargs:
+                dim = kwargs.pop("dim").as_python_constant()
+                assert -len(self.size) <= dim and dim < len(
+                    self.size
+                ), "Dimension out of range (expected to be in range of [{}, {}], but got {})".format(
+                    -len(self.size), len(self.size) - 1, dim
+                )
+                constant_result = variables.ConstantVariable(self.size[dim])
+            else:
+                sizes = [variables.ConstantVariable(x) for x in self.size]
+                constant_result = SizeVariable(sizes, **options)
         elif name == "size" and self.size is None and config.dynamic_shapes:
             return wrap_fx_proxy(
                 tx,
