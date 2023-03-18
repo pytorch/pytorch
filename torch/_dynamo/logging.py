@@ -12,7 +12,8 @@ def get_loggers():
     return [
         logging.getLogger("torch.fx.experimental.symbolic_shapes"),
         logging.getLogger("torch._dynamo"),
-        logging.getLogger("torch._inductor")]
+        logging.getLogger("torch._inductor"),
+    ]
 
 
 # Set the level of all loggers that torchdynamo is responsible for
