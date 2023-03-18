@@ -2073,7 +2073,14 @@ def create_runtime_wrapper(
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
-        with torch.autograd._force_original_view_tracking(True):
+        if trace_joint:
+            with torch.autograd._force_original_view_tracking(True):
+                all_outs = call_func_with_args(
+                    compiled_fn,
+                    args,
+                    disable_amp=True,
+                )
+        else:
             all_outs = call_func_with_args(
                 compiled_fn,
                 args,
