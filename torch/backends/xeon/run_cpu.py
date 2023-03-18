@@ -298,7 +298,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
         """
         Enable TCMalloc/JeMalloc with LD_PRELOAD and set configuration for JeMalloc.
         By default, PTMalloc will be used for PyTorch, but TCMalloc and JeMalloc can get better
-        memory resue and reduce page fault to improve performance.
+        memory reuse and reduce page fault to improve performance.
         """
         if enable_tcmalloc and enable_jemalloc:
             raise RuntimeError("Unable to enable TCMalloc and JEMalloc at the same time.")
