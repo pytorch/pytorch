@@ -7775,9 +7775,9 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/((-1) + (2*foo)))) + (foo*({c}/((-1) + (2*foo))))",
             ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/(bar + ((-1)*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
