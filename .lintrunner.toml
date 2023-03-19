@@ -862,7 +862,6 @@ include_patterns = [
     'test/test_value_ranges.py',
     'torch/utils/_sympy/interp.py',
     'torch/utils/_sympy/reference.py',
-    'torch/_logging/**/*.py',
     'torch/nn/parallel/distributed.py',
 ]
 command = [

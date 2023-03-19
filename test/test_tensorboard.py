@@ -94,14 +94,14 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
             self.assertIsInstance(make_np(tensor), np.ndarray)
 
             # CUDA tensor
-            if torch.cuda.is_available():
+            if torch.cuda.device_count() > 0:
                 self.assertIsInstance(make_np(tensor.cuda()), np.ndarray)
 
             # regular variable
             self.assertIsInstance(make_np(torch.autograd.Variable(tensor)), np.ndarray)
 
             # CUDA variable
-            if torch.cuda.is_available():
+            if torch.cuda.device_count() > 0:
                 self.assertIsInstance(make_np(torch.autograd.Variable(tensor).cuda()), np.ndarray)
 
         # python primitive type

@@ -39,15 +39,17 @@
 #define LSEEK lseek
 #endif
 
-static PyObject* THPStorage_nbytes(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_nbytes(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return py::cast(THPStorage_Unpack(self).sym_nbytes()).release().ptr();
+  auto self = (THPStorage*)_self;
+  return py::cast(self->cdata->sym_nbytes()).release().ptr();
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_dataPtr(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_dataPtr(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return PyLong_FromVoidPtr(THPStorage_Unpack(self).data<uint8_t>());
+  auto self = (THPStorage*)_self;
+  return PyLong_FromVoidPtr(self->cdata->data<uint8_t>());
   END_HANDLE_TH_ERRORS
 }
 
@@ -78,11 +80,12 @@ static PyObject* THPStorage_copy_(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_isPinned(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_isPinned(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
 #if defined(USE_CUDA)
+  auto self = (THPStorage*)_self;
   return PyBool_FromLong(
-      at::globalContext().isPinnedPtr(THPStorage_Unpack(self).data<uint8_t>()));
+      at::globalContext().isPinnedPtr(self->cdata->data<uint8_t>()));
 #else
   Py_RETURN_FALSE;
 #endif
@@ -95,9 +98,10 @@ static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_new(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  c10::Allocator* allocator = THPStorage_Unpack(self).allocator();
+  auto self = (THPStorage*)_self;
+  c10::Allocator* allocator = self->cdata->allocator();
   auto new_storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       0,
@@ -109,18 +113,18 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
+static PyObject* THPStorage_resize_(PyObject* _self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
-  const auto& storage = THPStorage_Unpack(self);
+  auto self = (THPStorage*)_self;
   THPUtils_assert(
       THPUtils_checkLong(number_arg),
       "resize_ expects an int, "
       "but got %s",
       THPUtils_typename(number_arg));
   int64_t newsize = THPUtils_unpackLong(number_arg);
-  c10::DeviceType device_type = storage.device_type();
+  c10::DeviceType device_type = self->cdata->device_type();
   if (device_type == at::kCPU) {
-    at::native::resize_bytes_cpu(storage.unsafeGetStorageImpl(), newsize);
+    at::native::resize_bytes_cpu(self->cdata, newsize);
 #ifdef USE_CUDA
   } else if (device_type == at::kCUDA) {
     ptrdiff_t size_bytes_i = newsize;
@@ -130,7 +134,7 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
         size_bytes_i,
         ") cannot be represented as a size_t");
     const auto size_bytes = static_cast<size_t>(size_bytes_i);
-    at::native::resize_bytes_cuda(storage.unsafeGetStorageImpl(), size_bytes);
+    at::native::resize_bytes_cuda(self->cdata, size_bytes);
 #endif
   } else {
     TORCH_CHECK(
@@ -139,21 +143,23 @@ static PyObject* THPStorage_resize_(PyObject* self, PyObject* number_arg) {
         device_type);
   }
   Py_INCREF(self);
-  return self;
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_fill_(PyObject* self, PyObject* number_arg) {
+static PyObject* THPStorage_fill_(PyObject* _self, PyObject* number_arg) {
   HANDLE_TH_ERRORS
-  const auto& storage = THPStorage_Unpack(self);
+  auto self = (THPStorage*)_self;
   THPUtils_assert(
       THPByteUtils_checkReal(number_arg),
       "fill_ expects int, "
       "but got %s",
       THPUtils_typename(number_arg));
-  storage_fill(storage, THPByteUtils_unpackReal(number_arg));
+  storage_fill(
+      at::unsafeStorageFromTH(self->cdata, /*retain=*/true),
+      THPByteUtils_unpackReal(number_arg));
   Py_INCREF(self);
-  return self;
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -361,9 +367,9 @@ static PyObject* THPStorage_fromFile(
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
+PyObject* THPStorage_writeFile(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
-  const auto& storage = THPStorage_Unpack(self);
+  auto self = (THPStorage*)_self;
   PyObject* file = PyTuple_GetItem(args, 0);
   bool is_real_file = PyTuple_GetItem(args, 1) == Py_True;
   bool save_size = PyTuple_GetItem(args, 2) == Py_True;
@@ -375,7 +381,7 @@ PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
 
   if (!is_real_file) {
     THPStorage_writeFileRaw<PyObject*>(
-        storage.unsafeGetStorageImpl(), file, save_size, element_size);
+        self->cdata, file, save_size, element_size);
     Py_RETURN_NONE;
   }
 
@@ -384,8 +390,7 @@ PyObject* THPStorage_writeFile(PyObject* self, PyObject* args) {
       fd != -1,
       "_write_file couldn't retrieve a file descriptor "
       "from given object");
-  THPStorage_writeFileRaw(
-      storage.unsafeGetStorageImpl(), fd, save_size, element_size);
+  THPStorage_writeFileRaw(self->cdata, fd, save_size, element_size);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -412,9 +417,9 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_setFromFile(PyObject* _self, PyObject* args) {
   HANDLE_TH_ERRORS
-  const auto& storage = THPStorage_Unpack(self);
+  auto self = (THPStorage*)_self;
   PyObject* file = PyTuple_GET_ITEM(args, 0);
   PyObject* offset = PyTuple_GET_ITEM(args, 1);
   bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
@@ -433,11 +438,11 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
         offset == Py_None,
         "_set_from_file: offset is NYI for filelike objects");
 
-    auto self_storage_impl = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
-        storage.unsafeGetStorageImpl());
-    auto storage_impl = THPStorage_readFileRaw<PyObject*>(
-        file, std::move(self_storage_impl), element_size);
-    if (!storage_impl.defined()) {
+    auto self_storage =
+        c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
+    auto storage = THPStorage_readFileRaw<PyObject*>(
+        file, std::move(self_storage), element_size);
+    if (!storage.defined()) {
       return nullptr;
     }
     Py_INCREF(self);
@@ -454,11 +459,10 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
       fd != -1,
       "_set_from_file couldn't retrieve a file "
       "descriptor from given object");
-  auto self_storage_impl = c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(
-      storage.unsafeGetStorageImpl());
-  auto storage_impl =
-      THPStorage_readFileRaw<int>(fd, self_storage_impl, element_size);
-  if (!storage_impl.defined())
+  auto self_storage =
+      c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(self->cdata);
+  auto storage = THPStorage_readFileRaw<int>(fd, self_storage, element_size);
+  if (!storage.defined())
     return nullptr;
   Py_INCREF(self);
 
@@ -474,7 +478,7 @@ static PyObject* THPStorage_setFromFile(PyObject* self, PyObject* args) {
   }
   Py_DECREF(seek_return);
 
-  return self;
+  return (PyObject*)self;
   END_HANDLE_TH_ERRORS
 }
 
@@ -487,9 +491,13 @@ PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
       "_set_cdata - expected an int or long, but got %s",
       THPUtils_typename(new_cdata));
   c10::StorageImpl* ptr = (c10::StorageImpl*)PyLong_AsVoidPtr(new_cdata);
-  self->cdata.~MaybeOwned<c10::Storage>();
-  self->cdata = c10::MaybeOwned<c10::Storage>::owned(
-      c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr)));
+  if (ptr) {
+    c10::raw::intrusive_ptr::incref(ptr);
+  }
+  if (self->cdata) {
+    c10::raw::intrusive_ptr::decref(self->cdata);
+  }
+  self->cdata = ptr;
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS

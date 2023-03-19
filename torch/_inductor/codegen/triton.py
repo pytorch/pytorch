@@ -12,7 +12,6 @@ import sympy
 
 import torch
 
-import torch._logging
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -43,7 +42,6 @@ from .common import (
 )
 
 log = logging.getLogger(__name__)
-schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def signature_of(arg):
@@ -1591,8 +1589,8 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        if schedule_log.isEnabledFor(logging.DEBUG):
-            schedule_log.debug(f"Schedule:\n {node_schedule}")
+        if dynamo_config.output_code:
+            log.info("schedule: %s", node_schedule)
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod

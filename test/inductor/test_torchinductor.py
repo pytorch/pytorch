@@ -5834,26 +5834,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand(1), torch.rand(2)))
 
-    def test_view_on_aliased(self):
-        # https://github.com/pytorch/pytorch/issues/96728
-        def fn1(a, b):
-            a = a.max(0).values
-            c = torch.cat((a, b))
-            c = c.round()
-            b >= a[0]
-            return c
-
-        some_const = torch.tensor(6324)
-
-        def fn2():
-            a = torch.tensor([[0.6324]])
-            ret = torch.cat((a, a), dim=0)
-            some_const >= a[0]
-            return ret
-
-        self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
-        self.common(fn2, ())
-
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
@@ -6385,24 +6365,6 @@ if HAS_CPU:
                         metrics.generated_kernel_count
                         - metrics.generated_cpp_vec_kernel_count
                     ) == 0
-
-        def test_redundant_to_node_elimination_bf16(self):
-            def fn(x, y):
-                res = x + y
-                res = torch.mean(res)
-                return (res,)
-
-            x = torch.randn((2, 9), dtype=torch.bfloat16)
-            y = torch.randn((2, 9), dtype=torch.bfloat16)
-
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x, y)
-                compiled = compile_fx_inner(traced, [x, y])
-                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
-                if codecache.valid_vec_isa_list():
-                    assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
