@@ -1070,8 +1070,8 @@ class CrossEntropyLoss(_WeightedLoss):
                 \text{if reduction} = \text{`sum'.}
             \end{cases}
 
-      Note that this case is equivalent to the combination of :class:`~torch.nn.LogSoftmax` and
-      :class:`~torch.nn.NLLLoss`.
+      Note that this case is equivalent to applying :class:`~torch.nn.LogSoftmax`
+      on an input, followed by :class:`~torch.nn.NLLLoss`.
 
     - Probabilities for each class; useful when labels beyond a single class per minibatch item
       are required, such as for blended labels, label smoothing, etc. The unreduced (i.e. with

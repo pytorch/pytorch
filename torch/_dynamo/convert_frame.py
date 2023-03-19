@@ -7,6 +7,7 @@ import weakref
 from typing import Dict, Optional, Set
 
 import torch
+import torch._logging
 from torch._guards import tracing
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
@@ -38,15 +39,18 @@ from .utils import (
     gen_record_file_name,
     guard_failures,
     increment_frame,
-    init_logging,
     is_namedtuple,
     istype,
     orig_code_map,
+    reset_graph_break_dup_checker,
+    setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
 )
 
 log = logging.getLogger(__name__)
+guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 
 
 class Tracker:
@@ -101,9 +105,11 @@ def wrap_convert_context(fn):
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
+        cleanup = setup_compile_debug()
         try:
             return fn(*args, **kwargs)
         finally:
+            cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
@@ -195,7 +201,7 @@ def convert_frame_assert(
     export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
-    init_logging()
+    reset_graph_break_dup_checker()
 
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
         increment_frame()
@@ -339,25 +345,26 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        if config.output_code:
-            log.info(
-                format_bytecode(
-                    "ORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    code,
-                ),
-            )
-            log.info(
-                format_bytecode(
-                    "MODIFIED BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    out_code,
-                ),
-            )
+        def log_bytecode(prefix, name, filename, line_no, code):
+            if bytecode_log.isEnabledFor(logging.DEBUG):
+                bytecode_log.debug(
+                    format_bytecode(prefix, name, filename, line_no, code)
+                )
+
+        log_bytecode(
+            "ORIGINAL BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+        log_bytecode(
+            "MODIFIED BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            out_code,
+        )
 
         assert output is not None
         assert output.guards is not None
@@ -371,12 +378,12 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        if config.output_code:
+        if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
             guard_str += "\n".join(
                 [f" - {str(guard)}" for guard in sorted(output.guards)]
             )
-            log.info(guard_str)
+            guards_log.debug(guard_str)
 
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
@@ -423,7 +430,6 @@ def replay(filename):
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
-    init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
     record.globals = {
