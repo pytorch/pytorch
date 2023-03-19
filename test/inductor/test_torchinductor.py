@@ -5844,7 +5844,8 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
+                    # XXX: change back
+                    unittest.expectedFailure(lambda self, value=value: value(self)),
                 )
             else:
                 setattr(
