@@ -319,7 +319,7 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_csv.py \
       -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
+    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]]; then
       # because I haven't dealt with dynamic expected artifacts yet,
       # and non-inductor jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.
       python benchmarks/dynamo/check_graph_breaks.py \
