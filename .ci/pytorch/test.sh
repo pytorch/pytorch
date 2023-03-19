@@ -269,8 +269,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
 fi
 
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-  # TODO: make specialize_int = False default, then remove this
-  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --unspecialize-int)
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes)
 fi
 
 if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
@@ -320,9 +319,9 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_csv.py \
       -f "$TEST_REPORTS_DIR/${name}_${suite}.csv"
-    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
+    if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
       # because I haven't dealt with dynamic expected artifacts yet,
-      # and non-inductor jobs (e.g. periodic) may have different set of expected models.
+      # and non-inductor jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.
       python benchmarks/dynamo/check_graph_breaks.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
         --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}${shard_id}.csv"
@@ -856,6 +855,11 @@ elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
 elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
+  if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
+    install_torchaudio cpu
+  else
+    install_torchaudio cuda
+  fi
   install_torchtext
   install_torchvision
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then

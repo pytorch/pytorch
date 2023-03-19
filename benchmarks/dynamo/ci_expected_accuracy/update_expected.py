@@ -31,7 +31,6 @@ ARTIFACTS_QUERY_URL = "https://api.usw2a1.rockset.com/v1/public/shared_lambdas/c
 
 
 def query_job_sha(repo, sha):
-
     params = {
         "parameters": [
             {"name": "sha", "type": "string", "value": sha},
@@ -108,7 +107,6 @@ def write_filtered_csvs(root_path, dataframes):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
