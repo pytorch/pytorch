@@ -2864,6 +2864,8 @@ def aot_module_simplified(
 
     # And now their dynamo equivalent, if there
     if hasattr(mod, "graph"):
+        if aot_autograd_arg_pos_to_source is None:
+            aot_autograd_arg_pos_to_source = []
         arg_srcs = [x._dynamo_source for x in mod.graph.nodes if x.op == "placeholder" and hasattr(x, "_dynamo_source")]
         aot_autograd_arg_pos_to_source.extend(arg_srcs)
 

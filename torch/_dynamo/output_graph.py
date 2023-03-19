@@ -461,13 +461,11 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                assert self.param_name_to_source is not None
-                assert name not in self.param_name_to_source
                 self.nn_modules[name] = target
-                self.param_name_to_source[name] = source
                 if isinstance(target, torch.nn.Module):
 
                     def register_leaf_name(leaf_name):
+                        assert self.param_name_to_source is not None
                         new_source = ParamBufferSource(source, leaf_name)
                         new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
