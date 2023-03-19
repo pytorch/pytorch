@@ -110,6 +110,7 @@ def fetch_attr(target: str, mod):
     return attr_itr
 
 
+# Note - This is a CPU only pass, see fuse_fx
 def remove_identity(gm: torch.fx.GraphModule):
     """
     Removes all identity layers from the module.
@@ -117,7 +118,7 @@ def remove_identity(gm: torch.fx.GraphModule):
 
     class IdentityRemover(torch.fx.Transformer):
         def call_module(self, target, args, kwargs):
-            if isinstance(self.submodules[target], nn.Identity):
+            if isinstance(self.module._modules[target], nn.Identity):
                 assert len(args) == 1
                 return args[0]
             else:
@@ -125,7 +126,7 @@ def remove_identity(gm: torch.fx.GraphModule):
 
     return IdentityRemover(gm).transform()
 
-
+# Note - This is a CPU only pass, see fuse_fx
 def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False):
     """
     Fuses Convolution/BN layers for inference purposes.
