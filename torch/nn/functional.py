@@ -5066,10 +5066,17 @@ def multi_head_attention_forward(
             be ignored by the attention. This is an binary mask. When the value is True,
             the corresponding value on the attention layer will be filled with -inf.
         need_weights: output attn_output_weights.
+            Default: `True`
+            Note: `needs_weight` defaults to `True`, but should be set to `False`
+            For best performance when attention weights are not nedeeded.
+            *Setting needs_weights to `True`
+            leads to a significant performance degradation.*
         attn_mask: 2D or 3D mask that prevents attention to certain positions. A 2D mask will be broadcasted for all
             the batches while a 3D mask allows to specify a different mask for the entries of each batch.
         is_causal: If specified, applies a causal mask as attention mask, and ignores
             attn_mask for computing scaled dot product attention.
+            *Warning*: If is_causal is set to True and a non-causal attention
+            mask is passed, the results (and BC/FC behavior) are undefined.
             Default: ``False``.
         use_separate_proj_weight: the function accept the proj. weights for query, key,
             and value in different forms. If false, in_proj_weight will be used, which is
@@ -5170,8 +5177,12 @@ def multi_head_attention_forward(
         target_type=query.dtype
     )
 
-    if is_causal:
-        attn_mask = None
+    if is_causal and key_padding_mask is None and not need_weights:
+        if torch.jit.is_scripting():
+            attn_mask = None
+        elif attn_mask is not None:
+            warnings.warn("is_causal overrides attn_mask")
+            attn_mask = None
     else:
         attn_mask = _canonical_mask(
             mask=attn_mask,
@@ -5181,6 +5192,29 @@ def multi_head_attention_forward(
             target_type=query.dtype,
             check_other=False,
         )
+
+        if key_padding_mask is not None:
+            # this is where we have atrociously painted ourselves into a corner
+            # when a key_padding mask is specified, it is merged with attn_mask
+            # but here we don't have the attn_mask, only is causal.
+            # Options:
+            # 1 - instantiate causal attn_mask and live happily ever after (perf will suck)
+            # 2 - allow specifying key_padding_mask to SDPA separately
+            # 3 - convert input to nested tensor to pake in kpm
+
+            # Option (1) for now.  Not sure I have the right dimensions
+            # FIXME:@drisspg
+            # if is_causal and attn_mask is None:
+            #     L = query.size(-2)
+            #     S = key.size(-2)
+            #     attn_mask = torch.triu(torch.full((L, S), float('-inf'), device=query.device, dtype=query.dtype), diagonal=1)
+
+            assert not (is_causal and attn_mask is None), "FIXME: instantiate causal attn_mask"
+
+            # We have the attn_mask, and use that. Woe upon our caller if
+            # they gave us a non-causal attn_mask and expect is_causal to
+            # override this
+            is_causal = False
 
     assert embed_dim == embed_dim_to_check, \
         f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
@@ -5301,6 +5335,14 @@ def multi_head_attention_forward(
     if need_weights:
         B, Nt, E = q.shape
         q_scaled = q / math.sqrt(E)
+
+        if is_causal and attn_mask is None:
+            L = query.size(-2)
+            S = key.size(-2)
+            attn_mask = torch.triu(torch.full((L, S), float('-inf'), device=query.device, dtype=query.dtype), diagonal=1)
+
+        assert not (is_causal and attn_mask is None), "FIXME: is_causal not implemented for need_weights"
+
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(attn_mask, q_scaled, k.transpose(-2, -1))
         else:
