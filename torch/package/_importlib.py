@@ -16,6 +16,7 @@ _zip_searchorder = (
     (".py", False),
 )
 
+
 # Replace any occurrences of '\r\n?' in the input string with '\n'.
 # This converts DOS and Mac line endings to Unix line endings.
 def _normalize_line_endings(source):

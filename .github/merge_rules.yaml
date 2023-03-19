@@ -2,6 +2,7 @@
   patterns:
   - .ci/caffe2/*
   - .ci/onnx/*
+  - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
   - docs/source/onnx.rst
   - docs/source/onnx*

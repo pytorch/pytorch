@@ -19,7 +19,8 @@ def _frame_fmt(f, full_filename=False):
     func = f['name']
     return f'{fname}:{i}:{func}'
 
-def _frame_filter(f):
+@cache
+def _frame_filter(name, filename):
     omit_functions = [
         "unwind::unwind",
         "StackContext::gather",
@@ -40,17 +41,17 @@ def _frame_filter(f):
         "cpython/abstract.h",
     ]
     for of in omit_functions:
-        if of in f['name']:
+        if of in name:
             return False
     for of in omit_filenames:
-        if of in f['filename']:
+        if of in filename:
             return False
     return True
 
 def _frames_fmt(frames, full_filename=False, reverse=False):
     if reverse:
         frames = reversed(frames)
-    return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f)]
+    return [_frame_fmt(f, full_filename) for f in frames if _frame_filter(f['name'], f['filename'])]
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
