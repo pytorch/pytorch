@@ -2869,7 +2869,7 @@ def aot_module_simplified(
         arg_srcs = [x._dynamo_source for x in mod.graph.nodes if x.op == "placeholder" and hasattr(x, "_dynamo_source")]
         aot_autograd_arg_pos_to_source.extend(arg_srcs)
 
-    if len(aot_autograd_arg_pos_to_source) > 0:
+    if aot_autograd_arg_pos_to_source:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False

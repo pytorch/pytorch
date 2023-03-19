@@ -404,6 +404,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
+                assert self.param_name_to_source is not None
+                self.param_name_to_source[module_key] = source
                 return wrap_fx_proxy(
                     self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
@@ -461,12 +463,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                assert self.param_name_to_source is not None
-                assert name not in self.param_name_to_source
                 self.nn_modules[name] = target
-                # TODO(voz): This takes too much stuff, but is convenient for top level attr registers
-                # that are not nested on the root module. We should move this to where we wrap_name for tensor.
-                self.param_name_to_source[name] = source
                 if isinstance(target, torch.nn.Module):
 
                     def register_leaf_name(leaf_name):
