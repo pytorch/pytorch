@@ -15,7 +15,8 @@ std::vector<int64_t> DropDimensions(
   std::vector<int64_t> new_dims;
   size_t drop_index = 0;
   for (const auto i : c10::irange(sizes.size())) {
-    if (drop_index < drop_dims.size() && i == drop_dims[drop_index]) {
+    if (drop_index < drop_dims.size() &&
+        static_cast<int64_t>(i) == drop_dims[drop_index]) {
       ++drop_index;
     } else {
       new_dims.push_back(sizes[i]);

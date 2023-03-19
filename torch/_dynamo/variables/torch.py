@@ -73,6 +73,7 @@ constant_fold_functions = [
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
 
+
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
     return torch._C._TensorBase.__radd__(*args)
