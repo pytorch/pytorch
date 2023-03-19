@@ -68,7 +68,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
-    nn_modules_sources: Optional[Dict[str, Source]]
+    param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
 
@@ -220,7 +220,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
-        self.nn_modules_sources: Optional[Dict[str, Source]] = dict()
+        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -277,14 +277,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
-        assert self.nn_modules_sources is not None
+        assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
-            dict(self.nn_modules_sources),
+            dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
         )
@@ -298,7 +298,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
-            self.nn_modules_sources,
+            self.param_name_to_source,
             self.side_effects,
             self.timestamp,
         ) = state
@@ -397,12 +397,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
-        if isinstance(source, ParamBufferSource):
-            # We DO NOT use the result of this, it is merely a registration mechanism.
-            def wrap_name(module_key):
-                return None
+        assert not isinstance(source, ParamBufferSource)
 
-        elif isinstance(target, torch.Tensor):
+        if isinstance(target, torch.Tensor):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -452,15 +449,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 )
 
         assert self.nn_modules is not None
-        # Each param has a source, and even if they have the same tensor value, it needs to
-        # be reachable. So, for ParamBufferSource, which is the leaf node source initialized below
-        # we can skip this value check. It's wrap_name is a no op anyway, so this is safe.
-        if not isinstance(source, ParamBufferSource):
-            for k, v in self.nn_modules.items():
-                if v is target:
-                    # it already exists, but register it anyway
-                    return wrap_name(k)
-
         # create a new unique name
         name = "_".join(map(str, names))
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
@@ -473,21 +461,17 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
-                assert self.nn_modules_sources is not None
-                assert name not in self.nn_modules_sources
+                assert self.param_name_to_source is not None
+                assert name not in self.param_name_to_source
                 self.nn_modules[name] = target
-                self.nn_modules_sources[name] = source
+                self.param_name_to_source[name] = source
                 if isinstance(target, torch.nn.Module):
                     # annoying, but there are cases when we do not have parameters
                     # see test_nn_moduledict_contains
                     def reg(n, p):
                         new_source = ParamBufferSource(source, n)
-                        new_name = new_source.name()
-                        # This re-enters the fn, except, with a terminating "leaf" source.
-                        # By making this a ParamBufferSource, we ensure that this function
-                        # dead ends on the next invocation, but only after registering
-                        # this name to self.nn_modules.
-                        self.register_attr_or_module(p, new_name, source=new_source)
+                        new_name = f"{name}.{n}"
+                        self.param_name_to_source[new_name] = new_source
 
                     if hasattr(target, "_parameters"):
                         for n, p in target.named_parameters(remove_duplicate=False):
@@ -692,7 +676,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for pl, arg in zip(placeholders, self.graphargs):
             pl._dynamo_source = arg.source
 
-        gm._nn_module_sources = self.nn_modules_sources
+        gm._param_name_to_source = self.param_name_to_source
 
         try:
             name = (
@@ -814,7 +798,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # Note: generated fx graph will hold a reference to the nn_module,
         # So depending on the backend they may not be released
         self.nn_modules = None
-        self.nn_modules_sources = None
+        self.param_name_to_source = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:

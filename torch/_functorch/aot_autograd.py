@@ -1,4 +1,3 @@
-import re
 import collections
 import dataclasses
 import itertools
@@ -2851,37 +2850,13 @@ def aot_module_simplified(
 
     aot_autograd_arg_pos_to_source = []
     # Then, the params 1:1 mapped sources, if relevant.
-    if hasattr(mod, "_nn_module_sources"):
+    if hasattr(mod, "_param_name_to_source"):
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
         for name in params.keys():
-            if name in mod._nn_module_sources:
-                # Easy case
-                aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[name])
-            else:
-                # Complex case - an attribute is found with "." in its name!
-                # This is not valid for dynamo named params, so, we need to reconstruct
-                # the source.
-                # A name is always a base_name, and a param_name
-                base_name, param_name = name.split(".")
-                # The base name should always be known
-                base = mod._nn_module_sources[base_name]
-                # TODO(voz): Move this to torch._guards
-                from torch._dynamo.source import AttrSource
-                # Reconstruct this to ensure we get the same name contract as dynamo
-                new_source = AttrSource(base, param_name)
-                # Sanitize the name, just as dynamo does
-                new_name = new_source.name()
-                # BEGIN DUPLICATIVE LOGIC TO DEDUP
-                new_name = re.sub(r"\[(\d+)\]", r"_\g<1>", new_name)
-                new_name = re.sub(r"[^a-zA-Z0-9]", "_", new_name)
-                if not new_name[0].isalpha():
-                    new_name = "sub" + new_name
-                # END DUPLICATIVE LOGIC TO DEDUP
-                # Invariant, this must always be here.
-                aot_autograd_arg_pos_to_source.append(mod._nn_module_sources[new_name])
-
+            assert name in mod._param_name_to_source, f"{name} not found."
+            aot_autograd_arg_pos_to_source.append(mod._param_name_to_source[name])
 
     # Next, the input args
     full_args.extend(args)
