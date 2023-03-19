@@ -2050,7 +2050,11 @@ def index_put_(self, indices, values, accumulate=False):
         and len(indices) == 1
         and indices[0].get_dtype() in {torch.bool, torch.uint8}
     ):
-        return index_put_as_masked_fill(self, indices, values, accumulate)
+        try:
+            return index_put_as_masked_fill(self, indices, values, accumulate)
+        except AssertionError:
+            # Fallback if self and indices[0] are not broadcastable
+            return index_put_fallback(self, indices, values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
