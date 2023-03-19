@@ -1,3 +1,7 @@
+"""
+PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
+with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
+"""
 # Owner(s): ["module: dynamo"]
 import collections
 import contextlib
@@ -20,7 +24,6 @@ import torch._dynamo.testing
 import torch._dynamo.utils
 
 import torch._functorch.config
-from torch._dynamo.testing import skip_if_pytest
 
 try:
     from test_minifier import requires_cuda
@@ -2313,7 +2316,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         self.assertNoUnraisable(f)
 
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_with_msg(self):
         def f(x):
@@ -2360,7 +2362,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
             exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
 
-    @skip_if_pytest
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
