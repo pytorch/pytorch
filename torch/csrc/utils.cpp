@@ -305,13 +305,13 @@ error:
   return nullptr;
 }
 
-std::string int_array_ref_string(at::IntArrayRef sizes){
+std::string int_array_ref_string(at::IntArrayRef sizes) {
   std::stringstream ss;
   ss << sizes;
   return ss.str();
 }
 
-std::string dispatch_keyset_string(c10::DispatchKeySet keyset){
+std::string dispatch_keyset_string(c10::DispatchKeySet keyset) {
   std::stringstream ss;
   ss << keyset;
   return ss.str();
