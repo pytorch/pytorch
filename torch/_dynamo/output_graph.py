@@ -461,7 +461,12 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         base = name
         for i in itertools.count():
             if name not in self.nn_modules:
+                assert self.param_name_to_source is not None
+                assert name not in self.param_name_to_source
                 self.nn_modules[name] = target
+                # TODO(voz): This takes too much stuff, but is convenient for top level attr registers
+                # that are not nested on the root module. We should move this to where we wrap_name for tensor.
+                self.param_name_to_source[name] = source
                 if isinstance(target, torch.nn.Module):
 
                     def register_leaf_name(leaf_name):
