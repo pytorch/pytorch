@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import importlib
 import os
+import re
 import sys
 import unittest
 
@@ -89,9 +90,18 @@ def check_codegen(
         self.assertTrue(for_loop_found, f"Failed to find for loop\n{code}")
     else:
         code = run_and_get_triton_code(run, *example_inputs, **kwargs)
-        # XXX: remove
-        print(code)
-        raise NotImplementedError("TBD: triton checks")
+        triton_kernel_found = False
+        lines = code.split("\n")
+        for line in lines:
+            if "def triton" in line:
+                triton_kernel_found = True
+                continue
+            if "xnumel =" in line:
+                self.assertTrue(
+                    re.search(r"xnumel = \d+$", line) is None,
+                    msg=f"Found static xnumel\n{code}",
+                )
+        self.assertTrue(triton_kernel_found, f"Failed to find triton kernel\n{code}")
 
     assert called, "Ran graph without calling compile_fx"
 
@@ -125,7 +135,7 @@ test_skips = {
     "test_glu_dynamic_shapes": ("cpu",),
     "test_invalid_operand_issue1_dynamic_shapes": ("cpu",),
     "test_isinf2_dynamic_shapes": ("cpu",),
-    "test_layer_norm_dynamic_shapes": ("cpu",),
+    "test_layer_norm_dynamic_shapes": ("cpu", "cuda"),
     "test_linspace1_dynamic_shapes": ("cpu",),
     "test_narrow_dynamic_shapes": ("cpu",),
     "test_reflection_pad2d_backward_dynamic_shapes": ("cpu",),
@@ -138,6 +148,7 @@ test_skips = {
     "test_tensor2_dynamic_shapes": ("cpu",),
     "test_tensor3_dynamic_shapes": ("cpu",),
     "test_tmp_not_defined_issue1_dynamic_shapes": ("cpu",),
+    "test_to_device_constant_dynamic_shapes": ("cpu"),
     "test_upsample_bicubic2d_dynamic_shapes": ("cpu",),
     "test_upsample_bilinear2d_a_dynamic_shapes": ("cpu",),
     "test_upsample_nearest1d_dynamic_shapes": ("cpu",),
@@ -150,47 +161,68 @@ test_skips = {
     "test_views4_dynamic_shapes": ("cpu",),
     "test_zeros_dynamic_shapes": ("cpu",),
     #
-    # Failed to find for loop:
+    # Failed to find for loop/triton kernel:
     #
-    "test_adaptive_avg_pool2d2_dynamic_shapes": ("cpu",),
-    "test_avg_pool2d7_dynamic_shapes": ("cpu",),
-    "test_avg_pool2d_backward4_dynamic_shapes": ("cpu",),
-    "test_baddbmm_dynamic_shapes": ("cpu",),
-    "test_bmm2_dynamic_shapes": ("cpu",),
-    "test_both_scalars_dynamic_shapes": ("cpu",),
+    "test_adaptive_avg_pool2d2_dynamic_shapes": ("cpu", "cuda"),
+    "test_avg_pool2d7_dynamic_shapes": ("cpu", "cuda"),
+    "test_avg_pool2d_backward4_dynamic_shapes": ("cpu", "cuda"),
+    "test_baddbmm_dynamic_shapes": ("cpu", "cuda"),
+    "test_bmm2_dynamic_shapes": ("cpu", "cuda"),
+    "test_both_scalars_dynamic_shapes": ("cpu", "cuda"),
     "test_compar_dynamic_shapes": ("cpu",),
     "test_conv2d_backward_channels_last_dynamic_shapes": ("cpu",),
     "test_conv2d_packed_dynamic_shapes": ("cpu",),
-    "test_conv_backward_dynamic_shapes": ("cpu",),
+    "test_conv_backward_dynamic_shapes": ("cpu", "cuda"),
     "test_conv_functional_bn_fuse_dynamic_shapes": ("cpu",),
     "test_conv_transpose2d_packed_dynamic_shapes": ("cpu",),
     "test_convolution2_dynamic_shapes": ("cpu",),
-    "test_div8_dynamic_shapes": ("cpu",),
-    "test_embedding_bag_dynamic_shapes": ("cpu",),
-    "test_empty1_dynamic_shapes": ("cpu",),
-    "test_empty2_dynamic_shapes": ("cpu",),
-    "test_empty_strided_dynamic_shapes": ("cpu",),
-    "test_index3_dynamic_shapes": ("cpu",),
-    "test_like_rands_dynamic_shapes": ("cpu",),
+    "test_div8_dynamic_shapes": ("cpu", "cuda"),
+    "test_embedding_bag_dynamic_shapes": ("cpu", "cuda"),
+    "test_empty1_dynamic_shapes": ("cpu", "cuda"),
+    "test_empty2_dynamic_shapes": ("cpu", "cuda"),
+    "test_empty_strided_dynamic_shapes": ("cpu", "cuda"),
+    "test_index3_dynamic_shapes": ("cpu", "cuda"),
+    "test_like_rands_dynamic_shapes": ("cpu", "cuda"),
     "test_linear_binary_dynamic_shapes": ("cpu",),
-    "test_linear_packed_dynamic_shapes": ("cpu",),
+    "test_linear_packed_dynamic_shapes": ("cpu", "cuda"),
     "test_linspace2_dynamic_shapes": ("cpu",),
-    "test_linspace3_dynamic_shapes": ("cpu",),
-    "test_max_pool2d6_dynamic_shapes": ("cpu",),
-    "test_max_pool2d_with_indices_backward5_dynamic_shapes": ("cpu",),
+    "test_linspace3_dynamic_shapes": ("cpu", "cuda"),
+    "test_max_pool2d6_dynamic_shapes": ("cpu", "cuda"),
+    "test_max_pool2d_with_indices_backward5_dynamic_shapes": ("cpu", "cuda"),
     "test_misaligned_address_issue1_dynamic_shapes": ("cpu",),
-    "test_mm_views_dynamic_shapes": ("cpu",),
-    "test_new_empty_dynamic_shapes": ("cpu",),
-    "test_new_empty_strided_dynamic_shapes": ("cpu",),
+    "test_mm_views_dynamic_shapes": ("cpu", "cuda"),
+    "test_new_empty_dynamic_shapes": ("cpu", "cuda"),
+    "test_new_empty_strided_dynamic_shapes": ("cpu", "cuda"),
     "test_new_ones_dynamic_shapes": ("cpu",),
-    "test_permute2_dynamic_shapes": ("cpu",),
-    "test_randn_generator_dynamic_shapes": ("cpu",),
-    "test_randn_like_empty_dynamic_shapes": ("cpu",),
-    "test_sort_dynamic_shapes": ("cpu",),
-    "test_split_dynamic_shapes": ("cpu",),
-    "test_topk_dynamic_shapes": ("cpu",),
-    "test_unbind_dynamic_shapes": ("cpu",),
-    "test_view_detach_dynamic_shapes": ("cpu",),
+    "test_permute2_dynamic_shapes": ("cpu", "cuda"),
+    "test_randn_generator_dynamic_shapes": ("cpu", "cuda"),
+    "test_randn_like_empty_dynamic_shapes": ("cpu", "cuda"),
+    "test_single_elem_dynamic_shapes": ("cpu",),
+    "test_single_elem_indirect_dynamic_shapes": ("cpu",),
+    "test_sort_dynamic_shapes": ("cpu", "cuda"),
+    "test_split_dynamic_shapes": ("cpu", "cuda"),
+    "test_to_device_dynamic_shapes": ("cpu", "cuda"),
+    "test_topk_dynamic_shapes": ("cpu", "cuda"),
+    "test_unbind_dynamic_shapes": ("cpu", "cuda"),
+    "test_view_detach_dynamic_shapes": ("cpu", "cuda"),
+    #
+    # Tests not using 'common':
+    #
+    "test_cauchy_dynamic_shapes": ("cuda",),
+    "test_gather_scatter_dynamic_shapes": ("cuda",),
+    "test_forced_buffer_realize_dynamic_shapes": ("cpu", "cuda"),
+    "test_linear_buffer_reuse_dynamic_shapes": ("cpu", "cuda"),
+    "test_min_max_reduction_dynamic_shapes": ("cuda",),
+    "test_move_arange_dynamic_shapes": ("cpu", "cuda"),
+    "test_multi_gpu_device_dynamic_shapes": (
+        "cpu",
+        "cuda",
+    ),
+    "test_scheduler_vertical_fusion1_dynamic_shapes": ("cpu", "cuda"),
+    "test_softmax_one_kernel_loop_dynamic_shapes": ("cuda",),
+    "test_softmax_one_kernel_persist_dynamic_shapes": ("cuda",),
+    "test_transpose_add_dynamic_shapes": ("cuda",),
+    "test_vertical_fusion1_dynamic_shapes": ("cpu", "cuda"),
     #
     # The following tests do not support dynamic shapes yet:
     #
