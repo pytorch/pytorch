@@ -14,3 +14,4 @@
 
 command script import tools/lldb/pytorch_lldb.py
 setting set escape-non-printables false
+type category enable torch
