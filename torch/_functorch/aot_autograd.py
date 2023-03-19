@@ -1801,7 +1801,7 @@ def aot_wrapper_dedupe(
     deduped_flat_args = remove_dupe_args(flat_args)
 
     tracing_context = TracingContext.get()
-    if tracing_context and aot_config.aot_autograd_arg_pos_to_source and len(aot_config.aot_autograd_arg_pos_to_source) > 0:
+    if tracing_context and aot_config.aot_autograd_arg_pos_to_source:
         # TODO(voz): This structure is 1:1, we could consider an alternate structure like
         # kept_pos:[dupe_arg_pos], however, add_dupe_map is 1:1 so we would need a new structure there,
         # which feels like needless complexity for a tiny bit of efficiency at this point.
@@ -2848,9 +2848,10 @@ def aot_module_simplified(
     # First, the params
     full_args.extend(params_flat)
 
-    aot_autograd_arg_pos_to_source = []
+    aot_autograd_arg_pos_to_source = None
     # Then, the params 1:1 mapped sources, if relevant.
     if hasattr(mod, "_param_name_to_source"):
+        aot_autograd_arg_pos_to_source = []
         # We now know this came from dynamo, and (1) we care about guards,
         # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
         # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.

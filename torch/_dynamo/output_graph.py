@@ -466,19 +466,24 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 self.nn_modules[name] = target
                 self.param_name_to_source[name] = source
                 if isinstance(target, torch.nn.Module):
-                    # annoying, but there are cases when we do not have parameters
-                    # see test_nn_moduledict_contains
-                    def reg(n, p):
-                        new_source = ParamBufferSource(source, n)
-                        new_name = f"{name}.{n}"
+
+                    def register_leaf_name(leaf_name):
+                        new_source = ParamBufferSource(source, leaf_name)
+                        new_name = f"{name}.{leaf_name}"
                         self.param_name_to_source[new_name] = new_source
 
+                    # annoying, but there are cases when we do not have parameters
+                    # see test_nn_moduledict_contains
                     if hasattr(target, "_parameters"):
-                        for n, p in target.named_parameters(remove_duplicate=False):
-                            reg(n, p)
+                        for leaf_name, _ in target.named_parameters(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
                     if hasattr(target, "_buffers"):
-                        for n, p in target.named_buffers(remove_duplicate=False):
-                            reg(n, p)
+                        for leaf_name, _ in target.named_buffers(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
 
                 return wrap_name(name)
             name = f"{base}_{i}"
