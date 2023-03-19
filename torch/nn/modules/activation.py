@@ -917,14 +917,12 @@ class MultiheadAttention(Module):
 
     where :math:`head_i = \text{Attention}(QW_i^Q, KW_i^K, VW_i^V)`.
 
-    ``forward()`` will use the optimized implementations of
-    ``scaled_dot_product_attention()``.
+    ``forward()`` will use the optimized implementation described in
+    `FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness`_ if all of the following
+    conditions are met:
 
-    In addition to support for the new ``scaled_dot_product_attention()``
-    function, for speeding up Inference, MHA will use
-    fastpath inference with support for Nested Tensors, iff:
-
-    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor.
+    - self attention is being computed (i.e., ``query``, ``key``, and ``value`` are the same tensor. This
+      restriction will be loosened in the future.)
     - inputs are batched (3D) with ``batch_first==True``
     - Either autograd is disabled (using ``torch.inference_mode`` or ``torch.no_grad``) or no tensor argument ``requires_grad``
     - training is disabled (using ``.eval()``)
@@ -936,7 +934,7 @@ class MultiheadAttention(Module):
       nor ``attn_mask`` is passed
     - autocast is disabled
 
-    If the optimized inference fastpath implementation is in use, a
+    If the optimized implementation is in use, a
     `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_ can be passed for
     ``query``/``key``/``value`` to represent padding more efficiently than using a
     padding mask. In this case, a `NestedTensor <https://pytorch.org/docs/stable/nested.html>`_
@@ -967,7 +965,6 @@ class MultiheadAttention(Module):
          https://arxiv.org/abs/2205.14135
 
     """
-
     __constants__ = ['batch_first']
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]

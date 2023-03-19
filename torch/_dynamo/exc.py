@@ -159,14 +159,8 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = str(
-            format_bytecode(
-                "WON'T CONVERT",
-                code.co_name,
-                code.co_filename,
-                code.co_firstlineno,
-                code,
-            )
+        msg = format_bytecode(
+            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()

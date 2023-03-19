@@ -695,29 +695,6 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def get_kernel_category(kernel_mod):
-    """
-    Given the module defining a triton kernel, return the category of the kernel.
-    Cateogry can be one of:
-    - pointwise
-    - reduction
-    - persistent_reduction
-
-    Currently we simply decide the cateory depending on what decorator is imported
-    by the kernel.
-    """
-    choices = [
-        "pointwise",
-        "reduction",
-        "persistent_reduction",
-    ]
-    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
-    if len(choices) == 1:
-        return choices[0]
-    else:
-        return "unknown"
-
-
 def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -734,8 +711,6 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
-
-        kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
         num_gb = get_num_bytes(*args) / 1e9
 
@@ -753,13 +728,10 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
             )
 
         bench_result = []
-        kernel_desc = (
-            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
-        )
         if benchmark_all_configs:
             assert hasattr(kernel_mod, "benchmark_all_configs")
             bench_result = kernel_mod.benchmark_all_configs(args)
-            print(kernel_desc)
+            print(f"{benchmark_name:20} {kernel_key[:10]}")
             for launcher, ms in bench_result.items():
                 print(
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
@@ -776,7 +748,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     launcher.n_regs,
                     launcher.n_spills,
                     launcher.shared,
-                    prefix=f"{kernel_desc} ",
+                    prefix=f"{benchmark_name:20} {kernel_key[:10]} ",
                 )
             )
 
