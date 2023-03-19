@@ -275,22 +275,28 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, code)
             return
 
-        # Add type check to prevent equality check between tensor and non-tensor.
         code = list()
+
+        # If matching equality against list/tuple, we must also check that
+        # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
+            # NB: LIST_LENGTH takes care of the outer __check_type_id test
             self.LIST_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
-
-        elif not istype(val, torch.Size):
+        else:
+            # Add type check to prevent equality check between tensor and non-tensor.
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # TODO: It feels like it would be better to just implement our own
+        # equality test in C that handles all of the necessary type checking
+        # and NaN tests
         code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
 
