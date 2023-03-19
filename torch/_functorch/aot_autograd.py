@@ -71,7 +71,7 @@ pytree._register_pytree_node(
     immutable_collections.immutable_dict,
     lambda x: (list(x.values()), list(x.keys())),
     lambda x, c: immutable_collections.immutable_dict(
-        {key: value for key, value in zip(c, x)}
+        dict(zip(c, x))
     ),
 )
 
