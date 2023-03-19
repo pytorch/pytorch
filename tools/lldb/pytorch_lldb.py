@@ -1,4 +1,3 @@
-import shlex
 from typing import Any
 
 import lldb  # type: ignore[import]
@@ -32,35 +31,45 @@ class DisableBreakpoints:
             print("[-] error: failed to enable all breakpoints.")
 
 
-def print_tensor(debugger: Any, command: Any, result: Any, internal_dict: Any) -> None:
-    """
-    Print a human readable representation of the given at::Tensor.
-    Usage: print_tensor EXP
+def IntArrayRef_summary(valobj: Any, internal_dict: Any, options: Any) -> str:
+    with DisableBreakpoints():
+        target = get_target()
+        tensor = valobj.GetName()
+        result = target.EvaluateExpression(
+            f"torch::gdb::int_array_ref_string({tensor})"
+        )
+        str_result = str(result)
+        str_result = str_result[str_result.find('"') + 1 : -1]
+        return str_result
+
+
+def Tensor_summary(valobj: Any, internal_dict: Any, options: Any) -> str:
+    """Print a human readable representation of the given at::Tensor.
 
     at::Tensor instances do not have a C++ implementation of a repr method: in
-    pytorch, this is done by pure-Python code. As such, print_tensor
+    pytorch, this is done by pure-Python code. As such, print <tensor>
     internally creates a Python wrapper for the given tensor and call repr()
     on it.
+    Usage:
+        print self
     """
     with DisableBreakpoints():
-        command_str = shlex.split(command)
-        assert (
-            len(command_str) == 1
-        ), "print_tensor only accepts the tensor name as argument"
-        tensor_arg = command_str[0]
         target = get_target()
-        # This will allocate the the char* array
-        result = target.EvaluateExpression(f"torch::gdb::tensor_repr({tensor_arg})")
-        print(f"Python-level repr of {tensor_arg}:")
+        tensor = valobj.GetName()
+        result = target.EvaluateExpression(f"torch::gdb::tensor_repr({tensor})")
         str_result = str(result)
-        print(str_result[str_result.find("tensor") : -1])
-        # torch::gdb::tensor_repr returns a malloc()ed buffer, let's free it
         target.EvaluateExpression(f"(void)free({result.GetValue()})")
+        str_result = "\n" + str_result[str_result.find("tensor") : -1]
+        return str_result
 
 
 # And the initialization code to add your commands
-def __lldb_init_module(debugger: Any, internal_dict: Any) -> None:
+def __lldb_init_module(debugger: Any, internal_dict: Any) -> Any:
     debugger.HandleCommand(
-        "command script add -f pytorch_lldb.print_tensor print_tensor"
+        "type summary add c10::IntArrayRef -F pytorch_lldb.IntArrayRef_summary"
     )
-    print('The "print_tensor" python command has been installed and is ready for use.')
+    debugger.HandleCommand("type summary add at::Tensor -F pytorch_lldb.Tensor_summary")
+    print(
+        "Pretty Printing lldb summary for PyTorch AT types has been installed and is ready for use."
+    )
+    print("Usage:\n\tprint <at::tensor>\n\tprint <at::IntArrayRef>")
