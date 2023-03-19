@@ -473,17 +473,17 @@ void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen)
     using opmath_t = at::opmath_type<scalar_t>;
     auto range = static_cast<opmath_t>(to-from);
     // define lambda to reverse bounds, multiply 'range' and add 'from_'
-    auto uniform_func = [range, from] __device__ (opmath_t rand) {
+    auto uniform_func = [range, from, to] __device__ (opmath_t rand) {
+      // Compute output value before reversing the bounds
+      // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/96947
+      auto value = static_cast<scalar_t>(rand * range + from);
       // reverse the bounds of curand4 from (0, 1] to [0, 1)
       // Note that this method is from legacy THCTensorRandom and is likely to give
       // you more 0-s, since, the probability of gettings 1-s is higher than 0-s and
       // by reversing the bounds, we are flipping the probabilities of 1-s and 0-s.
       // BEFORE TOUCHING THIS CODE READ: https://github.com/pytorch/pytorch/issues/16706
-      auto reverse_bound_rand = rand == static_cast<opmath_t>(1.0) ? static_cast<opmath_t>(0.0) : rand;
-      // Note for BFloat16 and Half, the default constructor does
-      // round to nearest even, which may return the end point of our
-      // range. Use truncation rounding instead.
-      return truncate_to<scalar_t>(reverse_bound_rand * range + from);
+      auto reverse_bound_value = value == to ? from : value;
+      return reverse_bound_value;
     };
     uniform_and_transform<scalar_t, opmath_t, curand4_engine_calls>(iter, gen, uniform_func);
    });
