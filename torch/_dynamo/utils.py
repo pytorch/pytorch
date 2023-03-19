@@ -10,7 +10,7 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
 import os
@@ -24,6 +24,9 @@ import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
 from typing import Any, Dict, List, Optional, Tuple, Union
+
+import torch._logging
+from . import config
 
 try:
     import numpy as np
@@ -42,8 +45,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
-
-from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
@@ -255,21 +256,38 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def init_logging():
-    torchdynamo_logging.init_logging(
-        config.log_level, log_file_name=config.log_file_name
-    )
+def setup_compile_debug():
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    exitstack = contextlib.ExitStack()
+
+    if compile_debug:
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG,
+            aot=logging.DEBUG,
+            inductor=logging.DEBUG,
+            output_code=True,  # this is off by default
+        )
+
+        debug_file_handler = add_file_handler()
+        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
+
+    return exitstack
+
+
+def reset_graph_break_dup_checker():
     graph_break_dup_warning_checker.reset()
 
 
-def format_graph_tabular(graph):
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
-    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+def add_file_handler():
+    log_path = os.path.join(get_debug_dir(), "torchdynamo")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
 
-
-def format_bytecode(prefix, name, filename, line_no, code):
-    return f"{prefix} {name} {filename}\
- line {line_no} \n{dis.Bytecode(code).dis()}\n "
+    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file.setLevel(logging.DEBUG)
+    logger = logging.getLogger("torch._dynamo")
+    logger.addHandler(log_file)
+    return log_file
 
 
 def gen_record_file_name(exc, code):
@@ -1379,3 +1397,33 @@ def tensor_always_has_static_shape(
     if not is_tensor:
         return True, TensorStaticReason.NOT_TENSOR
     return False, None
+
+
+def format_graph_code(name, gm):
+    return _format_graph_code(
+        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+    )
+
+
+def _format_graph_code(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+def format_graph_tabular(fn_name, gm):
+    try:
+        from tabulate import tabulate  # TODO: Check that this is installed
+    except ImportError:
+        return (
+            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+            + format_graph_code(fn_name, gm)
+        )
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
+    graph_str = tabulate(
+        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+    )
+    return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"

@@ -337,7 +337,6 @@ def _export_fx_node_to_onnxscript(
             _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
         fx_name_to_onnxscipt_value[node.name] = output
     elif node.op == "output":
-
         if isinstance(node.args[0], torch.fx.Node):
             onnx_tensor_or_tensor_tuple = fx_name_to_onnxscipt_value[node.args[0].name]
             onnxscript_graph.register_outputs(onnx_tensor_or_tensor_tuple)
@@ -389,7 +388,6 @@ def _export_fx_node_to_onnxscript(
 def export_fx_to_onnxscript(
     fx_module_with_metadata: torch.fx.GraphModule, options: options.ExportOptions
 ):
-
     # Initialize the ONNX graph
     onnxscript_graph = graph_building.TorchScriptGraph()
     tracer = graph_building.TorchScriptTracingEvaluator(onnxscript_graph)
