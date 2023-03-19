@@ -2597,10 +2597,8 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
     n = len(sizes) - len(bounds)
-    lows = (l for l, _ in bounds if isinstance(l, sympy.Expr))
-    bounds_precomp = []
-    # if padding is a complicated expression, hoist it
 
+    # if padding is a complicated expression, hoist it
     bounds_precomp = []
     for l, h in bounds:
         l_precomp = (
