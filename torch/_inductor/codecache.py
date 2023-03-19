@@ -15,6 +15,7 @@ import sys
 import sysconfig
 import tempfile
 import types
+from bisect import bisect_right
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from ctypes import cdll
 from functools import partial
@@ -635,10 +636,11 @@ class CppCodeCache:
 
 class PyCodeCache:
     cache = dict()
+    linemaps = dict()
     clear = staticmethod(cache.clear)
 
     @classmethod
-    def load(cls, source_code, extra=""):
+    def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
         if key not in cls.cache:
             with open(path) as f:
@@ -654,7 +656,35 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
+                cls.linemaps[path] = linemap
+
         return cls.cache[key]
+
+    @classmethod
+    @functools.lru_cache(None)
+    def stack_frames_for_code(cls, path, lineno):
+        if path not in cls.linemaps:
+            return None
+        # [(starting_line, <fx node>), ...]
+        linemap = cls.linemaps[path]
+        p = bisect_right(linemap, lineno, key=lambda x: x[0])
+        if p == 0:
+            return None
+        _, entry = linemap[p - 1]
+        if not entry:
+            return None
+
+        def parse_stack_trace(stack_trace):
+            # ideally fx stores stack traces as data rather than a string
+            # but this is not along a performance critical path
+            regex = r'File "(.+)", line (\d+), in (.+)\n'
+            matches = re.findall(regex, stack_trace)
+            return [
+                {"filename": f, "line": int(l), "name": n}
+                for f, l, n in reversed(matches)
+            ]
+
+        return parse_stack_trace(entry.stack_trace)
 
 
 class TritonCodeCache:

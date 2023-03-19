@@ -138,7 +138,6 @@ test_skips = {
     "test_layer_norm_dynamic_shapes": ("cpu", "cuda"),
     "test_linspace1_dynamic_shapes": ("cpu",),
     "test_narrow_dynamic_shapes": ("cpu",),
-    "test_reflection_pad2d_backward_dynamic_shapes": ("cpu",),
     "test_reflection_pad2d_dynamic_shapes": ("cpu",),
     "test_repeat_dynamic_shapes": ("cpu",),
     "test_roll_dynamic_shapes": ("cpu",),
@@ -183,7 +182,6 @@ test_skips = {
     "test_empty_strided_dynamic_shapes": ("cpu", "cuda"),
     "test_index3_dynamic_shapes": ("cpu", "cuda"),
     "test_like_rands_dynamic_shapes": ("cpu", "cuda"),
-    "test_linear_binary_dynamic_shapes": ("cpu",),
     "test_linear_packed_dynamic_shapes": ("cpu", "cuda"),
     "test_linspace2_dynamic_shapes": ("cpu",),
     "test_linspace3_dynamic_shapes": ("cpu", "cuda"),
@@ -212,7 +210,6 @@ test_skips = {
     "test_gather_scatter_dynamic_shapes": ("cuda",),
     "test_forced_buffer_realize_dynamic_shapes": ("cpu", "cuda"),
     "test_linear_buffer_reuse_dynamic_shapes": ("cpu", "cuda"),
-    "test_min_max_reduction_dynamic_shapes": ("cuda",),
     "test_move_arange_dynamic_shapes": ("cpu", "cuda"),
     "test_multi_gpu_device_dynamic_shapes": (
         "cpu",
@@ -231,6 +228,17 @@ test_skips = {
     "test_kwargs_dynamic_shapes": ("cpu",),
     # test_roi_align uses torchvision, which doesn't work with dynamic shapes
     "test_roi_align_dynamic_shapes": ("cpu", "cuda"),
+    #
+    # These are from switching to specialize_int=False
+    #
+    "test_div5_dynamic_shapes": (
+        "cpu",
+        "cuda",
+    ),  # The values for attribute 'dtype' do not match
+    "test_div8_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
+    # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
+    "test_reflection_pad2d_backward_dynamic_shapes": ("cpu", "cuda"),
+    "test_both_scalars_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
 }
 
 
