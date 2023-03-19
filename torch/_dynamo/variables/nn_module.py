@@ -12,7 +12,13 @@ from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
-from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource, NotNNModuleSource
+from ..source import (
+    AttrSource,
+    FSDPNNModuleSource,
+    GetItemSource,
+    NNModuleSource,
+    NotNNModuleSource,
+)
 from ..utils import (
     get_custom_getattr,
     is_lazy_module,
