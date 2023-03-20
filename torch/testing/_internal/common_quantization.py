@@ -914,8 +914,12 @@ class QuantizationTestCase(TestCase):
 
             # overwrite qconfig_dict with custom_qconfig_dict
             if custom_qconfig_dict is not None:
-                qconfig_dict = custom_qconfig_dict
-                qconfig_mapping = QConfigMapping.from_dict(qconfig_dict)
+                assert type(custom_qconfig_dict) in (QConfigMapping, Dict), \
+                    'custom_qconfig_dict should be a QConfigMapping or a dict'
+                if isinstance(custom_qconfig_dict, QConfigMapping):
+                    qconfig_mapping = custom_qconfig_dict
+                else:
+                    qconfig_mapping = QConfigMapping.from_dict(custom_qconfig_dict)
             prepared = prepare(
                 model, qconfig_mapping,
                 example_inputs=inputs,
