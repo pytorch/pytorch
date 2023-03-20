@@ -172,7 +172,7 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
     # dequantize_per_channel -
     # dequantize_per_tensor  - conv - post_op(or none) - quantize_per_tensor
     into new pattern:
-    # torch.ops.quantized_decomposed.conv_unary_inductor
+    # torch.ops.quantized.conv_unary
     """
     aten = torch.ops.aten
     quantized_decomposed = torch.ops.quantized_decomposed
@@ -254,7 +254,7 @@ def fuse_reference_quantized_conv_unary(gm: torch.fx.GraphModule):
                         name,
                     )
                     new_conv_node = gm.graph.call_function(
-                        quantized_decomposed.conv_unary_inductor, args=args
+                        torch.ops.quantized.conv_unary, args=args
                     )
                 # Copy node meta
                 new_conv_node.meta = copy.copy(quant_per_tensor_node.meta)
@@ -279,7 +279,7 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
     # dequantize_per_channel -
     # dequantize_per_tensor  - conv - quantize_per_tensor
     into new pattern:
-    # torch.ops.quantized_decomposed.conv_unary_inductor(post_op = None)
+    # torch.ops.quantized.conv_unary(post_op = None)
     """
     aten = torch.ops.aten
     quantized_decomposed = torch.ops.quantized_decomposed
@@ -347,7 +347,7 @@ def packed_reference_quantized_conv(gm: torch.fx.GraphModule):
                     "none",
                 )
                 new_conv_node = gm.graph.call_function(
-                    quantized_decomposed.conv_unary_inductor, args=args
+                    torch.ops.quantized.conv_unary, args=args
                 )
             # Copy node meta
             new_conv_node.meta = copy.copy(quant_per_tensor_node.meta)
@@ -399,7 +399,7 @@ def _prepack_conv_weight(gm: torch.fx.GraphModule):
     # Assume dq - conv (- relu) - q is already fused and `w - q` is replaced by qw
     decomposed = torch.ops.quantized_decomposed
     for node in gm.graph.nodes:
-        if node.target == decomposed.conv_unary_inductor:
+        if node.target == torch.ops.quantized.conv_unary:
             # node args = (qx, x_scale, x_zp,
             #              qw, w_scale, w_zp, w_axis,
             #              bias, stride, padding, dilation, groups,
