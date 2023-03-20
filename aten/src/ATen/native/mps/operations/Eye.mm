@@ -54,7 +54,10 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   // Derive from MPSCachedGraph
   // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
   // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
-  // for the operation Here, we don't have any input tensors, just an output tensor
+  // for the operation here, we don't have any input tensors, just an output tensor.
+  // If the operator to be added is unary or binary, instead of creating a new CachedGraph struct yourself, please
+  // consider using `MPSUnaryCachedGraph` or `MPSBinaryCachedGraph` and their corresponding Grad versions in
+  // `OperationUtils.h`.
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
     MPSGraphTensor* outputTensor_ = nil;
