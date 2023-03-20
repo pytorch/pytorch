@@ -2,33 +2,15 @@
 The following source file implements a sparse linear operator using CUTLASS
 */
 
-#include <ATen/Functions.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/cuda/CUDAContext.h>
-#include <ATen/cuda/CUDADataType.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAUtils.h>
-#include <c10/core/ScalarType.h>
 #include <c10/util/Half.h>
-#include <torch/custom_class.h>
-#include <iostream>
-
-#include <iostream>
 
 #include <cuda_runtime.h>
 #include <cutlass/cutlass.h>
 #include <cutlass/gemm/device/gemm_sparse.h>
-#include <cutlass/util/host_reorder.h>
-#include <cutlass/util/host_tensor.h>
-#include <cutlass/util/host_uncompress.h>
-#include <cutlass/util/reference/host/gemm.h>
-#include <cutlass/util/reference/host/tensor_compare.h>
-#include <cutlass/util/reference/host/tensor_copy.h>
-#include <cutlass/util/reference/host/tensor_fill.h>
-#include <cutlass/util/tensor_view_io.h>
 
-#include <functional>
-#include <limits>
-#include <typeinfo>
+#include <tuple>
 
 #define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
@@ -261,8 +243,8 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& tensor_a,
     LayoutOutput layout_d(tensor_d.stride(0));
     auto tensor_a_device_ref = cutlass::TensorRef<ElementInputA, LayoutInputA>((ElementInputA*)tensor_a.data_ptr(), layout_a);
     auto tensor_b_device_ref = cutlass::TensorRef<ElementInputB, LayoutInputB>((ElementInputB*)tensor_b.data_ptr(), layout_b);
-    auto tensor_c_device_ref = cutlass::TensorRef<ElementInputB, LayoutOutput>((ElementOutput*)tensor_c.data_ptr(), layout_c);
-    auto tensor_d_device_ref = cutlass::TensorRef<ElementInputB, LayoutOutput>((ElementOutput*)tensor_d.data_ptr(), layout_d);
+    auto tensor_c_device_ref = cutlass::TensorRef<ElementOutput, LayoutOutput>((ElementOutput*)tensor_c.data_ptr(), layout_c);
+    auto tensor_d_device_ref = cutlass::TensorRef<ElementOutput, LayoutOutput>((ElementOutput*)tensor_d.data_ptr(), layout_d);
     auto tensor_e_device_ref = meta_reordered_device_ref;
 
     // Initialize alpha and beta for dot product computation
@@ -276,13 +258,13 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& tensor_a,
     // passed as arguments to launch instantiated CUTLASS kernel
     typename Gemm::Arguments arguments{
         problem_size, // <- problem size of matrix multiplication
-            tensor_a_device_ref, // <- reference to matrix A on device
-            tensor_b_device_ref, // <- reference to matrix B on device
-            tensor_c_device_ref, // <- reference to matrix C on device
-            tensor_d_device_ref, // <- reference to matrix D on device
-            tensor_e_device_ref, // <- reference to matrix E on device
-            {alpha, beta}, // <- tuple of alpha and beta
-            split_k_slices}; // <- k-dimension split factor
+        tensor_a_device_ref, // <- reference to matrix A on device
+        tensor_b_device_ref, // <- reference to matrix B on device
+        tensor_c_device_ref, // <- reference to matrix C on device
+        tensor_d_device_ref, // <- reference to matrix D on device
+        tensor_e_device_ref, // <- reference to matrix E on device
+        {alpha, beta}, // <- tuple of alpha and beta
+        split_k_slices}; // <- k-dimension split factor
 
     Gemm gemm_op;
 
@@ -306,20 +288,20 @@ std::tuple<Tensor, Tensor> do_sgemm(const Tensor& tensor_a,
 std::tuple<Tensor, Tensor> _cutlass_linear(
       const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
       const Tensor& mask_or_meta) {
-    TORCH_CHECK(tensor_a.dim() == 2, "torch._cutlass_linear: Expected tensor_a argument to be 2D tensor, got ", tensor_a.dim(), " dims");
     TORCH_CHECK(tensor_a.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_a argument to be strided, but got layout ", tensor_a.layout());
+    TORCH_CHECK(tensor_a.dim() == 2, "torch._cutlass_linear: Expected tensor_a argument to be 2D tensor, got ", tensor_a.dim(), " dims");
     const auto strides_a = tensor_a.strides();
     TORCH_CHECK((strides_a[0] == 1 || strides_a[1] == 1) && strides_a[0] != strides_a[1], "torch._cutlass_linear: Invalid strides for tensor_a argument: row stride = ", strides_a[0], ", column stride = ", strides_a[1]);
 
-    TORCH_CHECK(tensor_b.dim() == 2, "torch._cutlass_linear: Expected tensor_b argument to be 2D tensor, got ", tensor_b.dim(), " dims");
     TORCH_CHECK(tensor_b.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_b argument to be strided, but got layout ", tensor_b.layout());
+    TORCH_CHECK(tensor_b.dim() == 2, "torch._cutlass_linear: Expected tensor_b argument to be 2D tensor, got ", tensor_b.dim(), " dims");
     const auto strides_b = tensor_b.strides();
     TORCH_CHECK((strides_b[0] == 1 || strides_b[1] == 1) && strides_b[0] != strides_b[1], "torch._cutlass_linear: Invalid strides for tensor_b argument: row stride = ", strides_b[0], ", column stride = ", strides_b[1]);
 
-    TORCH_CHECK(tensor_c.dim() == 2, "torch._cutlass_linear: Expected tensor_c argument to be 2D tensor, got ", tensor_c.dim(), " dims");
     TORCH_CHECK(tensor_c.layout() == Layout::Strided, "torch._cutlass_linear: Expected tensor_c argument to be strided, but got layout ", tensor_c.layout());
+    TORCH_CHECK(tensor_c.dim() == 2, "torch._cutlass_linear: Expected tensor_c argument to be 2D tensor, got ", tensor_c.dim(), " dims");
     const auto strides_c = tensor_c.strides();
-    TORCH_CHECK(strides_c[1] == 1 && strides_c[0] != strides_c[1], "torch._cutlass_linear: Invalid strides for tensor_c argument: row stride = ", strides_c[0], ", column stride = ", strides_c[1]);  // Must be in row-major format.
+    TORCH_CHECK(strides_c[1] == 1, "torch._cutlass_linear: Invalid strides for tensor_c argument: row stride = ", strides_c[0], ", column stride = ", strides_c[1]);
 
     if (strides_a[1] == 1) {
         auto layout_a = cutlass::layout::RowMajor(strides_a[0]);

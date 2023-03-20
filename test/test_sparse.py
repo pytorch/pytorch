@@ -4475,8 +4475,8 @@ class TestSparseAny(TestCase):
 
     def test_two_four_sparse(self):
         # TODO: This definitely cannot land.
-        def make_tensor(a, b):
-            return torch.randn(a, b) / 10
+        def make_tensor(shape):
+            return torch.randn(shape) / 10
 
 
         def random_mask_choice(i=None):
@@ -4495,9 +4495,9 @@ class TestSparseAny(TestCase):
 
 
         def run_test(m, n, k):
-            a = make_tensor(m, k)
-            b = make_tensor(k, n)
-            c = torch.zeros(m, n)
+            a = make_tensor((m, k))
+            b = make_tensor((k, n))
+            c = make_tensor((m, n))
             a = a.half().cuda()
             b = b.half().cuda()
             c = c.half().cuda()
@@ -4514,7 +4514,7 @@ class TestSparseAny(TestCase):
                 a_sparse = a.masked_select(mask).view(m, k // 2)
                 a_dense = a.masked_fill(~mask, 0)
 
-                c1 = torch.mm(a_dense, b)
+                c1 = torch.mm(a_dense, b) + c
 
                 c0, meta_reordered = torch._cutlass_linear(a_sparse, b, c, mask)
                 torch.testing.assert_close(c0, c1, rtol=1e-3, atol=1e-3)
