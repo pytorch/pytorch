@@ -11,7 +11,6 @@
 
 #include <numeric>
 #include <functional>
-#include <iostream>
 
 namespace {
 inline void validate_nested_tensor_metadata(
@@ -102,7 +101,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
 }
 
 // assume contiguous, we can construct stride from size
-inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
+inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return sizes;
@@ -167,14 +166,14 @@ NestedTensorImpl::NestedTensorImpl(
     Storage storage,
     c10::DispatchKeySet key_set,
     const caffe2::TypeMeta data_type,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    at::Tensor offsets_tensor)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : TensorImpl(std::move(storage), key_set, data_type),
-      nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_tensor_(std::move(offsets_tensor)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
+      nested_sizes_(std::move(nested_sizes)),
+      nested_strides_(std::move(nested_strides)),
+      storage_offsets_(std::move(storage_offsets)),
+      opt_sizes_(construct_opt_sizes(nested_sizes_)) {
   C10_LOG_API_USAGE_ONCE("torch.NestedTensor");
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
@@ -184,23 +183,23 @@ NestedTensorImpl::NestedTensorImpl(
       storage_device.is_cpu() || storage_device.is_cuda(),
       "NestedTensorImpl storage must be either CUDA or CPU but got ",
       storage_device);
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_tensor_);
+  validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    at::Tensor offsets_tensor)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : NestedTensorImpl(
           buffer.storage(),
           generate_nested_key_set_from_buffer(buffer),
           buffer.dtype(),
-          nested_size_tensor,
-          nested_stride_tensor,
-          offsets_tensor) {
+          nested_sizes,
+          nested_strides,
+          storage_offsets) {
 
   TORCH_INTERNAL_ASSERT(
       buffer.dim() == 1,
@@ -209,36 +208,36 @@ NestedTensorImpl::NestedTensorImpl(
       " dimensions.");
 }
 
-// assume contiguous, `nested_stride_tensor` and `offsets`
-// can be infered from `nested_size_tensor`
+// assume contiguous, `nested_strides` and `offsets`
+// can be infered from `nested_sizes`
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
-    at::Tensor nested_size_tensor)
+    at::Tensor nested_sizes)
     : NestedTensorImpl(
           buffer,
-          nested_size_tensor,
-          construct_nested_stride_tensor(nested_size_tensor),
-          construct_offsets(nested_size_tensor))
+          nested_sizes,
+          construct_nested_strides(nested_sizes),
+          construct_offsets(nested_sizes))
 {}
 
 NestedTensorImpl::NestedTensorImpl(
     c10::TensorImpl::ImplType impl_type,
     const at::Tensor& base_tensor,
-    at::Tensor nested_size_tensor,
-    at::Tensor nested_stride_tensor,
-    at::Tensor offsets_tensor)
+    at::Tensor nested_sizes,
+    at::Tensor nested_strides,
+    at::Tensor storage_offsets)
     : TensorImpl(impl_type, Storage(base_tensor.storage()), get_view_key_set(base_tensor), base_tensor.dtype()),
-      nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(std::move(nested_stride_tensor)),
-      offsets_tensor_(std::move(offsets_tensor)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
-  validate_nested_tensor_metadata(nested_size_tensor_, nested_stride_tensor_, offsets_tensor_);
+      nested_sizes_(std::move(nested_sizes)),
+      nested_strides_(std::move(nested_strides)),
+      storage_offsets_(std::move(storage_offsets)),
+      opt_sizes_(construct_opt_sizes(nested_sizes_)) {
+  validate_nested_tensor_metadata(nested_sizes_, nested_strides_, storage_offsets_);
   refresh_dim();
   set_custom_sizes_strides(c10::TensorImpl::SizesStridesPolicy::CustomSizes);
 }
 
 void NestedTensorImpl::refresh_dim() {
-  const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
+  const auto my_dim = nested_sizes_.dim() ? nested_sizes_.sizes()[1] + 1 : 1;
   sizes_and_strides_.resize(my_dim);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
@@ -249,18 +248,18 @@ int64_t NestedTensorImpl::dim_custom() const {
 
 // Currently sizes and strides assume contiguous
 int64_t NestedTensorImpl::numel_custom() const {
-  if (nested_size_tensor_.dim() == 0) {
+  if (nested_sizes_.dim() == 0) {
     return 0;
   }
   constexpr auto numel_max = std::min(
       static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
       static_cast<uint64_t>(std::numeric_limits<size_t>::max()));
 
-  const auto nt_dim = nested_size_tensor_.size(1);
-  const int64_t* sizes_ptr = nested_size_tensor_.data_ptr<int64_t>();
+  const auto nt_dim = nested_sizes_.size(1);
+  const int64_t* sizes_ptr = nested_sizes_.data_ptr<int64_t>();
   uint64_t num_elements{0};
 
-  for (const auto i : c10::irange(nested_size_tensor_.size(0))) {
+  for (const auto i : c10::irange(nested_sizes_.size(0))) {
     uint64_t n = 1;
     const auto start{sizes_ptr + i * nt_dim};
     const auto end{start + nt_dim};
@@ -319,9 +318,9 @@ c10::intrusive_ptr<TensorImpl> NestedTensorImpl::shallow_copy_and_detach_core(
       storage_,
       key_set_,
       data_type_,
-      nested_size_tensor_,
-      nested_stride_tensor_,
-      offsets_tensor_);
+      nested_sizes_,
+      nested_strides_,
+      storage_offsets_);
 
       copy_tensor_metadata(
           /*src_impl=*/this,
