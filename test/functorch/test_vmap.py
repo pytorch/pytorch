@@ -27,8 +27,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     TEST_WITH_UBSAN,
-    IS_MACOS,
-    IS_X86,
     skipIfRocm,
 )
 from torch.testing._internal.common_device_type import \
@@ -47,7 +45,6 @@ from common_utils import (
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
     decorate,
-    expectedFailureIf
 )
 import types
 from collections import namedtuple
@@ -3578,10 +3575,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcdiv'),
         xfail('addcmul'),
         xfail('clamp'),
-        # AssertionError: Tensor-likes are not equal!
-        xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', device_type='cpu',
-                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
 
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -3740,11 +3733,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-        # AssertionError: Tensor-likes are not equal!
-        # Issue: https://github.com/pytorch/pytorch/issues/70904
-        xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', device_type='cpu',
-                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -3807,8 +3795,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'scatter',
             'square',
             'sub',
-            'tril',
-            'triu',
             'trunc',
             'xlogy',
         )

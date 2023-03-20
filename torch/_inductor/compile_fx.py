@@ -193,9 +193,13 @@ def compile_fx_inner(
             and not graph.mutated_inputs
             and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
+            and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
             compiled_fn = cudagraphify(
-                compiled_fn, example_inputs, static_input_idxs=range(num_fixed)
+                compiled_fn,
+                example_inputs,
+                static_input_idxs=range(num_fixed),
+                device_index=next(iter(graph.device_idxs)),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -208,6 +212,10 @@ def compile_fx_inner(
                 elif complex_memory_overlap_inputs:
                     developer_warning(
                         "skipping cudagraphs due to complex input striding"
+                    )
+                elif len(graph.device_idxs) > 1 and config.triton.cudagraph_trees:
+                    developer_warning(
+                        "skipping cudagraphs due to multiple device indexes"
                     )
 
     result = align_inputs(compiled_fn, example_inputs, range(num_fixed))
@@ -259,10 +267,21 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
 
 @dynamo_utils.dynamo_timed
-def cudagraphify(model, inputs, static_input_idxs=()):
+def cudagraphify(model, inputs, static_input_idxs=(), *, device_index: int):
+    from torch._inductor.cudagraph_trees import (
+        cudagraphify_impl as new_cudagraphify_impl,
+    )
+
+    if config.triton.cudagraph_trees:
+        cudagraphify_fn = functools.partial(
+            new_cudagraphify_impl, device_index=device_index
+        )
+    else:
+        cudagraphify_fn = cudagraphify_impl
+
     # if using fake tensors, defer cudagraphs until we get real inputs at runtime
     if not any(isinstance(inp, FakeTensor) for inp in inputs):
-        return cudagraphify_impl(model, inputs, static_input_idxs)
+        return cudagraphify_fn(model, inputs, static_input_idxs)
 
     compiled_fn = None
 
@@ -270,8 +289,7 @@ def cudagraphify(model, inputs, static_input_idxs=()):
         nonlocal compiled_fn
         if compiled_fn is None:
             with dynamo_utils.preserve_rng_state():
-                compiled_fn = cudagraphify_impl(model, new_inputs, static_input_idxs)
-
+                compiled_fn = cudagraphify_fn(model, new_inputs, static_input_idxs)
         return compiled_fn(new_inputs)
 
     return run
@@ -290,27 +308,28 @@ def remove_unaligned_input_idxs(inputs, static_input_idxs):
     return static_input_idxs
 
 
+def static_input(x):
+    """
+    Copy and input while preserving strides
+    """
+    # TODO(jansel): figure out why this version doesn't work:
+    # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
+    needed_size = (
+        sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
+    )
+    buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+    return torch.as_strided(buffer, x.size(), x.stride())
+
+
 def cudagraphify_impl(model, inputs, static_input_idxs=()):
     """
     Assumes inputs[static_input_idxs[i]] are always the same memory address
     """
     static_input_idxs = remove_unaligned_input_idxs(inputs, static_input_idxs)
 
-    def static_input(x):
-        """
-        Copy and input while preserving strides
-        """
-        # TODO(jansel): figure out why this version doesn't work:
-        # return torch.empty_strided(x.size(), x.stride(), dtype=x.dtype, device=x.device)
-        needed_size = (
-            sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
-        )
-        buffer = torch.zeros(needed_size, dtype=x.dtype, device=x.device)
-        return torch.as_strided(buffer, x.size(), x.stride())
-
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x) if idx not in static_input_idxs else x.detach()
+        static_input(x).zero_() if idx not in static_input_idxs else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
