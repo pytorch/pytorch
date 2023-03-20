@@ -1,0 +1,105 @@
+{
+    "default": {
+        "linux-bionic-cuda11.6-py3-gcc7-slow-gradcheck": 1.14,
+        "linux-bionic-cuda11.6-py3.7-gcc7-debug":  1.14,
+        "linux-bionic-cuda11.7-py3.7-gcc7-debug": 1.14,
+        "linux-bionic-cuda11.8-py3.8-gcc7-debug": 1.14,
+        "parallelnative-linux-focal-py3.8-gcc7": 0.34,
+        "win-vs2019-cuda11.7-py3": 1.652,
+        "win-vs2019-cuda11.8-py3": 1.652,
+        "linux-bionic-cuda11.6-py3.10-gcc7": 1.14,
+        "linux-bionic-cuda11.6-py3.10-gcc7-sm86": 1.624,
+        "linux-bionic-cuda11.7-py3.10-gcc7": 1.14,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 1.14,
+        "linux-bionic-py3.11-clang9": 0.34,
+        "linux-bionic-py3.8-clang9": 0.34,
+        "linux-focal-py3.8-gcc7": 0.34,
+        "linux-focal-py3.9-clang7-asan": 0.68,
+        "linux-focal-rocm5.4.2-py3.8": 0,
+        "macos-12-py3-arm64": 0,
+        "macos-12-py3-arm64-mps": 0,
+        "macos-12-py3-x86-64": 4.8,
+        "win-vs2019-cpu-py3": 1.05,
+        "win-vs2019-cuda11.6-py3": 1.652,
+        "linux-bionic-cuda11.6-py3.10-gcc7-debug": 1.14,
+        "linux-bionic-cuda11.7-py3.10-gcc7-debug": 1.14,
+        "linux-bionic-cuda11.7-py3-gcc7-slow-gradcheck": 1.14,
+        "linux-bionic-cuda11.7-py3.10-gcc7-sm86": 1.624
+    },
+    "multigpu": {
+        "linux-bionic-cuda11.6-py3.9-gcc7": 4.56,
+        "linux-bionic-cuda11.7-py3.9-gcc7": 4.56
+    },
+    "slow": {
+        "linux-focal-rocm5.3-py3.8": 0,
+        "linux-bionic-cuda11.6-py3.10-gcc7-sm86": 1.624,
+        "linux-bionic-py3.8-clang9-slow": 0.34,
+        "linux-focal-rocm5.4.2-py3.8": 0,
+        "linux-bionic-cuda11.7-py3.10-gcc7-sm86": 1.624
+    },
+    "force_on_cpu": {
+        "win-vs2019-cuda11.7-py3": 1.652,
+        "win-vs2019-cuda11.8-py3": 1.652,
+        "win-vs2019-cuda11.6-py3": 1.652
+    },
+    "functorch": {
+        "win-vs2019-cuda11.7-py3": 1.652,
+        "linux-bionic-cuda11.6-py3.10-gcc7": 1.14,
+        "linux-bionic-cuda11.6-py3.10-gcc7-sm86": 1.624,
+        "linux-bionic-cuda11.7-py3.10-gcc7": 1.14,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 1.14,
+        "linux-bionic-py3.11-clang9": 0.34,
+        "linux-bionic-py3.8-clang9": 0.34,
+        "linux-focal-py3.8-gcc7": 0.34,
+        "linux-focal-py3.9-clang7-asan": 0.34,
+        "macos-12-py3-arm64": 0,
+        "macos-12-py3-x86-64": 4.8,
+        "win-vs2019-cpu-py3": 1.05,
+        "win-vs2019-cuda11.6-py3": 1.652,
+        "linux-bionic-cuda11.7-py3.10-gcc7-sm86": 1.624
+    },
+    "inductor": {
+        "cuda11.6-py3.10-gcc7-sm86": 1.624,
+        "cuda11.7-py3.10-gcc7-sm86": 1.624,
+        "cuda11.8-py3.10-gcc7-sm86": 1.624
+    },
+    "inductor_distributed": {
+        "cuda11.6-py3.10-gcc7-sm86": 5.672,
+        "cuda11.7-py3.10-gcc7-sm86": 5.672,
+        "cuda11.8-py3.10-gcc7-sm86": 5.672
+    },
+    "distributed": {
+        "linux-bionic-cuda11.6-py3.10-gcc7": 2.28,
+        "linux-bionic-cuda11.7-py3.10-gcc7": 2.28,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 2.28,
+        "linux-focal-py3.8-gcc7": 0.34,
+        "linux-focal-rocm5.4.2-py3.8": 0
+    },
+    "jit_legacy": {
+        "linux-bionic-cuda11.7-py3.10-gcc7": 1.14,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 1.14,
+        "linux-focal-py3.8-gcc7": 0.34
+    },
+    "nogpu_AVX512": {
+        "linux-bionic-cuda11.7-py3.10-gcc7": 0.34,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 0.34
+    },
+    "nogpu_NO_AVX2": {
+        "linux-bionic-cuda11.7-py3.10-gcc7": 0.34,
+        "linux-bionic-cuda11.8-py3.10-gcc7": 0.34
+    },
+    "smoke": {
+        "linux-bionic-py3.11-clang9": 0.34
+    },
+    "crossref": {
+        "linux-bionic-py3.11-clang9": 0.34,
+        "linux-bionic-py3.8-clang9": 0.34
+    },
+    "dynamo": {
+        "linux-bionic-py3.11-clang9": 0.34,
+        "linux-bionic-py3.8-clang9": 0.34
+    },
+    "null": {
+        "macos-12-py3-arm64-mps": 0
+    }
+}
