@@ -43,9 +43,11 @@ import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import DimDynamic, DimConstraint
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
+
+DimList = List
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
@@ -1434,36 +1436,32 @@ def format_bytecode(prefix, name, filename, line_no, code):
 # config as an input, and that seems a little annoying for little
 # gain.
 def dynamic_dims_from_tensor(
-    e: torch.Tensor, dynamic_ranges: Optional[Dict[int, MinMaxConstraint]]
-) -> Dict[int, DimDynamismState]:
+    e: torch.Tensor, constraint_dims: DimList[DimConstraint]
+) -> DimList[DimDynamic]:
     """
-    Given a tensor, returns a list of dimension dynamism states.
+    Infer DimDynamic from DimConstraint.
 
-    :param e: The input tensor.
-    :type e: torch.Tensor
-    :param dynamic_ranges: A dictionary containing the indices of dynamic dimensions and their corresponding
-    constraints. Defaults to None.
-    :type dynamic_ranges: Optional[Dict[int, MinMaxConstraint]], optional
-    :return: A list of DimDynamismState values representing the dynamism state of each dimension in the input tensor.
-    :rtype: Dict[int, DimDynamismState]
+    If a dimension is constrained, it is set as DYNAMIC.
 
-    An invariant is that the length of this list is the number of dimensions of the tensor.
-    If a dimension is marked in dynamic_ranges, it is set as DYNAMIC.
-    Otherwise, it is set to the default dimension state, either DUCK or STATIC depending on the configuration.
+    Otherwise, it is set to the default dimension state, either DUCK or STATIC
+    depending on the configuration.
     """
     # Note - while dynamo callers must be in config.dynamic_shapes
     # This is invoked outside of dynamo tests, so we do not assert on it here.
     # We suppose we could patch the tests, but that feels like a strange thing to add to
     # what should just be a dynamic shapes test.
     # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
-    dynamic_dims: Dict[int, DimDynamismState] = {}
-    for i, _ in enumerate(e.size()):
-        if dynamic_ranges and i in dynamic_ranges:
-            dynamic_dims[i] = DimDynamismState.DYNAMIC
+    assert e.dim() == len(constraint_dims)
+    dynamic_dims: DimList[DimDynamic] = []
+    for constraint in constraint_dims:
+        # NB: Technically this is not necessary as ShapeEnv will take care
+        # of this too, but it's more direct to do it this way
+        if constraint is not None:
+            dynamic_dims.append(DimDynamismState.DYNAMIC)
         else:
             if config.assume_static_by_default:
-                dynamic_dims[i] = DimDynamismState.STATIC
+                dynamic_dims.append(DimDynamismState.STATIC)
             else:
-                dynamic_dims[i] = DimDynamismState.DUCK
+                dynamic_dims.append(DimDynamismState.DUCK)
 
     return dynamic_dims

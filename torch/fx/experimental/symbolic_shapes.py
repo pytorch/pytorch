@@ -410,6 +410,10 @@ class StrictMinMaxConstraint:
     """
     vr: ValueRanges
 
+    def render(self, source: Source):
+        # TODO: better printing for -oo and oo
+        return f"{vr.lower} <= {source.name()} <= {vr.upper}"
+
 @dataclass(frozen=True)
 class RelaxedUnspecConstraint:
     """
@@ -430,7 +434,8 @@ class RelaxedUnspecConstraint:
     add extra constraints.  If you want to assert that there are no guards,
     use StrictMinMaxConstraint with an unbounded ValueRanges.
     """
-    pass
+    def render(self, source: Source):
+        return f"UnspecConstraint({source.name()})"
 
 # NB: None here indicates the client constraint is whatever is implicitly
 # inferred by guards from tracing, and that a backend can add whatever guards
@@ -1487,7 +1492,9 @@ class ShapeEnv:
             sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
         sym_storage_offset = self.create_symintnode(self.create_symbol(
             ex.storage_offset(),
-            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET)
+            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+            dynamic_dim=DimDynamic.DYNAMIC,
+            constraint_dim=None,
         ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
 
@@ -1537,7 +1544,9 @@ class ShapeEnv:
 
         assert val >= 0
 
-        if not duck or val not in self.val_to_var:
+        if val in (0, 1) and self.specialize_zero_one:
+            r = self.val_to_var[val]
+        elif not duck or val not in self.val_to_var:
             # If we're not duck shaping, we always create a new symbol
             # Even if we're duck shaping, if we haven't seen this particular
             # value before, we also create a new symbol
@@ -1552,8 +1561,7 @@ class ShapeEnv:
                 self.val_to_var[val] = sympy_expr
 
             # Apply default range, which assumes not zero-one
-            lower = 2 if self.specialize_zero_one else 0
-            self.var_to_range[sympy_expr] = ValueRanges(lower, sys.maxsize - 1)
+            self.var_to_range[sympy_expr] = self._default_value_range()
 
             # Small performance optimization: if we have a min-max constraint,
             # we can proactively narrow to that range
@@ -1561,33 +1569,19 @@ class ShapeEnv:
                 assert not duck
                 self.var_to_range[sympy_expr] &= constraint_dim.vr
 
-        if duck:
+            vr = self.var_to_range[sympy_expr]
+            if val not in vr:
+                raise RuntimeError(f"{val} not in range [{vr.lower}, {vr.upper}]")
+
+            r = sympy_expr
+        else:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
-            r = self.duck_int(val)
-        else:
-            r = sympy_expr
+            r = self.val_to_var[val]
 
         if isinstance(r, sympy.Symbol):
             self.var_to_sources[r].append(source)
         return r
-
-    # Given a concrete integer value, return the duck sized symbol associated
-    # with it; e.g., suppose we already have a tensor of size 3 in scope,
-    # which was assigned s3, then shape_env.duck_int(3) we will get back s3.
-    # This has some pretty tricky preconditions associated with it, so if
-    # you are in a binding context, you probably wanted create_symbol instead.
-    def duck_int(self, val):
-        assert self.duck_shape
-        assert val in self.val_to_var, (
-            "Direct call to duck_int MUST only duck size an integer values "
-            "that have already produced by inputs (allocated "
-            "by create_symbol), or we risk being unable to instantiate the "
-            "symbolic variable later.  However, at time of this call "
-            f"val={val} was not duck sized.  Bound duck sized integers: "
-            f"{list(self.val_to_var.keys())}"
-        )
-        return self.val_to_var[val]
 
     # Generates a list of guards strings which, when evaluated in a context that
     # defines tensors for all the sources, returns True or False depending
@@ -1613,12 +1607,36 @@ class ShapeEnv:
         self,
         placeholders,
         sources,
-        dynamic_ranges: InputList[DimList[DimConstraint]],
         source_ref=lambda n: n.name(),
         *,
+        # An input is either a SymInt (in which case you directly have
+        # DimConstraint) or a Tensor (in which case you have a
+        # DimList[DimConstraint]).  Whenever Optional is accepted, that
+        # just means there are no constraints
+        constraint_inputs: Optional[InputList[Union[DimConstraint, Optional[DimList[DimConstraint]]]]] = None,
         strict_mark_dyn=False,
         _simplified=False
     ) -> List[str]:
+        assert len(placeholders) == len(sources)
+
+        # Expand optional inputs, or verify invariants are upheld
+        if constraint_inputs is None:
+            constraint_inputs = [
+                [None] * t.dim() if isinstance(t, torch.Tensor) else None
+                for t in placeholders
+            ]
+        else:
+            assert len(constraint_inputs) == len(placeholders)
+            for i, (t, constraint) in enumerate(zip(placeholders, constraint_inputs)):
+                if isinstance(t, torch.Tensor):
+                    if constraint is None:
+                        constraint_inputs[i] = [None] * t.dim()
+                    else:
+                        assert len(constraint) == t.dim()
+                else:
+                    assert isinstance(t, SymInt)
+                    assert not isinstance(constraint, list)
+
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -1685,7 +1703,13 @@ class ShapeEnv:
         input_guards = []
 
         symbol_to_source = collections.defaultdict(list)
+        symbol_to_constraints = collections.defaultdict(list)
         dynamic_sources = []
+        constraint_violations = []
+
+        def record_constraint_violation(msg_fn):
+            assert callable(msg_fn)
+            constraint_violations.append(msg_fn)
 
         # How do we know what the value of s0 is?  Fresh variables can only be
         # bound by inputs, so there MUST be some other input which binds the
@@ -1698,46 +1722,41 @@ class ShapeEnv:
         # not be available to inner levels.  For example, Dynamo can guard on
         # tensors that never actually become graph arguments (they are
         # pruned).  In this case, only Dynamo knows about these arguments.
-        def track_symint(source, val):
+        def track_symint(source, val, constraint=None):
             if isinstance(val, SymInt):
                 s = val.node.expr
 
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
-                elif isinstance(-s, sympy.Symbol):
-                    symbol_to_source[-s].append(NegateSource(source))
+                    if constraint is not None:
+                        symbol_to_constraints[s].append(constraint)
+                else:
+                    if constraint is not None:
+                        # TODO: Maybe non-strict constraint shouldn't error
+                        # here?  Check what happens in practice
+                        record_constraint_violation(lambda: (
+                            f"Could not validate constraint {constraint.render(source)} as "
+                            f"{source.name()} is actually a non-atomic symbolic expression "
+                            f"{s}.  Perhaps you meant to specify a constraint on {s.free_symbols}?" +
+                            "; ".join(
+                                f"{s0} bound by " + ", ".join(str(source0) for source0 in symbol_to_source[s0])
+                                for s0 in s.free_symbols
+                            )
+                        ))
+
                 input_guards.append((source, s))
             else:
-                input_guards.append((source, sympy.Integer(val)))
+                s = sympy.Integer(val)
+                input_guards.append((source, s))
+                if constraint is not None:
+                    record_constraint_violation(lambda: (
+                        f"Could not validate constraint {constraint.render(source)} as "
+                        f"{source.name()} was inferred to be constant.  For more information "
+                        # TODO: fold this into TORCH_LOGS
+                        "about why it is constant, set torch._dynamo.config.print_specializations = True"
+                    ))
 
-        def _verify(expr, potential_expr):
-            # An expression of > 1 symbols is a relationship,
-            # and relationships can be ignored due to the nature of the
-            # constraint api explicitly not supporting relationships.
-            #
-            # In a future where we want to extend the constraint API to include
-            # user directives about relationships, we can remove this check from
-            # verification.
-            if len(expr.free_symbols) == 1:
-                symbol = next(iter(expr.free_symbols))
-                # NOTE! Manual user directives override the rule around not allowing any constraining of dynamic dims
-                # [NOTE - on user_constrained]
-                # User constrained symbols have an entry in var_to_range, but some of their range
-                # comes from manual user directives like dynamo's constrain api. This distinction is maintained
-                # for the purposes of protecting and enforcing user directives. In strict_mark_dyn mode, we do not
-                # allow ANY constraining of values for a given symbol. However, if this symbol is user constrained, we
-                # relax this requirement in favor of honoring the user directive and allowing the user specified range.
-                # We do this by checking of the range is unconstrained*.
-                #
-                # *unconstrained might mean a default unsound 0/1 constraint.
-                if symbol in self.user_constrained:
-                    return
-                srcs = symbol_to_source[symbol]
-                for src in srcs:
-                    if src in dynamic_sources:
-                        raise RuntimeError(f"Attempting to introduce a guard {potential_expr} that violates user's constraint")
-
-        for pos, (t, source) in enumerate(zip(placeholders, sources)):
+        for t, source, constraint in zip(placeholders, sources, constraint_inputs):
             if isinstance(source, str):
                 from torch._dynamo.source import LocalSource
                 source = LocalSource(source)
@@ -1750,22 +1769,7 @@ class ShapeEnv:
             assert isinstance(t, torch.Tensor)
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-                track_symint(property_source, ss)
-                if dynamic_ranges:
-                    dyn_range = dynamic_ranges[pos]
-                    if dyn_range and i in dyn_range:
-                        # If this dim is marked dynamic, we need to do a test on it, to ensure that it has not bee
-                        # constrained to an integer.
-                        if _is_int(ss):
-                            raise RuntimeError(f"Attempting to constrain dimension "
-                                               f"{source.name()}.size()[{i}] to {int(ss)}, "
-                                               "which violates user's constraints")
-
-                        vr = dyn_range[i].to_range()
-                        for symbol in ss.node.expr.free_symbols:
-                            if symbol in self.user_constrained:
-                                self._verify_valid_range(symbol, vr)
-                        dynamic_sources.append(property_source)
+                track_symint(property_source, ss, constraint)
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
@@ -1786,6 +1790,11 @@ class ShapeEnv:
                     continue
                 sexpr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(f"{source_ref(source)} == {sexpr}")
+                # NB: Not necessary to report constraint violations here:
+                # constraints are guaranteed to be on symbols (we've already
+                # caught constants and non-atomic expressions), so we only
+                # have relational constraints, but we don't support those
+                # at the moment
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
@@ -1796,8 +1805,27 @@ class ShapeEnv:
             try:
                 guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
                 exprs.append(guard_expr)
-                if strict_mark_dyn:
-                    _verify(g, guard_expr)
+                # A non-relational constraint on a single sizevar can violate
+                # a constraint
+                if len(g.free_symbols) == 1:
+                    source = symbol_to_source[symbol][0]
+                    symbol = next(iter(expr.free_symbols))
+                    constraints = symbol_to_constraints[symbol]
+                    for c in constraints:
+                        if isinstance(c, StrictMinMaxConstraint):
+                            record_constraint_violation(lambda: (
+                                f"Could not validate (strict) constraint {c.render(source)} as "
+                                f"we generated a guard on this size variable: {guard_expr}.  Guard "
+                                f"was allocated at:\n{tb}"
+                            ))
+                        elif isinstance(c, RelaxedUnspecConstraint):
+                            # This is fine, we allow guards here as long as it
+                            # didn't constrain it to one value  (we don't
+                            # actually know this; this depends on our
+                            # ValueRanges reasoning capability)
+                            pass
+                        else:
+                            raise AssertionError(f"unrecognized constraint {c}")
             except Exception:
                 log.warning(f"Failing guard allocated at: \n{tb}")
                 raise
@@ -1809,15 +1837,25 @@ class ShapeEnv:
         # these should probably get reported in tests too
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
-
-                # TODO(voz): Should this valid range actually come from the passed in dynamic_ranges?
-                # On one hand, yes! It's a lot more like the contract we agreed upon with verification
-                # with regards to produce_guards in the first place.
-                # On the other hand, self.var_to_range is pretty useful to check too!
-                vr = self.var_to_range[symbol]
-                if vr != _default_value_range(specialize_zero_one=self.specialize_zero_one):
-                    self._verify_valid_range(symbol, vr)
-
+                for c in symbol_to_constraints[symbol]:
+                    if isinstance(c, StrictMinMaxConstraint):
+                        # Refine the user VR based on default value range, as
+                        # no matter what the user specifies, we will have
+                        # narrowed it according to the default range
+                        c_vr = c.vr & self._default_value_range()
+                        # NB: exact match is OK here, because we already
+                        # applied the constraint when we allocated the symbol
+                        # originally.  Otherwise, should only assert that
+                        # vr is superset of c_vr
+                        if not (c_vr.lower == vr.lower and c_vr.upper == vr.upper):
+                            record_constraint_violation(lambda: (
+                                f"Could not validate constraint {c.render(sources[0])} as "
+                                f"we actually inferred the valid range to be [{vr.lower}, {vr.upper}]."
+                                "This is actually supposed to be impossible to "
+                                "trigger right now as we do not refine ranges; maybe you called "
+                                "constrain_range manually, or we forgot to update this error message? "
+                                "In any case, please file a bug report."
+                            ))
 
                 assert sources
                 assert symbol.is_integer
@@ -2128,6 +2166,14 @@ class ShapeEnv:
                 pass
         return
 
+    # See: Note - On 0/1 specialization
+    # NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
+    # as a sentinel sometimes.  Your sizevar isn't going to be
+    # anywhere near the max 64-bit integer anyway.
+    def _default_value_range(self) -> ValueRanges:
+        lower = 2 if self.specialize_zero_one else 0
+        return ValueRanges(lower, sys.maxsize - 1)
+
     @_lru_cache
     def _simplify_floor_div(self, expr):
         floor_divs = tuple(expr.atoms(FloorDiv))
@@ -2158,13 +2204,6 @@ class ShapeEnv:
                 log.warning(f"Adding shape guard {expr} at \n{user_stack}")
             log.debug("SHAPE GUARD", stack_info=True)
         self.guards.append(guard)
-
-    def _verify_valid_range(self, symbol, valid_range):
-        if symbol not in self.var_to_val:
-            return
-        if has_hint(symbol) and self.size_hint(symbol) not in valid_range:
-            raise RuntimeError(f"Valid range, {valid_range}, contradicts "
-                               f"traced value of {symbol}, {self.size_hint(symbol)}")
 
     @lru_cache(256)
     def evaluate_expr(self, expr: "sympy.Expr", hint=None):
