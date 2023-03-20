@@ -70,5 +70,11 @@ Tensor NestedTensor_neg(const Tensor& self) {
   return map_nt(self, at::neg);
 }
 
+Tensor& zero_nested_(Tensor& self) {
+  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+  self_buf.fill_(0);
+  return self;
+}
+
 } // namespace native
 } // namespace at

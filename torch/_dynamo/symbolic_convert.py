@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import dis
 import functools
@@ -386,12 +387,6 @@ def break_graph_if_unsupported(*, push):
                 reason = GraphCompileReason(excp.msg, user_stack)
             self.restore_graphstate(state)
 
-            if sys.version_info >= (3, 11) and inst.opname == "CALL":
-                kw_names = self.kw_names.value if self.kw_names is not None else ()
-                if len(kw_names) > 0:
-                    self.output.add_output_instructions(
-                        [create_instruction("KW_NAMES", argval=kw_names)]
-                    )
             self.output.compile_subgraph(self, reason=reason)
             cg = PyCodegen(self)
             cleanup: List[Instruction] = []
@@ -403,10 +398,28 @@ def break_graph_if_unsupported(*, push):
                         *b.resume_fn().try_except(cg.code_options, cleanup),
                     ]
                 )
-            self.output.add_output_instructions([inst])
+
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                kw_names = self.kw_names.value if self.kw_names is not None else ()
+                if len(kw_names) > 0:
+                    self.output.add_output_instructions(
+                        [create_instruction("KW_NAMES", argval=kw_names)]
+                    )
+                self.output.add_output_instructions(
+                    create_call_function(inst.arg, False)
+                )
+            else:
+                self.output.add_output_instructions([inst])
             self.output.add_output_instructions(cleanup)
 
-            self.popn(push - dis.stack_effect(inst.opcode, inst.arg))
+            if sys.version_info >= (3, 11) and inst.opname == "CALL":
+                # stack effect for PRECALL + CALL is split between the two instructions
+                stack_effect = dis.stack_effect(
+                    dis.opmap["PRECALL"], inst.arg
+                ) + dis.stack_effect(dis.opmap["CALL"], inst.arg)
+            else:
+                stack_effect = dis.stack_effect(inst.opcode, inst.arg)
+            self.popn(push - stack_effect)
 
             for _ in range(push):
                 self.push(UnknownVariable())
@@ -417,14 +430,6 @@ def break_graph_if_unsupported(*, push):
         return wrapper
 
     return decorator
-
-
-def is_none(x):
-    return x is None
-
-
-def is_not_none(x):
-    return x is not None
 
 
 class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState]):
@@ -439,6 +444,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
     lineno: int
     mutated_closure_cell_contents: Set[str]
     kw_names: Optional[ConstantVariable]
+    accept_prefix_inst: bool
+    prefix_insts: List[Instruction]
 
     checkpoint: Optional[Tuple[Instruction, InstructionTranslatorGraphState]]
     random_calls: List[
@@ -564,7 +571,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            getattr(self, inst.opname)(inst)
+            with TracingContext.current_loc(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
+            ):
+                getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -594,8 +604,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             [create_jump_absolute(continue_inst)] + self.instructions
         )
 
+    def run_ctx_mgr(self):
+        return contextlib.nullcontext()
+
     def run(self):
-        with TracingContext.current_frame(self.frame_summary()):
+        with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
                 while (
@@ -841,7 +854,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
-        assert inst.argval in self.f_builtins
+        if inst.argval not in self.f_builtins:
+            raise NameError(f"name '{inst.argval}' is not defined")
         val = self.f_builtins[inst.argval]
 
         if callable(val):
@@ -1729,6 +1743,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.block_stack = []
         self.lineno = code_options["co_firstlineno"]
         self.kw_names = None
+        self.accept_prefix_inst = True
+        self.prefix_insts = []
 
         # Properties of the input/output code
         self.instructions: List[Instruction] = instructions
@@ -2089,6 +2105,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self):
         return self.parent.fake_mode
+
+    def run_ctx_mgr(self):
+        return TracingContext.current_frame(self.parent.frame_summary())
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:
