@@ -69,7 +69,7 @@ def _aot_capture(mod, flat_args):
     out_spec = None
 
     with enable_python_dispatcher():
-        fw_metadata, _ = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
         )(*copy.deepcopy(full_args))  # type: ignore[operator]

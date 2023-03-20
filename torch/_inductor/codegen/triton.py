@@ -12,6 +12,7 @@ import sympy
 
 import torch
 
+import torch._logging
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -19,6 +20,7 @@ from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
     get_fused_kernel_name,
+    get_kernel_metadata,
     instance_descriptor,
     next_power_of_2,
     sympy_product,
@@ -41,6 +43,7 @@ from .common import (
 )
 
 log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def signature_of(arg):
@@ -80,6 +83,10 @@ class TritonPrinter(PythonPrinter):
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"tl.libdevice.floor({self.paren(self._print(expr.args[0]))})"
+
+    def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"tl.libdevice.ceil({self.paren(self._print(expr.args[0]))})"
 
 
 texpr = TritonPrinter().doprint
@@ -696,11 +703,13 @@ class TritonKernel(Kernel):
                 # and write out a reduction loop
                 self.codegen_body()
             self.inside_reduction = False
-            yield
-            if not self.persistent_reduction:
-                # flush out any code before opening the next loop
-                self.codegen_body()
-            self.inside_reduction = True
+            try:
+                yield
+                if not self.persistent_reduction:
+                    # flush out any code before opening the next loop
+                    self.codegen_body()
+            finally:
+                self.inside_reduction = True
 
         return ctx()
 
@@ -957,10 +966,12 @@ class TritonKernel(Kernel):
             mask = self.cse.generate(self.compute, f"{mask} & {prior}")
 
         self._load_mask = mask
-        with self.swap_buffers(self.compute, self.compute):
-            # TODO(jansel): do we need a reshape here?
-            yield mask
-        self._load_mask = prior
+        try:
+            with self.swap_buffers(self.compute, self.compute):
+                # TODO(jansel): do we need a reshape here?
+                yield mask
+        finally:
+            self._load_mask = prior
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1201,8 +1212,9 @@ class TritonKernel(Kernel):
         result.writelines(["\n", "\n", "def call(args):"])
         grid = []
         extra_args = []
+        extra_args_str = None
+        index = V.graph.scheduler.current_device.index
         with result.indent():
-            index = V.graph.scheduler.current_device.index
             result.writeline(f"with torch.cuda._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
@@ -1220,6 +1232,18 @@ class TritonKernel(Kernel):
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
                     f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
+                )
+
+        # benchmark all configs
+        result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
+        with result.indent():
+            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            with result.indent():
+                result.writeline(
+                    f"torch.cuda.set_device({index})"
+                )  # no-op to ensure context
+                result.writeline(
+                    f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
@@ -1513,7 +1537,6 @@ class TritonScheduling:
 
         @contextlib.contextmanager
         def end_current_reduction_loop():
-
             if current_loop_writes:
                 # flush out any other runnable nodes to reduce number of loops
                 for other_node in nodes[index + 1 :]:
@@ -1568,8 +1591,8 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        if dynamo_config.output_code:
-            log.info("schedule: %s", node_schedule)
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug(f"Schedule:\n {node_schedule}")
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
@@ -1638,17 +1661,12 @@ class TritonScheduling:
         else:
             fused_name = (
                 get_fused_kernel_name(node_schedule)
-                if config.triton.descriptive_kernel_names
+                if config.triton.descriptive_names
                 else ""
             )
             kernel_name = "_".join(["triton", fused_name, wrapper.next_kernel_suffix()])
             wrapper.kernels[src_code] = kernel_name
-            subs_name = (
-                kernel_name
-                if config.triton.ordered_kernel_names
-                or config.triton.descriptive_kernel_names
-                else "triton_"
-            )
+            subs_name = kernel_name if config.triton.unique_kernel_names else "triton_"
             src_code = src_code.replace("KERNEL_NAME", subs_name)
 
             # TODO(voz): Ostensibly, we should not need this. But there are cases where C++ codegen does
@@ -1661,7 +1679,11 @@ class TritonScheduling:
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("''')")
 
-            wrapper.define_kernel(kernel_name, compile_wrapper.getvalue(), kernel_path)
+            metadata_comment = f"# kernel path: {kernel_path}"
+            metadata_comment += "\n" + get_kernel_metadata(node_schedule)
+            wrapper.define_kernel(
+                kernel_name, compile_wrapper.getvalue(), metadata_comment
+            )
         return kernel_name
 
     def codegen_template(self, template_node, epilogue_nodes):

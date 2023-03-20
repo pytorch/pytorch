@@ -24,6 +24,7 @@ from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporaril
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
+import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -471,6 +472,23 @@ def wrap_key(f, tensors, tracer):
 
     return wrapped
 
+ORIGINAL_ATEN = None
+@contextmanager
+def set_original_aten_op(func):
+    global ORIGINAL_ATEN
+    if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
+        ORIGINAL_ATEN = func
+        fx_traceback.current_meta['original_aten'] = func
+        try:
+            yield
+        finally:
+            ORIGINAL_ATEN = None
+            fx_traceback.current_meta['original_aten'] = None
+    else:
+        yield
+
+
+
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
     def __init__(self, tracer, tracing_mode):
@@ -483,7 +501,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        with self.sym_mode.enable(False):
+        with self.sym_mode.enable(False), set_original_aten_op(func):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
     def __enter__(self):

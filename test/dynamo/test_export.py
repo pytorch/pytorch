@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import inspect
 import operator
 import unittest
@@ -937,6 +938,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.assertTrue(node.meta["nn_module_stack"] is not None)
                 self.assertTrue(node.meta["source_fn"] is not None)
                 self.assertTrue(node.meta["val"] is not None)
+                self.assertTrue(node.meta["original_aten"] is not None)
 
     def test_export_preserves_nn_module_stack_for_get_attr(self):
         inp = torch.randn(4, 4)
@@ -1910,6 +1912,85 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             wrapped_fn, expected_argument_names, *args, **kwargs
         )
 
+    def test_export_with_functools_wrapped_method(self):
+        def test_decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                return x
+
+            @test_decorator
+            def method_to_test(self, pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+                out = pos0
+                out += pos1
+                out += kw0
+                out += kw1
+                for arg in args:
+                    out += arg
+                for kwarg in kwargs.values():
+                    out += kwarg
+                return out
+
+        pos0 = torch.randn(4)
+        pos1 = torch.randn(4)
+        unnamed_pos = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, pos1, unnamed_pos)
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4), "unnamed_kw": torch.randn(4)}
+        expected_argument_names = [
+            "pos0",
+            "pos1",
+            "args_0",  # 3rd unnamed positional argument
+        ] + list(kwargs.keys())
+        m = MyModule()
+
+        self._test_export_preserving_original_signature(
+            m.method_to_test, expected_argument_names, *args, **kwargs
+        )
+
+    def test_export_with_functools_wrapped_fn(self):
+        def test_decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        @test_decorator
+        def _fn(pos0, pos1=1.0, *args, kw0, kw1=2.0, **kwargs):
+            out = pos0
+            out += pos1
+            out += kw0
+            out += kw1
+            for arg in args:
+                out += arg
+            for kwarg in kwargs.values():
+                out += kwarg
+            return out
+
+        def wrapped_fn(*args, **kwargs):
+            return _fn(*args, **kwargs)
+
+        pos0 = torch.randn(4)
+        kw0 = torch.randn(4)
+        args = (pos0, torch.randn(4), torch.randn(4))
+        kwargs = {"kw0": kw0, "kw2": torch.randn(4)}
+        expected_argument_names = [f"args_{i}" for i in range(len(args))] + list(
+            kwargs.keys()
+        )
+
+        self._test_export_preserving_original_signature(
+            wrapped_fn, expected_argument_names, *args, **kwargs
+        )
+
     def _test_export_preserving_original_signature(
         self, fn, expected_argument_names: Sequence[str], *args, **kwargs
     ):
@@ -2129,7 +2210,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = exported(inp)
         self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
-    def test_export_specialized_int_float(self):
+    def test_export_specialized_int(self):
         class Foo(torch.nn.Module):
             def __init__(
                 self,
@@ -2139,19 +2220,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.torch_module = torch.nn.LayerNorm(
                     input_dim, eps=1e-5, elementwise_affine=True
                 )
+                self.int_val = 100
 
             def forward(self, input):
-                return input.cos() * self.torch_module.eps
+                return input.cos() * self.int_val * self.torch_module.eps
 
         mod = Foo(128)
         inp = torch.randn(3, 128)
 
-        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
-        count = 0
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                count += 1
-        self.assertEqual(count, 1)
+        # In export, int & float in forward should always be specialized
+        with config.patch(dynamic_shapes=True):
+            gm, _ = torch._dynamo.export(
+                mod, inp, aten_graph=True, tracing_mode="symbolic"
+            )
+            count = 0
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    count += 1
+            self.assertEqual(count, 1)
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
