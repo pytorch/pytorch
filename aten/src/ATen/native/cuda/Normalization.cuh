@@ -448,6 +448,9 @@ __global__ void batch_norm_reduce_statistics_kernel(
     index_t n = 0;
     for (int j = 0; j < world_size; j++) {
       scalar_t count = counts[j];
+      if (count == 0) {
+        continue;
+      }
       accscalar_t m = vec_mean[j][i];
       accscalar_t v = accscalar_t(1.0) / (vec_invstd[j][i]);
       v = (v * v - epsilon) * count;
@@ -456,17 +459,21 @@ __global__ void batch_norm_reduce_statistics_kernel(
       avg = n * factor * avg + count * factor * m;
       n += count;
     }
-    mean[i] = avg;
-    invstd[i] = static_cast<accscalar_t>(1) / device_sqrt(var_n / n + epsilon);
-    if (running_mean.data() != NULL) {
-      running_mean[i] = static_cast<scalar_t>((1 - momentum) * running_mean[i] + momentum * avg);
-    }
-    accscalar_t unbiasedVar = var_n / (n - 1);
-    if (running_var.data() != NULL) {
-      running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
+    if (n > 0) {
+      mean[i] = avg;
+      invstd[i] = static_cast<accscalar_t>(1) / device_sqrt(var_n / n + epsilon);
+      if (running_mean.data() != NULL) {
+        running_mean[i] = static_cast<scalar_t>((1 - momentum) * running_mean[i] + momentum * avg);
+      }
+      accscalar_t unbiasedVar = var_n / (n - 1);
+      if (running_var.data() != NULL) {
+        running_var[i] = static_cast<scalar_t>((1 - momentum) * running_var[i] + momentum * unbiasedVar);
+      }
+    } else {
+      mean[i] = 0.;
+      invstd[i] = 1.;
     }
   }
-
 }
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
@@ -558,10 +565,12 @@ __global__ void batch_norm_backward_elemt_kernel(
     total_numel += numel[i];
   }
 
-  const stat_accscalar_t norm_fct =
-      static_cast<stat_accscalar_t>(1) / static_cast<stat_accscalar_t>(total_numel);
-  batch_norm_backward_elemt_kernel_impl(
-      input, grad_output, mean, invstd, weight, sum_dy, sum_dy_xmu, grad_input, norm_fct);
+  if (total_numel > 0) {
+    const stat_accscalar_t norm_fct =
+        static_cast<stat_accscalar_t>(1) / static_cast<stat_accscalar_t>(total_numel);
+    batch_norm_backward_elemt_kernel_impl(
+        input, grad_output, mean, invstd, weight, sum_dy, sum_dy_xmu, grad_input, norm_fct);
+  }
 }
 
 template <typename input_scalar_t, typename stat_scalar_t, typename stat_accscalar_t, typename index_t>
