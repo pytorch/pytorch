@@ -10,7 +10,7 @@ from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_utils import \
     TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize
 from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, dtypes, onlyCUDA, skipMeta, ops, OpDTypes)
+    (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
     foreach_unary_op_db, foreach_binary_op_db, foreach_pointwise_op_db,
     foreach_reduce_op_db, foreach_lerp_op_db)
@@ -131,7 +131,6 @@ class TestForeach(TestCase):
                 else:
                     self.assertEqual(expected, actual)
 
-    @skipMeta
     @ops(foreach_binary_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_binary_op(self, device, dtype, op, is_fastpath):
@@ -295,7 +294,6 @@ class TestForeach(TestCase):
             inplace_ref(copied_inputs),
             self.assertEqual(copied_inputs, inputs)
 
-    @skipMeta
     @ops(foreach_unary_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_unary_op(self, device, dtype, op, is_fastpath):
@@ -372,10 +370,6 @@ class TestForeach(TestCase):
         res = foreach_op(tensors, 1)
         self.assertEqual(res, expected)
 
-    # note(mkozuki): this test case fails with Meta at least in my local environment.
-    # The message was
-    # `AssertionError: NotImplementedError("Could not run 'aten::_foreach_add.Scalar' with arguments from the 'Meta' backend.`
-    @skipMeta
     @ops(foreach_binary_op_db, allowed_dtypes=[torch.float])
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
         foreach_op = op.method_variant
@@ -451,7 +445,6 @@ class TestForeach(TestCase):
                 with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                     foreach_op_([tensor1], [tensor2])
 
-    @skipMeta
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(foreach_binary_op_db, dtypes=OpDTypes.supported)
     def test_binary_op_list_slow_path(self, device, dtype, op):

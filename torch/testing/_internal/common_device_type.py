@@ -957,7 +957,7 @@ def largeTensorTest(size, device=None):
     In other tests, the `device=` argument needs to be specified.
     """
     if isinstance(size, str):
-        assert size.endswith("GB") or size.endswith("gb"), "only bytes or GB supported"
+        assert size.endswith(('GB', 'gb')), "only bytes or GB supported"
         size = 1024 ** 3 * int(size[:-2])
 
     def inner(fn):
