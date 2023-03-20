@@ -249,6 +249,14 @@ Tensor mkldnn_linear_pointwise(
   return output;
 }
 
+// This function support input is dense tensor, weight can be dense or MKLDNN tensor.
+Tensor mkldnn_linear_v2(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt) {
+  return mkldnn_linear_pointwise(input_t, weight_t, bias_opt, "none", torch::List<c10::optional<at::Scalar>>(), c10::nullopt);
+}
+
 Tensor mkldnn_linear_pointwise_binary(
     const Tensor& input_t,
     const Tensor& other_t,
@@ -325,6 +333,9 @@ Tensor mkldnn_linear_pointwise_binary(
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_linear"),
+      TORCH_FN(mkldnn_linear_v2));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_linear_pointwise"),
       TORCH_FN(mkldnn_linear_pointwise));

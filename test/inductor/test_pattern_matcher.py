@@ -13,6 +13,20 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 slow = functools.partial(unittest.skipIf, not TEST_WITH_SLOW, "too slow")
 
 
+# For OneDNN bf16 path, OneDNN requires the cpu has intel avx512 with avx512bw,
+# avx512vl, and avx512dq at least. So we will skip the test case if one processor
+# is not meet the requirement.
+@functools.lru_cache(maxsize=None)
+def has_bf16_support():
+    import sys
+
+    if sys.platform != "linux":
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return all(word in lines for word in ["avx512bw", "avx512vl", "avx512dq"])
+
+
 unary_list = {
     torch.nn.ReLU(): 2,
     torch.nn.Sigmoid(): 2,
@@ -221,6 +235,50 @@ class TestPaternMatcher(TestCase):
                         unary_list[unary_fn],
                     )
                     counters.clear()
+
+    """
+    def test_linear_unary(self):
+        class M(torch.nn.Module):
+            def __init__(
+                self,
+                unary_fn,
+                in_features,
+                out_features,
+                bias,
+                **kwargs,
+            ):
+                super().__init__()
+                self.linear = torch.nn.Linear(
+                    in_features,
+                    out_features,
+                    bias,
+                    **kwargs,
+                )
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.linear(x)
+                return self.unary_fn(x)
+
+        options = itertools.product(unary_list, [True, False])
+        dtype = torch.bfloat16
+        if has_bf16_support():
+            for unary_fn,  bias in options:
+                mod = M(unary_fn, 10, 30, bias=bias).eval()
+                # only fuse for linear when the dtype is bf16
+                mod = mod.to(dtype)
+                v = torch.randn(2, 10).to(dtype)
+                with torch.no_grad():
+                    expected = mod(v)
+                    actual = torch.compile(mod)(v)
+                    torch.testing.assert_close(actual, expected)
+                    self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+                    self.assertEqual(
+                        counters["inductor"]["pattern_matcher_nodes"],
+                        unary_list[unary_fn],
+                    )
+                    counters.clear()
+    """
 
 
 if __name__ == "__main__":

@@ -33,6 +33,8 @@ TORCH_LIBRARY(mkldnn, m) {
           });
 
   m.def(TORCH_SELECTIVE_SCHEMA(
+      "mkldnn::_linear(Tensor X, Tensor W, Tensor? B) -> Tensor Y"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_linear_pointwise(Tensor X, Tensor W, Tensor? B, str attr, Scalar?[] scalars, str? algorithm) -> Tensor Y"));
   m.def(TORCH_SELECTIVE_SCHEMA(
       "mkldnn::_linear_pointwise.binary(Tensor X, Tensor other, Tensor W, Tensor? B, str attr) -> Tensor Y"));

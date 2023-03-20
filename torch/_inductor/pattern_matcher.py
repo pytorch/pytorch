@@ -602,10 +602,23 @@ if torch._C.has_mkldnn:
     mkldnn = torch.ops.mkldnn
     # _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), KeywordArg('attr'), Arg(),  Arg(),)
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _user_1 = [CallFunction(mkldnn._convolution, *_conv_args, _users=1)]
-    _user_2 = [CallFunction(mkldnn._convolution, *_conv_args, _users=2)]
-    _user_3 = [CallFunction(mkldnn._convolution, *_conv_args, _users=3)]
-    _user_4 = [CallFunction(mkldnn._convolution, *_conv_args, _users=4)]
+    _linear_args = (Arg(), Arg(), Arg())
+    _user_1 = [
+        CallFunction(mkldnn._convolution, *_conv_args, _users=1),
+        CallFunction(mkldnn._linear, *_linear_args, _users=1),
+    ]
+    _user_2 = [
+        CallFunction(mkldnn._convolution, *_conv_args, _users=2),
+        CallFunction(mkldnn._linear, *_linear_args, _users=2),
+    ]
+    _user_3 = [
+        CallFunction(mkldnn._convolutionn, *_conv_args, _users=3),
+        CallFunction(mkldnn._linear, *_linear_args, _users=3),
+    ]
+    _user_4 = [
+        CallFunction(mkldnn._convolution, *_conv_args, _users=4),
+        CallFunction(mkldnn._linear, *_linear_args, _users=4),
+    ]
 
     def gelu_fusion_1(computation_call):
         return CallFunction(
@@ -742,13 +755,28 @@ if torch._C.has_mkldnn:
                 groups,
                 unary_op.op_name,
                 unary_op.scalars_attr,
-                unary_op.algorithm_attr,
+                unary_op.algorithm_attr
+            )
+
+        return fn
+
+    def register_mkldnn_linear_replacement_pattern(unary_op, pattern):
+        @register_replacement_pattern(pattern)
+        def fn(input, weight, bias):
+            return torch.ops.mkldnn._linear(
+                input,
+                weight,
+                bias,
+                unary_op.op_name,
+                unary_op.scalars_attr,
+                unary_op.algorithm_attr
             )
 
         return fn
 
     for unary_op, patterns in replacement_unary_fusion_patterns.items():
         register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
+        register_mkldnn_linear_replacement_pattern(unary_op, patterns[1])
         # TODO: add linear/ConvTranspose fusion
 
     @register_lowering_pattern(CallFunction(mkldnn._convolution, *_conv_args))
@@ -757,6 +785,12 @@ if torch._C.has_mkldnn:
     ):
         return L[torch.ops.mkldnn._convolution_pointwise.default](
             input, weight, bias, padding, stride, dilation, groups, "none", [], ""
+        )
+
+    @register_lowering_pattern(CallFunction(mkldnn._linear, *_linear_args))
+    def single_linear_lowering(match, input, weight, bias):
+        return L[torch.ops.mkldnn._linear_pointwise](
+            input, weight, bias, "none", [], ""
         )
 
     def register_leaky_relu_fusion_lowering(computation_call, computation_op):
@@ -813,7 +847,14 @@ if torch._C.has_mkldnn:
     register_hardtanh_fusion_lowering(
         _user_1[0], torch.ops.mkldnn._convolution_pointwise.default
     )
-    # TODO: add linear/ConvTranspose lowering
+    # TODO: add ConvTranspose lowering
+    # linear_fusion lowering
+    register_leaky_relu_fusion_lowering(
+        _user_3[1], torch.ops.mkldnn._linear_pointwise
+    )
+    register_hardtanh_fusion_lowering(
+        _user_1[1], torch.ops.mkldnn._linear_pointwise
+    )
 
 
 # This slows things down:

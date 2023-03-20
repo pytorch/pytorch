@@ -268,34 +268,6 @@ class PackedLinear(nn.Linear):
         return y
 
 
-class LinearUnary(nn.Linear):
-    def __init__(
-        self,
-        linear: nn.Module,
-        unary: nn.Module,
-    ):
-        super().__init__(
-            linear.in_features,
-            linear.out_features,
-            linear.bias is not None,
-            linear.weight.device,
-            linear.weight.dtype,
-        )
-        self._update_module_params(linear, unary)
-
-    def _update_module_params(self, linear, unary):
-        self.__dict__ = copy.deepcopy(linear.__dict__)
-        self.attr, self.scalars, self.algorithm = unary_modules_map[unary.__class__](
-            unary
-        )
-
-    def forward(self, input):
-        y = torch.ops.mkldnn._linear_pointwise(
-            input, self.weight, self.bias, self.attr, self.scalars, self.algorithm
-        )
-        return y
-
-
 class LinearBinary(nn.Linear):
     def __init__(self, linear: nn.Module, binary_op_name: str):
         super().__init__(
@@ -434,14 +406,6 @@ def fused_conv_binary_unary_eval(
 def packed_linear_eval(linear: nn.Module, input_size: list):
     assert not (linear.training), "Fusion only for eval!"
     return PackedLinear(linear, input_size)
-
-
-def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
-    assert not (linear.training), "Fusion only for eval!"
-    return LinearUnary(
-        linear,
-        unary,
-    )
 
 
 def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
@@ -747,7 +711,6 @@ def pack_module(gm: torch.fx.GraphModule):
 
 
 computation_op_unary_op_fusion_map = {
-    nn.Linear: fused_linear_unary_eval,
     ConvBinary2d: fused_conv_binary_unary_eval,
     nn.ConvTranspose2d: fused_conv_transpose_unary_eval,
 }
