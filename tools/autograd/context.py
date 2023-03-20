@@ -5,6 +5,7 @@ from torchgen.api.autograd import NativeFunctionWithDifferentiabilityInfo as NFW
 from torchgen.context import native_function_manager
 from torchgen.utils import T
 
+
 # Like tools.api.context.with_native_function, but for
 # NativeFunctionWithDifferentiabilityInfo.
 def with_native_function_with_differentiability_info(

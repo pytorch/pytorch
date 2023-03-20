@@ -24,15 +24,6 @@ do
 done
 set -- "${UNKNOWN[@]}" # leave UNKNOWN
 
-if [[ $PARALLEL == 1 ]]; then
-    pip install pytest-xdist
-fi
-
-# pytest, scipy, hypothesis: these may not be necessary
-# pytest-cov: installing since `coverage run -m pytest ..` doesn't work
-# pytest-subtests: unittest subtests support for pytest
-# parameterized: parameterizing test class
-pip install pytest scipy hypothesis pytest-cov pytest-subtests parameterized
 # allows coverage to run w/o failing due to a missing plug-in
 pip install -e tools/coverage_plugins_package
 
