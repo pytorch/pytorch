@@ -141,7 +141,7 @@ void calculate_mode(
   // to calculate the mode for --> we do this by manually doing the stride
   // calculations to get an offset
   scalar_t* data = self.data_ptr<scalar_t>();
-  for (int64_t i = 0; i < position.size(); i++) {
+  for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
     data += position[i] * ensure_nonempty_stride(self, i);
   }
 
@@ -159,7 +159,7 @@ void calculate_mode(
   scalar_t* values_data = values.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
 
-  for (int64_t i = 0; i < position.size(); i++) {
+  for (int64_t i = 0; i < static_cast<int64_t>(position.size()); i++) {
     int64_t pos = position[i];
     values_data += ensure_nonempty_stride(values, i) * pos;
     indices_data += ensure_nonempty_stride(indices, i) * pos;
