@@ -185,49 +185,64 @@ def checkpoint(
     applied to any part of a model.
 
     There are currently two checkpointing implementations available, determined
-    by the :attr:`use_reentrant` parameter. In the future, we plan to deprecate
-    ``use_reentrant=True`` (reentrant variant). so it is recommended that you
-    use ``use_reentrant=False`` (non-reentrant variant). If you have a use case
-    that requires the reentrant variant, please file an issue.
-
-    The non-reentrant variant offers several improvements over the reentrant
-    variant:
-
-    * Stops recomputation as soon as all needed intermediate activations
-      have been recomputed. This feature is enabled by default, but can be
-      disabled with :func:`set_checkpoint_early_stop`.
-
-    * Properly records the autograd graph during the forward pass, allowing for
-      more fine-grained control, such as performing backward on the graph within
-      checkpointed regions and attaching hooks. The reentrant variant runs the
-      forward in :func:`torch.no_grad`.
-
-    * Supports all ways of performing the backward pass, whereas reentrant
-      checkpoint only supports the :func:`torch.autograd.backward` API and only
-      if its `inputs` argument is not passed. Reentrant checkpoint does not
-      support :func:`torch.autograd.grad`.
-
-    * No requirement for at least one input and output to have
-      ``requires_grad=True``. If this condition is unmet in the reentrant
-      checkpoint, the checkpointed part of the model will not have gradients.
-
-    * Considers tensors passed as inputs or returned as outputs in nested
-      structures (e.g., custom objects, lists, dicts, etc) as participating in
-      autograd.
-
-    * Supports checkpointed regions containing tensors detached from the
-      computational graph. For the reentrant variant, if the checkpointed
-      segment contains tensors detached using ``detach()`` or with
-      :func:`torch.no_grad`, the backward pass will raise an error. This is
-      because ``checkpoint`` makes all the outputs require gradients and this
-      causes issues when a tensor is defined to have no gradient in the model.
-      To avoid this, detach the tensors outside of the ``checkpoint`` function.
+    by the :attr:`use_reentrant` parameter. It is recommended that you use
+    ``use_reentrant=False``. Please refer the note below for a discussion of
+    their differences.
 
     .. warning::
+
         If the :attr:`function` invocation during the backward pass differs
         from the forward pass, e.g., due to a global variable, the checkpointed
         checkpointed version may not be equivalent, potentially causing an
         error being raised or leading to silently incorrect gradients.
+
+    .. warning::
+
+        If you are using the ``use_reentrant=True`` variant (this is currently
+        the default), please refer to the note below for important
+        considerations and potential limitations.
+
+    .. note::
+
+        The reentrant variant of checkpoint (``use_reentrant=True``) and
+        the non-reentrant variant of checkpoint (``use_reentrant=False``)
+        differ in the following ways:
+
+        * Non-reentrant checkpoint stops recomputation as soon as all needed
+          intermediate activations have been recomputed. This feature is enabled
+          by default, but can be disabled with :func:`set_checkpoint_early_stop`.
+          Reentrant checkpoint always recomputes :attr:`function` in its
+          entirety during the backward pass.
+
+       * The reentrant variant does not record the autograd graph during the
+          forward pass, as it runs with the forward pass under
+          :func:`torch.no_grad`. The non-reentrant version does record the
+          autograd graph, allowing one to perform backward on the graph within
+          checkpointed regions.
+
+        * The reentrant checkpoint only supports the
+          :func:`torch.autograd.backward` API for the backward pass without its
+          `inputs` argument, while the non-reentrant version supports all ways
+          of performing the backward pass.
+
+        * At least one input and output must have ``requires_grad=True`` for the
+          reentrant variant. If this condition is unmet, the checkpointed part
+          of the model will not have gradients. The non-reentrant version does
+          not have this requirement.
+
+        * The reentrant version does not consider tensors in nested structures
+          (e.g., custom objects, lists, dicts, etc) as participating in
+          autograd, while the non-reentrant version does.
+
+        * The reentrant checkpoint does not support checkpointed regions with
+          detached tensors from the computational graph, whereas the
+          non-reentrant version does. For the reentrant variant, if the
+          checkpointed segment contains tensors detached using ``detach()`` or
+          with :func:`torch.no_grad`, the backward pass will raise an error.
+          This is because ``checkpoint`` makes all the outputs require gradients
+          and this causes issues when a tensor is defined to have no gradient in
+          the model. To avoid this, detach the tensors outside of the
+          ``checkpoint`` function.
 
     Args:
         function: describes what to run in the forward pass of the model or
