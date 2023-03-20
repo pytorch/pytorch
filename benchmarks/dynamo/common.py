@@ -250,7 +250,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # torchbench
     "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
     # timm_models
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
