@@ -325,8 +325,8 @@ class SizeVarAllocator:
         if not free_symbols:
             return int(expr)
         while any(s.name.startswith("ps") for s in free_symbols):
-           expr = sympy_subs(expr, self.inv_precomputed_replacements)
-           free_symbols = expr.free_symbols
+            expr = sympy_subs(expr, self.inv_precomputed_replacements)
+            free_symbols = expr.free_symbols
         out = sympy_subs(expr, self.var_to_val)
         return int(out)
 
