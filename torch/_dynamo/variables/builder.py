@@ -25,7 +25,6 @@ from ..source import (
     AttrSource,
     ConstantSource,
     GetItemSource,
-    GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
     LocalInputSource,
@@ -673,17 +672,22 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) is int and not config.specialize_int and config.dynamic_shapes:
+        unspec = not config.specialize_int and config.dynamic_shapes
+        if unspec and type(value) is torch.Size:
+            return SizeVariable(
+                [
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
+                    for i, v in enumerate(value)
+                ],
+                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+            )
+        elif unspec and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
-                or isinstance(self.source, GlobalSource)
-                or isinstance(self.source, GetItemSource)
-                or (
-                    isinstance(self.source, AttrSource)
-                    and isinstance(self.source.base, GlobalSource)
-                )
+                # Assume integers from global variables want to be specialized
+                or not self.source.guard_source().is_local()
                 # Assume that integers that came from NN modules want to be
                 # specialized (as we don't expect users to be changing the
                 # NN modules on the fly)
@@ -787,6 +791,10 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            # NB: We do not do float.  For motivation, see
+            # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
+            # but the general idea is that we generate kernels that can
+            # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
                 and isinstance(value, int)
@@ -799,11 +807,7 @@ class VariableBuilder:
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float?
-                # Not entirely clear we want to do this, as float inputs don't
-                # work with inductor codegen at the moment
             else:
-                # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
@@ -827,6 +831,14 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
+                    raise AssertionError(
+                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
+                            wrapped_value, self.get_source()
+                        )
+                    )
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
@@ -1050,6 +1062,14 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
 
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake == other.fake and self.source.name() == other.source.name()
+        return False
+
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
@@ -1057,7 +1077,8 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

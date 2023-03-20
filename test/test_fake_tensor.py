@@ -15,6 +15,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
 )
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+from torch._dynamo.testing import rand_strided
 from torch.testing import FileCheck
 from torch import nn
 import unittest
@@ -786,6 +787,37 @@ class FakeTensorOperatorInvariants(TestCase):
         for ref_o, meta_o in zip(ref_out, meta_out):
             self.assertEqual(ref_o.size(), meta_o.size())
 
+    @skipIfRocm
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_conv_c1_backward(self):
+        class Repro(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, arg1, arg2, arg3):
+                torch.ops.aten.convolution_backward.default(
+                    arg1,
+                    arg2,
+                    arg3,
+                    [1],
+                    [1, 1],
+                    [1, 1],
+                    [1, 1],
+                    False,
+                    [0, 0],
+                    1,
+                    [True, True, False],
+                )
+
+        args_new = [
+            ((16, 1, 128, 128), (16384, 16384, 128, 1), torch.float16, "cuda"),
+            ((16, 64, 128, 128), (1048576, 1, 8192, 64), torch.float16, "cuda"),
+            ((1, 64, 3, 3), (576, 9, 3, 1), torch.float16, "cuda"),
+        ]
+        args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args_new]
+
+        with torch._subclasses.CrossRefFakeMode():
+            Repro()(*args)
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):

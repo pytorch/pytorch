@@ -149,9 +149,9 @@ _ATENLIB_FUNCTIONS = {
 }
 
 
-def _create_op_overload_to_exporter_key_table() -> Dict[
-    Union[torch._ops.OpOverload, Callable], str
-]:
+def _create_op_overload_to_exporter_key_table() -> (
+    Dict[Union[torch._ops.OpOverload, Callable], str]
+):
     # TODO(justinchuby): Improve how the table is constructed.
     table: Dict[Union[torch._ops.OpOverload, Callable], str] = {}
 
@@ -189,9 +189,9 @@ _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 
 @_beartype.beartype
-def _create_onnx_friendly_decomposition_table() -> Dict[
-    torch._ops.OpOverload, Callable
-]:
+def _create_onnx_friendly_decomposition_table() -> (
+    Dict[torch._ops.OpOverload, Callable]
+):
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
     for op_overload, decomp_fn in torch._decomp.decomposition_table.items():
         # Skip decomposition into "prim::*" ops, because they are not generally supported by ONNX.
