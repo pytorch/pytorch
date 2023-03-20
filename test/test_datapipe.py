@@ -659,6 +659,10 @@ def _mod_3_test(x):
     return x % 3 == 1
 
 
+def _to_list(x):
+    return [x]
+
+
 lambda_fn1 = lambda x: x  # noqa: E731
 lambda_fn2 = lambda x: x % 2  # noqa: E731
 lambda_fn3 = lambda x: x >= 5  # noqa: E731
@@ -740,6 +744,7 @@ class TestFunctionalIterDataPipe(TestCase):
             (dp.iter.Filter, None, (_fake_filter_fn,), {}),
             (dp.iter.Filter, None, (partial(_fake_filter_fn_constant, 5),), {}),
             (dp.iter.Forker, None, (2,), {}),
+            (dp.iter.Forker, None, (2,), {"copy": "shallow"}),
             (dp.iter.Grouper, None, (_fake_filter_fn,), {"group_size": 2}),
             (dp.iter.IterableWrapper, range(10), (), {}),
             (dp.iter.Mapper, None, (_fake_fn,), {}),
@@ -943,6 +948,22 @@ class TestFunctionalIterDataPipe(TestCase):
         for n1, n2 in zip(dp1, dp2):
             output.append((n1, n2))
         self.assertEqual([(i, i) for i in range(10)], output)
+
+        # Functional Test: two child DataPipes yield shallow copies with copy equals shallow
+        dp1, dp2 = input_dp.map(_to_list).fork(num_instances=2, copy="shallow")
+        for n1, n2 in zip(dp1, dp2):
+            self.assertIsNot(n1, n2)
+            self.assertEqual(n1, n2)
+
+        # Functional Test: two child DataPipes yield deep copies with copy equals deep
+        dp1, dp2 = input_dp.map(_to_list).map(_to_list).fork(num_instances=2, copy="deep")
+        for n1, n2 in zip(dp1, dp2):
+            self.assertIsNot(n1[0], n2[0])
+            self.assertEqual(n1, n2)
+
+        # Functional Test: fork DataPipe raises error for unknown copy method
+        with self.assertRaises(ValueError):
+            input_dp.fork(num_instances=2, copy="unknown")
 
         # Functional Test: make sure logic related to slowest_ptr is working properly
         dp1, dp2, dp3 = input_dp.fork(num_instances=3)
