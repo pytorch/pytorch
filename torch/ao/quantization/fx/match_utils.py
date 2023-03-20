@@ -151,18 +151,19 @@ def _find_matches(
                         match_value,
                         matched_pattern)
             else:
-                # If there is only 1 node in the pattern, however node_pattern will still pass in as a list of length 1.
-                assert(isinstance(node_pattern, List) and len(node_pattern) == 1)
+                # For the case such as in test_quantization.py::TestQuantizeFx::test_match_pattern_with_multiple_args
+                # Where pattern is single node of MatchAllNode
+                # But the node_pattern could be a tuple as (-1,)
                 pattern_n = pattern
-                n = node_pattern[0]
-                _recursive_record_node_in_match_map(
-                    last_node,
-                    match_map,
-                    n,
-                    matched_node_pattern,
-                    pattern_n,
-                    match_value,
-                    matched_pattern)
+                for n in node_pattern:
+                    _recursive_record_node_in_match_map(
+                        last_node,
+                        match_map,
+                        n,
+                        matched_node_pattern,
+                        pattern_n,
+                        match_value,
+                        matched_pattern)
 
     # TODO: 1. merge with fuse matcher 2. document the code
     def record_match(
