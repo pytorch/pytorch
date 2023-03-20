@@ -600,7 +600,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
-    r"""Returns the global free and total GPU memory occupied for a given
+    r"""Returns the global free and total GPU memory for a given
     device using cudaMemGetInfo.
 
     Args:
