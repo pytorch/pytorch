@@ -7,7 +7,7 @@
 #else
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/_nested_tensor_strides_native.h>
-#include <ATen/ops/_nested_tensor_offsets_native.h>
+#include <ATen/ops/_nested_tensor_storage_offsets_native.h>
 #include <ATen/ops/chunk_native.h>
 #endif
 
@@ -15,19 +15,19 @@ namespace at {
 namespace native {
 
 /**
- * Thin wrapper around get_nested_size_tensor that is registered as a native function
+ * Thin wrapper around get_nested_sizes that is registered as a native function
  *
  * @return The nested tensors' size tensor.
  */
 at::Tensor _nested_tensor_size(const at::Tensor& self) {
-  return get_nested_size_tensor(self);
+  return get_nested_sizes(self);
 }
 
 at::Tensor _nested_tensor_strides(const at::Tensor& self){
-  return  get_nested_tensor_impl(self) -> get_nested_stride_tensor();
+  return  get_nested_tensor_impl(self) -> get_nested_strides();
 }
-at::Tensor _nested_tensor_offsets(const at::Tensor& self){
-  return get_nested_tensor_impl(self) -> get_offsets_tensor();
+at::Tensor _nested_tensor_storage_offsets(const at::Tensor& self){
+  return get_nested_tensor_impl(self) -> get_storage_offsets();
 }
 
 // Helper functions for getting information about a nested tensor's shape.
@@ -54,7 +54,7 @@ std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(
 
 std::vector<int64_t> NestedTensor_get_max_size(const NestedTensorImpl& nt) {
   return NestedTensor_get_max_size_from_size_tensor(
-      nt.get_nested_size_tensor());
+      nt.get_nested_sizes());
 }
 
 int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
@@ -62,7 +62,7 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
   TORCH_CHECK(
       last_dim != c10::nullopt,
       "Expected all tensors in nested tensor to have the same trailing dimension, instead last dimension equals: ",
-      nt.get_nested_size_tensor().select(1, -1));
+      nt.get_nested_sizes().select(1, -1));
   return *last_dim;
 }
 
@@ -84,9 +84,9 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   int64_t n_tensors = self.size(0);
   int64_t split_size = last_dim_size / chunks;
   std::vector<Tensor> splits(chunks);
-  const auto& sizes = self_impl->get_nested_size_tensor();
-  const auto& strides = self_impl->get_nested_stride_tensor();
-  const auto offsets = self_impl->get_offsets_tensor();
+  const auto& sizes = self_impl->get_nested_sizes();
+  const auto& strides = self_impl->get_nested_strides();
+  const auto offsets = self_impl->get_storage_offsets();
   int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;

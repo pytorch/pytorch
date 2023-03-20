@@ -305,7 +305,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       ".");
 
   // create a contiguous output
-  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
+  const Tensor& self_sizemat = self_ptr->get_nested_sizes();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
 
@@ -342,9 +342,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
 
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  const int64_t *self_offsets_ptr = self_ptr->get_offsets_tensor().data_ptr<int64_t>();
-  const int64_t *mat2_offsets_ptr = mat2_ptr->get_offsets_tensor().data_ptr<int64_t>();
-  const int64_t *out_offsets_ptr = out_ptr->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t *self_offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t *mat2_offsets_ptr = mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t *out_offsets_ptr = out_ptr->get_storage_offsets().data_ptr<int64_t>();
 
 #ifndef USE_ROCM
 #ifndef _WIN32

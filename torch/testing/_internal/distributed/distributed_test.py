@@ -628,7 +628,7 @@ class DistributedTest:
 
         def _verify_buffers_equal(self, m1, m2):
             # verify buffers across models
-            m1_buf_dict = {k: v for k, v in m1.module.named_buffers()}
+            m1_buf_dict = dict(m1.module.named_buffers())
             for name, buf in m2.module.named_buffers():
                 self.assertEqual(buf, m1_buf_dict[name])
 
