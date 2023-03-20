@@ -203,14 +203,13 @@ class GuardBuilder(GuardBuilderBase):
                 log.warning(f"invalid var name: {guard}")
             self.argnames.append(base)
 
-        self.record_cse(name)
-        return name
+        return self.record_cse(name)
 
     def TYPE_MATCH(self, guard: Guard):
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
         obj_id = self.id_ref(t)
-        code = f"___check_type_id({self.get_cse_name(self.arg_ref(guard))}, {obj_id})"
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._produce_guard_code(guard, [code])
 
     def BOOL_FALSE(self, guard: Guard):
@@ -225,7 +224,7 @@ class GuardBuilder(GuardBuilderBase):
         # Why not simply check the runtime type inside this guard?  It's slow enough to defeat
         # the purpose of using this guard, which itself is supposed to be a faster alternative
         # to DICT_KEYS.
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         real_obj = self.get(guard.name)
         code = f"not {ref}"
         self._produce_guard_code(guard, [code], provided_guarded_object=real_obj)
@@ -239,13 +238,13 @@ class GuardBuilder(GuardBuilderBase):
                 Guard(m.group(1), guard.source, GuardBuilder.TYPE_MATCH)
             )
 
-        code = f"___check_obj_id({self.get_cse_name(self.arg_ref(guard))}, {self.id_ref(self.get(guard.name))})"
+        code = f"___check_obj_id({self.arg_ref(guard)}, {self.id_ref(self.get(guard.name))})"
         self._produce_guard_code(guard, [code])
 
     def NAME_MATCH(self, guard: Guard):
         ref = self.arg_ref(guard)
         obj = self.get(guard.name)
-        code = f"{self.get_cse_name(self.arg_ref(guard))}.__name__ == {obj.__name__}"
+        code = f"{self.arg_ref(guard)}.__name__ == {obj.__name__}"
         self._produce_guard_code(guard, [code])
 
     def HASATTR(self, guard: Guard):
@@ -263,7 +262,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, [code], provided_guarded_object=self.get(base))
 
     def EQUALS_MATCH(self, guard: Guard):
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         val = self.get(guard.name)
         t = type(val)
         np_types = (
@@ -353,7 +352,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         val = self.get(guard.name)
 
         def setup_guard():
@@ -378,7 +377,7 @@ class GuardBuilder(GuardBuilderBase):
         return self.FUNCTION_MATCH(guard)
 
     def LIST_LENGTH(self, guard):
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
@@ -389,7 +388,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def TUPLE_ITERATOR_LEN(self, guard):
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
@@ -400,7 +399,7 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def DICT_KEYS(self, guard):
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
@@ -418,10 +417,10 @@ class GuardBuilder(GuardBuilderBase):
         self._produce_guard_code(guard, code)
 
     def WEAKREF_ALIVE(self, guard):
-        self._produce_guard_code(guard, [f"{self.get_cse_name(self.arg_ref(guard))} is not None"])
+        self._produce_guard_code(guard, [f"{self.arg_ref(guard)} is not None"])
 
     def NN_MODULE_PARAM_NAMES(self, guard):
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
         keys = {k for k, v in value.named_parameters()}
@@ -434,7 +433,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def ODICT_KEYS(self, guard):
         """OrderedDict keys match"""
-        ref = self.get_cse_name(self.arg_ref(guard))
+        ref = self.arg_ref(guard)
         value = self.get(guard.name)
         t = type(value)
 
