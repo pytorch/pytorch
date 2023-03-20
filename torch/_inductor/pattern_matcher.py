@@ -607,95 +607,110 @@ if torch._C.has_mkldnn:
     _user_3 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=3)]
     _user_4 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=4)]
 
-    gelu_fusion_1 = lambda compute_call: CallFunction(
-        aten.mul,
-        CallFunction(aten.mul, compute_call, 0.5),
-        CallFunction(
-            aten.add,
+    def gelu_fusion_1(computation_call):
+        return CallFunction(
+            aten.mul,
+            CallFunction(aten.mul, computation_call, 0.5),
             CallFunction(
-                aten.erf, CallFunction(aten.mul, compute_call, 0.7071067811865476)
-            ),
-            1,
-        ),
-    )
-
-    gelu_fusion_2 = lambda compute_call: CallFunction(
-        aten.mul,
-        CallFunction(aten.mul, compute_call, 0.5),
-        CallFunction(
-            aten.add,
-            CallFunction(
-                aten.tanh,
+                aten.add,
                 CallFunction(
-                    aten.mul,
+                    aten.erf,
+                    CallFunction(aten.mul, computation_call, 0.7071067811865476),
+                ),
+                1,
+            ),
+        )
+
+    def gelu_fusion_2(computation_call):
+        return CallFunction(
+            aten.mul,
+            CallFunction(aten.mul, computation_call, 0.5),
+            CallFunction(
+                aten.add,
+                CallFunction(
+                    aten.tanh,
                     CallFunction(
-                        aten.add,
-                        compute_call,
+                        aten.mul,
                         CallFunction(
-                            aten.mul,
+                            aten.add,
+                            computation_call,
                             CallFunction(
                                 aten.mul,
-                                CallFunction(aten.mul, compute_call, compute_call),
-                                compute_call,
+                                CallFunction(
+                                    aten.mul,
+                                    CallFunction(
+                                        aten.mul, computation_call, computation_call
+                                    ),
+                                    computation_call,
+                                ),
+                                0.044715,
                             ),
-                            0.044715,
                         ),
+                        0.7978845608028654,
                     ),
-                    0.7978845608028654,
+                ),
+                1,
+            ),
+        )
+
+    def hardswish_fusion(computation_call):
+        return CallFunction(
+            aten.div,
+            CallFunction(
+                aten.mul,
+                computation_call,
+                CallFunction(
+                    aten.clamp_max,
+                    CallFunction(
+                        aten.clamp_min, CallFunction(aten.add, computation_call, 3), 0
+                    ),
+                    6,
                 ),
             ),
-            1,
-        ),
-    )
+            6,
+        )
 
-    hardswish_fusion = lambda compute_call: CallFunction(
-        aten.div,
-        CallFunction(
-            aten.mul,
-            compute_call,
+    def silu_fusion(computation_call):
+        return CallFunction(
+            aten.mul, compute_call, CallFunction(aten.sigmoid, computation_call)
+        )
+
+    def hardsigmoid_fusion(computation_call):
+        return CallFunction(
+            aten.div,
             CallFunction(
                 aten.clamp_max,
                 CallFunction(
-                    aten.clamp_min, CallFunction(aten.add, compute_call, 3), 0
+                    aten.clamp_min, CallFunction(aten.add, computation_call, 3), 0
                 ),
                 6,
             ),
-        ),
-        6,
-    )
-
-    silu_fusion = lambda compute_call: CallFunction(
-        aten.mul, compute_call, CallFunction(aten.sigmoid, compute_call)
-    )
-
-    hardsigmoid_fusion = lambda compute_call: CallFunction(
-        aten.div,
-        CallFunction(
-            aten.clamp_max,
-            CallFunction(aten.clamp_min, CallFunction(aten.add, compute_call, 3), 0),
             6,
-        ),
-        6,
-    )
+        )
 
-    relu_fusion = lambda compute_call: CallFunction(aten.relu, compute_call)
+    def relu_fusion(computation_call):
+        return CallFunction(aten.relu, computation_call)
 
-    sigmoid_fusion = lambda compute_call: CallFunction(aten.sigmoid, compute_call)
+    def sigmoid_fusion(computation_call):
+        return CallFunction(aten.sigmoid, computation_call)
 
-    tanh_fusion = lambda compute_call: CallFunction(aten.tanh, compute_call)
+    def tanh_fusion(computation_call):
+        return CallFunction(aten.tanh, computation_call)
 
-    leaky_relu_fusion = lambda compute_call: CallFunction(
-        aten.where,
-        CallFunction(aten.gt, compute_call, 0),
-        compute_call,
-        CallFunction(aten.mul, compute_call, KeywordArg("negative_slope")),
-    )
+    def leaky_relu_fusion(computation_call):
+        return CallFunction(
+            aten.where,
+            CallFunction(aten.gt, computation_call, 0),
+            computation_call,
+            CallFunction(aten.mul, computation_call, KeywordArg("negative_slope")),
+        )
 
-    hardtanh_fusion = lambda compute_call: CallFunction(
-        aten.clamp_max,
-        CallFunction(aten.clamp_min, compute_call, KeywordArg("min_value")),
-        KeywordArg("max_value"),
-    )
+    def hardtanh_fusion(computation_call):
+        return CallFunction(
+            aten.clamp_max,
+            CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
+            KeywordArg("max_value"),
+        )
 
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
@@ -714,7 +729,7 @@ if torch._C.has_mkldnn:
         UnaryAttr("tanh"): [tanh_fusion(u) for u in _user_1],
     }
 
-    def register_mkldnn_replacement_pattern(unary_op, pattern):
+    def register_mkldnn_conv_replacement_pattern(unary_op, pattern):
         @register_replacement_pattern(pattern)
         def fn(input, weight, bias, padding, stride, dilation, groups):
             return torch.ops.mkldnn._convolution_pointwise(
@@ -733,7 +748,8 @@ if torch._C.has_mkldnn:
         return fn
 
     for unary_op, patterns in replacement_unary_fusion_patterns.items():
-        register_mkldnn_replacement_pattern(unary_op, patterns[0])
+        register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
+        # TODO: add linear/ConvTranspose fusion
 
     @register_lowering_pattern(CallFunction(aten.mkldnn_convolution, *_conv_args))
     def single_conv_lowering(
