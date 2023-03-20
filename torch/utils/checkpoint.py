@@ -300,11 +300,10 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
-        If you are using the ``use_reentrant=True` implementation (this is the
-        default), please see :func:`~torch.utils.checkpoint.checkpoint` to see
-        the restrictions of this variant. It is recommended that you pass
-        ``use_reentrant=False``. We plan to deprecate ``use_reentrant=True`` in
-        a future version of PyTorch.
+        If you are using the ``use_reentrant=True` variant (this is the
+        default), please see :func:`~torch.utils.checkpoint.checkpoint` for
+        the important considerations and limitations of this variant. It is
+        recommended that you use ``use_reentrant=False``.
 
     .. warning:
         Since PyTorch 1.4, it allows only one Tensor as the input and
