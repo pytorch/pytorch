@@ -456,6 +456,10 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
                 )
 
         assert self.nn_modules is not None
+        for k, v in self.nn_modules.items():
+            if v is target:
+                # it already exists
+                return wrap_name(k)
         # create a new unique name
         name = "_".join(map(str, names))
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
