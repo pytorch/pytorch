@@ -73,7 +73,7 @@ jobs:
           timeout_minutes: 10
           max_attempts: 5
           command: |
-            sh scripts/buck_setup.sh
+            bash scripts/buck_setup.sh
 
       - name: Build tools
         run: |
@@ -122,3 +122,7 @@ jobs:
       - name: Build everything
         run: |
           buck build //... --keep-going
+
+      - name: Build aten_cpu@shared
+        run: |
+          buck build :aten_cpu#linux-x86_64,shared
