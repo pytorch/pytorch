@@ -735,7 +735,7 @@ class HingeEmbeddingLoss(_Loss):
     .. math::
         l_n = \begin{cases}
             x_n, & \text{if}\; y_n = 1,\\
-            \max \{0, \Delta - x_n\}, & \text{if}\; y_n = -1,
+            \max \{0, margin - x_n\}, & \text{if}\; y_n = -1,
         \end{cases}
 
     and the total loss functions is

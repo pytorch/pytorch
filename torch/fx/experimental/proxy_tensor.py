@@ -24,6 +24,7 @@ from torch.utils._python_dispatch import TorchDispatchMode, _pop_mode_temporaril
 from torch._subclasses import FakeTensor
 from .symbolic_shapes import ShapeEnv, SymDispatchMode, SymNode
 from torch.fx import Proxy
+import torch.fx.traceback as fx_traceback
 from torch import SymInt, SymFloat, SymBool
 from torch.utils.weak import WeakTensorKeyDictionary
 
@@ -445,15 +446,15 @@ def dispatch_trace(
     return GraphModule(tracer.root, graph, name)
 
 
-def wrap_key(f, tensors, tracer):
+def wrap_key(f, tensors, tracer, _dispatch_key):
     flat_tensors, tensors_spec = pytree.tree_flatten(tensors)
 
     @functools.wraps(f)
     def wrapped(*proxies):
         flat_proxies, proxies_spec = pytree.tree_flatten(proxies)
         assert len(flat_proxies) == len(flat_tensors)
-        assert isinstance(_get_current_dispatch_mode(), ProxyTorchDispatchMode)
-        with _pop_mode_temporarily():
+        with _pop_mode_temporarily(_dispatch_key) as m:
+            assert isinstance(m, ProxyTorchDispatchMode)
             track_tensor_tree(flat_tensors, flat_proxies, constant=None, tracer=tracer)
 
         out = f(*tensors)
@@ -471,9 +472,27 @@ def wrap_key(f, tensors, tracer):
 
     return wrapped
 
+ORIGINAL_ATEN = None
+@contextmanager
+def set_original_aten_op(func):
+    global ORIGINAL_ATEN
+    if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
+        ORIGINAL_ATEN = func
+        fx_traceback.current_meta['original_aten'] = func
+        try:
+            yield
+        finally:
+            ORIGINAL_ATEN = None
+            fx_traceback.current_meta['original_aten'] = None
+    else:
+        yield
+
+
+
 
 class ProxyTorchDispatchMode(TorchDispatchMode):
-    def __init__(self, tracer, tracing_mode):
+    def __init__(self, tracer, tracing_mode, _dispatch_key=None):
+        super().__init__(_dispatch_key)
         self.tracer = tracer
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
@@ -483,7 +502,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        with self.sym_mode.enable(False):
+        with self.sym_mode.enable(False), set_original_aten_op(func):
             return self.inner_torch_dispatch(func, types, args, kwargs)
 
     def __enter__(self):
@@ -561,11 +580,16 @@ class ProxySymDispatchMode(SymDispatchMode):
         # We also assume there are no keyword arguments.
         assert not kwargs
         out = func(*args, **kwargs)
-        assert isinstance(out, py_sym_types), f"{func}(*{args}, **{kwargs}) = {out}"
 
-        # Delays tracing out the proxies on this op until we actually need it
-        p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
-        set_proxy_slot(out.node, self.tracer, p_out_thunk)
+        # If func returned a constant, we don't need to trace; we have
+        # determined that the result is constant (no matter if the inputs
+        # were symbolic) and it is no longer necessary to trace the
+        # computation.  This could occur if func triggered some guards.
+        if isinstance(out, py_sym_types):
+            # Delays tracing out the proxies on this op until we actually need it
+            p_out_thunk = thunkify(self._compute_proxy, func=func, args=args, out=out)
+            set_proxy_slot(out.node, self.tracer, p_out_thunk)
+
         return out
 
 
@@ -634,7 +658,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, pre_autograd=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -661,10 +685,15 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        if tracing_mode == "symbolic":
+        # pre-autograd tracing uses per-dispatch-key modes,
+        # which requires the python dispatcher
+        if tracing_mode == "symbolic" or pre_autograd:
             python_dispatcher_mode = enable_python_dispatcher()
 
-        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode)
+        _dispatch_key = None
+        if pre_autograd:
+            _dispatch_key = torch._C.DispatchKey.AutogradFunctionality
+        proxy_mode = ProxyTorchDispatchMode(fx_tracer, tracing_mode, _dispatch_key=_dispatch_key)
 
         arg_count = 0
 
@@ -706,7 +735,7 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         # thus irrelevant to any external functional trace.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, \
              sym_mode, proxy_mode, disable_autocast_cache(), disable_proxy_modes_tracing(enable_current=True):
-            t = dispatch_trace(wrap_key(func, args, fx_tracer), tracer=fx_tracer, concrete_args=tuple(phs))
+            t = dispatch_trace(wrap_key(func, args, fx_tracer, _dispatch_key), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
         if tracing_mode == "symbolic":

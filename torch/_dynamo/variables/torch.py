@@ -64,11 +64,15 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -160,7 +164,7 @@ class TorchVariable(VariableTracker):
         return "__" + re.sub(r"[^a-zA-Z0-9_]+", "_", name)
 
     def reconstruct(self, codegen):
-        return codegen.setup_globally_cached(self.unique_var_name(), self.value)
+        return codegen.setup_globally_cached(self.unique_var_name(), self.value, False)
 
     def as_proxy(self):
         return self.value
@@ -324,6 +328,13 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
+            assert "device_type" not in kwargs
+            if self.value is torch.cuda.amp.autocast:
+                kwargs.update({"device_type": ConstantVariable("cuda")})
+            else:
+                kwargs.update({"device_type": ConstantVariable("cpu")})
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -481,9 +492,34 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             if self.value == torch._C._nn.scaled_dot_product_attention:
                 # See:[Note] SDPA_flash's meta function returns incorrect Philox seed and offset
                 # in pytorch/torch/_meta_registrations.py
-                fake_query = args[0].as_proxy().node.meta["example_value"]
-                fake_key = args[1].as_proxy().node.meta["example_value"]
-                fake_value = args[2].as_proxy().node.meta["example_value"]
+                all_kwargs = kwargs.copy()
+                all_kwargs.update(
+                    dict(
+                        zip(
+                            (
+                                "query",
+                                "key",
+                                "value",
+                                "attn_mask",
+                                "dropout_p",
+                                "is_causal",
+                            ),
+                            args,
+                        )
+                    )
+                )
+                fake_query = all_kwargs["query"].as_proxy().node.meta["example_value"]
+                fake_key = all_kwargs["key"].as_proxy().node.meta["example_value"]
+                fake_value = all_kwargs["value"].as_proxy().node.meta["example_value"]
+                fake_mask = all_kwargs.get("attn_mask")
+                if isinstance(fake_mask, TensorVariable):
+                    fake_mask = fake_mask.as_proxy().node.meta["example_value"]
+                else:
+                    fake_mask = None
+                dropout_p = kwargs.get("dropout_p")
+                dropout_p = dropout_p.value if dropout_p is not None else 0.0
+                is_causal = kwargs.get("is_causal")
+                is_causal = is_causal.value if is_causal is not None else False
                 # We look through the stack to find a cuda autocast context
                 # If we do we will convert the fake tensors to torch.float16
                 is_cuda_autocast_context = False
@@ -502,15 +538,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     fake_value = fake_value.clone().to(amp_dtype)
 
                 backend_choice = torch._fused_sdp_choice(
-                    fake_query, fake_key, fake_value
+                    fake_query, fake_key, fake_value, fake_mask, dropout_p, is_causal
                 )
                 if backend_choice == torch.backends.cuda.SDPBackend.FLASH_ATTENTION:
-                    dropout_p = kwargs.get("dropout_p")
-                    # Lets see if they passed it in as not an arg
-                    if len(args) >= 5:
-                        dropout_p = args[4]
-
-                    if dropout_p is not None and dropout_p.value != 0.0:
+                    if dropout_p is not None and dropout_p != 0.0:
                         unimplemented(
                             "FlashAttention with dropout is not supported in cuda graphs"
                         )
@@ -524,6 +555,31 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     from torch.fx.experimental.symbolic_shapes import sym_sqrt
 
                     fn_ = sym_sqrt
+
+            if fn_ is torch.tensor:
+
+                def check_any_unspec(x):
+                    # NB: This includes UnspecializedPythonVariable
+                    if isinstance(x, (TensorVariable, SymNodeVariable)):
+                        return True
+                    elif isinstance(x, ListVariable):
+                        return any(check_any_unspec(y) for y in x.items)
+                    # TODO: there maybe other recursive structures you need to
+                    # check
+                    else:
+                        return False
+
+                # NB: OK to pass torch.tensor(tensor), this will trace fine
+                # TODO: But torch.tensor(unspec) would not trace fine.  Not
+                # handled right now.
+                data_arg = None
+                if args:
+                    data_arg = args[0]
+                elif "data" in kwargs:
+                    data_arg = kwargs["data"]
+
+                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
+                    unimplemented("torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(
                 tx=tx,
@@ -879,8 +935,9 @@ class TorchPyOperator(VariableTracker):
                 false_cmp,
             ) = speculate_branch(False)
 
-            if true_cmp != false_cmp:
-                unimplemented(true_cmp.diff(false_cmp))
+            true_tracked_fakes = true_cmp.output.tracked_fakes
+            false_tracked_fakes = false_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
@@ -940,11 +997,9 @@ class TorchPyOperator(VariableTracker):
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
-            if parent_cmp != body_cmp:
-                diff = parent_cmp.diff(body_cmp)
-                raise unimplemented(
-                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
-                )
+            parent_tracked_fakes = parent_cmp.output.tracked_fakes
+            body_tracked_fakes = body_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards

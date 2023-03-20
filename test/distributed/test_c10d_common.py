@@ -1444,6 +1444,59 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             PythonProcessGroupExtensionTest.create_dummy
         )
 
+    def test_backend_config(self):
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        # Ensure backend config can be created with the following arguments
+        backend_config_strings_and_expected_values = [
+            (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
+            ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
+            ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
+        ]
+
+        for config_str, expected_value in backend_config_strings_and_expected_values:
+            with self.subTest(config_str):
+                # ensures these configs strings are valid and no ValueError is raised
+                config = dist.BackendConfig(config_str)
+                self.assertEqual(str(config), expected_value)
+
+        # Ensure backend config will raise ValueError with the following arguments
+        invalid_backend_config_strings = [
+            "cpu:gloo,cuda:nccl,",  # trailing comma
+            "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
+        ]
+        for config_str in invalid_backend_config_strings:
+            with self.subTest(config_str):
+                with self.assertRaises(ValueError):
+                    dist.BackendConfig(config_str)
+
+    def test_init_process_group_with_multiple_backends(self):
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size)
+
+        # test all_gather
+        input_tensor = torch.ones(2, 2) * 7
+        output_tensor_list = [torch.zeros(2, 2) for _ in range(self.world_size)]
+        dist.all_gather(output_tensor_list, input_tensor)
+
+        dist.barrier()
+        dist.destroy_process_group()
+
     class Options:
         def __init__(self):
             pass

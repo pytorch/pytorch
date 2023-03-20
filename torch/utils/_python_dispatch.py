@@ -43,15 +43,20 @@ class TorchDispatchMode:
     ``__torch_dispatch__(self)`` to make PyTorch
     API self-referential (beware of infinite loops, in this case!)
     """
+    def __init__(self, _dispatch_key=None):
+        if _dispatch_key is not None:
+            assert isinstance(_dispatch_key, torch._C.DispatchKey)
+            self.__dict__['_dispatch_key'] = _dispatch_key
+
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
 
     def __enter__(self):
-        _push_mode(self, self.__dict__.get("__dispatch_key", None))
+        _push_mode(self, self.__dict__.get("_dispatch_key", None))
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        _pop_mode(self.__dict__.get("__dispatch_key", None))
+        _pop_mode(self.__dict__.get("_dispatch_key", None))
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -89,12 +94,12 @@ def _pop_mode(k: Optional[DispatchKey] = None):
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily():
-    old = _pop_mode()
+def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
+    old = _pop_mode(k)
     try:
         yield old
     finally:
-        _push_mode(old)
+        _push_mode(old, k)
 
 
 @contextlib.contextmanager

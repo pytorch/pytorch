@@ -3,7 +3,10 @@
 import tempfile
 import torch
 from copy import deepcopy
-from torch.library import Library
+from torch.library import Library, impl
+from torch.fx.experimental.proxy_tensor import ShapeEnv
+from torch import SymInt
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch._dispatch.python import enable_python_dispatcher
@@ -284,6 +287,25 @@ class TestPythonRegistration(TestCase):
 
         with self.assertRaisesRegex(ValueError, "reserved namespace"):
             my_lib1 = Library("prim", "DEF")
+
+    def test_returning_symint(self) -> None:
+        shape_env = ShapeEnv()
+        fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
+
+        ft = fake_tensor_mode.from_tensor(torch.rand(2, 3))
+
+        s0, s1 = ft.shape
+
+        tlib = Library("tlib", "DEF")
+        tlib.define("sqsum(SymInt a, SymInt b) -> SymInt")
+
+        @impl(tlib, "sqsum", "CompositeExplicitAutograd")
+        def sqsum(a: SymInt, b: SymInt):
+            return a * a + b * b
+
+        out = torch.ops.tlib.sqsum.default(s0, s1)
+        out_val = shape_env.evaluate_expr(out.node.expr)
+        self.assertEquals(out_val, 13)
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
@@ -1107,20 +1129,6 @@ $0 = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), pin_memo
         self.assertTrue(all_same_mode([x, x, x]))
         self.assertFalse(all_same_mode([x, None]))
         self.assertFalse(all_same_mode([x, y]))
-
-    def test_pre_autograd_mode_stack(self):
-        x = LoggingTensorMode()
-        x.__dict__['__dispatch_key'] = torch._C.DispatchKey.AutogradFunctionality
-        with capture_logs(is_mode=True) as logs:
-            with enable_python_dispatcher(), x:
-                a = torch.ones(4, 4)
-                out = torch.matmul(a, a)
-        # We expect to see matmul in the trace - it should NOT be decomposed into mm.
-        # Also, torch.ones() doesn't show up in the trace.
-        # This is annoying but expected: ones() never dispatches to the Autograd dispatch key,
-        # so our mode never sees it - it goes directly to the BackendSelect key.
-        self.assertExpectedInline("\n".join(logs), """$1 = torch._ops.aten.matmul.default($0, $0)""")
-
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))

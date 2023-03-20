@@ -13,7 +13,6 @@ import re
 import torch
 
 from typing import Callable, Dict, Optional, Tuple, Type, Union
-from torch._six import string_classes
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
@@ -70,7 +69,7 @@ def default_convert(data):
         return elem_type(*(default_convert(d) for d in data))
     elif isinstance(data, tuple):
         return [default_convert(d) for d in data]  # Backwards compatibility.
-    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, string_classes):
+    elif isinstance(data, collections.abc.Sequence) and not isinstance(data, str):
         try:
             return elem_type([default_convert(d) for d in data])
         except TypeError:
@@ -198,7 +197,7 @@ with contextlib.suppress(ImportError):
     default_collate_fn_map[(np.bool_, np.number, np.object_)] = collate_numpy_scalar_fn
 default_collate_fn_map[float] = collate_float_fn
 default_collate_fn_map[int] = collate_int_fn
-default_collate_fn_map[string_classes] = collate_str_fn
+default_collate_fn_map[str] = collate_str_fn
 
 
 def default_collate(batch):
