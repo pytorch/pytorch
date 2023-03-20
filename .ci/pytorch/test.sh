@@ -840,12 +840,6 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-# TODO: Include this in the Docker image
-if [[ "${TEST_CONFIG}" == *_perf* ]]; then
-  install_matplotlib
-  install_tabulate
-fi
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
