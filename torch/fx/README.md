@@ -17,7 +17,7 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
   - [Symbolic Tracer](#symbolic-tracer)
   - [Proxy](#proxy)
   - [TorchDynamo](#torchdynamo)
-- [The FX IR](#the-fx-ir)
+- [The FX IR Container](#the-fx-ir-container)
 - [Transformation and Codegen](#transformation-and-codegen)
 - [Next steps](#next-steps)
 
@@ -105,13 +105,13 @@ If you're doing graph transforms, you can wrap your own Proxy method around a ra
 
 ## [TorchDynamo](https://pytorch.org/docs/master/compile/technical-overview.html) ##
 
-Tracing has limitations in that it can't deal with dynamic control flow and is limited to outputting a single graph at a time, so a better alternative is the new `torch.compile()` infrastructure where you can output multiple subgraphs in a `torch.fx` IR. [This tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf) gives more context on how this works.
+Tracing has limitations in that it can't deal with dynamic control flow and is limited to outputting a single graph at a time, so a better alternative is the new `torch.compile()` infrastructure where you can output multiple subgraphs in either an aten or torch IR using `torch.fx`. [This tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf) gives more context on how this works.
 
 
 
-# The FX IR
+# The FX IR Container
 
-Symbolic tracing captures an intermediate representation (IR), which is represented as a doubly-linked list of Nodes.
+Tracing captures an intermediate representation (IR), which is represented as a doubly-linked list of Nodes.
 
 Node is the data structure that represents individual operations within a Graph. For the most part, Nodes represent callsites to various entities, such as operators, methods, and Modules (some exceptions include Nodes that specify function inputs and outputs). Each Node has a function specified by its `op` property. The Node semantics for each value of `op` are as follows:
 
@@ -128,7 +128,7 @@ To facilitate easier analysis of data dependencies, Nodes have read-only propert
 
 An invocation of `symbolic_traced` above requires a valid `forward()` method to be defined on the Module instance. How does this work? GraphModule actually generates valid Python source code based on the IR it is instantiated with. This can be seen by accessing the code attribute on the GraphModule: `print(symbolic_traced.code)`.
 
-After symbolic tracing, the code given under [Technical Details](#technical-details) is represented as follows:
+After tracing, the code given under [Technical Details](#technical-details) is represented as follows:
 
 ```python
 def forward(self, x):
