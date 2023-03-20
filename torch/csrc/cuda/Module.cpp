@@ -844,7 +844,7 @@ static std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
 ////////////////////////////////////////////////////////////////////////////////
 
 static void registerCudaDeviceProperties(PyObject* module) {
-  // Add _cudaDevicePropertires class to torch._C
+  // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
   py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
       .def_readonly("name", &cudaDeviceProp::name)
