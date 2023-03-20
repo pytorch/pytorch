@@ -319,8 +319,15 @@ class SizeVarAllocator:
         return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
-        expr_precomp = sympy_subs(sympy.expand(expr), self.inv_precomputed_replacements)
-        out = sympy_subs(expr_precomp, self.var_to_val)
+        if not isinstance(expr, Expr):
+            return int(expr)
+        free_symbols = expr.free_symbols
+        if not free_symbols:
+            return int(expr)
+        while any(s.name.startswith("ps") for s in free_symbols):
+           expr = sympy_subs(expr, self.inv_precomputed_replacements)
+           free_symbols = expr.free_symbols
+        out = sympy_subs(expr, self.var_to_val)
         return int(out)
 
     def size_hints(self, exprs: List[Expr]) -> int:
