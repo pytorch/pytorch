@@ -774,12 +774,13 @@ def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    first: bool,
+    index: int,
     last: bool,
 ) -> None:
     """
     called whenever a guard fails.
     """
+    first = index == 0
     global stashed_first_fail_reason
     # Don't waste time computing the fail reason for guards we aren't going to report out.
     if not guard_fn.guard_fail_fn and not (first or last):
@@ -829,7 +830,7 @@ def guard_error_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    first: bool,
+    index: int,
     last: bool,
 ):
     print(
