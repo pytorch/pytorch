@@ -5737,8 +5737,8 @@ class CommonTemplate:
             ["test_mm_views", True],
             [
                 "test_profiler_mark_wrapper_call",
-                False,
-            ],  # TODO: fallback to default wrapper for now
+                True,
+            ],
             ["test_reduction1", True],  # Reduction
             ["test_relu", True],  # multiple inputs
             ["test_silu", True],  # single input, single output
