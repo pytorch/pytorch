@@ -1639,3 +1639,7 @@ def _sparse_coo_tensor_unsafe(*args, **kwargs):
                   'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
     kwargs['check_invariants'] = False
     return torch.sparse_coo_tensor(*args, **kwargs)
+
+
+from . import _logging
+_logging._init_logs()
