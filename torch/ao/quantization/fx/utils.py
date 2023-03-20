@@ -152,6 +152,16 @@ def get_qconv_prepack_op(conv_op: Callable) -> Callable:
     assert prepack_op, "Didn't find prepack op for {}".format(conv_op)
     return prepack_op
 
+def get_qconv_transpose_prepack_op(conv_transpose_op: Callable) -> Callable:
+    prepack_ops = {
+        torch.nn.functional.conv_transpose1d: torch.ops.quantized.conv_transpose1d_prepack,
+        torch.nn.functional.conv_transpose2d: torch.ops.quantized.conv_transpose2d_prepack,
+        torch.nn.functional.conv_transpose3d: torch.ops.quantized.conv_transpose3d_prepack,
+    }
+    prepack_op = prepack_ops.get(conv_transpose_op, None)
+    assert prepack_op, "Didn't find prepack op for {}".format(conv_transpose_op)
+    return prepack_op
+
 # Returns a function that can get a new attribute name for module with given
 # prefix, for example,
 # >> get_new_observer_name = get_new_attr_name_with_prefix('_observer')
