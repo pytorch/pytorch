@@ -5155,6 +5155,17 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertEqual(fq1()._observer_ctr, fq2()._observer_ctr)
 
     def test_register_patterns(self):
+        def cleanUp():
+            del _DEFAULT_FUSION_PATTERNS["dummy_fusion"]
+            del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant"]
+            del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant2"]
+            del _DEFAULT_QUANTIZATION_PATTERNS["dummy_quant3"]
+            del _DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant2"]
+            del _DEFAULT_OUTPUT_OBSERVER_MAP["dummy_quant3"]
+            del _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant2"]
+            del _DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP["dummy_quant3"]
+        self.addCleanup(cleanUp)
+
         @_register_fusion_pattern("dummy_fusion")
         class DummyFusion():
             pass

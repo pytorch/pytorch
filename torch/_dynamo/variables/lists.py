@@ -363,7 +363,10 @@ class SizeVariable(TupleVariable):
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         proxy.node.meta["example_value"] = torch.Size(
-            [p.node.meta["example_value"] for p in proxies]
+            [
+                p.node.meta["example_value"] if not isinstance(p, int) else p
+                for p in proxies
+            ]
         )
         return proxy
 
