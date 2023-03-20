@@ -95,7 +95,7 @@ void copy_device_to_device(TensorIterator& iter,
       // peer-to-peer-capable need "cudaMemcpyPeerAsync".
       // So we let the allocator implement the correct call
       // (either cudaMemcpyAsync or cudaMemcpyPeerAsync)
-      AT_CUDA_CHECK(CUDACachingAllocator::get()->memcpyAsync(
+      AT_CUDA_CHECK(CUDACachingAllocator::memcpyAsync(
         dst, dst_device.index(),
         src, src_device.index(),
         size, copy_stream, p2p_enabled));
