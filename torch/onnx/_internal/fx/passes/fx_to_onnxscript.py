@@ -163,6 +163,16 @@ def _fill_tensor_meta(
     expected_values: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
 ):
     """Fill the meta information of onnxscript_values with that from the fx FakeTensor."""
+
+    if isinstance(expected_values, (list, tuple)) and not isinstance(
+        onnxscript_values, (list, tuple)
+    ):
+        # TODO(titaiwang): Support List of Tensors: https://github.com/microsoft/onnx-script/issues/481
+        # This is the case that fx has [tensor, tensor, ...], but onnxscript_value wrapped it as a single tensor.
+        # graph_buiding not yet support list of tensors, so we don't need to handle this case for now.
+        # eg: aten_split
+        return
+
     flat_onnxscript_values, _ = _pytree.tree_flatten(onnxscript_values)
     flat_expected_values, _ = _pytree.tree_flatten(expected_values)
     for i, (onnxscript_value, expected_value) in enumerate(
@@ -170,6 +180,9 @@ def _fill_tensor_meta(
     ):
         # Only set shape for now as we don't need type information.
         onnxscript_value.shape = tuple(expected_value.size())
+        # FIXME(titaiwang): type promotion is not supported yet,
+        # so set dtype will break onnx shape inference.
+        onnxscript_value.dtype = expected_value.dtype
         if i > 0:
             onnxscript_value.name = f"{name}_{i}"
         else:

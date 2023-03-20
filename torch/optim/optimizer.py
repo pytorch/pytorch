@@ -391,9 +391,8 @@ class Optimizer:
                              "that doesn't match the size of optimizer's group")
 
         # Update the state
-        id_map = {old_id: p for old_id, p in
-                  zip(chain.from_iterable((g['params'] for g in saved_groups)),
-                      chain.from_iterable((g['params'] for g in groups)))}
+        id_map = dict(zip(chain.from_iterable((g['params'] for g in saved_groups)),
+                      chain.from_iterable((g['params'] for g in groups))))
 
         def cast(param, value, key=None):
             r"""Make a deep copy of value, casting all tensors to device of param."""

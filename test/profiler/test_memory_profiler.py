@@ -177,7 +177,7 @@ class TestIdentifyGradients(TestCase):
 
     def test_extract_gradients_from_module(self) -> None:
         model = torch.nn.Sequential(torch.nn.Linear(2, 1), ScaleLayer())
-        named_parameters = {name: p for name, p in model.named_parameters()}
+        named_parameters = dict(model.named_parameters())
         self.assertEqual(len(named_parameters), 3)
 
         def assert_only_gradients(prof: torch.profiler.profile):
