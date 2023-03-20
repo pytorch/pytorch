@@ -1249,7 +1249,11 @@ function MemoryView(outer, stack_info, trace_data, events) {
                     l_segment_map[event.addr] = Segment(event.addr, event.size, event.stream, event.frames_idx, event.version)
                     break
                 case 'segment_alloc':
-                    delete l_segment_map[event.addr]
+                    // a pair of free/alloc on the same address is a segment expand, we want to keep it mapped
+                    // because there may still be blocks in this segment
+                    if (i == 0 || events[i - 1].action != 'segment_free' || events[i - 1].addr != event.addr) {
+                        delete l_segment_map[event.addr]
+                    }
                     break
                 case 'oom':
                     break
@@ -1279,7 +1283,7 @@ function MemoryView(outer, stack_info, trace_data, events) {
 
             let segments_by_addr = [...segments].sort((x, y) => x.addr - y.addr)
 
-            let max_size = segments.at(-1).size
+            let max_size = segments.length == 0 ? 0 : segments.at(-1).size
 
             let xScale = scaleLinear([0, max_size], [0, 200])
             let padding = xScale.invert(1)
