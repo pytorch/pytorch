@@ -154,7 +154,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.abs({x})"
 
     @staticmethod
-    def math_abs(x):
+    def libdevice_abs(x):
         return f"tl.math.abs({x})"
 
     @staticmethod
@@ -162,7 +162,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.exp({x})"
 
     @staticmethod
-    def math_exp(x):
+    def libdevice_exp(x):
         return f"tl.math.exp({x})"
 
     @staticmethod
@@ -178,7 +178,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sqrt({x})"
 
     @staticmethod
-    def math_sqrt(x):
+    def libdevice_sqrt(x):
         return f"tl.math.sqrt({x})"
 
     @staticmethod
@@ -202,7 +202,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.cos({x})"
 
     @staticmethod
-    def math_cos(x):
+    def libdevice_cos(x):
         return f"tl.math.cos({x})"
 
     @staticmethod
@@ -210,7 +210,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sin({x})"
 
     @staticmethod
-    def math_sin(x):
+    def libdevice_sin(x):
         return f"tl.math.sin({x})"
 
     @staticmethod
@@ -324,7 +324,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.sigmoid({x})"
 
     @staticmethod
-    def math_sigmoid(x):
+    def libdevice_sigmoid(x):
         return f"1/(1 + tl.math.exp(-({x})))"
 
     @staticmethod
@@ -345,7 +345,7 @@ class TritonOverrides(OpOverrides):
         return f"tl.log({x})"
 
     @staticmethod
-    def math_log(x):
+    def libdevice_log(x):
         return f"tl.math.log({x})"
 
     @staticmethod
