@@ -3093,6 +3093,11 @@ def all_reduce_meta(self, reduceOp, tag, rankset, group_size):
     return torch.empty_like(self)
 
 
+@register_meta(aten.all_reduce_coalesced)
+def all_reduce_coalesced_meta(self, reduceOp, tag, rankset, group_size):
+    return [torch.empty_like(t) for t in self]
+
+
 @register_meta(aten.all_gather_into_tensor)
 def all_gather_into_tensor_meta(shard, tag, rankset, group_size):
     out_size = list(shard.size())
