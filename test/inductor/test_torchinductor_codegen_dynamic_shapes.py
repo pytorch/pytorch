@@ -142,7 +142,6 @@ test_skips = {
     "test_repeat_dynamic_shapes": ("cpu",),
     "test_roll_dynamic_shapes": ("cpu",),
     "test_slice1_dynamic_shapes": ("cpu",),
-    "test_split_with_sizes_dynamic_shapes": ("cpu",),
     "test_stack_dynamic_shapes": ("cpu",),
     "test_tensor2_dynamic_shapes": ("cpu",),
     "test_tensor3_dynamic_shapes": ("cpu",),
@@ -154,8 +153,6 @@ test_skips = {
     "test_upsample_nearest2d_backward_dynamic_shapes": ("cpu",),
     "test_upsample_nearest2d_dynamic_shapes": ("cpu",),
     "test_upsample_nearest3d_dynamic_shapes": ("cpu",),
-    "test_views1_dynamic_shapes": ("cpu",),
-    "test_views2_dynamic_shapes": ("cpu",),
     "test_views3_dynamic_shapes": ("cpu",),
     "test_views4_dynamic_shapes": ("cpu",),
     "test_zeros_dynamic_shapes": ("cpu",),
@@ -203,6 +200,7 @@ test_skips = {
     "test_topk_dynamic_shapes": ("cpu", "cuda"),
     "test_unbind_dynamic_shapes": ("cpu", "cuda"),
     "test_view_detach_dynamic_shapes": ("cpu", "cuda"),
+    "test_view_on_aliased_dynamic_shapes": ("cpu", "cuda"),
     #
     # Tests not using 'common':
     #
@@ -231,10 +229,6 @@ test_skips = {
     #
     # These are from switching to specialize_int=False
     #
-    "test_div5_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # The values for attribute 'dtype' do not match
     "test_div8_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
     # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
     "test_reflection_pad2d_backward_dynamic_shapes": ("cpu", "cuda"),
