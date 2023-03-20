@@ -325,6 +325,8 @@ vjp_fail = {
     decorate('nn.functional.instance_norm', decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -472,6 +474,13 @@ class TestOperators(TestCase):
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
+
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -780,6 +789,8 @@ class TestOperators(TestCase):
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
         xfail("put"),  # vmap: inplace into a regular tensor
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('linalg.pinv', 'hermitian', decorator=skipIfRocm),
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
