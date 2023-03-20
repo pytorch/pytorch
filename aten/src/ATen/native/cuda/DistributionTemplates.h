@@ -454,17 +454,6 @@ struct NormalKernel {
 
 // ==================================================== Uniform ========================================================
 
-template <typename scalar_t, typename opmath_t>
-__device__ scalar_t truncate_to(opmath_t value) {
-  if constexpr(std::is_same_v<scalar_t, BFloat16>) {
-    return __float2bfloat16_rz(value);
-  }
-  if constexpr(std::is_same_v<scalar_t, Half>) {
-    return __float2half_rz(value);
-  }
-  return static_cast<scalar_t>(value);
-}
-
 template<typename RNG>
 void uniform_kernel(TensorIteratorBase& iter, double from_, double to_, RNG gen) {
   AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "uniform_kernel_cuda", [&] {
