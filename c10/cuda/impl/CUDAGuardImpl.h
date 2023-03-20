@@ -16,7 +16,8 @@ namespace c10 {
 namespace cuda {
 namespace impl {
 
-struct C10_CUDA_EXPORT CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
+struct C10_CUDA_EXPORT CUDAGuardImpl final
+    : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = DeviceType::CUDA;
 
   CUDAGuardImpl() = default;
