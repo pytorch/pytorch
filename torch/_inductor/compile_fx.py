@@ -190,7 +190,11 @@ def compile_fx_inner(
 
     output = list(gm.graph.nodes)[-1]
     assert len(output.args) == 1
-    stack_traces = [arg.stack_trace for arg in output.args[0]]
+    stack_traces = [
+        (arg.stack_trace if isinstance(arg, torch.fx.node.Node) else None)
+        for arg in output.args[0]
+    ]
+
     if cudagraphs:
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
