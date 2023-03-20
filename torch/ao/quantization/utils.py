@@ -681,3 +681,12 @@ __all__ = [
     "determine_qparams",
     "validate_qmin_qmax",
 ]
+
+conv_add_pattern_list = [(torch.ops.aten.relu.default,
+                         (torch.ops.aten.add.Tensor, torch.ops.aten.convolution.default, MatchAllNode)),
+                         (torch.ops.aten.relu_.default,
+                         (torch.ops.aten.add_.Tensor, torch.ops.aten.convolution.default, MatchAllNode)),
+                         (torch.ops.aten.add.Tensor, MatchAllNode, torch.ops.aten.convolution.default),
+                         (torch.ops.aten.add.Tensor, torch.ops.aten.convolution.default, MatchAllNode),
+                         (torch.ops.aten.add_.Tensor, MatchAllNode, torch.ops.aten.convolution.default),
+                         (torch.ops.aten.add_.Tensor, torch.ops.aten.convolution.default, MatchAllNode), ]
