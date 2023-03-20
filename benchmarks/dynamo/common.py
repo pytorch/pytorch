@@ -240,6 +240,7 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
+    "tf_efficientnet_b0",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
