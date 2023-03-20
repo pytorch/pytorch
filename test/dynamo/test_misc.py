@@ -5190,6 +5190,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         else:
             base_checker().check("No recompilation detected.").run(prof.report())
 
+        # Ensure correct guard fail message is selected to show to user
+        if not torch._dynamo.config.dynamic_shapes:
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
+
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
