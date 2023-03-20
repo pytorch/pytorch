@@ -267,11 +267,12 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += NNModuleToString.convert(gm)
 
-    model_str += f"args = []\n"
+    model_str += "args = []\n"
+
     # get hint shape/stride when dynamic shape enabled
-    hint_if_symint = lambda x: tuple(
-        i.node.hint if isinstance(i, torch.SymInt) else i for i in x
-    )
+    def hint_if_symint(x):
+        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
+
     for arg in args:
         if isinstance(arg, int):
             model_str += f"args.append({arg})\n"
@@ -279,7 +280,7 @@ from torch.fx.experimental.proxy_tensor import make_fx
             model_str += f"args.append({arg.node.hint})  # {arg}\n"
         elif isinstance(arg, torch.Tensor):
             model_str += (
-                f"args.append(rand_strided"
+                "args.append(rand_strided"
                 + f"{hint_if_symint(arg.shape), hint_if_symint(arg.stride()), arg.dtype, arg.device.type})"
                 + f"  # shape {tuple(arg.shape)}, stride {arg.stride()}\n"
             )
