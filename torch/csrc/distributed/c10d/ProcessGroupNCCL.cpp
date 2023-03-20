@@ -523,6 +523,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
           (*this),
           " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
       LOG(ERROR) << exceptionMsg;
+    }
+    // exception() includes timeout and error during blocking wait
+    if (exception()) {
       // Abort NCCL communicators
       abort();
       // Throw exception (from main thread here)
