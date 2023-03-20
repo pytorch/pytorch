@@ -1056,7 +1056,7 @@ def _get_param_id_to_param_from_optim_input(
     # Assume the standard case of passing `model.parameters()` to the optimizer
     # if `optim_input` is not specified
     if optim_input is None:
-        return {pid: param for pid, param in enumerate(model.parameters())}
+        return dict(enumerate(model.parameters()))
     try:
         params = cast(List[nn.Parameter], list(optim_input))
     except TypeError as e:
@@ -1076,7 +1076,7 @@ def _get_param_id_to_param_from_optim_input(
     if not all_tensors and not all_dicts:
         raise TypeError("Optimizer input should be an iterable of Tensors or dicts")
     if all_tensors:
-        return {pid: param for pid, param in enumerate(params)}
+        return dict(enumerate(params))
     assert all_dicts
     param_id_to_param: List[nn.Parameter] = []
     for param_group in params:
@@ -1089,7 +1089,7 @@ def _get_param_id_to_param_from_optim_input(
             # Implicitly map `flat_param_id` (current length of the list) to
             # `param`
             param_id_to_param.append(param)
-    return {pid: param for pid, param in enumerate(param_id_to_param)}
+    return dict(enumerate(param_id_to_param))
 
 
 def _get_flat_param_to_fqn(model: torch.nn.Module) -> Dict[nn.Parameter, str]:
