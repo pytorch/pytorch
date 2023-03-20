@@ -12,6 +12,7 @@ import sympy
 
 import torch
 
+import torch._logging
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
@@ -25,6 +26,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
+    unique,
 )
 from ..virtualized import ops, V
 
@@ -42,6 +44,7 @@ from .common import (
 )
 
 log = logging.getLogger(__name__)
+schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
 
 def signature_of(arg):
@@ -1244,6 +1247,7 @@ class TritonKernel(Kernel):
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
+        ninplace_args = len(unique(self.args.inplace_buffers.values()))
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
             result.writeline("from torch._inductor.utils import get_num_bytes")
@@ -1254,7 +1258,9 @@ class TritonKernel(Kernel):
             result.writeline(
                 "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
             )
-            result.writeline("num_gb = get_num_bytes(*args) / 1e9")
+            result.writeline(
+                f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"
+            )
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
             result.writeline(
                 'print(f"{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s")'
@@ -1589,8 +1595,8 @@ class TritonScheduling:
                     f"unexpected group: ({numel}, {rnumel}) != {node.group[1]}"
                 )
 
-        if dynamo_config.output_code:
-            log.info("schedule: %s", node_schedule)
+        if schedule_log.isEnabledFor(logging.DEBUG):
+            schedule_log.debug(f"Schedule:\n {node_schedule}")
         return self.codegen_node_schedule(node_schedule, numel, rnumel)
 
     @staticmethod
