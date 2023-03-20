@@ -2083,7 +2083,9 @@ class CppKernelProxy(CppKernel):
                                 node.replace_all_uses_with(val_node)
                                 sub_graph.erase_node(node)
 
-                    sub_graph.lint()
+                    # throws bound method LoopBody.get_index of <torch._inductor.ir.LoopBody object
+                    # is not an nn.Module `... not reference an nn.Module``
+                    # sub_graph.lint()
 
                 def _eliminate_redundant_to_node(sub_grah: torch.fx.Graph):
                     # TODO(Eikan) Remove redundant to_dtype like load_bf16 + to_fp32 + to_bf16 + store_bf16
