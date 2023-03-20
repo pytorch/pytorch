@@ -441,6 +441,7 @@ def compile_fx(
             "cpp_wrapper": True,
             "debug": True,
             "triton.cudagraphs": False,
+            "triton.unique_kernel_names": True,
         }
         with config.patch(aot_config_patches):
             return compile_fx(

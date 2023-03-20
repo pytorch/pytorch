@@ -23,7 +23,14 @@ from ..utils import (
     sympy_symbol,
 )
 from ..virtualized import V
-from .common import CodeGen, DeferredLine, IndentedBuffer, Kernel, PythonPrinter
+from .common import (
+    CodeGen,
+    DeferredLine,
+    DeferredLineBase,
+    IndentedBuffer,
+    Kernel,
+    PythonPrinter,
+)
 
 pexpr = PythonPrinter().doprint
 
@@ -39,6 +46,22 @@ def buffer_reuse_key(node: ir.Buffer):
         # Detect gaps in tensor storage caused by strides
         V.graph.sizevars.size_hint(last_element),
     )
+
+
+def is_int(s: str):
+    try:
+        int(s)
+    except ValueError:
+        return False
+    return True
+
+
+def is_float(s: str):
+    try:
+        float(s)
+    except ValueError:
+        return False
+    return True
 
 
 class MemoryPlanningState:
@@ -148,6 +171,38 @@ class ReuseLine(MemoryPlanningLine):
                 self.reused_as,
             )
         )
+
+
+class DeferredKernelNameLine(DeferredLineBase):
+    """A line that contains mangled CUDA kernel name that will be filled in the second pass"""
+
+    def __init__(self, name, line):
+        super().__init__(line)
+        self.name = name
+
+    def __call__(self):
+        with open(f"{self.name}.mangled", "r") as f:
+            mangled_name = f.readline()
+            return self.line.replace("MANGLED_NAME", mangled_name)
+
+    def _new_line(self, line):
+        return DeferredKernelNameLine(self.name, line)
+
+
+class DeferredKernelParamLine(DeferredLineBase):
+    """A line that contains CUDA launch parameters that will be filled in the second pass"""
+
+    def __init__(self, name, line):
+        super().__init__(line)
+        self.name = name
+
+    def __call__(self):
+        with open(f"{self.name}.param", "r") as f:
+            params = f.readline()
+            return self.line.replace("LAUNCH_PARAMS", params)
+
+    def _new_line(self, line):
+        return DeferredKernelParamLine(self.name, line)
 
 
 class NullLine(MemoryPlanningLine):
@@ -477,8 +532,11 @@ class WrapperCodeGen(CodeGen):
                         name, shape, stride, value.get_device(), value.get_dtype()
                     )
 
+            call_str = f"call([{', '.join(V.graph.graph_inputs.keys())}])"
             output.writeline(
-                f"print_performance(lambda: call([{', '.join(V.graph.graph_inputs.keys())}]))"
+                call_str
+                if V.graph.aot_mode
+                else f"print_performance(lambda: {call_str})"
             )
 
     def add_benchmark_harness(self, output):
@@ -861,9 +919,10 @@ class CppWrapperCodeGen(WrapperCodeGen):
         return f"{buffer.get_name()}.reset();"
 
     def make_buffer_allocation(self, buffer):
-        from .cpp import DTYPE_TO_ATEN
+        from .cpp import DEVICE_TO_ATEN, DTYPE_TO_ATEN
 
-        # TODO: map layout and device here
+        # TODO: map layout here
+        device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         stride = tuple(buffer.get_stride())
@@ -871,13 +930,14 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.declare}{buffer.get_name()} = {self.namespace}empty_strided("
             f"{self.codegen_shape_tuple(shape)}, "
             f"{self.codegen_shape_tuple(stride)}, "
-            f"{DTYPE_TO_ATEN[dtype]}){self.ending}"
+            f"at::device({DEVICE_TO_ATEN[device.type]})"
+            f".dtype({DTYPE_TO_ATEN[dtype]})){self.ending}"
         )
 
 
 class CppAotWrapperCodeGen(CppWrapperCodeGen):
     """
-    The AOT-version outer wrapper that calls the kernels in C++
+    The AOT-version outer C++ wrapper that calls the kernels in C++
     """
 
     def set_header(self):
@@ -889,7 +949,7 @@ class CppAotWrapperCodeGen(CppWrapperCodeGen):
     def call_func_name(self):
         return "aot_inductor_entry"
 
-    def define_kernel(self, name: str, kernel: str):
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
         self.header.splice(f"\n{kernel}\n")
 
     def load_kernel(self, name: str = None, kernel: str = None, arg_types: List = None):
@@ -899,10 +959,161 @@ class CppAotWrapperCodeGen(CppWrapperCodeGen):
         return f"{name}({', '.join(call_args)});"
 
     def return_end_str(self):
-        return "\n}"
+        return "\n}\n"
 
     def generate_end(self, result):
         return
 
     def add_benchmark_harness(self, output):
         return
+
+
+class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
+    """
+    The AOT-version outer C++ wrapper that calls the kernels in CUDA
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.kernel_callsite_id = 0
+        self.arg_var_id = 0
+
+    def set_header(self):
+        return
+
+    def write_prefix(self):
+        # KERNEL_DECLARES will be replaced after we have collected all the kernels
+        self.prefix.splice(
+            """
+            #include <ATen/ATen.h>
+            #include <ATen/cuda/CUDAContext.h>
+            #include <ATen/cuda/Exceptions.h>
+            #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+
+            #include <fstream>
+
+            CUfunction loadKernel(const std::string &filePath, const std::string &funcName) {
+                CUmodule mod;
+                CUfunction func;
+                AT_CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
+                AT_CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
+                return func;
+            }
+
+            void launchKernel(
+                    CUfunction func,
+                    int gridX,
+                    int gridY,
+                    int gridZ,
+                    int numWraps,
+                    int sharedMemBytes,
+                    void* args[]) {
+                AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
+                    func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
+                    at::cuda::getCurrentCUDAStream(), args, nullptr));
+            }
+            """
+        )
+
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        self.kernels[kernel] = name
+
+    def generate(self):
+        self.prefix.writeline("\n")
+        for kernel in self.kernels.values():
+            self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
+        self.prefix.writeline("\n")
+        return super().generate()
+
+    def generate_load_kernel(self, name: str = None):
+        self.writeline(f"if ({name} == nullptr) {{")
+        self.writeline(
+            DeferredKernelNameLine(
+                name, f"""     {name} = loadKernel("{name}.cubin", "MANGLED_NAME");"""
+            )
+        )
+        self.writeline("}")
+
+    def generate_args_decl(self, call_args):
+        # TODO: only works for constant now, need type info
+        new_args = []
+        for arg in call_args:
+            var_name = f"var_{self.arg_var_id}"
+            if is_int(arg):
+                self.writeline(f"int {var_name} = {arg};")
+            elif is_float(arg):
+                self.writeline(f"float {var_name} = {arg};")
+            else:
+                self.writeline(
+                    f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                )
+            new_args.append(f"&{var_name}")
+            self.arg_var_id += 1
+
+        return ", ".join(new_args)
+
+    def generate_kernel_call(self, name, call_args):
+        self.generate_load_kernel(name)
+        call_args = self.generate_args_decl(call_args)
+        self.writeline(
+            f"void* kernel_args_{self.kernel_callsite_id}[] = {{{call_args}}};"
+        )
+        self.writeline(
+            DeferredKernelParamLine(
+                name,
+                f"launchKernel({name}, LAUNCH_PARAMS, kernel_args_{self.kernel_callsite_id});",
+            )
+        )
+        self.kernel_callsite_id += 1
+
+
+class TwoPassAotWrapperCodeGen(WrapperCodeGen):
+    """
+    When performing AOT compilation for the CUDA backend, we need to maintain
+    two sets of wrapper code. WrapperCodeGen is still needed to generate the
+    Python wrapper code which will be executed to perform Triton compilaiton
+    and autotuning. CudaAotWrapperCodeGen generates C++ version wrapper code
+    which calls CUDA kernels produced from autotuning.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.cpp_wrapper = CudaAotWrapperCodeGen()
+
+    def generate(self):
+        from ..codecache import PyCodeCache
+
+        # Generate and run the python wrapper first
+        python_wrapper_code, linemap = super().generate()
+        if config.debug:
+            print("/* AOT-Inductor generated first-pass python wrapper */")
+            print(python_wrapper_code)
+            print("Running the generated python wrapper")
+        mod = PyCodeCache.load(python_wrapper_code, linemap=linemap)
+        mod.benchmark_compiled_module()
+
+        # Generate the cpp wrapper
+        return self.cpp_wrapper.generate()
+
+    # For actions happen before calling .generate(), we need to record them
+    # for both WrapperCodeGen
+    def generate_kernel_call(self, name, call_args):
+        # The Triton codegen does not call generate_kernel_call.
+        # Could use some refactoring here.
+        self.cpp_wrapper.generate_kernel_call(name, call_args)
+
+    def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
+        self.cpp_wrapper.define_kernel(name, kernel)
+        return super().define_kernel(name, kernel)
+
+    def codegen_allocation(self, buffer):
+        self.cpp_wrapper.codegen_allocation(buffer)
+        return super().codegen_allocation(buffer)
+
+    def codegen_free(self, buffer):
+        self.cpp_wrapper.codegen_free(buffer)
+        return super().codegen_free(buffer)
+
+    def codegen_inplace_reuse(self, input_buffer, output_buffer):
+        self.cpp_wrapper.codegen_inplace_reuse(input_buffer, output_buffer)
+        return super().codegen_inplace_reuse(input_buffer, output_buffer)

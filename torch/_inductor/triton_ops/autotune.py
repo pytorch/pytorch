@@ -27,6 +27,7 @@ from ..utils import (
     has_triton,
     next_power_of_2,
 )
+from ..virtualized import V
 from .conv_perf_model import (
     early_config_prune as conv_early_config_prune,
     estimate_conv_time,
@@ -141,6 +142,10 @@ class CachingAutotuner(KernelInterface):
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
+        if getattr(V.graph, "aot_mode", False):
+            launcher.kernel_name = self.fn.__name__
+            launcher.bin = binary
+
         return launcher
 
     def bench(self, launcher, *args, grid):
@@ -196,6 +201,22 @@ class CachingAutotuner(KernelInterface):
                 self.autotune_to_one_config(*args, grid=grid)
 
         (launcher,) = self.launchers
+
+        if getattr(V.graph, "aot_mode", False):
+            if callable(grid):
+                grid_0, grid_1, grid_2 = grid(launcher.config.kwargs)
+            else:
+                grid_0, grid_1, grid_2 = grid
+
+            with open(f"{launcher.kernel_name}.mangled", "w") as f:
+                f.write(launcher.bin.metadata["name"])
+            with open(f"{launcher.kernel_name}.param", "w") as f:
+                f.write(
+                    f"{grid_0}, {grid_1}, {grid_2}, {launcher.bin.num_warps}, {launcher.bin.shared}"
+                )
+            with open(f"{launcher.kernel_name}.cubin", "wb") as f:
+                f.write(launcher.bin.asm["cubin"])
+
         if launcher.config.pre_hook is not None:
             launcher.config.pre_hook(
                 {**zip(self.arg_names, args), **launcher.config.kwargs}

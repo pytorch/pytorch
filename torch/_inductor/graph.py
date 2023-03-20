@@ -1,3 +1,4 @@
+import functools
 import logging
 import operator
 import os
@@ -24,7 +25,12 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import (
+    CppAotWrapperCodeGen,
+    CppWrapperCodeGen,
+    TwoPassAotWrapperCodeGen,
+    WrapperCodeGen,
+)
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -532,12 +538,17 @@ class GraphLowering(torch.fx.Interpreter):
         if config.profiler_mark_wrapper_call:
             self.disable_cpp_wrapper("profiler not supported")
 
-    def check_device_for_cpp_buffer(self):
+    @functools.lru_cache(None)
+    def get_single_device(self):
         if len(self.device_types) == 1:
-            device = self.device_types.pop()
-            if device == "cpu":
-                return
-        self.disable_cpp_wrapper("device not CPU")
+            device = list(self.device_types)[0]
+            if device == "cpu" or "cuda":
+                return device
+        return None
+
+    def check_device_for_cpp_buffer(self):
+        if self.get_single_device() is None:
+            self.disable_cpp_wrapper("device not CPU or CUDA")
 
     def check_input_for_cpp_buffer(self):
         for _, value in self.graph_inputs.items():
@@ -559,12 +570,14 @@ class GraphLowering(torch.fx.Interpreter):
         if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
-                self.wrapper_code = (
-                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
-                )
+                if self.aot_mode:
+                    if self.get_single_device() == "cpu":
+                        self.wrapper_code = CppAotWrapperCodeGen()
+                    elif self.get_single_device() == "cuda":
+                        self.wrapper_code = TwoPassAotWrapperCodeGen()
+                else:
+                    self.wrapper_code = CppWrapperCodeGen()
                 return
-            else:
-                assert not self.aot_mode, "Model does not support AOT compilation"
         self.wrapper_code = WrapperCodeGen()
 
     def codegen(self):
@@ -576,7 +589,8 @@ class GraphLowering(torch.fx.Interpreter):
         assert self.scheduler is not None  # mypy can't figure this out
         self.scheduler.codegen()
         assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        code = self.wrapper_code.generate()
+        return code
 
     def count_bytes(self):
         from .scheduler import FusedSchedulerNode, NopKernelSchedulerNode, Scheduler
@@ -643,12 +657,14 @@ class GraphLowering(torch.fx.Interpreter):
         if self.aot_mode:
             from .codecache import AotCodeCache
 
-            code = self.codegen()
+            code, linemap = self.codegen()
             if config.debug:
+                print("/* AOT-Inductor generated code */")
                 print(code)
-
             # return the generated .so file path
-            output_path = AotCodeCache.compile(code)
+            output_path = AotCodeCache.compile(
+                code, cuda=(self.get_single_device() == "cuda")
+            )
             return lambda dummy: output_path
         else:
             return self.compile_to_module().call

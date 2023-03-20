@@ -1435,11 +1435,13 @@ class TritonKernel(Kernel):
                 call_args.append(expr)
             if tree.prefix != "r":
                 grid.append(expr)
-        call_args = ", ".join(call_args)
+        call_args_str = ", ".join(call_args)
         stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
         code.writeline(
-            f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
+            f"{name}.run({call_args_str}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
+        if V.graph.aot_mode:
+            V.graph.wrapper_code.generate_kernel_call(name, call_args)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
@@ -1651,6 +1653,7 @@ class TritonScheduling:
 
         src_code = kernel.codegen_kernel()
         kernel_name = self.define_kernel(src_code, node_schedule)
+
         kernel.call_kernel(V.graph.wrapper_code, kernel_name)
         self.scheduler.free_buffers()
 
