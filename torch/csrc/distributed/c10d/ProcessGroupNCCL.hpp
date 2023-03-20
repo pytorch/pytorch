@@ -549,10 +549,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communicators from the cache and clears used device indices.
   void destroyNCCLComms(const std::string& devNCCLCommMapKey);
 
+  // Watchdog's inside loop.
+  // Takes care of cleaning up completed work, and aborting upon failure or timeout.
   void workCleanupLoop();
 
+  // Desync debug helper
   void logWorkStart(WorkNCCL& work);
 
+  // Desync debug helper
   void logWorkEnd(WorkNCCL& work);
 
  protected:
