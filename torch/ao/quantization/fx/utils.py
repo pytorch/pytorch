@@ -59,6 +59,7 @@ __all__ = [
     "get_new_attr_name_with_prefix",
     "get_non_observable_arg_indexes_and_types",
     "get_qconv_prepack_op",
+    "get_qconv_transpose_prepack_op",
     "get_skipped_module_name_and_classes",
     "graph_module_from_producer_nodes",
     "maybe_get_next_module",
