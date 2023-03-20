@@ -1,4 +1,4 @@
-#include <ATen/SparseTensorUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
