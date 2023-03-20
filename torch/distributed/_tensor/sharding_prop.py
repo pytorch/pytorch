@@ -78,6 +78,8 @@ class ShardingPropagator:
         # sharding propagation to get the output sharding
         try:
             output_sharding = sharding_prop_func(op_schema)
+        except NotImplementedError as e:
+            raise e
         except Exception as e:
             raise RuntimeError(
                 f"Sharding propagation failed on op {op_overload}.\n"
