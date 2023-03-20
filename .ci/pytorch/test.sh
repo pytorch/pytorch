@@ -264,7 +264,7 @@ DYNAMO_BENCHMARK_FLAGS=()
 
 if [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
-elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
 fi
 
@@ -277,6 +277,46 @@ if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
 else
   DYNAMO_BENCHMARK_FLAGS+=(--device cuda)
 fi
+
+test_perf_for_dashboard() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+
+  local suite="$1"
+  shift
+
+  for dtype in amp float32; do
+    # Run accuracy test
+    # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
+    for backend in eager aot_eager; do
+      python "benchmarks/dynamo/$suite.py" \
+          --accuracy --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/{$backend}_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+    done
+
+    # Run accuracy test for inductor with different configs
+    # --disable-cudagraphs is the default inductor behavior
+    # TODO: update here once cudagraphs is turned on as default
+    backend=inductor
+    python "benchmarks/dynamo/$suite.py" \
+        --accuracy --backend "$backend" --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/{$backend}_no_cudagraphs_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --accuracy --backend "$backend" "$@" \
+        --output "$TEST_REPORTS_DIR/{$backend}_with_cudagraphs_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+
+    # Run performance test
+    # Skip dynamo-eager and aot-eager for performance test
+    # Run performance test for inductor with different configs
+    # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
+    python "benchmarks/dynamo/$suite.py" \
+        --performance --backend "$backend" --disable-cudagraphs "$@" \
+        --output "$TEST_REPORTS_DIR/{$backend}_no_cudagraphs_{$suite}_{$dtype}_training_cuda_performance.csv"
+    python "benchmarks/dynamo/$suite.py" \
+        --performance --backend "$backend" "$@" \
+        --output "$TEST_REPORTS_DIR/{$backend}_with_cudagraphs_{$suite}_{$dtype}_training_cuda_performance.csv"
+  done
+}
 
 test_single_dynamo_benchmark() {
   # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
@@ -302,15 +342,12 @@ test_single_dynamo_benchmark() {
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     python "benchmarks/dynamo/$suite.py" \
-      --ci --performance --disable-cudagraphs \
-      "${DYNAMO_BENCHMARK_FLAGS[@]}" \
-      "$@" "${partition_flags[@]}" \
+      --ci --performance --disable-cudagraphs --inductor \
+      "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
-    # MKL_THREADING_LAYER=GNU to mitigate https://github.com/pytorch/pytorch/issues/37377
-    MKL_THREADING_LAYER=GNU python benchmarks/dynamo/runner.py --suites="$suite" \
-      --base-sha="$BASE_SHA" "${partition_flags[@]}" \
-      --no-graphs --no-update-archive --no-gh-comment "$@"
+    test_perf_for_dashboard "$suite" \
+      "${DYNAMO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
   else
     python "benchmarks/dynamo/$suite.py" \
       --ci --accuracy --timing --explain \
@@ -322,6 +359,7 @@ test_single_dynamo_benchmark() {
     if [[ "${TEST_CONFIG}" == *inductor* ]] && [[ "${TEST_CONFIG}" != *cpu_accuracy* ]] && [[ "${TEST_CONFIG}" != *dynamic* ]]; then
       # because I haven't dealt with dynamic expected artifacts yet,
       # and non-inductor jobs (e.g. periodic, cpu-accuracy) may have different set of expected models.
+      # TODO: make update_expected.py produces combined expected csv file
       python benchmarks/dynamo/check_graph_breaks.py \
         --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
         --expected "benchmarks/dynamo/ci_expected_accuracy/${name}_${suite}${shard_id}.csv"
@@ -339,11 +377,10 @@ test_dynamo_benchmark() {
   shift
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
-    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --amp "$@"
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
-    # Performance test training only, for float32 and amp
-    test_single_dynamo_benchmark "amp" "$suite" "$shard_id" --training --dtypes=amp --output-dir="$TEST_REPORTS_DIR"/amp "$@"
-    test_single_dynamo_benchmark "float32" "$suite" "$shard_id" --training --dtypes=float32 --output-dir="$TEST_REPORTS_DIR"/float32 "$@"
+    # Performance test training only
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training "$@"
   else
     # Check inference with --float32
     test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --float32 "$@"
@@ -803,12 +840,6 @@ test_executorch() {
   assert_git_not_dirty
 }
 
-# TODO: Include this in the Docker image
-if [[ "${TEST_CONFIG}" == *_perf* ]]; then
-  install_matplotlib
-  install_tabulate
-fi
-
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* || "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -848,7 +879,8 @@ elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHAR
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
-  test_dynamo_benchmark huggingface ""
+  id=$((SHARD_NUMBER-1))
+  test_dynamo_benchmark huggingface "$id"
 elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   install_timm
@@ -862,12 +894,13 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   fi
   install_torchtext
   install_torchvision
+  id=$((SHARD_NUMBER-1))
   if [[ "${TEST_CONFIG}" == *inductor_torchbench_smoketest_perf* ]]; then
     checkout_install_torchbench hf_Bert hf_Albert timm_efficientdet timm_vision_transformer
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_smoketest_perf
   else
     checkout_install_torchbench
-    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench ""
+    PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
 elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision

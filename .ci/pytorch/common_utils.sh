@@ -162,14 +162,6 @@ function clone_pytorch_xla() {
   fi
 }
 
-function install_matplotlib() {
-  pip_install matplotlib
-}
-
-function install_tabulate() {
-  pip_install tabulate
-}
-
 function checkout_install_torchdeploy() {
   local commit
   commit=$(get_pinned_commit multipy)
