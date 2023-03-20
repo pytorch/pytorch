@@ -5231,8 +5231,9 @@ class CommonTemplate:
         self.assertTrue(same(g2, g3))
 
     @config.patch(search_autotune_cache=False)
-    @requires_cuda()
     def test_lowmem_dropout2(self):
+        if self.device == "cpu":
+            raise unittest.SkipTest("lowmem_dropout only supports cuda")
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
             torch.nn.Dropout(),
