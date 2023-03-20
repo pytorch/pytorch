@@ -562,6 +562,13 @@ def explain(f, *args, **kwargs):
     )
 
 
+@dataclasses.dataclass
+class Constraint:
+    w_tensor: weakref.ReferenceType[torch.Tensor]
+    dim: int
+    constraint_range: Optional[MinMaxConstraint]
+
+
 def export(
     f: Callable[..., Any],
     *args,
@@ -570,6 +577,9 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
+    constraints: List[
+        Constraint,
+    ] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -681,6 +691,7 @@ def export(
             dynamo_normalization_capturing_compiler,
             hooks=Hooks(guard_export_fn=guard_export_print, guard_fail_fn=None),
             export=True,
+            export_constraints=constraints,
             dynamic=(tracing_mode == "symbolic"),
         )(f)
         # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideffects and reject.
@@ -853,7 +864,7 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=False):
+def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, export_constraints=None, dynamic=False):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -863,7 +874,7 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, dynamic=F
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export),
+        convert_frame.convert_frame_assert(backend, export=export, export_constraints=export_constraints),
         hooks,
         backend_ctx_ctor,
         export=export,

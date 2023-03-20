@@ -199,6 +199,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
+    export_constraints = None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -274,6 +275,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
+            export_constriants,
             hooks,
             frame,
         )
@@ -291,6 +293,7 @@ def _compile(
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
+    export_constraints,
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
@@ -312,6 +315,7 @@ def _compile(
             compiler_fn,
             one_graph,
             export,
+            export_constraints,
             mutated_closure_cell_contents,
         )
         with tracing(tracer.output.tracing_context):

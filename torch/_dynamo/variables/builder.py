@@ -1081,6 +1081,10 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
+
+        # TODO: iterate through export_constraints to set things up, rather
+        # than what we do right now
+
         static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
         dynamic_ranges = None
