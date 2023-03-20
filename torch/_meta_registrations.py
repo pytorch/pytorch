@@ -750,6 +750,7 @@ if torch._C.has_mkldnn:
     _meta_lib_dont_use_me_use_register_meta_for_quantized = torch.library.Library(
         "quantized", "IMPL", "Meta"
     )
+
     @register_meta(torch.ops.quantized.conv_unary.tensor)
     def meta_int8_convolution_tensor(
         qx,
@@ -766,7 +767,7 @@ if torch._C.has_mkldnn:
         groups,
         output_scale,
         output_zero_point,
-        unary_post_op
+        unary_post_op,
     ):
         if len(qx.shape) == 3 and len(qw.shape) == 4:
             # For conv1d, x and w should both have rank 3
@@ -2873,7 +2874,9 @@ def activate_meta():
             elif "mkl::" in op_overload.name():
                 _meta_lib_dont_use_me_use_register_meta_for_mkl.impl(op_overload, fn)
             elif "quantized::" in op_overload.name():
-                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(op_overload, fn)
+                _meta_lib_dont_use_me_use_register_meta_for_quantized.impl(
+                    op_overload, fn
+                )
             else:
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
