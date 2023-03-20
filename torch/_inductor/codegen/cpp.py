@@ -213,6 +213,10 @@ class OptimizationContext:
     is_load_bf16_as_fp32: bool = False
     # Store float32 value as bfloat16
     is_store_fp32_as_bf16: bool = False
+    # do not  need type cast for
+    # for mem copy only node bf16 load -> bf16 store,
+    is_directly_load_bf16: bool = False
+    is_directly_store_bf16: bool = False
 
     dtype: torch.dtype = torch.float
     ops_name: str = ""
@@ -467,7 +471,7 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx
         assert opt_ctx.dtype in [torch.int32, torch.float32]
         if dtype in [torch.bfloat16]:
-            assert opt_ctx.is_load_bf16_as_fp32
+            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_directly_load_bf16
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
             assert proposed_dtype == torch.float
@@ -1124,6 +1128,7 @@ class CppVecKernel(CppKernel):
         return not expanded_index.has(var)
 
     def load(self, name: str, index: sympy.Expr):
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -1148,7 +1153,11 @@ class CppVecKernel(CppKernel):
             )
             line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
         elif V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"load_bf16_as_float({var_expr})"
+            if opt_ctx.is_load_bf16_as_fp32:
+                line = f"load_bf16_as_float({var_expr})"
+            else:
+                assert opt_ctx.is_directly_load_bf16
+                line = f"at::vec::Vectorized<bfloat16>::loadu({var_expr}, {self.tiling_factor})"
         elif is_broadcast:
             line = f"at::vec::Vectorized<float>({var_expr})"
         else:
@@ -1158,6 +1167,7 @@ class CppVecKernel(CppKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
+        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         index = self.rename_indexing(index)
         assert mode is None
@@ -1166,7 +1176,13 @@ class CppVecKernel(CppKernel):
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
         assert new_index != expanded_index
         if V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
+            if opt_ctx.is_store_fp32_as_bf16:
+                line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
+            else:
+                assert opt_ctx.is_directly_store_bf16
+                line = (
+                    f"{value}.store({var} + {cexpr(new_index)}, {self.tiling_factor});"
+                )
         else:
             line = f"{value}.store({var} + {cexpr(new_index)});"
         self.stores.writeline(name, line)
@@ -1543,7 +1559,7 @@ class CppVecKernelChecker(CppVecKernel):
                 opt_ctx.is_load_bf16_as_fp32 = self.can_load_bf16_as_fp32(
                     node_ctx.get_fx_node()
                 )
-                if not opt_ctx.is_load_bf16_as_fp32:
+                if not (opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_directly_load_bf16):
                     self.simd_vec = False
                     return var
 
@@ -1571,8 +1587,7 @@ class CppVecKernelChecker(CppVecKernel):
                     name, value_node
                 )
                 if not opt_ctx.is_store_fp32_as_bf16:
-                    self.simd_vec = False
-                    return self.simd_vec
+                    return opt_ctx.is_directly_store_bf16
 
             assert "buf" in name
             index = self.rename_indexing(index)
@@ -1651,11 +1666,12 @@ class CppVecKernelChecker(CppVecKernel):
                     break
 
                 # Create and record the context
-                opt_ctx = OptimizationContext()
-                opt_ctx.dtype = load_dtype
-                opt_ctx.ops_name = _node.target
-                opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
-                _node.meta[OptimizationContext.key] = opt_ctx
+                with RecordOptimizationContext(__name__) as node_ctx:
+                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
+                    assert opt_ctx
+                    opt_ctx.dtype = load_dtype
+                    opt_ctx.ops_name = _node.target
+                    opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
 
             if _node.target == "to_dtype":
                 dtype = _node.args[-1]
@@ -1765,7 +1781,7 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.is_load_bf16_as_fp32 = True
                             opt_ctx.dtype = torch.float
                         else:
-                            self.simd_vec = False
+                            self.simd_vec = opt_ctx.is_directly_load_bf16
 
                     return val
 
@@ -1994,10 +2010,39 @@ class CppKernelProxy(CppKernel):
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
+            def only_used_by_store(node: torch.fx.Node):
+                if len(node.users) > 1:
+                    return False
+                for user in node.users:
+                    _only_used_by_store = user.target == "store"
+                    opt_ctx = OptimizationContext()
+                    opt_ctx.is_directly_load_bf16 = _only_used_by_store
+                    node.meta[OptimizationContext.key] = opt_ctx
+                    return _only_used_by_store
+
+            def can_directly_store(node: torch.fx.Node):
+                store_buf = node.args[1]
+                store_node = node.args[3]
+                store_dtype = V.graph.get_dtype(store_buf)
+                load_dtype = (
+                    V.graph.get_dtype(store_node.args[1])
+                    if store_node.target == "load"
+                    else store_node.args[-1]
+                )
+                if only_used_by_store(store_node) and store_dtype == load_dtype:
+                    opt_ctx = OptimizationContext()
+                    opt_ctx.is_directly_store_bf16 = True
+                    node.meta[OptimizationContext.key] = opt_ctx
+                    return True
+                else:
+                    return False
+
             for node in sub_graph.nodes:
                 _node: torch.fx.Node = node
                 if _node.target in ["load", "constant"]:
                     assert len(_node.args) == 3
+                    if only_used_by_store(node):
+                        continue
                     ops = _node.args[0]
                     # If the node is constant, the last arg is dtype
                     load_dtype = (
@@ -2014,7 +2059,10 @@ class CppKernelProxy(CppKernel):
                             to_type_node_args = to_type_node.args
                             _node.replace_all_uses_with(to_type_node)
                             to_type_node.args = to_type_node_args
+                            metrics.to_dtype_count += 1
                 elif _node.target == "store":
+                    if can_directly_store(_node):
+                        continue
                     ops, store_var, _, value_var, _ = _node.args
                     store_dtype = V.graph.get_dtype(store_var)
                     if store_dtype == torch.bfloat16:
@@ -2023,6 +2071,7 @@ class CppKernelProxy(CppKernel):
                                 "to_dtype", args=(ops, value_var, torch.bfloat16)
                             )
                             _node.replace_input_with(value_var, to_type_node)
+                            metrics.to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
                         ops,
@@ -2085,13 +2134,7 @@ class CppKernelProxy(CppKernel):
 
                     sub_graph.lint()
 
-                def _eliminate_redundant_to_node(sub_grah: torch.fx.Graph):
-                    # TODO(Eikan) Remove redundant to_dtype like load_bf16 + to_fp32 + to_bf16 + store_bf16
-                    # => load_bf16 + store_bf16
-                    pass
-
                 _eliminate_duplicate_to_node(sub_graph)
-                _eliminate_redundant_to_node(sub_graph)
 
             eliminate_to_dtype(sub_graph)
 
