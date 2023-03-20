@@ -75,6 +75,7 @@ def is_default_node(node, modules):
     module_type_list = [
         nnqr.ConvTranspose1d,
         nnqr.ConvTranspose2d,
+        nnqr.ConvTranspose3d,
         torch.nn.ELU,
         torch.nn.LeakyReLU,
         torch.nn.Hardswish,
@@ -242,6 +243,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.BatchNorm3d: nnq.BatchNorm3d,
     nnqr.ConvTranspose1d: nnq.ConvTranspose1d,
     nnqr.ConvTranspose2d: nnq.ConvTranspose2d,
+    nnqr.ConvTranspose3d: nnq.ConvTranspose3d,
     nn.ELU: nnq.ELU,
     nn.LeakyReLU: nnq.LeakyReLU,
     nn.Hardswish: nnq.Hardswish,
