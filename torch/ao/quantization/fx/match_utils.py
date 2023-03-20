@@ -12,7 +12,8 @@ from ..qconfig import (
     QConfigAny,
 )
 from ..utils import (
-    MatchAllNode
+    MatchAllNode,
+    conv_add_pattern_list
 )
 from .graph_module import (
     _is_observed_standalone_module,
@@ -128,15 +129,40 @@ def _find_matches(
             node_pattern,
             matched_node_pattern,
             pattern,
-            match_value):
+            match_value,
+            matched_pattern):
         if isinstance(node_pattern, Node):
+            if (matched_pattern in conv_add_pattern_list) and (pattern is MatchAllNode):
+                # Skip adding extra input node of conv_add_relu fusion pattern into the match_map.
+                return
             match_map[node_pattern.name] = (
-                last_node, matched_node_pattern, pattern, match_value)
+                last_node, matched_node_pattern, matched_pattern, match_value)
         elif not isinstance(node_pattern, Iterable):
             return
         else:
-            for n in node_pattern:
-                _recursive_record_node_in_match_map(last_node, match_map, n, matched_node_pattern, pattern, match_value)
+            if isinstance(pattern, tuple):
+                for n, pattern_n in zip(node_pattern, pattern):
+                    _recursive_record_node_in_match_map(
+                        last_node,
+                        match_map,
+                        n,
+                        matched_node_pattern,
+                        pattern_n,
+                        match_value,
+                        matched_pattern)
+            else:
+                # If there is only 1 node in the pattern, however node_pattern will still pass in as a list of length 1.
+                assert(isinstance(node_pattern, List) and len(node_pattern) == 1)
+                pattern_n = pattern
+                n = node_pattern[0]
+                _recursive_record_node_in_match_map(
+                    last_node,
+                    match_map,
+                    n,
+                    matched_node_pattern,
+                    pattern_n,
+                    match_value,
+                    matched_pattern)
 
     # TODO: 1. merge with fuse matcher 2. document the code
     def record_match(
@@ -206,7 +232,8 @@ def _find_matches(
                         # this is a part of the value corresponding to the node
                         matched_node_pattern,
                         pattern,
-                        quantize_handler)
+                        quantize_handler,
+                        pattern)
                     break
 
     # add custom module instances to the match result
