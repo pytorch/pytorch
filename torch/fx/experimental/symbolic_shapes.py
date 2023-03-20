@@ -9,6 +9,7 @@ import sys
 import textwrap
 import threading
 import traceback
+from dataclasses import dataclass
 from contextlib import contextmanager
 from functools import lru_cache
 from typing import cast, Dict, List, Optional, Set, Type, Union
@@ -30,6 +31,8 @@ from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 
+InputList = List
+DimList = List
 SymTypes = (SymInt, SymFloat, SymBool)
 
 log = logging.getLogger(__name__)
@@ -204,37 +207,38 @@ def guard_scalar(a):
         raise AssertionError(f"unrecognized scalar {a}")
 
 # inclusive both ways
-def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_directive=False):
+def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     """
-    Constrain range takes a ``SymInt`` or ``int``, and records a valid value range for it in the graph.
-    That value range is the intersection of the current value range for the symbol.
+    Applies a constraint that the passed in SymInt must lie between min-max
+    inclusive-inclusive, WITHOUT introducing a guard on the SymInt (meaning
+    that it can be used on unbacked SymInts).  If min/max are None, we assume
+    that the dimension is unbounded in that direction.  Repeated application
+    of constrain_range intersects the ranges.  This is a fairly low level API
+    that doesn't have a lot of safety guarantees (TODO: provide higher level
+    APIs).
 
-    Example usage:
+    Currently, we use this API in the following circumstance: when we allocate
+    an unbacked SymInt, denoting an integer quantity which is data dependent,
+    we ordinarily do not know anything about what values it may take.  This
+    means that any sort of guard on it will immediately fail.  However, in
+    many cases, we know something about the unbacked SymInt: for example, we
+    know that nonzero(x).size(0) must be >= 0.  We use constrain_range to
+    narrow the possible range, declaring that negative symbols are impossible.
+    This permits to definitely answer True to queries like 'nnz >= 0', even if
+    we don't know what the actual (hinted) value of 'nnz' is.  In fact, we
+    actually use constrain_range to unsoundly discharge common guards: for an
+    unbacked SymInt produced by nonzero, we will also assume that it is not
+    equal to 0/1 (even though these are perfectly possible values at runtime),
+    because we generally expect graphs that are valid for N=2 to also be valid
+    for N=1.
 
-    constrain_range(x, min=3, max=10)
-    constrain_range(x, min=4, max=12)
-
-    Would have a range of ``[4, 10]``.
-
-    :param a: The value to constrain the range for.
-    :type a: SymInt or int
-    :param min: The minimum value of the range (inclusive). Optional, default is ``None``.
-    :type min: int or None
-    :param max: The maximum value of the range (inclusive). Optional, default is ``None``.
-    :type max: int or None
-
-    ``min`` and ``max`` are optional, and not specifying one will leave the range unbounded, but
-    still constrained to any past ``min`` or ``max`` values.
-
-    In this way, it is a one directional API - it can only constrain ranges for a shape further.
-
-    The user_directive flag is used for recording a constrain_range that comes from a manually
-    user specified constrain_range.
-
-    In the dynamo case, this means it is downstream of mark_dynamic_constrain.
-
-    Setting this flag records the range into the user_constrained field on shape_env. See the docs on that field
-    for more information.
+    .. warning::
+        If you use constrain_range in the context of tracing, we do NOT check
+        that the constraint was actually valid at runtime!  In fact, we
+        cannot (easily) do so, as we currently unsoundly assume that unbacked
+        SymInt can never be zero/one, even if it may actually take on these
+        values at runtime (we assume that a graph that is valid for N=2 will
+        also be valid for N=1).
     """
     if min is None:
         min = -sympy.oo
@@ -248,12 +252,14 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None, user_di
         return
     # TODO: Turn this into a runtime assert too
     assert isinstance(a.node.expr, sympy.Symbol), "constraining non-Symbols NYI"
+    # TODO: Shouldn't we install a guard if the symbol is backed?  Or is the
+    # semantics that this is an "unchecked" assert (but it this actually
+    # something useful?  Might be better to restrict only for unbacked
+    # SymInt).
     r = a.node.shape_env.var_to_range[a.node.expr]
     a.node.shape_env.var_to_range[a.node.expr] = ValueRanges(
         builtins.max(r.lower, min), builtins.min(r.upper, max)
     )
-    if user_directive:
-        a.node.shape_env.user_constrained.add(a.node.expr)
 
 
 def constrain_unify(a, b):
@@ -338,13 +344,98 @@ def eval_guards(gm, *args):
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
 
-class DimDynamismState(Enum):
-    # The default state today, a dim is both allocated dynamic and duck shaped
+class DimDynamic(Enum):
+    """
+    Controls how to perform symbol allocation for a dimension.  It is always
+    sound to default this to DYNAMIC, but the policies DUCK and STATIC can
+    result in better trace-time and compile-time performance, as they reduce
+    the number of allocated symbols and generally make your graph more static.
+
+    NB: If we notice you've applied a constraint to the dimension, we will
+    force it to DYNAMIC for simplicity.
+
+    DimDynamic is controlled by a variety of higher level UX features.
+    Currently:
+
+    - In eager mode, the default policy is DUCK.
+        - The default is changed to STATIC with assume_static_by_default.
+        - An individual dim is marked DYNAMIC if you mark_dynamic_dim.
+    - In export mode, the default policy is STATIC.
+        - An individual dim is marked DYNAMIC if you mention it as dynamic_dim
+          in the constraints kwarg.
+    """
+    # Treat the dimension symbolically
+    DYNAMIC = 0
+    # Treat the dimension symbolically, but if its hint matches another
+    # dynamic dimension, unify the two symbols ("duck sizing")
     DUCK = 1
-    # Static, no symbol is allocated for this dim.
+    # Treat the dimension statically based on its hint
     STATIC = 2
-    # A user directive has marked this. A dim is allocated, but not ducked.
-    DYNAMIC = 3
+
+# NB: These constraints affect both clients and backends: given some
+# constraint C, the client must pass inputs that satisfy the constraint,
+# while a backend must not introduce guards BEYOND this constraint.
+# For clarity, we document the implications on both sides for both the client
+# and the backend.
+#
+# NB: These constraints are on a *single* dimension.  In principle, we could
+# also have multi-dimension constraints, but our guess is that this is not
+# actually useful and so we are not supporting it right now.
+#
+# NB: Strict constraints are typically only suitable for export, as in eager
+# a backend like inductor may validly introduce extra, discretionary guards
+# to improve performance of code.  A StrictMinMaxConstraint would be brittle
+# under future optimizations performed by inductor; we don't guarantee
+# eager code with StrictMinMaxConstraint will keep working in the future!
+
+@dataclass(frozen=True)
+class StrictMinMaxConstraint:
+    """
+    For clients: the size at this dimension must be within 'vr' (which
+    specifies a lower and upper bound, inclusive-inclusive) AND it
+    must be non-negative and should not be 0 or 1 (but see NB below).
+
+    For backends: there must not be any guards on this dimension which
+    are not implied by the given lower and upper bound.  Regardless of
+    the lower bound, the backend can assume the size is non-negative
+    and that it is not 0 or 1.
+
+    An unbounded StrictMinMaxConstraint can be thought of as a strict version
+    of "RelaxedUnspecConstraint".
+
+    NB: Export will often unsoundly assume that a graph works for 0/1, even
+    though at trace time we assumed size is not 0 or 1.  The idea is that
+    if we produce a graph that works for a range of values, it will be OK
+    for N=0/1 too.
+    """
+    vr: ValueRanges
+
+@dataclass(frozen=True)
+class RelaxedUnspecConstraint:
+    """
+    For clients: no explicit constraint; constraint is whatever is implicitly
+    inferred by guards from tracing.
+
+    For backends: there must exist at least TWO possible values for the
+    size at this dimension which satisfy the guards for this dimension.
+
+    In other words, this constraint helps us distinguish between "we don't
+    care if this dimension specializes or not" versus "this dimension must be
+    unspecialized."  However, this constraint doesn't say very much about what
+    specialization is permitted; for example, if we guard on a size being
+    even, this would still be acceptable under an unspec constraint.  This
+    makes UnspecConstraint useful for eager mode, where your backend compiler
+    may add constraints to otherwise dynamic dimensions; we can't assert that
+    there are NO guards as this is brittle because compilers should be able to
+    add extra constraints.  If you want to assert that there are no guards,
+    use StrictMinMaxConstraint with an unbounded ValueRanges.
+    """
+    pass
+
+# NB: None here indicates the client constraint is whatever is implicitly
+# inferred by guards from tracing, and that a backend can add whatever guards
+# it wants (including fully specializing the value).
+DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
 
 # TODO: An incomplete list
 # 1. Set variables to be equal when we do equality
@@ -1323,34 +1414,37 @@ class ShapeEnv:
     def _produce_dyn_sizes(self,
                            ex: torch.Tensor,
                            source: Source,
-                           dims: Dict[int, DimDynamismState]) -> List[sympy.Expr]:
-        if dims is None:
-            dims = {}
+                           dynamic_dims: DimList[DimDynamic],
+                           constraint_dims: DimList[DimConstraint],
+                           ) -> List[sympy.Expr]:
         from torch._dynamo.source import TensorPropertySource, TensorProperty
         size = []
         for i, val in enumerate(ex.size()):
-            if i not in dims:
-                dim_state = DimDynamismState.DUCK
-            else:
-                dim_state = dims[i]
             size.append(self.create_symbol(
-                val, TensorPropertySource(source, TensorProperty.SIZE, i), dim_state
+                val, TensorPropertySource(source, TensorProperty.SIZE, i), dynamic_dims[i], constraint_dims[i]
             ))
         return size
 
-    def create_symbolic_sizes_strides_storage_offset(self,
-                                                     ex: torch.Tensor,
-                                                     source: Source,
-                                                     *,
-                                                     dynamic_dims: Dict[int, DimDynamismState],
-                                                     constraint_dims: Optional[Dict[int, "MinMaxConstraint"]]):
+    def create_symbolic_sizes_strides_storage_offset(
+        self,
+        ex: torch.Tensor,
+        source: Source,
+        *,
+        # TODO: once we fix the call sites, can consider allowing Optional for
+        # convenience
+        dynamic_dims: DimList[DimDynamic],
+        constraint_dims: DimList[DimConstraint],
+    ):
         """
         Returns a list of symbolic sizes and strides for the given tensor.
         We try our best to express stride in terms of the sizes, so as to not
         introduce new symbolic variables.
         """
+        assert len(dynamic_dims) == ex.dim()
+        assert len(constraint_dims) == ex.dim()
+
         from torch._dynamo.source import TensorPropertySource, TensorProperty
-        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims)
+        size: List[sympy.Expr] = self._produce_dyn_sizes(ex, source, dynamic_dims, constraint_dims)
         stride: List[Optional[sympy.Expr]] = [None] * len(size)
         for i, val in enumerate(ex.stride()):
             if val in (0, 1):
@@ -1385,15 +1479,6 @@ class ShapeEnv:
         assert all(x is not None for x in stride)
         sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
 
-        for i, sym_size in enumerate(sym_sizes):
-            user_constrained = constraint_dims and i in constraint_dims
-            if user_constrained:
-                msg = "Illegal state. User constrained dims must be marked as such in dynamic_dims"
-                assert dynamic_dims and dynamic_dims[i] == DimDynamismState.DYNAMIC, msg
-                constraint = constraint_dims[i]
-                if constraint != MinMaxConstraint.NONE():
-                    constrain_range(sym_size, min=constraint.min, max=constraint.max, user_directive=True)
-
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
@@ -1424,36 +1509,59 @@ class ShapeEnv:
         self.var_to_range[symbol] = ValueRanges(-sys.maxsize - 1, sys.maxsize)
         return SymInt(SymNode(symbol, self, int, None))
 
-    # This is guaranteed to return a symbol or its negation is a sympy.Symbol,
-    # but there may be a replacement that allows it to be immediately
-    # simplified
-    def create_symbol(self, val: int, source: Source, dim_state: DimDynamismState = DimDynamismState.DUCK) -> "sympy.Expr":
+    def create_symbol(
+        self,
+        val: int,
+        source: Source,
+        dynamic_dim: DimDynamic,
+        constraint_dim: DimConstraint,
+    ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
-        if dim_state == DimDynamismState.STATIC:
+
+        # It's always sound to allocate a symbol as DYNAMIC.  If the user
+        # constrained the symbol, force the policy to DYNAMIC, because our
+        # constraint code will do weird stuff if, e.g., it's duck shaped
+        if constraint_dim is not None:
+            dynamic_dim = DimDynamic.DYNAMIC
+
+        if dynamic_dim is DimDynamic.STATIC:
             return sympy.Integer(val)
+        elif dynamic_dim is DimDynamic.DUCK:
+            # duck_shape can be used to globally turn off duck shaping, even
+            # if it was requested
+            duck = self.duck_shape
+        elif dynamic_dim is DimDynamic.DYNAMIC:
+            duck = False
+        else:
+            raise AssertionError(f"unhandled dynamic_dim {dynamic_dim}")
 
-        duck = dim_state == DimDynamismState.DYNAMIC
+        assert val >= 0
 
-        if val < 0:
-            from torch._dynamo.source import NegateSource
-            return -self.create_symbol(-val, NegateSource(source), duck)
-
-        if duck or val not in self.val_to_var or not self.duck_shape:
-            # If a value is never before seen, or dynamic, we want to create an expression
+        if not duck or val not in self.val_to_var:
+            # If we're not duck shaping, we always create a new symbol
+            # Even if we're duck shaping, if we haven't seen this particular
+            # value before, we also create a new symbol
             sympy_expr = sympy.Symbol(f"s{len(self.var_to_val)}", positive=True, integer=True)
             # We always associate vars to vals
             self.var_to_val[sympy_expr] = sympy.Integer(val)
             # Do the appending later, because we always want to populate this
             self.var_to_sources[sympy_expr] = []
 
-            if not duck:
-                # Non explicitly marked dynamic dims register to val_to_var to get duck shaped
+            if duck:
+                # Make sure to reuse this symbol for subsequent duck shaping
                 self.val_to_var[val] = sympy_expr
 
-            # We also infer that it must be not 0/1
-            self.var_to_range[sympy_expr] = _default_value_range(specialize_zero_one=self.specialize_zero_one)
+            # Apply default range, which assumes not zero-one
+            lower = 2 if self.specialize_zero_one else 0
+            self.var_to_range[sympy_expr] = ValueRanges(lower, sys.maxsize - 1)
 
-        if not duck and self.duck_shape:
+            # Small performance optimization: if we have a min-max constraint,
+            # we can proactively narrow to that range
+            if isinstance(constraint_dim, StrictMinMaxConstraint):
+                assert not duck
+                self.var_to_range[sympy_expr] &= constraint_dim.vr
+
+        if duck:
             # This implements duck-shaping: input sizes that match are assigned
             # the same symint
             r = self.duck_int(val)
@@ -1501,8 +1609,16 @@ class ShapeEnv:
     # some equality guards are nontrivial!  It would be nice to get simplified
     # output to print them too).  It's private because it's not
     # intended for normal use
-    def produce_guards(self, placeholders, sources, dynamic_ranges: Optional[List[Dict[int, "MinMaxConstraint"]]],
-                       source_ref=lambda n: n.name(), *, strict_mark_dyn=False, _simplified=False) -> List[str]:
+    def produce_guards(
+        self,
+        placeholders,
+        sources,
+        dynamic_ranges: InputList[DimList[DimConstraint]],
+        source_ref=lambda n: n.name(),
+        *,
+        strict_mark_dyn=False,
+        _simplified=False
+    ) -> List[str]:
         # It took a lot of sweat to figure out the algorithm here.  Let's
         # explain how it works.
         #
@@ -2101,41 +2217,8 @@ class ShapeEnv:
                 self._add_guard(sympy.Eq(expr, concrete_val))  # type: ignore[arg-type]
         return concrete_val
 
-class MinMaxConstraint:
-    range_ : ValueRanges
-
-    def __init__(self, min=None, max=None):
-        min_ = min if min else -sympy.oo
-        max_ = max if max else sympy.oo
-        assert min_ < max_, f"Illegal intersection produced! {min_} < {max_}"
-        self.range_ = ValueRanges(min_, max_)
-
-    @staticmethod
-    def NONE():
-        return MinMaxConstraint(min=-sympy.oo, max=sympy.oo)
-
-    @property
-    def min(self):
-        return self.range_.lower
-
-    @property
-    def max(self):
-        return self.range_.upper
-
-    def to_range(self) -> ValueRanges:
-        return self.range_
-
-    def __repr__(self):
-        return f"({self.min}, {self.max})"
-
-    def __eq__(self, other):
-        return self.min == other.min and self.max == other.max
-
-
-def _dynamic_dim_range(t, d) -> MinMaxConstraint:
-    assert _is_dim_dynamic(t, d)
+def _dynamic_dim_range(t, d) -> DimConstraint:
     return t._dynamo_dynamic_ranges[d]
-
 
 def _is_int(expr):
     if not isinstance(expr, SymInt):
@@ -2143,11 +2226,3 @@ def _is_int(expr):
     if len(expr.node.expr.free_symbols) > 0:
         return False
     return True
-
-# See: Note - On 0/1 specialization
-# NB: sys.maxsize is NOT allowed for sizes, because we use MAX_INT
-# as a sentinel sometimes.  Your sizevar isn't going to be
-# anywhere near the max 64-bit integer anyway.
-def _default_value_range(*, specialize_zero_one: bool) -> ValueRanges:
-    lower = 2 if specialize_zero_one else 0
-    return ValueRanges(lower, sys.maxsize - 1)

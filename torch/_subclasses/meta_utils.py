@@ -1,13 +1,15 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Dict, Optional
+from typing import ContextManager, Dict, Optional, List
 
 import torch
 from torch._guards import Source
-from torch.fx.experimental.symbolic_shapes import DimDynamismState, MinMaxConstraint
+from torch.fx.experimental.symbolic_shapes import DimDynamic, DimConstraint
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
+
+DimList = List
 
 
 def safe_is_leaf(t):
@@ -166,14 +168,23 @@ class MetaConverter:
         shape_env=None,
         callback=lambda t: t(),
         source: Optional[Source] = None,
-        dynamic_dims: Optional[Dict[int, DimDynamismState]] = None,
-        constraint_dims: Optional[Dict[int, MinMaxConstraint]] = None,
+        dynamic_dims: Optional[DimList[DimDynamic]] = None,
+        constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
         if source is None:
             from torch._dynamo.source import ConstantSource
 
             # TODO: make a dedicated UnknownSource for this?
             source = ConstantSource(f"__unknown_tensor{len(self.tensor_memo)}")
+
+        # Setup some default policy for convenience.  NB: from dynamo, you
+        # shouldn't do this as Dynamo has a more complicated policy it wants
+        # to apply
+        if shape_env is not None:
+            if dynamic_dims is None:
+                dynamic_dims = [DimDynamic.DUCK] * t.dim()
+            if constraint_dims is None:
+                constraint_dims = [None] * t.dim()
 
         # This indicates you set no_dispatch() before calling into this
         # function.  This is an error: we may be creating fake tensors and
@@ -213,10 +224,8 @@ class MetaConverter:
         if shape_env is not None:
             maybe_suppress = shape_env.suppress_guards
 
-        make_symbolic = shape_env is not None
-
         def sym_sizes_strides_storage_offset(t):
-            if make_symbolic:
+            if shape_env is not None:
                 return shape_env.create_symbolic_sizes_strides_storage_offset(
                     t,
                     source,
