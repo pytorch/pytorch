@@ -264,7 +264,7 @@ def construct_version_maps(
 ) -> str:
     version_map = torch._C._get_operator_version_map()
     sorted_version_map_ = sorted(version_map.items(), key=lambda item: item[0])  # type: ignore[no-any-return]
-    sorted_version_map = {name: lst for name, lst in sorted_version_map_}
+    sorted_version_map = dict(sorted_version_map_)
 
     operator_list_in_version_map_part = []
     for op_name in sorted_version_map:

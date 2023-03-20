@@ -2210,7 +2210,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         dynamo_result = exported(inp)
         self.assertTrue(torch._dynamo.utils.same(inp, dynamo_result))
 
-    def test_export_specialized_int_float(self):
+    def test_export_specialized_int(self):
         class Foo(torch.nn.Module):
             def __init__(
                 self,
@@ -2220,19 +2220,24 @@ class ExportTests(torch._dynamo.test_case.TestCase):
                 self.torch_module = torch.nn.LayerNorm(
                     input_dim, eps=1e-5, elementwise_affine=True
                 )
+                self.int_val = 100
 
             def forward(self, input):
-                return input.cos() * self.torch_module.eps
+                return input.cos() * self.int_val * self.torch_module.eps
 
         mod = Foo(128)
         inp = torch.randn(3, 128)
 
-        gm, _ = torch._dynamo.export(mod, inp, aten_graph=True, tracing_mode="symbolic")
-        count = 0
-        for node in gm.graph.nodes:
-            if node.op == "placeholder":
-                count += 1
-        self.assertEqual(count, 1)
+        # In export, int & float in forward should always be specialized
+        with config.patch(dynamic_shapes=True):
+            gm, _ = torch._dynamo.export(
+                mod, inp, aten_graph=True, tracing_mode="symbolic"
+            )
+            count = 0
+            for node in gm.graph.nodes:
+                if node.op == "placeholder":
+                    count += 1
+            self.assertEqual(count, 1)
 
     def test_export_pass_arg_by_name(self):
         class BasicModule(torch.nn.Module):
