@@ -256,9 +256,9 @@ def cudagraphify_impl(
     static_input_idxs=(),
     *,
     device_index: int,
-    stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
+    stack_traces: Optional[List[Optional[str]]] = None,
 ):
     manager = get_container(device_index).get_tree_manager()
     return manager.add_function(
@@ -380,7 +380,7 @@ class CUDAWarmupNode:
         cuda_graphs_pool: Tuple[int, int],
         existing_cuda_graph: torch.cuda.Graph,
         device_index: int,
-        stack_traces: List[Optional[str]],
+        stack_traces: Optional[List[Optional[str]]],
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -455,7 +455,7 @@ class CUDAWarmupNode:
         for node in reversed(nodes):
             for i, output in enumerate(node.outputs_weakrefs):
                 if is_live(output):
-                    yield output, node.stack_traces[i]
+                    yield output, (node.stack_traces[i] if node.stack_traces else None)
 
     def all_outputs_are_dead(self):
         return not list(self.path_live_weakrefs())
@@ -496,7 +496,7 @@ class CUDAGraphNode:
         inputs: List[Tensor],
         cuda_graphs_pool: Tuple[int, int],
         device_index: int,
-        stack_traces: List[Optional[str]],
+        stack_traces: Optional[List[Optional[str]]],
     ):
         assert isinstance(inputs, (list, tuple))
 
@@ -734,6 +734,11 @@ class CUDAGraphNode:
                 o is not None
                 and o.untyped_storage().data_ptr() in self.static_input_storage_ptrs
             )
+
+        if self.stack_traces is None:
+            self.stack_traces = [None for _ in range(len(outputs))]
+        else:
+            assert len(self.stack_traces) == len(outputs), "Wrong number of stack traces passed in"
 
         self._add_replayed_outputs(outputs)
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
