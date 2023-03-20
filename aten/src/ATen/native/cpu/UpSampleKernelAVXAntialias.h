@@ -35,8 +35,16 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-static __m128i inline mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr) {
-  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
+static __m128i inline mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+  int32_t v;
+  if (i32_aligned) {
+    v = *(const int32_t*)ptr;
+  } else {
+    uint8_t aligned_ptr[4];
+    std::memcpy(aligned_ptr, ptr, 4);
+    v = *(int32_t*)aligned_ptr;
+  }
+  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(v));
 }
 
 // TODO: We may want to hard-code an unrolled version for the case where
@@ -418,7 +426,8 @@ void ImagingResampleHorizontalConvolution8u4x(
     bool is_last_line) {
 
   // Interpolation horizontal pass processing together 4 vertical lines.
-  // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
+  // - Input data format is RGBA or RGB with R,G,B,A being uint8. In case of RGBA
+  //   we can encode 4 values as a single uint32 value.
   // - We split the size of weight vector for a given output index as a sum: K = n * 4 + m * 2 + k.
   // - We load and process 4 weights values in a loop ("block 4") then we process 2 weights values
   // in another loop ("block 2") and finally we process 1 weights value in the final loop ("block 1").
@@ -459,32 +468,37 @@ void ImagingResampleHorizontalConvolution8u4x(
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
 
-  // Precompute xmax limits for block 4 and block 2
-  // lineIn0 + stride * (x + xmin) + 16 <= lineIn0 + stride * (xmax + xmin)
-  // --> x <= xmax - 16.0 / stride
+  // out_xsize = output width, out_x = output x index
+  // ids_min is the input offset index corresponding to out_x
+  // ids_size is the interpolation size for out_x
+
+  // Let's precompute ids_size limits for block 4 and block 2.
+  //
+  // In block 4 (4 means we process 4 weight values together), we read input data
+  // with _mm_loadu_si128, i.e. 16 bytes, per one line:
+  // lineIn0 + stride * (i + ids_min) + 16 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 16.0 / stride
   // Strict boundary:
-  // --> x < xmax + 1 - int(ceil(16.0 / stride)) = xmax - b4_delta
+  // --> i < ids_size + 1 - int(ceil(16.0 / stride)) = ids_size - b4_delta
   // Soft boundary for reading inside the buffer except its boundaries:
-  // --> x < xmax + 1 - int(16.0 / stride) = xmax - b4_delta_soft
+  // --> i < ids_size + 1 - int(16.0 / stride) = ids_size - b4_delta_soft
   // RGBA: b4_delta = b4_delta_soft = 3
   // RGB : b4_delta = 5
   // RGB : b4_delta_soft = 4
   const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
 
-  // lineIn0 + stride * (x + xmin) + 8 <= lineIn0 + stride * (xmax + xmin)
-  // --> x <= xmax - 8.0 / stride
+  // In block 2 (2 means we process 2 weights values together), we read input data
+  // with _mm_loadl_epi64, i.e. 8 bytes, per one line:
+  // lineIn0 + stride * (i + ids_min) + 8 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 8.0 / stride
   // Strict boundary:
-  // --> x < xmax + 1 - int(ceil(8.0 / stride)) = xmax - b2_delta
+  // --> i < ids_size + 1 - int(ceil(8.0 / stride)) = ids_size - b2_delta
   // Soft boundary for reading inside the buffer except its boundaries:
-  // --> x < xmax + 1 - int(8.0 / stride) = xmax - b2_delta_soft
+  // --> i < ids_size + 1 - int(8.0 / stride) = ids_size - b2_delta_soft
   // RGBA: b2_delta = b2_delta_soft = 1
   // RGB : b2_delta = 2
   // RGB : b2_delta_soft = 1
   const auto b2_delta = (stride == 4) ? 1 : ((is_last_line) ? 2 : 1);
-
-  // out_xsize = output width, out_x = output x index
-  // xmax = interpolation size, x = interpolation index (horizontal <-> x dimension)
-  // xmin = input x start index corresponding to output x index (out_x)
 
   const auto max_out_x_strided = out_xsize * stride;
   const auto max_in_x_strided = in_xsize * stride;
@@ -563,11 +577,11 @@ void ImagingResampleHorizontalConvolution8u4x(
       const auto mmk = _mm256_set1_epi32(*(int32_t*)&k[i]);
 
       // Load 4 pixels (2 per line) from input lines 0 and 1:
-      // RGBA: source = [
+      // RGBA: source1 = [
       //   r0 g0 b0 a0  r1 g1 b1 a1  0 0 0 0  0 0 0 0
       //   R0 G0 B0 A0  R1 G1 B1 A1  0 0 0 0  0 0 0 0
       // ]
-      // RGB: source = [
+      // RGB: source1 = [
       //   r0 g0 b0 r1  g1 b1 r2  0 0 0 0  0 0 0 0
       //   R0 G0 B0 R1  G1 B1 R2  0 0 0 0  0 0 0 0
       // ]
@@ -592,30 +606,31 @@ void ImagingResampleHorizontalConvolution8u4x(
     }
 
     // block 1
+    const auto i32_aligned = num_channels == 4;
     for (; i < ids_size - 1; i++) {
       // Load 1 value from weight vector
       // mmk = [wl_0 wh_0 0 0  wl_0 wh_0 0 0  ...]
       const auto mmk = _mm256_set1_epi32(k[i]);
 
       // Load 2 pixels (one per line) from input lines 0 and 1:
-      // RGBA: source = [
-      //   r0 g0 b0 a0  0 0 0 0  0 0 0 0  0 0 0 0
-      //   R0 G0 B0 A0  0 0 0 0  0 0 0 0  0 0 0 0
+      // RGBA: pix1 = [
+      //   r0 0 0 0  g0 0 0 0  b0 0 0 0  a0 0 0 0
+      //   R0 0 0 0  G0 0 0 0  B0 0 0 0  A0 0 0 0
       // ]
-      // RGB: source = [
-      //   r0 g0 b0 r1  0 0 0 0  0 0 0 0  0 0 0 0
-      //   R0 G0 B0 R1  0 0 0 0  0 0 0 0  0 0 0 0
+      // RGB: pix1 = [
+      //   r0 0 0 0  g0 0 0 0  b0 0 0 0  r1 0 0 0
+      //   R0 0 0 0  G0 0 0 0  B0 0 0 0  R1 0 0 0
       // ]
       auto pix1 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          mm_cvtepu8_epi32(lineIn0_min + stride * i)),
-          mm_cvtepu8_epi32(lineIn1_min + stride * i), 1);
+          mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
       // Compute output value as C += w0 * C0 for each channel in 32-bit precision
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix1, mmk));
 
       // Same as above for lines 2 and 3
       auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          mm_cvtepu8_epi32(lineIn2_min + stride * i)),
-          mm_cvtepu8_epi32(lineIn3_min + stride * i), 1);
+          mm_cvtepu8_epi32(lineIn2_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn3_min + stride * i, i32_aligned), 1);
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
     }
 
@@ -625,18 +640,18 @@ void ImagingResampleHorizontalConvolution8u4x(
       // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
       // lines 0, 1 and 2 wont go out of allocated memory bounds
       auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
-          mm_cvtepu8_epi32(lineIn0_min + stride * i)),
-          mm_cvtepu8_epi32(lineIn1_min + stride * i), 1);
+          mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
+          mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
       sss0 = _mm256_add_epi32(sss0, _mm256_madd_epi16(pix, mmk));
 
-      auto p0 = mm_cvtepu8_epi32(lineIn2_min + stride * i);
+      auto p0 = mm_cvtepu8_epi32(lineIn2_min + stride * i, i32_aligned);
       __m128i p1;
       if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
         uint8_t output1[4];
         std::memcpy(output1, lineIn3_min + stride * i, 3);
-        p1 = mm_cvtepu8_epi32(output1);
+        p1 = mm_cvtepu8_epi32(output1, true);
       } else {
-        p1 = mm_cvtepu8_epi32(lineIn3_min + stride * i);
+        p1 = mm_cvtepu8_epi32(lineIn3_min + stride * i, i32_aligned);
       }
       auto pix2 = _mm256_inserti128_si256(_mm256_castsi128_si256(p0), p1, 1);
       sss1 = _mm256_add_epi32(sss1, _mm256_madd_epi16(pix2, mmk));
@@ -664,14 +679,18 @@ void ImagingResampleHorizontalConvolution8u4x(
     const auto out_x_strided = stride * out_x;
 
     if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
-      // This is a boundary case when we want to write 4 bytes to the output buffer but
-      // the 4th bytes is already computed. It means that we can not overwrite it.
+      // This is a boundary case when we want to write 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+      // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
+      // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+      // it by simply writing 4 bytes from the register to the output. We'll do the following:
       //               v----------|
-      // Output = [... X1 X2 X3 | A B C D ...]
-      // First, we store store next 4 bytes (A B C D)
-      // Second, we write 4 bytes to (X1 X2 X3 | A) -> (U V W | Z)
-      //          [... U V W | Z B C D ...]
-      // Third, we overwrite next 4 bytes (Z B C D) with stored values (A B C D)
+      // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
+      // First, we store next 4 bytes (R1 G1 B1 R2) in a temporary variable
+      // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | X)
+      // Output = [... R G B | X G1 B1 R2 ...]
+      // Third, we overwrite next 4 bytes of the output (X G1 B1 R2) with stored values (R1 G1 B1 R2)
+      // Output = [... R G B | R1 G1 B1 R2 ...]
+
       char next0[4];
       std::memcpy(next0, lineOut0 + out_x_strided + stride, 4);
       std::memcpy(lineOut0 + out_x_strided, (uint8_t *) &o0, 4);
@@ -728,7 +747,8 @@ void ImagingResampleHorizontalConvolution8u(
     bool is_last_line) {
 
   // Interpolation horizontal pass processing only one vertical line.
-  // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
+  // - Input data format is RGBA or RGB with R,G,B,A being uint8. In case of RGBA
+  //   we can encode 4 values as a single uint32 value.
   // - We split the size of weight vector for a given output index as a sum: K = n * 8 + m * 4 + k * 2 + l.
   // - We load and process 8 weights values in a loop ("block 8") then 4 weights and 2 weights values in
   // in another loops ("block 4" and "block 2") and finally we process 1 weight value in the final loop ("block 1").
@@ -790,43 +810,50 @@ void ImagingResampleHorizontalConvolution8u(
   const auto mask_low128 = (num_channels == 3) ? masks_low128_c3_c4[0] : masks_low128_c3_c4[1];
 
   // out_xsize = output width, out_x = output x index
-  // ids_size = interpolation size
-  // ids_min = input x start index corresponding to output x index (out_x)
+  // ids_min is the input offset index corresponding to out_x
+  // ids_size is the interpolation size for out_x
 
   const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
   const auto zero = _mm_setzero_si128();
 
   TORCH_INTERNAL_ASSERT(stride == 3 || stride == 4);
 
-  // Precompute xmax limits for block 8, block 4 and block 2
-  // lineIn + stride * (x + xmin) + 32 <= lineIn + stride * (xmax + xmin)
-  // --> x <= xmax - 32.0 / stride
+  // Let's precompute ids_size limits for block 8, block 4 and block 2
+  //
+  // In block 8 (8 means we process 8 weight values together), we read at
+  // most 32 bytes input data (16 + 16 bytes for RGBA and 12 + 16 bytes for RGB)
+  // lineIn + stride * (i + ids_min) + 32 <= lineIn + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 32.0 / stride
   // Strict boundary:
-  // --> x < xmax + 1 - int(ceil(32.0 / stride)) = xmax - b8_delta
+  // --> i < ids_size + 1 - int(ceil(32.0 / stride)) = ids_size - b8_delta
   // Soft boundary for reading inside the buffer except its boundaries:
-  // --> x < xmax + 1 - int(32.0 / stride) = xmax - b8_delta_soft
+  // --> i < ids_size + 1 - int(32.0 / stride) = ids_size - b8_delta_soft
   // RGBA: b8_delta = b8_delta_soft = 7
   // RGB : b8_delta = 10
   // RGB : b8_delta_soft = 9
   const auto b8_delta = (stride == 4) ? 7 : ((is_last_line) ? 10 : 9);
 
-  // lineIn + stride * (x + xmin) + 16 <= lineIn0 + stride * (xmax + xmin)
-  // --> x <= xmax - 16.0 / stride
+  // In block 4 (4 means we process 4 weight values together), we read
+  // 16 bytes of input data.
+  // lineIn + stride * (i + ids_min) + 16 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 16.0 / stride
   // Strict boundary:
-  // --> x < xmax + 1 - int(ceil(16.0 / stride)) = xmax - b4_delta
+  // --> i < ids_size + 1 - int(ceil(16.0 / stride)) = ids_size - b4_delta
   // Soft boundary for reading inside the buffer except its boundaries:
-  // --> x < xmax + 1 - int(16.0 / stride) = xmax - b4_delta_soft
+  // --> i < ids_size + 1 - int(16.0 / stride) = ids_size - b4_delta_soft
   // RGBA: b4_delta = b4_delta_soft = 3
   // RGB : b4_delta = 5
   // RGB : b4_delta_soft = 4
   const auto b4_delta = (stride == 4) ? 3 : ((is_last_line) ? 5 : 4);
 
-  // lineIn0 + stride * (x + xmin) + 8 <= lineIn0 + stride * (xmax + xmin)
-  // --> x <= xmax - 8.0 / stride
+  // In block 2 (2 means we process 2 weight values together), we read
+  // 8 bytes of input data.
+  // lineIn0 + stride * (i + ids_min) + 8 <= lineIn0 + stride * (ids_size + ids_min)
+  // --> i <= ids_size - 8.0 / stride
   // Strict boundary:
-  // --> x < xmax + 1 - int(ceil(8.0 / stride)) = xmax - b2_delta
+  // --> i < ids_size + 1 - int(ceil(8.0 / stride)) = ids_size - b2_delta
   // Soft boundary for reading inside the buffer except its boundaries:
-  // --> x < xmax + 1 - int(8.0 / stride) = xmax - b2_delta_soft
+  // --> i < ids_size + 1 - int(8.0 / stride) = ids_size - b2_delta_soft
   // RGBA: b2_delta = b2_delta_soft = 1
   // RGB : b2_delta = 2
   // RGB : b2_delta_soft = 1
@@ -972,6 +999,7 @@ void ImagingResampleHorizontalConvolution8u(
     }
 
     // block 1
+    const auto i32_aligned = num_channels == 4;
     for (; i < ids_size - 1; i++) {
       // Load 1 value from weight vector
       // mmk = [wl_0 wh_0 0 0  wl_0 wh_0 0 0  ...]
@@ -983,7 +1011,7 @@ void ImagingResampleHorizontalConvolution8u(
       // RGB: pix = [
       //   r0 0 0 0  g0 0 0 0  b0 0 0 0  r1 0 0 0
       // ]
-      auto pix = mm_cvtepu8_epi32(lineIn_min + stride * i);
+      auto pix = mm_cvtepu8_epi32(lineIn_min + stride * i, i32_aligned);
       // Compute output value as C += w0 * C0 for each channel in 32-bit precision
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
@@ -996,9 +1024,9 @@ void ImagingResampleHorizontalConvolution8u(
       if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
         uint8_t output[4];
         std::memcpy(output, p, 3);
-        pix = mm_cvtepu8_epi32(output);
+        pix = mm_cvtepu8_epi32(output, true);
       } else {
-        pix = mm_cvtepu8_epi32(p);
+        pix = mm_cvtepu8_epi32(p, true);
       }
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
@@ -1021,14 +1049,17 @@ void ImagingResampleHorizontalConvolution8u(
         // as they are out of memory bounds.
         std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 3);
       } else {
-        // This is a boundary case when we want to write 4 bytes to the output buffer but
-        // the 4th bytes is already computed. It means that we can not overwrite it.
+        // This is a boundary case when we want to write 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+        // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
+        // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+        // it by simply writing 4 bytes from the register to the output. We'll do the following:
         //               v----------|
-        // Output = [... X1 X2 X3 | A B C D ...]
-        // First, we store store next 4 bytes (A B C D)
-        // Second, we write 4 bytes to (X1 X2 X3 | A) -> (U V W | Z)
-        //          [... U V W | Z B C D ...]
-        // Third, we overwrite next 4 bytes (Z B C D) with stored values (A B C D)
+        // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
+        // First, we store next 4 bytes (R1 G1 B1 R2) in a temporary variable
+        // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | X)
+        // Output = [... R G B | X G1 B1 R2 ...]
+        // Third, we overwrite next 4 bytes of the output (X G1 B1 R2) with stored values (R1 G1 B1 R2)
+        // Output = [... R G B | R1 G1 B1 R2 ...]
 
         char next[4];
         std::memcpy(next, lineOut + out_x_strided + stride, 4);
@@ -1250,6 +1281,7 @@ void ImagingResampleVerticalConvolution8u(
 
   // block 1
   const auto b1_usable_vec_stride = (4 / data_stride) * data_stride;
+  const auto i32_aligned = num_channels == 4;
   for (; j < data_size - 4; j += b1_usable_vec_stride) {
     auto sss = initial;
     int64_t i = 0;
@@ -1285,7 +1317,7 @@ void ImagingResampleVerticalConvolution8u(
 
     for (; i < ids_size; i++) {
       auto mmk = _mm_set1_epi32(k[i]);
-      auto pix = mm_cvtepu8_epi32(lineIn_min + i * data_size);
+      auto pix = mm_cvtepu8_epi32(lineIn_min + i * data_size, i32_aligned);
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
     sss = _mm_srai_epi32(sss, coefs_precision);
@@ -1331,9 +1363,9 @@ void ImagingResampleVerticalConvolution8u(
       if (num_channels == 3) {
         uint8_t input[4];
         std::memcpy(input, p, 3);
-        pix = mm_cvtepu8_epi32(input);
+        pix = mm_cvtepu8_epi32(input, true);
       } else {
-        pix = mm_cvtepu8_epi32(p);
+        pix = mm_cvtepu8_epi32(p, true);
       }
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
