@@ -507,9 +507,8 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
-            static, reason = tensor_always_has_static_shape(
-                value, guard.source, is_tensor=True
-            )
+            assert guard.source is not None
+            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
