@@ -453,6 +453,8 @@ def compile_fx(
                 recursive_compile_fx,
             )
 
+        # Since handle_dynamo_export_graph will trigger compile_fx again,
+        # Move these passes after handle_dynamo_export_graph to avoid repeated calls.
         with overrides.patch_functions():
             model_ = overrides.replace_fx(model_)
             model_ = overrides.fuse_fx(model_, example_inputs_)
