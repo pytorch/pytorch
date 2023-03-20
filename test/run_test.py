@@ -912,8 +912,8 @@ def parse_args():
         action="store_true",
         help=(
             "If this flag is present, we will only run functorch tests. "
-            "If this flag is not present, we will not run any functorch tests. "
-            "This requires functorch to already be installed."
+            "If this flag is not present, we will run all tests "
+            "(including functorch tests)."
         )
     )
     parser.add_argument(
@@ -1147,11 +1147,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
-    else:
-        # Exclude all functorch tests otherwise
-        options.exclude.extend(FUNCTORCH_TESTS)
 
     if options.mps:
         selected_tests = ['test_mps', 'test_metal']
