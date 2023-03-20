@@ -2177,6 +2177,16 @@
 - name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
 
+- name: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  self: "grads[1].defined() ? grad_output.mm(grads[1]) : Tensor()"
+  grad_output: "grads[0].defined() ?
+                (
+                 grads[1].defined() ? grads[0].mm(weight.mT()) + self.mm(grads[1].mT())
+                                    : grads[0].mm(weight.mT())
+                )
+                                    : self.mm(grads[1].mT())"
+  weight: "grads[0].defined() ? grad_output.mT().mm(grads[0]) : Tensor()"
+
 #mps
 - name: max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   self: max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
