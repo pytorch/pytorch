@@ -560,7 +560,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   void logWorkEnd(WorkNCCL& work);
 
  protected:
-  static const int64_t kWorkCleanupThreadSleepMillis;
+  static const int64_t kWatchdogThreadSleepMillis;
 
   // The store is used to broadcast the NCCL unique ID of rank 0.
   c10::intrusive_ptr<Store> store_;

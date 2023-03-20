@@ -875,8 +875,9 @@ void ProcessGroupNCCL::workCleanupLoop() {
       if (work.exception()) {
         // Abort work and corresponding communicators
         work.abort();
-        // Abort all other communicators on this rank
-        abortAllComms();
+        // PG level abort, which would abort all other communicators on this
+        // rank
+        abort();
         // Report desync state in case of timeout
         if (desyncDebug_ && timedOut) {
           auto desyncMsg = retrieveDesyncReport(store_, "NCCL", rank_, size_);
