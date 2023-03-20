@@ -672,7 +672,7 @@ if torch._C.has_mkldnn:
 
     def silu_fusion(computation_call):
         return CallFunction(
-            aten.mul, compute_call, CallFunction(aten.sigmoid, computation_call)
+            aten.mul, computation_call, CallFunction(aten.sigmoid, computation_call)
         )
 
     def hardsigmoid_fusion(computation_call):
@@ -759,70 +759,61 @@ if torch._C.has_mkldnn:
             input, weight, bias, padding, stride, dilation, groups, "none", [], ""
         )
 
-    @register_lowering_pattern(leaky_relu_fusion(_user_3[0]))
-    def conv_leaky_relu(
-        match, input, weight, bias, padding, stride, dilation, groups, negative_slope
-    ):
-        if isinstance(negative_slope, ir.TensorBox):
-            matched = False
-        else:  # inp is a Number
-            matched = True
-        if matched:
-            return L[torch.ops.mkldnn._convolution_pointwise](
-                input,
-                weight,
-                bias,
-                padding,
-                stride,
-                dilation,
-                groups,
-                "leaky_relu",
-                [negative_slope],
-                "",
-            )
-        else:
-            conv_out = L[torch.ops.mkldnn._convolution_pointwise](
-                input, weight, bias, padding, stride, dilation, groups, "none", [], ""
-            )
-            return L[aten.where](
-                L[aten.gt](conv_out, 0), conv_out, L[aten.mul](conv_out, negative_slope)
-            )
+    def register_leaky_relu_fusion_lowering(computation_call, computation_op):
+        @register_lowering_pattern(leaky_relu_fusion(computation_call))
+        def fn(match, *args, **kwargs):
+            negative_slope = kwargs.get("negative_slope")
+            if isinstance(negative_slope, ir.TensorBox):
+                matched = False
+            else:  # inp is a Number
+                matched = True
+            computation_args = [arg for arg in args]
+            if matched:
+                computation_args += ["leaky_relu", [negative_slope], ""]
+                return L[computation_op](*computation_args)
+            else:
+                computation_args += ["none", [], ""]
+                computation_out = L[computation_op](*computation_args)
+                return L[aten.where](
+                    L[aten.gt](computation_out, 0),
+                    computation_out,
+                    L[aten.mul](computation_out, negative_slope),
+                )
 
-    @register_lowering_pattern(hardtanh_fusion(_user_1[0]))
-    def conv_hardtanh(
-        match,
-        input,
-        weight,
-        bias,
-        padding,
-        stride,
-        dilation,
-        groups,
-        min_value,
-        max_value,
-    ):
-        if isinstance(min_value, ir.TensorBox) or isinstance(max_value, ir.TensorBox):
-            matched = False
-        else:  # inp is a Number
-            matched = True
-        if matched:
-            return L[torch.ops.mkldnn._convolution_pointwise](
-                input,
-                weight,
-                bias,
-                padding,
-                stride,
-                dilation,
-                groups,
-                "hardtanh",
-                [min_value, max_value],
-                "",
-            )
-        else:
-            conv_out = L[torch.ops.mkldnn._convolution_pointwise](
-                input, weight, bias, padding, stride, dilation, groups, "none", [], ""
-            )
-            return L[aten.clamp_max](L[aten.clamp_min](conv_out, min_value), max_value)
+        return fn
+
+    def register_hardtanh_fusion_lowering(computation_call, computation_op):
+        @register_lowering_pattern(hardtanh_fusion(computation_call))
+        def fn(match, *args, **kwargs):
+            min_value = kwargs.get("min_value")
+            max_value = kwargs.get("max_value")
+            if isinstance(min_value, ir.TensorBox) or isinstance(
+                max_value, ir.TensorBox
+            ):
+                matched = False
+            else:  # inp is a Number
+                matched = True
+            computation_args = [arg for arg in args]
+            if matched:
+                computation_args += ["hardtanh", [min_value, max_value], ""]
+                return L[computation_op](*computation_args)
+            else:
+                computation_args += ["none", [], ""]
+                conv_out = L[computation_op](*computation_args)
+                return L[aten.clamp_max](
+                    L[aten.clamp_min](conv_out, min_value), max_value
+                )
+
+        return fn
+
+    # conv_fusion lowering
+    register_leaky_relu_fusion_lowering(
+        _user_3[0], torch.ops.mkldnn._convolution_pointwise
+    )
+    register_hardtanh_fusion_lowering(
+        _user_1[0], torch.ops.mkldnn._convolution_pointwise
+    )
+    # TODO: add linear/ConvTranspose lowering
 
 
 # This slows things down:
