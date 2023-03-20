@@ -4680,11 +4680,11 @@ Done""")
             def fn(sparse):
                 return torch.sparse.sum(sparse)
 
-            gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), check_sparse_nnz=True,
+            gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), masked=True,
                       check_batched_grad=False, fast_mode=fast_mode)
-            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-                gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
+            gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), masked=False,
+                      check_batched_grad=False, fast_mode=fast_mode)
+
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4693,12 +4693,11 @@ Done""")
             def fn(sparse_csr):
                 return torch.clone(sparse_csr).to_dense()
 
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=True,
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), masked=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), masked=False,
                       check_batched_grad=False, fast_mode=fast_mode)
 
-            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4707,12 +4706,11 @@ Done""")
             def fn(sparse_csc):
                 return torch.clone(sparse_csc).to_dense()
 
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=True,
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), masked=True,
+                      check_batched_grad=False, fast_mode=fast_mode)
+            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), masked=False,
                       check_batched_grad=False, fast_mode=fast_mode)
 
-            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), check_sparse_nnz=False,
-                          check_batched_grad=False, fast_mode=fast_mode, masked=True)
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4722,11 +4720,10 @@ Done""")
                 return torch.clone(sparse_bsr).to_dense()
 
             gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
-                      check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
+                      masked=True, check_batched_grad=False, fast_mode=fast_mode)
+            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
+                      masked=False, check_batched_grad=False, fast_mode=fast_mode)
 
-            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
-                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode, masked=True)
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4736,11 +4733,10 @@ Done""")
                 return torch.clone(sparse_bsc).to_dense()
 
             gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
-                      check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
+                      masked=True, check_batched_grad=False, fast_mode=fast_mode)
+            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
+                      masked=False, check_batched_grad=False, fast_mode=fast_mode)
 
-            with self.assertRaisesRegex(RuntimeError, 'gradcheck expects all tensor inputs are dense'):
-                gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
-                          check_sparse_nnz=False, check_batched_grad=False, fast_mode=fast_mode, masked=True)
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -4773,13 +4769,13 @@ Done""")
 
     def test_gradcheck_validates_inputs(self):
         def check(fast_mode):
-            # when inputs are not dense, but check_sparse_nnz is false
             x = torch.rand(10, requires_grad=True).to_sparse()
-            with self.assertRaisesRegex(RuntimeError, 'dense when check_sparse_nnz is set to False.'):
-                gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False, check_batched_grad=False,
-                          fast_mode=fast_mode, masked=True)
-            self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=False,
+            self.assertTrue(gradcheck(lambda x: x.to_dense(), (x,), check_batched_grad=False,
+                                      atol=1e-1, fast_mode=fast_mode, masked=True))
+            self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), masked=False,
                                        check_batched_grad=False, raise_exception=False, fast_mode=fast_mode))
+            self.assertTrue(gradcheck(lambda x: x.to_dense(masked_grad=False), (x,), masked=False,
+                                      atol=1e-1, check_batched_grad=False, raise_exception=False, fast_mode=fast_mode))
 
             # when none of the inputs require grad (always raises even if raise_exception=False)
             x = torch.rand(10, requires_grad=False)
@@ -4823,7 +4819,7 @@ Done""")
             # when sparse outputs (always raise even if raise_exception=False)
             x = torch.rand(10, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(ValueError, 'Sparse output is not supported at gradcheck yet'):
-                gradcheck(lambda x: x, (x,), check_sparse_nnz=True, check_batched_grad=False, raise_exception=False,
+                gradcheck(lambda x: x, (x,), masked=True, check_batched_grad=False, raise_exception=False,
                           fast_mode=fast_mode)
 
             # when mkldnn outputs (always raise even if raise_exception=False)
@@ -4851,8 +4847,8 @@ Done""")
             x = torch.rand(10, dtype=torch.double, requires_grad=True).to_sparse()
             # runtime error while compute batched grad (print big error)
             with self.assertRaisesRegex(RuntimeError, 'gradcheck or gradgradcheck failed while testing batched gradient'):
-                gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True, fast_mode=fast_mode)
-            self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), check_sparse_nnz=True, check_batched_grad=True,
+                gradcheck(lambda x: x.to_dense(), (x,), masked=True, check_batched_grad=True, fast_mode=fast_mode)
+            self.assertFalse(gradcheck(lambda x: x.to_dense(), (x,), masked=True, check_batched_grad=True,
                                        raise_exception=False, fast_mode=fast_mode))
         check(fast_mode=True)
         check(fast_mode=False)
@@ -4870,8 +4866,8 @@ Done""")
                 return y.to_dense()
             x = torch.ones((2, 2), dtype=torch.double, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(RuntimeError, 'grad is sparse tensor, but has incorrect sparse_dim'):
-                gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
-            self.assertFalse(gradcheck(fn, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
+                gradcheck(fn, (x,), atol=1e-1, masked=True, check_batched_grad=False, fast_mode=fast_mode)
+            self.assertFalse(gradcheck(fn, (x,), atol=1e-1, masked=True, check_batched_grad=False,
                                        raise_exception=False, fast_mode=fast_mode))
 
             # when backward not multiplied by grad_output (non-sparse case)
@@ -4891,8 +4887,8 @@ Done""")
                 return y
             x = torch.ones(1, dtype=torch.double, requires_grad=True).to_sparse()
             with self.assertRaisesRegex(RuntimeError, 'backward not multiplied by grad_output'):
-                gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode)
-            self.assertFalse(gradcheck(fn3, (x,), atol=1e-1, check_sparse_nnz=True, check_batched_grad=False,
+                gradcheck(fn3, (x,), atol=1e-1, masked=True, check_batched_grad=False, fast_mode=fast_mode)
+            self.assertFalse(gradcheck(fn3, (x,), atol=1e-1, masked=True, check_batched_grad=False,
                                        raise_exception=False, fast_mode=fast_mode))
 
             # when layout of grad_input is not the same as input
@@ -4970,7 +4966,7 @@ Done""")
                 return x * y.coalesce().to_dense()
             a = torch.rand(2, 2, dtype=torch.double, requires_grad=True)
             b = torch.rand(2, 2, dtype=torch.double,).to_sparse().requires_grad_(True)
-            self.assertTrue(gradcheck(fn, (a, b), check_sparse_nnz=True, check_batched_grad=False, fast_mode=fast_mode))
+            self.assertTrue(gradcheck(fn, (a, b), masked=True, check_batched_grad=False, fast_mode=fast_mode))
         check(fast_mode=True)
         check(fast_mode=False)
 
@@ -9014,9 +9010,6 @@ class TestAutogradDeviceType(TestCase):
         (fn.apply(x, sparse_grad1) + fn.apply(x, sparse_grad2)).sum().abs().backward()
         self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
-    # autograd tests via common_method_invocations don't allow input tensors to
-    # be sparse (RuntimeError: gradcheck expects all tensor inputs are dense when
-    # check_sparse_nnz is set to False.)
     @skipIfMps
     def test_sparse_mask_autograd(self, device):
         tensor = torch.randn(3, requires_grad=True, device=device)
