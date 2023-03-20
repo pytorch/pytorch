@@ -39,7 +39,7 @@ By using `nn.Module` as the interface between passes, FX transforms are interope
 
 The following sections will walk us through the components that transform from original `torch.nn.Module` to FX IR and finally to generated Python code and a GraphModule instance:
 
-FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). The simplest way to get an fx graph is via `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
+FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). The simplest way to get an FX graph is by using `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
 
 ```python
 import torch
