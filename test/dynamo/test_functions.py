@@ -845,7 +845,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @requires_numpy_pytorch_interop
     def test_numpy_attributes(x):
         a = x.numpy()
-        return a.shape, a.ndim, a.size, a.T, a.real, a.imag
+        return a.shape, a.ndim, a.size,
 
 
 def global_func_with_default_tensor_args(

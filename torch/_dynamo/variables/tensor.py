@@ -3,7 +3,6 @@ import itertools
 import operator
 import types
 
-import torch_np
 from typing import Dict, List
 
 import torch.fx
@@ -626,7 +625,7 @@ class TensorWithTFOverrideVariable(VariableTracker):
             return tx.inline_user_function_return(tf_func_var, tf_args, {})
 
 
-class NumpyTensorVariable(VariableTracker):
+class NumpyTensorVariable(TensorVariable):
     """
     Represents a numpy.ndarray, but backed by torch Tensor. Use this for Tensor.numpy() call.
     """
@@ -648,45 +647,7 @@ class NumpyTensorVariable(VariableTracker):
         specialized_value=None,
         **kwargs,
     ):
-        super().__init__(**kwargs)
-        self.proxy = proxy
-        self.dtype = dtype
-        self.device = device
-        self.layout = layout
-        self.ndim = ndim
-        self.size = size
-        self.stride = stride
-        self.requires_grad = requires_grad
-        self.is_quantized = is_quantized
-        self.is_contiguous = is_contiguous
-        self.is_sparse = is_sparse
-        self.class_type = class_type
-        self.specialized_value = specialized_value
-
-    @staticmethod
-    def specialize(value: torch.Tensor):
-        props = {
-            "dtype": value.dtype,
-            "device": value.device,
-            "layout": value.layout,
-            "ndim": int(value.ndim),
-            "requires_grad": value.requires_grad,
-            "is_quantized": value.is_quantized,
-            "is_sparse": value.is_sparse,
-            "class_type": type(value),
-        }
-        if not config.dynamic_shapes:
-            props["size"] = tuple(value.size())
-            props["stride"] = tuple(value.stride())
-            props["is_contiguous"] = tuple(
-                [
-                    x
-                    for x in torch._prims_common._memory_formats
-                    if value.is_contiguous(memory_format=x)
-                ]
-            )
-        return props
-
+        super().__init__(proxy, dtype, device, layout, ndim, size, stride, requires_grad, is_quantized, is_contiguous, is_sparse, class_type, specialized_value, **kwargs)
 
     def var_getattr(self, tx, name):
         from .builder import wrap_fx_proxy_cls, TupleVariable
@@ -735,16 +696,12 @@ class NumpyTensorVariable(VariableTracker):
                     **options,
                 )
         elif name == "size":
-            result = super().call_method(tx, "numel", [], {})
+            result = ConstantVariable(product(self.size), **options)
         elif name in ["strides", "itemsize", "base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:
             unimplemented(f"ndarray.{name} not supported")
         return result
-
-    def reconstruct(self, codegen):
-        import pdb; pdb.set_trace()
-        super().reconstruct(codegen)
 
     def call_method(
         self,
