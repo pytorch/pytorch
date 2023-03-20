@@ -37,7 +37,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, sympy_product
+from .utils import ceildiv, developer_warning, pad_list, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -81,7 +81,6 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
-        aten._int_mm,
     ]
 )
 
@@ -2144,7 +2143,6 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-
     if reduce not in {None, "sum"} or (
         reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
     ):
@@ -2158,7 +2156,6 @@ def scatter_fallback(
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
@@ -2674,7 +2671,6 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
-
     x_out = ir.FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
@@ -2707,6 +2703,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
+    kernel_size = pad_list(kernel_size)
+    stride = pad_list(stride)
+    padding = pad_list(padding)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -3117,6 +3116,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
+    kernel_size = pad_list(kernel_size)
+    stride = pad_list(stride)
+    padding = pad_list(padding)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
@@ -3206,7 +3208,6 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-
     assert not divisor_override
     if not stride:
         stride = kernel_size

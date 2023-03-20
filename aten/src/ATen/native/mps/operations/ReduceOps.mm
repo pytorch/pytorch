@@ -136,8 +136,9 @@ void reduction_out_mps(const Tensor& input_t,
     IntArrayRef dim = opt_dim.value();
     for (const auto dim_val : dim) {
       auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
-      TORCH_CHECK(wrap_dim < (input_shape.size() == 0 ? input_t.numel() : input_shape.size()),
-                  func_name + ": reduction dim must be in the range of input shape")
+      TORCH_CHECK(
+          wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size() == 0 ? input_t.numel() : input_shape.size()),
+          func_name + ": reduction dim must be in the range of input shape")
     }
   }
 
@@ -395,7 +396,8 @@ void impl_func_norm_mps(const Tensor& input_tensor,
 
   for (const auto dim_val : dim) {
     auto wrap_dim = maybe_wrap_dim(dim_val, input_shape.size());
-    TORCH_CHECK(wrap_dim < input_shape.size(), "norm_out_mps: reduction dim must be in the range of input shape")
+    TORCH_CHECK(wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size()),
+                "norm_out_mps: reduction dim must be in the range of input shape")
   }
 
   auto cache_ = MPSGraphCache::getInstance();
@@ -663,8 +665,8 @@ Tensor std_var_common_impl_mps(const Tensor& input_t,
     string errMessage = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
     errMessage += ": reduction dim must be in the range of input shape";
     for (const auto dim : dim_value) {
-      auto wrap_dim = maybe_wrap_dim(dim, input_shape.size());
-      TORCH_CHECK(wrap_dim < input_shape.size(), errMessage.c_str())
+      auto wrap_dim = maybe_wrap_dim(dim, num_input_dims);
+      TORCH_CHECK(wrap_dim < static_cast<decltype(wrap_dim)>(input_shape.size()), errMessage.c_str())
     }
   }
 
