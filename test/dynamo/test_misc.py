@@ -5009,7 +5009,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         model.training_step()
 
-    def test_torch_guards_stack_frame_register(self):
+    def test_torch_guards_stack_frame_register_inlining_disable(self):
         y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
         x = torch.tensor([0.5, 0.5])
 
@@ -5042,8 +5042,50 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(e)(x)
 
+        self.assertEqual(len(seen_frames), 0)
+
+    def test_torch_guards_stack_frame_register_inlining_partially_disable(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper_disabled(self, x, y):
+                return x * y
+
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param) + self.helper_disabled(x, self.param)
+
+        e = encoder(y)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
         self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].line, "def forward(self, a, *args):")
+        self.assertEqual(seen_frames[0].name, "forward")
+        self.assertEqual(
+            seen_frames[0].line,
+            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
+        )
 
     def test_torch_guards_stack_frame_register_inlining(self):
         x = torch.tensor([0.5, 0.5])
@@ -5073,9 +5115,45 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(fn)(x, y, z)
 
-        self.assertEqual(len(seen_frames), 2)
+        self.assertEqual(len(seen_frames), 1)
         self.assertEqual(seen_frames[0].name, "fn")
-        self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
+        self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
+
+    def test_torch_guards_stack_frame_register_inlining_deep(self):
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([0.75, 0.75, 0.75, 0.75])
+        z = torch.tensor([0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
+
+        def uwu_inline_me_deep(x, y):
+            return torch.cat((x, x)) + y
+
+        def uwu_inline_me(x, y, z):
+            r = uwu_inline_me_deep(x, y)
+            r2 = uwu_inline_me_deep(y, z)
+            return r, r2
+
+        def fn(x, y, z):
+            r, r2 = uwu_inline_me(x, y, z)
+            return torch.mul(r, r), torch.mul(r2, r2)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(fn)(x, y, z)
+
+        self.assertEqual(len(seen_frames), 3)
+        self.assertEqual(seen_frames[0].name, "fn")
+        self.assertEqual(seen_frames[1].name, "uwu_inline_me")
+        self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
 
 
 class CustomFunc1(torch.autograd.Function):
