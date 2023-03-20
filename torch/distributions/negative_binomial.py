@@ -98,8 +98,12 @@ class NegativeBinomial(Distribution):
 
         log_unnormalized_prob = (self.total_count * F.logsigmoid(-self.logits) +
                                  value * F.logsigmoid(self.logits))
-
-        log_normalization = (-torch.lgamma(self.total_count + value).nan_to_num(nan=float("nan"), posinf=0, neginf=-float("inf")) +
-                             torch.lgamma(1. + value) + torch.lgamma(self.total_count))
+        
+        log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
+                             torch.lgamma(self.total_count))
+        # The case self.total_count == 0 and value == 0 has probability 1 but
+        # lgamma(0) is infinite. Handle this case separately using a function
+        # that does not modify tensors in place to allow Jit compilation.
+        log_normalization = log_normalization.masked_fill(self.total_count + value == 0., 0.)
 
         return log_unnormalized_prob - log_normalization
