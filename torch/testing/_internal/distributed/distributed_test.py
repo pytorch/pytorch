@@ -4905,6 +4905,33 @@ class DistributedTest:
                 weight_decay=sgd_weight_decay,
             )
 
+        @skip_if_lt_x_gpu(2)
+        def test_get_data_parallel_params(self):
+            torch.cuda.set_device(self.rank)
+            model = TwoLinLayerNet().cuda()
+            # Parameters to ignore are in the format {module_name}.{param_name}
+            params_to_ignore = ["a.weight"]
+            torch.nn.parallel.DistributedDataParallel._set_params_and_buffers_to_ignore_for_model(
+                model, params_to_ignore
+            )
+            ddp_model = torch.nn.parallel.DistributedDataParallel(
+                model, device_ids=[self.rank]
+            )
+            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(
+                model, named_params=True
+            )
+            for name, _ in dp_params:
+                self.assertNotEqual(f"module.{params_to_ignore[0]}", name)
+
+            # test named_params=False, just check if returns the expected
+            # no of parameters.
+            num_ddp_params = len(list(model.parameters())) - 1
+            count = 0
+            dp_params = torch.nn.parallel.DistributedDataParallel._get_data_parallel_params(model, named_params=False)
+            for _ in dp_params:
+                count += 1
+            self.assertEqual(count, num_ddp_params)
+
         def _test_ddp_apply_optim_in_backward(
             self,
             optim_cls,
