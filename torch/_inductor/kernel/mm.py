@@ -73,7 +73,7 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
+aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out", ("beta", "alpha"))
 
 
 def bias_addmm(inp, mat1, mat2, *, out=None, alpha=1, beta=1):
