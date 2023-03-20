@@ -190,6 +190,7 @@ def compile_fx_inner(
 
     output = list(gm.graph.nodes)[-1]
     assert len(output.args) == 1
+    stack_traces = [arg.stack_trace for arg in output.args[0]]
     if cudagraphs:
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
@@ -207,6 +208,7 @@ def compile_fx_inner(
                 example_inputs,
                 static_input_idxs=range(num_fixed),
                 device_index=next(iter(graph.device_idxs)),
+                stack_traces=stack_traces,
                 is_backward=is_backward,
                 is_inference=is_inference,
             )
@@ -282,6 +284,7 @@ def cudagraphify(
     static_input_idxs=(),
     *,
     device_index: int,
+    stack_traces: List[Optional[str]],
     is_backward: bool,
     is_inference: bool,
 ):
@@ -293,6 +296,7 @@ def cudagraphify(
         cudagraphify_fn = functools.partial(
             new_cudagraphify_impl,
             device_index=device_index,
+            stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
         )
