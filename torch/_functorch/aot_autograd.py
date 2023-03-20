@@ -3003,10 +3003,13 @@ def aot_module_simplified(
     if hasattr(mod, "graph"):
         if aot_autograd_arg_pos_to_source is None:
             aot_autograd_arg_pos_to_source = []
-        arg_srcs = [x._dynamo_source for x in mod.graph.nodes if x.op == "placeholder" and hasattr(x, "_dynamo_source")]
-        aot_autograd_arg_pos_to_source.extend(arg_srcs)
+        for i, node in enumerate(mod.graph.nodes):
+            if node.op == "placeholder":
+                assert hasattr(node, "_dynamo_source")
+                assert isinstance(args[i], torch.Tensor)
+                aot_autograd_arg_pos_to_source.append(node._dynamo_source)
 
-    if aot_autograd_arg_pos_to_source:
+    if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
 
     dynamic_shapes = False
