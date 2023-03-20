@@ -204,9 +204,7 @@ cudaError_t SetDevice(int device) {
   if (device == curdev) {
     return cudaSuccess;
   }
-  cudaError_t err = cudaSetDevice(device);
-  C10_CUDA_CHECK(cudaFree(0)); // Just to mimic cuda 12 on cuda 11 for testing purposes
-  return err;
+  return cudaSetDevice(device);
 }
 
 cudaError_t MaybeSetDevice(int device) {
