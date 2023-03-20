@@ -211,8 +211,6 @@ class TestPaternMatcher(TestCase):
                     .add(1)
                     .to(memory_format=memory_format)
                 )
-                print(mod)
-                print(x_shape)
                 with torch.no_grad():
                     expected = mod(v)
                     actual = torch.compile(mod)(v)

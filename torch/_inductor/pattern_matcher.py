@@ -602,10 +602,10 @@ if torch._C.has_mkldnn:
     mkldnn = torch.ops.mkldnn
     # _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), KeywordArg('attr'), Arg(),  Arg(),)
     _conv_args = (Arg(), Arg(), Arg(), Arg(), Arg(), Arg(), Arg())
-    _user_1 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=1)]
-    _user_2 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=2)]
-    _user_3 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=3)]
-    _user_4 = [CallFunction(aten.mkldnn_convolution, *_conv_args, _users=4)]
+    _user_1 = [CallFunction(mkldnn._convolution, *_conv_args, _users=1)]
+    _user_2 = [CallFunction(mkldnn._convolution, *_conv_args, _users=2)]
+    _user_3 = [CallFunction(mkldnn._convolution, *_conv_args, _users=3)]
+    _user_4 = [CallFunction(mkldnn._convolution, *_conv_args, _users=4)]
 
     def gelu_fusion_1(computation_call):
         return CallFunction(
@@ -732,7 +732,7 @@ if torch._C.has_mkldnn:
     def register_mkldnn_conv_replacement_pattern(unary_op, pattern):
         @register_replacement_pattern(pattern)
         def fn(input, weight, bias, padding, stride, dilation, groups):
-            return torch.ops.mkldnn._convolution_pointwise(
+            return torch.ops.mkldnn._convolution_pointwise.default(
                 input,
                 weight,
                 bias,
@@ -751,11 +751,11 @@ if torch._C.has_mkldnn:
         register_mkldnn_conv_replacement_pattern(unary_op, patterns[0])
         # TODO: add linear/ConvTranspose fusion
 
-    @register_lowering_pattern(CallFunction(aten.mkldnn_convolution, *_conv_args))
+    @register_lowering_pattern(CallFunction(mkldnn._convolution, *_conv_args))
     def single_conv_lowering(
         match, input, weight, bias, padding, stride, dilation, groups
     ):
-        return L[torch.ops.mkldnn._convolution_pointwise](
+        return L[torch.ops.mkldnn._convolution_pointwise.default](
             input, weight, bias, padding, stride, dilation, groups, "none", [], ""
         )
 
@@ -767,7 +767,7 @@ if torch._C.has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            computation_args = [arg for arg in args]
+            computation_args = [arg for arg in list(args)]
             if matched:
                 computation_args += ["leaky_relu", [negative_slope], ""]
                 return L[computation_op](*computation_args)
@@ -793,7 +793,7 @@ if torch._C.has_mkldnn:
                 matched = False
             else:  # inp is a Number
                 matched = True
-            computation_args = [arg for arg in args]
+            computation_args = [arg for arg in list(args)]
             if matched:
                 computation_args += ["hardtanh", [min_value, max_value], ""]
                 return L[computation_op](*computation_args)
@@ -808,10 +808,10 @@ if torch._C.has_mkldnn:
 
     # conv_fusion lowering
     register_leaky_relu_fusion_lowering(
-        _user_3[0], torch.ops.mkldnn._convolution_pointwise
+        _user_3[0], torch.ops.mkldnn._convolution_pointwise.default
     )
     register_hardtanh_fusion_lowering(
-        _user_1[0], torch.ops.mkldnn._convolution_pointwise
+        _user_1[0], torch.ops.mkldnn._convolution_pointwise.default
     )
     # TODO: add linear/ConvTranspose lowering
 

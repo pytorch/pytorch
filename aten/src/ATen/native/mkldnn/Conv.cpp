@@ -366,6 +366,29 @@ Tensor mkldnn_convolution_pointwise(
       algorithm);
 }
 
+// This fusion will running channels last path if weight is MKLDNN tensor.
+Tensor mkldnn_convolution_v2(
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
+  c10::impl::ExcludeDispatchKeyGuard edkg(c10::autograd_dispatch_keyset);
+  bool use_channels_last =
+      weight_t.is_mkldnn() || mkldnn_conv_use_channels_last(input_t, weight_t);
+  return _mkldnn_convolution(
+      input_t,
+      weight_t,
+      bias_opt,
+      padding,
+      stride,
+      dilation,
+      groups,
+      use_channels_last);
+}
+
 // Fuse convolution+binary_op+unary_op for good performance, which doing such
 // operation: output=unary_op(binary_op(conv(input_t, ...), other_t, alpha)).
 // The binary_attr means which binary_op is, it can be "add", or
@@ -1104,6 +1127,9 @@ REGISTER_ALL_CPU_DISPATCH(mkldnn_convolution_transpose_backward_stub, &mkldnn_co
 
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution"),
+      TORCH_FN(mkldnn_convolution_v2));
+  m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));
   m.impl(
@@ -1118,6 +1144,9 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
 }
 
 TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_convolution"),
+      TORCH_FN(mkldnn_convolution_v2));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_convolution_pointwise"),
       TORCH_FN(mkldnn_convolution_pointwise));

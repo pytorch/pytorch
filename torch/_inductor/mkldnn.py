@@ -130,7 +130,7 @@ class PackedConv2d(nn.Conv2d):
 
     def _conv_forward(self, input, weight, bias):
         if self.padding_mode != "zeros":
-            return torch.mkldnn_convolution(
+            return torch.ops.mkldnn._convolution(
                 F.pad(
                     input, self._reversed_padding_repeated_twice, mode=self.padding_mode
                 ),
@@ -141,7 +141,7 @@ class PackedConv2d(nn.Conv2d):
                 self.dilation,
                 self.groups,
             )
-        return torch.mkldnn_convolution(
+        return torch.ops.mkldnn._convolution(
             input,
             weight,
             bias,
