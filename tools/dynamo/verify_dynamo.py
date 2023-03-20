@@ -81,7 +81,7 @@ def get_rocm_version():
 def check_cuda():
     import torch
 
-    if not torch.cuda.is_available() or torch.version.cuda is None:
+    if not torch.cuda.is_available() or torch.version.hip is not None:
         return None
 
     torch_cuda_ver = packaging.version.parse(torch.version.cuda)
