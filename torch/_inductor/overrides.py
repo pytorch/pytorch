@@ -461,7 +461,7 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
 
 
 philox_rand_like = _prims._make_prim(
-    schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
+    schema="philox_rand_like(Tensor input, Tensor seed, SymInt offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
     meta=_philox_rand_like_meta,
     impl_aten=_philox_rand_like,

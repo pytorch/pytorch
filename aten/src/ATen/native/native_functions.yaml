@@ -2240,6 +2240,7 @@
     SparseCPU, SparseCUDA, SparseMeta: empty_sparse
     SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
     QuantizedCPU, QuantizedCUDA, QuantizedMeta: empty_unknown_quantized
+  tags: core
 
 - func: empty_permuted(SymInt[] size, int[] physical_layout, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:
@@ -3834,14 +3835,6 @@
     SparseCPU, SparseCUDA: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA: _sparse_csr_mm_out
 
-- func: _int_mm(Tensor self, Tensor mat2) -> Tensor
-  dispatch:
-    CUDA: _int_mm_cuda
-
-- func: _int_mm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CUDA: _int_mm_out_cuda
-
 - func: _sparse_mm(Tensor sparse, Tensor dense) -> Tensor
   python_module: sparse
 
@@ -4321,7 +4314,7 @@
   autogen: rand.generator_with_names_out
 
 - func: rand(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: rand
 
@@ -4403,7 +4396,7 @@
   autogen: randint_like.low_dtype_out
 
 - func: randn(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
-  tags: nondeterministic_seeded
+  tags: [core, nondeterministic_seeded]
   dispatch:
     CompositeExplicitAutograd: randn
 
@@ -4439,7 +4432,7 @@
   dispatch:
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: randn_like
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: randn_like
   autogen: randn_like.out
 
 - func: randperm(int n, *, ScalarType? dtype=long, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
@@ -6087,7 +6080,7 @@
   dispatch:
     # NB: Although this composite mutates on the inside, it is
     # non-differentiable so NonFunctional doesn't apply
-    CompositeExplicitAutograd: zeros_like
+    CompositeExplicitAutograd, CompositeImplicitAutogradNestedTensor: zeros_like
   autogen: zeros_like.out
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
@@ -6359,6 +6352,7 @@
     SparseCPU, SparseCUDA, SparseMeta: zero_sparse_
     SparseCsrCPU, SparseCsrCUDA: zero_sparse_csr_
     MkldnnCPU: mkldnn_zero_
+    NestedTensorCPU, NestedTensorCUDA: zero_nested_
   autogen: zero, zero.out
 
 - func: sub.out(Tensor self, Tensor other, *, Scalar alpha=1, Tensor(a!) out) -> Tensor(a!)
@@ -6708,11 +6702,11 @@
 - func: _to_cpu(Tensor[] tensors) -> Tensor[]
   variants: function
 
-- func: to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+- func: to_dense(Tensor self, ScalarType? dtype=None, *, bool? masked_grad=None) -> Tensor
   variants: method
 
 # Special case of to_dense with custom derivative
-- func: _to_dense(Tensor self, ScalarType? dtype=None) -> Tensor
+- func: _to_dense(Tensor self, ScalarType? dtype=None, bool? masked_grad=None) -> Tensor
   variants: method
   dispatch:
     SparseCPU, SparseCUDA: sparse_to_dense
@@ -6720,7 +6714,7 @@
     MkldnnCPU: mkldnn_to_dense
   autogen: _to_dense.out
 
-- func: to_dense_backward(Tensor grad, Tensor input) -> Tensor
+- func: to_dense_backward(Tensor grad, Tensor input, bool? masked_grad=None) -> Tensor
 
 - func: sparse_dim(Tensor self) -> int
   variants: method
@@ -7219,7 +7213,7 @@
     MPS: _lstm_mps
   autogen: _lstm_mps.out
 
-- func: lstm_mps_backward(Tensor grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
+- func: lstm_mps_backward(Tensor? grad_y, Tensor? grad_hy, Tensor? grad_cy, Tensor z_state, Tensor cell_state_fwd, Tensor input, Tensor layersOutputs, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor[], Tensor[])
   dispatch:
     MPS: lstm_mps_backward
   autogen: lstm_mps_backward.out
@@ -9298,12 +9292,11 @@
     MPS: min_mps
     QuantizedCPU: min_quantized_cpu
 
-# Not to be confused with binary op `min.out`. Commented because of failed CI
-# FIXME: enable this
-#- func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-#  device_check: NoCheck   # TensorIterator
-#  dispatch:
-#    CompositeExplicitAutograd: min_unary_out
+- func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CPU, CUDA: min_unary_out
+    QuantizedCPU: min_quantized_unary_out
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmin.out
@@ -9645,6 +9638,7 @@
     MPS: normal_mps_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
+    NestedTensorCPU, NestedTensorCUDA: normal_nested_
   autogen: normal.out
 
 # Only used by the functionalization pass.
@@ -13896,7 +13890,7 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
-- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> Tensor
+- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> Tensor
   python_module: nn
   variants: function
   autogen: scaled_dot_product_attention.out
@@ -13908,55 +13902,56 @@
   autogen: _scaled_dot_product_attention.out
 
 # This aten function is kept so that we can test the choice function from Python
-- func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False) -> int
+- func: _fused_sdp_choice(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None) -> int
   dispatch:
     Meta: _fused_sdp_choice_meta
     CPU, NestedTensorCPU: _fused_sdp_choice_cpp
     CUDA, NestedTensorCUDA: _fused_sdp_choice_cuda
 
-- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None) -> (Tensor, Tensor)
+- func: _scaled_dot_product_attention_math(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, Tensor? dropout_mask=None, *, float? scale=None) -> (Tensor, Tensor)
   variants: function
 
-- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, int philox_seed, int philox_offset, Tensor debug_attn_mask)
+- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor ouput, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, int philox_seed, int philox_offset, Tensor debug_attn_mask)
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
 
-- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, int philox_seed, int philox_offset) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
+- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, int philox_seed, int philox_offse, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
 
-- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False) -> (Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention(Tensor query, Tensor key, Tensor value, bool compute_log_sumexp, bool is_causal=False, *, float? scale=None) -> (Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_cuda
     NestedTensorCUDA: _scaled_dot_product_efficient_attention_nestedtensor_cuda
 
-- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
+- func: _scaled_dot_product_efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   dispatch:
     CUDA: _scaled_dot_product_efficient_attention_backward_cuda
 
+# THIS FUNCTION iS DEPRECATED AND SHOULD BE REMOVED
 - func: _chunk_grad_outputs_efficient_attention(Tensor query, Tensor key, Tensor value, bool is_causal=False) -> bool
   dispatch:
     CUDA: _chunk_grad_outputs_efficient_attention
 
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask) -> (Tensor output, Tensor softmax_logsumexp, int philox_seed, int philox_offset, Tensor debug_attn_mask)
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None) -> (Tensor output, Tensor softmax_logsumexp, int philox_seed, int philox_offset, Tensor debug_attn_mask)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
 
-- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, int philox_seed, int philox_offset) -> (Tensor, Tensor, Tensor)
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, int max_q, int max_k, float dropout_p, bool is_causal, int philox_seed, int philox_offset, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
 
 # Returns ouput, logsumexp if compute_logsumexp
-- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False) -> (Tensor, Tensor)
+- func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, int? max_seqlen_q, bool compute_log_sumexp=False, bool causal=False, *, float? scale=None) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _efficient_attention_forward
 
-- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False) -> (Tensor, Tensor, Tensor)
+- func: _efficient_attention_backward(Tensor grad_out_, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, bool is_causal=False, bool chunk_grad_outputs=False, *, float? scale=None) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
     CUDA: _efficient_attention_backward
@@ -13987,18 +13982,6 @@
   structured: True
   variants: function
   tags: pointwise
-
-- func: _transformer_decoder_only_layer_fwd(Tensor src, int embed_dim, int num_heads, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, bool use_gelu, bool norm_first, float eps, Tensor norm_weight_1, Tensor norm_bias_1, Tensor norm_weight_2, Tensor norm_bias_2, Tensor ffn_weight_1, Tensor ffn_bias_1, Tensor ffn_weight_2, Tensor ffn_bias_2, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None) -> (Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: transformer_decoder_only_layer_forward
-  autogen: _transformer_decoder_only_layer_fwd.out
-
-- func: _native_decoder_only_multi_head_attention(Tensor query, Tensor key, Tensor value, int embed_dim, int num_head, Tensor qkv_weight, Tensor qkv_bias, Tensor proj_weight, Tensor proj_bias, Tensor? mask=None, Tensor? incr_key=None, Tensor? incr_value=None, bool need_weights=True, bool average_attn_weights=True) -> (Tensor, Tensor, Tensor, Tensor)
-  variants: function
-  dispatch:
-    CPU, CUDA, NestedTensorCPU, NestedTensorCUDA: native_decoder_only_multi_head_attention
-  autogen: _native_decoder_only_multi_head_attention.out
 
 - func: special_bessel_j0(Tensor self) -> Tensor
   python_module: special

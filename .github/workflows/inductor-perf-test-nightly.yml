@@ -1,4 +1,4 @@
-name: inductor-A100-perf
+name: inductor-A100-perf-nightly
 
 on:
   schedule:
