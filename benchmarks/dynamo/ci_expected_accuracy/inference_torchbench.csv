@@ -8,13 +8,16 @@ attention_is_all_you_need_pytorch,0
 dcgan,0
 densenet121,0
 dlrm,0
+doctr_det_predictor,3
+doctr_reco_predictor,3
 drq,0
 fastNLP_Bert,4
 functorch_dp_cifar10,0
 functorch_maml_omniglot,0
-hf_Albert,0
+hf_Albert,3
 hf_Bart,11
-hf_Bert,0
+hf_Bert,3
+hf_Bert_large,3
 hf_DistilBert,0
 hf_GPT2,0
 hf_Reformer,5
@@ -26,6 +29,8 @@ mobilenet_v2,0
 mobilenet_v3_large,0
 nvidia_deeprecommender,0
 opacus_cifar10,0
+phlippe_densenet,0
+phlippe_resnet,0
 pyhpc_isoneutral_mixing,0
 pytorch_CycleGAN_and_pix2pix,0
 pytorch_stargan,0
