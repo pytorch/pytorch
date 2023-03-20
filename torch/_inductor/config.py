@@ -45,6 +45,10 @@ epilogue_fusion_first = False
 # enable pattern match+replace optimizations
 pattern_matcher = True
 
+# enable scaled dot-product attention replacements/fusions
+# based on pattern matching. (requires pattern_matcher==True)
+scaled_dot_product_attention_fusion = False
+
 # enable reordering pass
 reordering = False
 

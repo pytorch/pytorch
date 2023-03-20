@@ -9,6 +9,7 @@ import torch._dynamo.config as dynamo_config
 import torch.nn as nn
 from torch import _prims
 from torch._dynamo.utils import fake_mode_from_tensors
+from torch._inductor.sdpa_pattern_rewriter import fuse_scaled_dot_product_attention
 from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
@@ -80,6 +81,13 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
         gm = linear_permute_fusion(gm)
         gm = permute_linear_fusion(gm)
         gm = permute_matmul_fusion(gm)
+
+    if (
+        config.scaled_dot_product_attention_fusion
+        and config.pattern_matcher
+        and not is_cpu
+    ):
+        gm = fuse_scaled_dot_product_attention(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled():

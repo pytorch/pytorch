@@ -1,15 +1,23 @@
-from .graph_module import GraphModule
-from .graph import Graph
-from .node import Node
-from ._symbolic_trace import symbolic_trace
-from ._compatibility import compatibility
-
 import copy
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import Callable, Dict, List, NamedTuple, Optional, Set, Union
+
+
+from ._compatibility import compatibility
+from ._symbolic_trace import symbolic_trace
+from .graph import Graph
+from .graph_module import GraphModule
+from .node import Node
 import torch
 
-__all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters', "ReplacedPatterns"]
+__all__ = [
+    "Match",
+    "replace_pattern",
+    "replace_pattern_with_filters",
+    "replace_multiple_patterns_with_filters",
+    "ReplacedPatterns",
+]
 
 @compatibility(is_backward_compatible=True)
 class Match(NamedTuple):
@@ -335,9 +343,194 @@ def _replace_pattern(
     # `original_graph`
     gm.recompile()
 
-    # If `replacement` was an nn.Module, we'll need to make sure that
-    # all the submodules have been copied over correctly
-    if isinstance(replacement, torch.nn.Module):
-        _replace_submodules(gm, replacement)
+    if len(_matches)>0:
+        # If `replacement` was an nn.Module, we'll need to make sure that
+        # all the submodules have been copied over correctly
+        if isinstance(replacement, torch.nn.Module):
+            _replace_submodules(gm, replacement)
 
+    return match_and_replacements
+
+
+# Experimental API, not backward compatible
+@compatibility(is_backward_compatible=False)
+def replace_multiple_patterns_with_filters(
+    gm: GraphModule,
+    pattern_replacement_map: Dict[ GraphModule, GraphModule],
+    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]],  # type: ignore[name-defined]
+) -> List[ReplacedPatterns]:
+    """
+        Matches all possible non-overlapping sets of operators and their
+        data dependencies of multiple patterns ( the keys in the `pattern_replacement_map` )
+        in the Graph of a GraphModule (``gm``), then replaces each of these matched
+        subgraphs with another subgraph ( corresponding value to pattern
+        in `pattern_replacement_map`).
+
+        Args:
+            ``gm``: The GraphModule that wraps the Graph to operate on
+            ``pattern_replacement_map``: A mapping of patterns to replacements in the
+            Graph.                       form of GraphModules
+            ``match_filters``: A list of functions that take in
+                (match: InternalMatch, original_graph: Graph, pattern_graph: Graph) and return a boolean indicating
+                whether the match satisfies the condition.
+
+        Returns:
+            List[Match]: A list of ``Match`` objects representing the places
+            in the original graph that any ``pattern`` was matched to. The list
+            is empty if there are no matches. ``Match`` is defined as:
+
+            .. code-block:: python
+
+                class Match(NamedTuple):
+                    # Node from which the match was found
+                    anchor: Node
+                    # Maps nodes in the pattern subgraph to nodes in the larger graph
+                    nodes_map: Dict[Node, Node]
+    """
+    return _replace_multiple_patterns(gm, pattern_replacement_map, match_filters)
+
+
+def _replace_multiple_patterns(
+    gm: GraphModule,
+    pattern_replacement_map: Dict[ Union[Callable, GraphModule], Union[Callable, GraphModule]],
+    match_filters: List[Callable[["InternalMatch", Graph, Graph], bool]] = None,  # type: ignore[name-defined]
+) -> List[ReplacedPatterns]:
+    from torch.fx.passes.utils.matcher_utils import SubgraphMultiPatternMatcher, InternalMatch
+
+    if match_filters is None:
+        match_filters = []
+
+    # Get the graphs for `gm`, `pattern`, `replacement`
+    original_graph: Graph = gm.graph
+    pattern_replacement_map_orig = pattern_replacement_map
+    pattern_replacement_map = {}
+    pattern_gm_map = {}
+    for pattern, replacement in pattern_replacement_map_orig.items():
+        #assert not isinstance(replacement, torch.nn.Module), "replace_multiple_patterns_with_filters does not support replacements to be torch.nn.Module instances."
+        if not isinstance(pattern, GraphModule):
+            pattern_gm = symbolic_trace(pattern)
+            pattern_gm_map[pattern_gm] = pattern
+            pattern = pattern_gm
+        else:
+            pattern_gm_map[pattern] = pattern
+
+        if not isinstance(replacement, GraphModule):
+            replacement = symbolic_trace(replacement)
+        pattern_replacement_map[pattern] = replacement
+
+    matcher = SubgraphMultiPatternMatcher([gm.graph for gm in pattern_replacement_map.keys()],
+                match_output=False, match_placeholder=False, remove_overlapping_matches=True)
+    _matches: List[InternalMatch] = matcher.match(original_graph)
+    anchor_to_pattern_map = matcher.anchor_to_pattern_map
+
+
+    # Filter out matches that don't match the filter
+    all_matches = [
+        m for m in _matches
+        if all(match_filter(m, original_graph, anchor_to_pattern_map[m.anchors[0]])
+               for match_filter in match_filters)
+    ]
+    pattern_match_map = defaultdict(list)
+    replaced_modules = set()
+    for pattern_gm, replacement_gm in pattern_replacement_map.items():
+        for m in all_matches:
+            if anchor_to_pattern_map[m.anchors[0]]==pattern_gm.graph:
+                pattern_match_map[pattern_gm].append(m)
+                # Find original replacement, so we can determine whether it is
+                # a torch.nn.Module requiring special treatment
+                pattern = pattern_gm_map[pattern_gm]
+                orig_replacement = pattern_replacement_map_orig[pattern]
+                if isinstance(orig_replacement, torch.nn.Module):
+                    replaced_modules.add(orig_replacement)
+
+    match_and_replacements = []
+
+    for pattern_gm, _matches in pattern_match_map.items():
+        replacement_graph = pattern_replacement_map[pattern_gm].graph
+        pattern_graph = pattern_gm.graph
+        replacement_placeholders = [n for n in replacement_graph.nodes if n.op == "placeholder"]
+
+        # As we progressively replace nodes, we'll need to keep track of how the match results should change
+        match_changed_node: Dict[Node, Node] = {}
+
+
+        for match in _matches:
+
+            # Build connecting between replacement graph's input and original graph input producer node
+
+            # Initialize `val_map` with mappings from placeholder nodes in
+            # `replacement` to their corresponding node in `original_graph`
+            assert len(match.placeholder_nodes) == len(replacement_placeholders)
+            val_map: Dict[Node, Node] = {}
+            for rn, gn in zip(replacement_placeholders, match.placeholder_nodes):
+                if isinstance(gn, Node):
+                    val_map[rn] = match_changed_node.get(gn, gn)
+                else:
+                    val_map[rn] = gn
+
+            # Copy the replacement graph over
+            user_nodes: Set[Node] = set()
+            for n in match.returning_nodes:
+                for user in n.users:
+                    user_nodes.add(user)
+            assert user_nodes, "The returning_nodes should have at least one user node"
+
+            if len(user_nodes) == 1:
+                first_user_node = list(user_nodes)[0]
+            else:
+                # If there are multiple user nodes, we need to find the first user node
+                # in the current execution order of the `original_graph`
+                for n in original_graph.nodes:
+                    if n in user_nodes:
+                        first_user_node = n
+                        break
+
+            with original_graph.inserting_before(first_user_node):
+                copied_returning_nodes = original_graph.graph_copy(replacement_graph, val_map)
+
+            if isinstance(copied_returning_nodes, Node):
+                copied_returning_nodes = (copied_returning_nodes, )
+
+            # Get a list of nodes that have been replaced into the graph
+            replacement_nodes = []
+
+            def get_replacement_nodes(curr_node: Node):
+                nonlocal replacement_nodes
+                for arg in curr_node.args:
+                    if isinstance(arg, Node):
+                        if arg not in val_map.values():
+                            get_replacement_nodes(arg)
+                replacement_nodes.append(curr_node)
+
+            for ret_node in copied_returning_nodes:
+                get_replacement_nodes(ret_node)
+
+            # Hook the output Node of the replacement subgraph in to the
+            # original Graph at the correct location
+            assert len(match.returning_nodes) == len(copied_returning_nodes)
+            for gn, copied_node in zip(match.returning_nodes, copied_returning_nodes):
+                gn.replace_all_uses_with(copied_node)
+                match_changed_node[gn] = copied_node
+            # Remove the original nodes
+            for node in reversed(pattern_graph.nodes):
+                if node.op != "placeholder" and node.op != "output":
+                    gn = match.nodes_map[node]
+                    gm.graph.erase_node(gn)
+
+            match_and_replacements.append(
+                ReplacedPatterns(
+                    anchor=match.anchors[0],
+                    nodes_map=match.nodes_map,
+                    replacements=replacement_nodes
+                )
+            )
+
+    # Update the passed-in GraphModule to reflect the new state of
+    # `original_graph`
+    gm.recompile()
+
+    # If a module is used as replacement, it needs special treatment
+    # to make sure all submodules are copied over
+    for replaced_module in replaced_modules:
+        _replace_submodules(gm, replaced_module)
     return match_and_replacements

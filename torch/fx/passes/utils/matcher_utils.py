@@ -350,3 +350,170 @@ class SubgraphMatcher:
         logger.info(f"Matches returned: {matches}")
 
         return matches
+
+
+@compatibility(is_backward_compatible=False)
+class SubgraphMultiPatternMatcher(SubgraphMatcher):
+
+    def __init__(self, patterns: List[Graph],
+                 match_output: bool = False,
+                 match_placeholder: bool = False,
+                 remove_overlapping_matches: bool = True) -> None:
+        """
+        Args:
+            patterns: the targeted matching patterns, represented as a list of fx.Graph instances.
+            match_output: If True, output node in the pattern graph will be treated as a part of the targeted pattern.
+                If False, output node is ignored during match.
+            match_placeholder: If True, placeholder node in the pattern graph will be treated as a part of
+                the targeted pattern. If False, placeholder nodes will be used a wildcard.
+            remove_overlapping_matches: If True, in the case of overlapping matches, only the first match
+                will be returned.
+        """
+
+        self.patterns : List[Graph]= patterns
+        self.match_output : bool = match_output
+        self.match_placeholder : bool = match_placeholder
+        self.remove_overlapping_matches : bool = remove_overlapping_matches
+        self.pattern_placeholder_nodes : List[Node]  = []
+        self.pattern_returning_nodes : List[Node] = []
+        self.pattern_anchors: List[Node] = []
+        self.anchor_to_pattern_map : Dict[Node,Graph]= {} # Map anchor nodes ( starting points for match attempts ) to the corresponding pattern graph
+        for pattern in patterns:
+            if len(pattern.nodes) == 0:
+                raise ValueError("SubgraphMultiPatternMatcher cannot be initialized with an empty pattern")
+
+            for node in pattern.nodes:
+                if node.op != "output":
+                    assert len(node.users) > 0, \
+                        "SubgraphMultiPatternMatcher cannot be initialized with an pattern with dead code"
+
+            self.pattern_placeholder_nodes += [n for n in pattern.nodes if n.op == "placeholder"]
+            output_node = next(iter(reversed(pattern.nodes)))
+
+            # nodes returned by outputs
+            self.pattern_returning_nodes += output_node.all_input_nodes
+
+            if match_output:
+                anchor = output_node
+            else:
+                # If a node has output_node as the ONLY user, then this node is a graph sink,
+                # and should be matched against as an anchor
+                anchors = [ n for n in output_node.all_input_nodes]
+                assert len(anchors)==1, "SubgraphMultiPatternMatcher does not support graphs with multiple anchors / return values."
+                anchor = anchors[0]
+                assert len(anchor.users) == 1,  "SubgraphMultiPatternMatcher does not support anchors with more than one user node in the graph."
+
+            self.pattern_anchors += [anchor]
+            self.anchor_to_pattern_map[anchor] = pattern
+
+    def _match_single_anchor_candidates(self, pattern_anchor: Node, graph : Graph) -> List[InternalMatch]:
+            anchor_matches: List[InternalMatch] = []
+            # find candidate nodes to match with pattern anchors
+            match_candidates: Dict[Node, List[Node]] = defaultdict(list)
+            for node in graph.nodes:
+                if self._nodes_are_equal(pattern_anchor, node):
+                    match_candidates[pattern_anchor].append(node)
+
+            match_candidates_list = list(match_candidates.items())
+
+            logger.info(f"Initial match_candidates_list: {match_candidates_list}\n")
+
+
+
+            def backtracking(anchor_index, match):
+                if anchor_index == len(match_candidates_list):
+                    match.placeholder_nodes = [match.nodes_map[pn] for pn in self.pattern_placeholder_nodes if pn in match.nodes_map]
+                    match.returning_nodes = [match.nodes_map[pn] for pn in self.pattern_returning_nodes if pn in match.nodes_map]
+                    anchor_matches.append(match)
+
+                    logger.info(f"Found a match: {match}\n")
+                    return
+
+                pattern_anchor, candidate_nodes = match_candidates_list[anchor_index]
+                saved_match = copy.copy(match)
+
+                for node in candidate_nodes:
+                    logger.info(f"Trying to match anchor {pattern_anchor} to {node}")
+
+                    match_found = self._match_nodes(pattern_anchor, node, match)
+                    if match_found:
+                        # match next anchor
+                        backtracking(anchor_index + 1, match)
+                    else:
+                        logger.info(f"Failed to match anchor {pattern_anchor} to {node}\n")
+
+                    # revert to saved_match before matching with current anchor
+                    match = copy.copy(saved_match)
+
+            match = InternalMatch(anchors=[pattern_anchor])
+            if match_candidates_list:
+                backtracking(0, match)
+
+            return anchor_matches
+
+    def match(self, graph: Graph) -> List[InternalMatch]:
+        """
+        Returns:
+            The matched subgraphs.
+            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            and nodes returned by output) can only be consumed by nodes within the matched subgraph.
+
+        Subgraph pattern matcher is implemented with the backtracking style in the following steps:
+
+        1. We first identify all the anchor nodes in the pattern graph. The anchor nodes
+        are the "sinks" (nodes with no user other than the output node) of the pattern graph.
+        Note: For SubgraphMultiPatternMatcher in contrast to SubgraphMatcher, each pattern
+        graph may only have exactly one anchor.
+
+        2. In the target graph, we identify the potential candidate nodes that can be matched
+        with each anchor. These anchor-candidate pairs are the starting points for
+        pairwise per-node matching.
+
+        3. For each anchor-candidate pair, we simultaneously traverse backwards (DFS) in both
+        pattern and target graphs. For every pattern nodes along traversal path, we compare it
+        against the target nodes. In case any comparison failed, the match for this anchor-candidate
+        pair fails. A match is found when DFS completes traversing the graph. See `self._match_nodes`
+        for more details.
+
+        4. SubgraphMultiPatternMatcher does not use backtracking in contrast to SubgraphMatcher, because
+        each pattern has exactly one anchor.
+
+        Notice: graph traversal must be done in the reverser order because a tensor can have multiple
+        consumers, but can only have a single producer. Only with reverser order, we can we jointly
+        traverse the pattern and target graph in a deterministic path.
+        """
+        from torch.fx.passes.utils.fuser_utils import validate_partition
+
+        matches: List[InternalMatch] = []
+
+        for pattern_anchor in self.pattern_anchors:
+            matches += self._match_single_anchor_candidates(pattern_anchor, graph)
+
+        # filter out the matches where the subgraph is not fully_contained
+        before = len(matches)
+        matches = [match for match in matches if self._is_contained(match.nodes_map)]
+        after = len(matches)
+        if before != after:
+            logger.info(f"Filtered out {before - after} matches because they are not fully contained")
+
+        # filter out the matches that that forms a cycle if the subgraph is fused
+        valid_matches = []
+        for match in matches:
+            matched_compute_nodes = \
+                [gn for pn, gn in match.nodes_map.items() if pn.op not in {"placeholder", "output"}]
+            if validate_partition(matched_compute_nodes):
+                valid_matches.append(match)
+        if len(valid_matches) != len(matches):
+            logger.info(f"Filtered out {len(matches) - len(valid_matches)} matches because \
+                          matched subgraph would form a cycle if fused")
+
+        if self.remove_overlapping_matches:
+            before = len(valid_matches)
+            matches = self._remove_overlapping_matches(valid_matches)
+            after = len(matches)
+            if before != after:
+                logger.info(f"Filtered out {before - after} matches because matched subgraphs are overlapping")
+
+        logger.info(f"Matches returned: {matches}")
+
+        return matches
