@@ -272,9 +272,12 @@ void impl_func_norm_mps(const Tensor& input_tensor,
                         bool cdist = false,
                         c10::optional<IntArrayRef> input_broadcasted_shape = c10::nullopt,
                         NormOpBlock normOpBlock = nullptr) {
+  auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   if (input_tensor.numel() == 0) {
+    output_t.fill_((p < 0) ? INFINITY : 0);
     return;
   }
+
 
   auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
   auto in_dtype = opt_dtype.value_or(input_tensor.scalar_type());
@@ -288,7 +291,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
                 "norm_out_mps: reduction dim must be in the range of input shape")
   }
 
-  auto p = opt_p.has_value() ? opt_p.get().to<double>() : Scalar(2.0).to<double>();
   auto reciprocal_p = 1 / p;
   bool pIsZero = (p == 0.0);
   bool pIsPosInf = (p == numeric_limits<double>::infinity());
@@ -319,9 +321,17 @@ void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
+  // Cast FP16 to FP32 on macOS Monterey due to precision issues.
+  // This is fixed starting with macOS Ventura.
+  bool castInputData = false;
+  if (!is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_0_PLUS) && mps_input_dtype == MPSDataTypeFloat16) {
+    castInputData = true;
+    mps_input_dtype = MPSDataTypeFloat32;
+  }
+
   auto stream = at::mps::getCurrentMPSStream();
   @autoreleasepool {
-    NSString* ns_key = [[axes valueForKey:@"description"] componentsJoinedByString:@","];
+    NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
     string key =
@@ -337,19 +347,23 @@ void impl_func_norm_mps(const Tensor& input_tensor,
       MPSGraphTensor* inputTensor = cdist
           ? normOpBlock(newCachedGraph, newCachedGraph->inputTensor_, newCachedGraph->otherTensor_)
           : newCachedGraph->inputTensor_;
-      if (opt_dtype.has_value()) {
-        inputTensor = [mpsGraph castTensor:inputTensor toType:mps_input_dtype name:@"castInputTensor"];
+
+          if (opt_dtype.has_value() || castInputData) {
+            inputTensor = [mpsGraph castTensor:inputTensor
       }
 
       MPSGraphTensor* outputTensor;
 
       if (pIsZero) {
-        MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-        MPSGraphTensor* powerValTensor = [mpsGraph constantWithScalar:p dataType:mps_input_dtype];
-        MPSGraphTensor* powerTensor = [mpsGraph powerWithPrimaryTensor:absoluteTensor
-                                                       secondaryTensor:powerValTensor
+              MPSGraphTensor* zeros = [mpsGraph constantWithScalar:0.0 dataType:mps_input_dtype];
+              MPSGraphTensor* ones = [mpsGraph constantWithScalar:1.0 dataType:mps_input_dtype];
+              MPSGraphTensor* nonZeros = [mpsGraph selectWithPredicateTensor:inputTensor
+                                                         truePredicateTensor:ones
+                                                        falsePredicateTensor:zeros
                                                                   name:nil];
-        outputTensor = [mpsGraph reductionSumWithTensor:powerTensor axes:wrappedAxes name:nil];
+              outputTensor = [mpsGraph reductionSumWithTensor:nonZeros
+                                                         axes:wrappedAxes
+                                                         name:nil];
       } else if (pIsPosInf) {
         MPSGraphTensor* absoluteTensor = [mpsGraph absoluteWithTensor:inputTensor name:nil];
         outputTensor = [mpsGraph reductionMaximumWithTensor:absoluteTensor axes:wrappedAxes name:nil];
@@ -378,7 +392,7 @@ void impl_func_norm_mps(const Tensor& input_tensor,
         outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:mps::getMPSShape(output_t) name:nil];
       }
 
-      newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->outputTensor_ = castInputData ? castMPSTensor(mpsGraph, outputTensor, output_t.scalar_type()) : outputTensor;
     });
 
     auto otherPlaceholder = Placeholder();
@@ -400,6 +414,16 @@ void impl_func_norm_mps(const Tensor& input_tensor,
   }
 }
 
+}
+
+TORCH_IMPL_FUNC(linalg_vector_norm_out_mps)
+(const Tensor& self,
+ const Scalar& scalar_ord,
+ OptionalIntArrayRef opt_dim,
+ bool keepdim,
+ c10::optional<ScalarType> opt_dtype,
+ const Tensor& result) {
+  impl_func_norm_mps(self, self, scalar_ord, opt_dim.value_or(IntArrayRef{}), keepdim, opt_dtype, result, /*cdist=*/false);
 Tensor std_var_common_impl_mps(const Tensor& input_t,
                                at::OptionalIntArrayRef dim,
                                const c10::optional<Scalar>& correction,
