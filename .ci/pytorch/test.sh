@@ -302,7 +302,7 @@ test_single_dynamo_benchmark() {
 
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     python "benchmarks/dynamo/$suite.py" \
-      --ci --performance --disable-cudagraphs \
+      --ci --performance \
       "${DYNAMO_BENCHMARK_FLAGS[@]}" \
       "$@" "${partition_flags[@]}" \
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
