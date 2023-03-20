@@ -337,6 +337,12 @@ class IRNode:
     def __post_init__(self):
         self.origins = set(self._current_origins)
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # can not pickle an fx.Node, so ignore them
+        state["origins"] = set()
+        return state
+
     def common_repr(self):
         origins = f"origins={getattr(self, 'origins', '')}"
         if len(origins) > 64:

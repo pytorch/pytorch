@@ -2,6 +2,7 @@ import os
 import sys
 
 import torch
+import contextlib
 
 # add some debug printouts
 debug = False
@@ -59,6 +60,9 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
+
+# We will disable creating subprocess for autotuning if this is False
+autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
@@ -282,3 +286,17 @@ from .._dynamo.config_utils import install_config_module
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
+
+@contextlib.contextmanager
+def override_configs(**new_configs):
+    prev_configs = {}
+    mod = sys.modules[__name__]
+    try:
+        for k, v in new_configs.items():
+            assert hasattr(mod, k)
+            prev_configs[k] = getattr(mod, k)
+            setattr(mod, k, v)
+        yield
+    finally:
+        for k, v in prev_configs.items():
+            setattr(mod, k, v)

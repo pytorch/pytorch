@@ -5,18 +5,20 @@ import itertools
 import logging
 import sys
 import textwrap
+import warnings
 from io import StringIO
 
 from typing import Any, List
 from unittest.mock import patch
 
 import sympy
+import sys
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity
 
-from . import config, ir
+from . import config, ir, codecache
 from .codecache import code_hash, PersistentCache, PyCodeCache
 
 from .codegen.common import IndentedBuffer
@@ -24,8 +26,13 @@ from .codegen.triton import config_of, signature_of, texpr, TritonKernel, Triton
 
 from .utils import do_bench, sympy_dot, sympy_product
 from .virtualized import V
+from torch import multiprocessing
+from cloudpickle import dumps, loads
 
 log = logging.getLogger(__name__)
+
+# cuda runtime does not work with "fork"
+multiprocessing.set_start_method("spawn", force=True)
 
 # correctness checks struggle with fp16/tf32
 VERIFY = False  # dict(atol=1, rtol=0.05)
@@ -40,6 +47,17 @@ class KernelNamespace:
 template_kernels = KernelNamespace()
 extern_kernels = KernelNamespace()
 
+def benchmark_choice_in_sub_process(all_template_kernels, choice, args, out, expected_out, timings):
+    global template_kernels
+    template_kernels = loads(all_template_kernels)
+    choice = loads(choice)
+    result = choice.benchmark(*args, out=out)
+    if expected_out is not None:
+        torch.testing.assert_close(out, expected_out) 
+
+    # use a tensor since the mutation to a python list in a sub process
+    # is not synced back to the parent process
+    timings.copy_(torch.tensor(result))
 
 class TritonTemplateKernel(TritonKernel):
     def __init__(
@@ -326,10 +344,21 @@ class TritonTemplate:
             return env.from_string(source)
         return None
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # jinja template can not be pickled
+        del state["template"]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self.template = self._template_from_string(self.source)
+
     def __init__(self, name: str, grid: Any, source: str, debug=False):
         super().__init__()
         self.name = name
         self.grid = grid
+        self.source = source
         self.template = self._template_from_string(source)
         assert name not in self.all_templates, "duplicate template name"
         self.all_templates[name] = self
@@ -403,8 +432,6 @@ class TritonTemplate:
                 )
                 + "-"
             )
-            mod = PyCodeCache.load(code, extra)
-            run = getattr(mod, kernel_name).run
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = [x.get_name() for x in input_nodes] + [fake_out.get_name()]
@@ -417,7 +444,16 @@ class TritonTemplate:
         )
         assert not extra_args, "TODO: dynamic shapes"
 
+        run = None
+
         def call(*args, out):
+            # set run only when used to we don't need pickle it.
+            # Pickle run fail with error: TypeError: cannot pickle 'PyCapsule' object
+            nonlocal run
+
+            if run is None:
+                mod = PyCodeCache.load(code, extra)
+                run = getattr(mod, kernel_name).run
             return run(
                 *args,
                 out,
@@ -427,8 +463,9 @@ class TritonTemplate:
                 num_warps=num_warps,
             )
 
-        call.key = mod.key
-        call.__file__ = mod.__file__
+        key, path = codecache.write(code, "py", extra)
+        call.key = key
+        call.__file__ = path
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
         setattr(template_kernels, kernel_hash_name, call)
@@ -716,7 +753,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
             expected = out_extern.clone()
 
-        def benchmark(choice):
+        def benchmark_in_current_process(choice):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -728,6 +765,41 @@ class AlgorithmSelectorCache(PersistentCache):
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
             torch.cuda.synchronize()  # shake out any CUDA errors
             return min(result)
+
+        def benchmark_in_sub_process(choice):
+            out.zero_()
+
+            if isinstance(choice, ExternKernelCaller):
+                inputs = example_inputs_extern
+                output = out_extern
+            else:
+                inputs = example_inputs
+                output = out
+
+            if VERIFY:
+                expected_output = expected
+            else:
+                expected_output = None
+
+            # use a tensor since the mutation to a python list in a sub process
+            # is not synced back to the parent process
+            timings = torch.zeros(3, dtype=torch.float32)
+
+            child = multiprocessing.Process(target=benchmark_choice_in_sub_process, args=(dumps(template_kernels), dumps(choice), inputs, output, expected_output, timings))
+            child.start()
+            child.join()
+
+            # child process fail
+            if child.exitcode != 0:
+                warnings.warn(f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains.")
+
+                # return a large value to this choice will be ignored
+                return 1e10
+
+            torch.cuda.synchronize()  # shake out any CUDA errors
+            return timings.min().item()
+
+        benchmark = benchmark_in_sub_process if config.autotune_in_subproc else benchmark_in_current_process
 
         def debug_str():
             def tensor_repr(x):
