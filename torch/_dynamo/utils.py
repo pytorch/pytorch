@@ -1097,9 +1097,10 @@ class CompileProfiler:
 
         """
         )
-        report += graph_break_report() or "No graph breaks detected.\n"
+        report += graph_break_report() or "No graph breaks detected."
         report += textwrap.dedent(
             """
+
             Recompilation
             -------------
             These subgraphs were recompiled more than once due to guard failures
