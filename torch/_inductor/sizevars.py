@@ -224,6 +224,10 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 

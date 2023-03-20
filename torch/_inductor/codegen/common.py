@@ -39,14 +39,19 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
-        def matching_parens(string):
-            op = []
-            dc = {
-                op.pop() if op else -1: i
-                for i, c in enumerate(string)
-                if (c == "(" and op.append(i) and False) or (c == ")" and op)
-            }
-            return False if dc.get(-1) or op else dc
+        def all_in_parens(string):
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
 
         if (
             isinstance(string, CSEVariable)
@@ -56,7 +61,7 @@ class ExprPrinter(Printer):
         ):
             return string
         # don't put extra parens for strings that are already wrapped in parens
-        if matching_parens(string).get(0, -1) == len(string) - 1:
+        if all_in_parens(string):
             return string
         return f"({string})"
 
