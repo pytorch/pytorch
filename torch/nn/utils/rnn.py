@@ -136,7 +136,7 @@ class PackedSequence(PackedSequence_):
             return self
         else:
             # Does not forward device or dtype arg/kwargs, device is set from data.device
-            kwargs = {k : v for k, v in filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items())}
+            kwargs = dict(filter(lambda t: t[0] != 'device' and t[0] != 'dtype', kwargs.items()))
             sorted_indices = bind(self.sorted_indices, lambda t: t.to(data.device, **kwargs))
             unsorted_indices = bind(self.unsorted_indices, lambda t: t.to(data.device, **kwargs))
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
