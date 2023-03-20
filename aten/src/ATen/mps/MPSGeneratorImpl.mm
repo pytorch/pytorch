@@ -23,8 +23,9 @@ Generator createMPSGenerator(uint64_t seed_val) {
 } // namespace mps
 
 MPSGeneratorImpl::MPSGeneratorImpl(uint64_t seed_in)
-  : c10::GeneratorImpl{Device(DeviceType::MPS), DispatchKeySet(c10::DispatchKey::MPS)},
-    data_({.seed = seed_in}), engine_(seed_in, 0, 0) { }
+    : c10::GeneratorImpl{Device(DeviceType::MPS), DispatchKeySet(c10::DispatchKey::MPS)},
+      data_({.seed = seed_in}),
+      engine_(seed_in, 0, 0) {}
 
 void MPSGeneratorImpl::set_current_seed(uint64_t seed) {
   data_.seed = seed;
@@ -60,7 +61,8 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
   static const size_t seed_size = sizeof(uint64_t);
   static const size_t total_size = states_size + seed_size;
 
-  auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
+  auto state_tensor = at::detail::empty_cpu(
+      {(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
   auto rng_state = state_tensor.data_ptr<uint8_t>();
   auto current_seed = this->current_seed();
   memcpy(rng_state, this->data_.state.data(), states_size);
