@@ -23,7 +23,6 @@ from . import config
 from .fx_utils import matches_module_function_pattern
 
 from .mkldnn import mkldnn_fuse_fx
-from .utils import has_triton
 
 log = logging.getLogger(__name__)
 
@@ -36,19 +35,22 @@ class AutogradMonkeypatch(TorchFunctionMode):
             config.fallback_random
             and replacements[func] in replacements_using_triton_random
         ):
-            return replacements[func](*args, **kwargs)
+            if func != torch.nn.functional.dropout or (
+                func == torch.nn.functional.dropout and args[0].device != torch.device("cpu")
+            ):
+                return replacements[func](*args, **kwargs)
         return func(*args, **kwargs)
 
 
 patch_functions = AutogradMonkeypatch
 
 
-def replace_fx(gm: torch.fx.GraphModule):
+def replace_fx(gm: torch.fx.GraphModule, example_inputs):
     # Sometimes patch_functions() misses things already in the graph
     for node in reversed(list(gm.graph.nodes)):
         if node.op == "call_function" and node.target in replacements:
             if (
-                config.fallback_random
+                (config.fallback_random or example_inputs[0].device == torch.device("cpu"))
                 and replacements[node.target] in replacements_using_triton_random
             ):
                 continue
@@ -577,14 +579,7 @@ def rand_like(x, **kwargs):
     return philox_rand_like(x, seed, offset).to(kwargs.get("dtype", torch.float32))
 
 
-if has_triton():
-    replacements = {
-        torch.nn.functional.dropout: lowmem_dropout,
-        torch.rand_like: rand_like,
-    }
-    # Keep track of any replacement functions that use triton random,
-    # so they can be avoided when fallback_random is set
-    replacements_using_triton_random = {lowmem_dropout, rand_like}
-else:
-    replacements = {torch.rand_like: rand_like}
-    replacements_using_triton_random = {rand_like}
+replacements = {torch.nn.functional.dropout: lowmem_dropout, torch.rand_like: rand_like}
+# Keep track of any replacement functions that use triton random,
+# so they can be avoided when fallback_random is set
+replacements_using_triton_random = {lowmem_dropout, rand_like}

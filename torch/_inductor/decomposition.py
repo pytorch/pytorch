@@ -444,16 +444,20 @@ register_extra_random_decomp = functools.partial(
     decomp.register_decomposition, registry=extra_random_decomps
 )
 
-if utils.has_triton():
 
-    @register_extra_random_decomp([aten.bernoulli_])
-    def bernoulli_(self, p=0.5):
-        return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
+@register_extra_random_decomp([aten.bernoulli_])
+def bernoulli_(self, p=0.5):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    return self.copy_(torch.rand_like(self, dtype=torch.float32) < p)
 
-    @register_extra_random_decomp([aten.bernoulli.p])
-    def bernoulli_p(self, p=0.5, *, generator=None):
-        assert generator is None
-        return torch.rand_like(self, dtype=torch.float32) < p
+
+@register_extra_random_decomp([aten.bernoulli.p])
+def bernoulli_p(self, p=0.5, *, generator=None):
+    if self.device == torch.device("cpu"):
+        return NotImplemented
+    assert generator is None
+    return torch.rand_like(self, dtype=torch.float32) < p
 
 
 @functools.lru_cache(None)
