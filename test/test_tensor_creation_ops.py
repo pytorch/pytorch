@@ -3664,10 +3664,10 @@ class TestBufferProtocol(TestCase):
             torch.frombuffer(byte_arr, dtype=dtype)
 
     def test_byte_to_int(self):
-        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte)
+        byte_array = np.array([-1, 0, 0, 0, -1, 0, 0, 0], dtype=np.byte) if sys.byteorder == 'little' \
+            else np.array([0, 0, 0, -1, 0, 0, 0, -1], dtype=np.byte)
         tensor = torch.frombuffer(byte_array, dtype=torch.int32)
         self.assertEqual(tensor.numel(), 2)
-        # Assuming little endian machine
         self.assertSequenceEqual(tensor, [255, 255])
 
 # Tests for the `asarray` function:
