@@ -823,7 +823,7 @@ if torch._C.has_mkldnn:
     def single_conv_transpose_lowering(
         match, input, weight, bias, padding, output_padding, stride, dilation, groups
     ):
-        return L[torch.ops.mkldnn._convolution_transpose_pointwise](
+        return L[torch.ops.mkldnn._convolution_transpose_pointwise.default](
             input,
             weight,
             bias,
@@ -891,16 +891,17 @@ if torch._C.has_mkldnn:
     register_hardtanh_fusion_lowering(
         _user_1[0], torch.ops.mkldnn._convolution_pointwise.default
     )
+
     # linear_fusion lowering
     register_leaky_relu_fusion_lowering(_user_3[1], torch.ops.mkldnn._linear_pointwise)
     register_hardtanh_fusion_lowering(_user_1[1], torch.ops.mkldnn._linear_pointwise)
 
     # conv_transpose_fusion lowering
     register_leaky_relu_fusion_lowering(
-        _user_3[2], torch.ops.mkldnn._convolution_transpose_pointwise
+        _user_3[2], torch.ops.mkldnn._convolution_transpose_pointwise.default
     )
     register_hardtanh_fusion_lowering(
-        _user_1[2], torch.ops.mkldnn._convolution_transpose_pointwise
+        _user_1[2], torch.ops.mkldnn._convolution_transpose_pointwise.default
     )
 
 
