@@ -3088,4 +3088,3 @@ def activate_meta():
                 _meta_lib_dont_use_me_use_register_meta.impl(op_overload, fn)
 
 
-activate_meta()
