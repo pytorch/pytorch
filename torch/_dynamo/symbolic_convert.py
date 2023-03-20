@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import dis
 import functools
@@ -557,7 +558,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            getattr(self, inst.opname)(inst)
+            with TracingContext.current_loc(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
+            ):
+                getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -587,8 +591,11 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             [create_jump_absolute(continue_inst)] + self.instructions
         )
 
+    def run_ctx_mgr(self):
+        return contextlib.nullcontext()
+
     def run(self):
-        with TracingContext.current_frame(self.frame_summary()):
+        with self.run_ctx_mgr():
             try:
                 self.output.push_tx(self)
                 while (
@@ -834,7 +841,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
-        assert inst.argval in self.f_builtins
+        if inst.argval not in self.f_builtins:
+            raise NameError(f"name '{inst.argval}' is not defined")
         val = self.f_builtins[inst.argval]
 
         if callable(val):
@@ -2055,6 +2063,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self):
         return self.parent.fake_mode
+
+    def run_ctx_mgr(self):
+        return TracingContext.current_frame(self.parent.frame_summary())
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

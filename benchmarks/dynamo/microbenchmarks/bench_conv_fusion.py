@@ -236,7 +236,6 @@ def bench(layer_params, layer_id, p, fusion_types=[""]):
 
     row = [layer_id]
     for fusion_type in fusion_types:
-
         if fusion_type == "":
             conv_torchinductor = getattr(Func, "conv_torchinductor")
             conv = getattr(Func, "conv")
