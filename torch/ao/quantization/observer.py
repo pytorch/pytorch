@@ -1320,7 +1320,7 @@ class PlaceholderObserver(ObserverBase):
         dtype: dtype argument to the `quantize` node needed to implement the
                reference model spec.
         quant_min: minimum value in quantized domain (TODO: align behavior with other observers)
-        quant_min: maximum value in quantized domain
+        quant_max: maximum value in quantized domain
         custom_op_name: (temporary) specify this observer for an operator that doesn't require any observation
                         (Can be used in Graph Mode Passes for special case ops).
         compute_dtype (deprecated): if set, marks the future quantize function to use
