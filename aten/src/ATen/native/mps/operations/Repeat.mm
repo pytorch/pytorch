@@ -37,14 +37,10 @@ Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
 
 Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   using namespace mps;
+  using CachedGraph = MPSUnaryCachedGraph;
 
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
               "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
 
   // Add new leading dimensions to the tensor if the
   // number of target dimensions is larger than the
@@ -207,7 +203,7 @@ void computeRepeatIndices(index_t* repeat_ptr,
       [computeEncoder setBytes:&size length:sizeof(size) atIndex:3];
       MTLSize gridSize = MTLSizeMake(size, 1, 1);
       NSUInteger threadsPerThreadgroup_ = pipelineState.maxTotalThreadsPerThreadgroup;
-      if (threadsPerThreadgroup_ > size) {
+      if (threadsPerThreadgroup_ > static_cast<NSUInteger>(size)) {
         threadsPerThreadgroup_ = size;
       }
       MTLSize threadsPerThreadgroup = MTLSizeMake(threadsPerThreadgroup_, 1, 1);

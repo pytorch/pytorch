@@ -552,7 +552,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
 

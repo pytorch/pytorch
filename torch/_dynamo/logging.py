@@ -11,11 +11,13 @@ logging.addLevelName(logging.CODE, "CODE")
 # Disable progress bar by default, not in dynamo config because otherwise get a circular import
 disable_progress = True
 
+
 # Return all loggers that torchdynamo/torchinductor is responsible for
 def get_loggers():
     return [
         logging.getLogger("torch._dynamo"),
         logging.getLogger("torch._inductor"),
+        logging.getLogger("torch.fx.experimental.symbolic_shapes"),
     ]
 
 
@@ -53,6 +55,11 @@ LOGGING_CONFIG = {
             "propagate": False,
         },
         "torch._inductor": {
+            "level": "DEBUG",
+            "handlers": ["torchdynamo_console"],
+            "propagate": False,
+        },
+        "torch.fx.experimental.symbolic_shapes": {
             "level": "DEBUG",
             "handlers": ["torchdynamo_console"],
             "propagate": False,
