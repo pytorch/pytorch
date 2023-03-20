@@ -153,13 +153,12 @@ def operator_dispatch(
     if mesh is not None and mesh.get_coordinate() is None:
         # For a non-participating device, we do:
         # 1. if the return type is scalar, all gather the local result
-        # from participating devices, and reduce on the list of results.
-        # For bool type, we by default use AND to reduce;
-        # We can extend this logic for specific ops if necessary.
-        # 2. if the return type is Tensor, return empty tensor with
-        # correct dtype.
-        # 3. if the return type is List[Tensor], return a list of empty
-        # tensors with correct dtype.
+        # from participating devices, and reduce on the list of results
+        # with appropriate operators.
+        #   for bool type, we by default use AND to reduce;
+        #   we can extend for more ops if necessary.
+        # 2. if the return type is Tensor or List[Tensor], return empty
+        # tensor(s) with correct dtype.
         spec = output_sharding.output_spec
         ret_list = op_schema.func_schema.returns
         if len(ret_list) != 1:
@@ -182,8 +181,7 @@ def operator_dispatch(
                 local_results = functools.reduce(operator.and_, obj_list, True)
             else:
                 raise NotImplementedError(
-                    f"default value for type {ret_type} on non-participating"
-                    f" device is not implemented."
+                    f"return type {ret_type} in DTensor op is not supported"
                 )
         else:
             def default_tensor(spec: DTensorSpec):
@@ -206,17 +204,14 @@ def operator_dispatch(
                 local_results = default_tensor(spec)
             elif (isinstance(spec, Sequence)):
                 # return a List[Tensor] value
-                local_results = []
-                for s in spec:
-                    if s is not None:
-                        local_results.append(default_tensor(s))
-                    else:
-                        raise NotImplementedError(
-                            f"returning a list of mixed scalar and Tensor"
-                            f" values from DTensor ops running on a sub-mesh"
-                            f" is not supported. The return value type is"
-                            f" {spec}."
-                        )
+                local_results = [
+                    default_tensor(s) if s is not None else None for s in spec
+                ]
+                if None in local_results:
+                    ret_type = str(ret_list[0].type)
+                    raise NotImplementedError(
+                        f"return type {ret_type} in DTensor op is not supported"
+                    )
     else:
         # compute locally with redistribute first if needed
         local_tensor_args = pack_args_kwargs_with_local_tensor(

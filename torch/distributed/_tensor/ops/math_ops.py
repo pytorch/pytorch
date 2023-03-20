@@ -128,3 +128,16 @@ def var_correction_rule(op_schema: OpSchema) -> OutputSharding:
     return reduction_rule(
         op_schema, dims=dims, keep_dim=keep_dim, reduction_linear=False
     )
+
+
+@register_prop_rule(aten.equal.default)
+def equal_rule(op_schema: OpSchema) -> OutputSharding:
+    pointwise_equal_sharding = pointwise_rule(op_schema, linearity=True)
+    output_sharding = reduction_rule(
+        OpSchema(
+            op_schema.func_schema,
+            (pointwise_equal_sharding.output_spec,),
+            {},
+        ),
+    )
+    return output_sharding
