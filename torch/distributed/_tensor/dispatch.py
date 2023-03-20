@@ -184,7 +184,7 @@ def operator_dispatch(
                     f"return type {ret_type} in DTensor op is not supported"
                 )
         else:
-            def default_tensor(spec: DTensorSpec):
+            def default_tensor(spec: DTensorSpec) -> torch.Tensor:
                 if spec.tensor_meta is not None:
                     shape = spec.tensor_meta.shape
                     dtype = spec.tensor_meta.dtype
@@ -204,7 +204,7 @@ def operator_dispatch(
                 local_results = default_tensor(spec)
             elif (isinstance(spec, Sequence)):
                 # return a List[Tensor] value
-                local_results = [
+                local_results: List[Any] = [
                     default_tensor(s) if s is not None else None for s in spec
                 ]
                 if None in local_results:
