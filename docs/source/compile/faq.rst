@@ -1,7 +1,8 @@
 Frequently Asked Questions
 ==========================
+**Author**: `Mark Saroufim <https://github.com/msaroufim>`_
 
-At a high level, the TorchDynamo stack consists of a graph capture from
+At a high level, the PyTorch 2.0 stack consists of a graph capture from
 Python code using dynamo and a backend compiler. In this example the
 backend compiler consists of backward graph tracing using AOTAutograd
 and graph lowering using TorchInductor. There are of course many more
@@ -368,6 +369,9 @@ Triton code or the C++ backend, the numerics from those downstream
 compilers can be different in subtle ways yet have dramatic impact on
 your training stability. So the accuracy debugger is very useful for us
 to detect bugs in our codegen or with a backend compiler.
+
+If you'd like to ensure that random number generation is the same across both torch
+and triton then you can enable ``torch._inductor.config.fallback_random = True``
 
 Why am I getting OOMs?
 ----------------------

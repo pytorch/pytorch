@@ -597,7 +597,6 @@ class TestInductorOpInfo(TestCase):
                     )
 
         except Exception as e:
-
             if test_expect is ExpectedTestResult.XFAILURE:
                 raise e
 

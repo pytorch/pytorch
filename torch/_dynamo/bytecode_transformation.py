@@ -52,8 +52,14 @@ class _NotProvided:
 def create_instruction(name, arg=None, argval=_NotProvided, target=None):
     """
     At most one of `arg`, `argval`, and `target` can be not None/_NotProvided.
-    If not provided, the `arg` value will be computed during assembly from
+    This is to prevent ambiguity, e.g. does
+        create_instruction("LOAD_CONST", 5)
+    mean load the constant at co_consts[5], or load the constant 5?
+
+    If `arg` is not provided, it will be computed during assembly from
     `argval` or `target`.
+
+    Do not use for LOAD_GLOBAL - use create_load_global instead.
     """
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
     if cnt > 1:
@@ -85,12 +91,17 @@ def create_load_global(name, push_null):
     name index. See `create_call_function` for why this NULL is needed.
 
     The instruction's `arg` is actually computed when assembling the bytecode.
-    For Python 3.11, push_null information is propagated through the argval
-    using the format (push_null, real_argval).
+    For Python 3.11, push_null information is propagated through the arg.
+
+    NOTE: we don't use create_instruction since LOAD_GLOBAL is the only instruction
+    where both arg and argval need to be specified.
     """
-    if sys.version_info >= (3, 11):
-        return create_instruction("LOAD_GLOBAL", argval=(push_null, name))
-    return create_instruction("LOAD_GLOBAL", argval=name)
+    return Instruction(
+        opcode=dis.opmap["LOAD_GLOBAL"],
+        opname="LOAD_GLOBAL",
+        arg=push_null,
+        argval=name,
+    )
 
 
 def create_dup_top():
@@ -140,7 +151,7 @@ def create_call_function(nargs, push_null):
     push_null should default to True unless you know you are calling a function
     that you codegen'd with a null already pushed, for example,
 
-    create_instruction("LOAD_GLOBAL", argval=(True, "math"))  # pushes a null
+    create_load_global("math", True)  # pushes a null
     create_instruction("LOAD_ATTR", argval="sqrt")
     create_instruction("LOAD_CONST", argval=25)
     create_call_function(1, False)
@@ -477,14 +488,13 @@ def fix_vars(instructions: List[Instruction], code_options):
             check_argval()
             # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
             # So we must compute push_null earlier.
+            assert instructions[i].arg is not None
             shift = 1
-            push_null = instructions[i].argval[0]
-            instructions[i].argval = instructions[i].argval[1]
+            push_null = instructions[i].arg % 2
         else:
             shift = 0
             push_null = 0
 
-        print(instructions[i])
         if instructions[i].opcode in HAS_LOCAL:
             check_argval()
             instructions[i].arg = varnames[instructions[i].argval]
