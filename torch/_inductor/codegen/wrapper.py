@@ -982,7 +982,6 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
         return
 
     def write_prefix(self):
-        # KERNEL_DECLARES will be replaced after we have collected all the kernels
         self.prefix.splice(
             """
             #include <ATen/ATen.h>
