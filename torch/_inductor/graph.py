@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
+import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
@@ -23,7 +24,7 @@ from torch.utils._mode_utils import no_dispatch
 from .._dynamo import config as dynamo_config
 
 from . import config, ir
-from .codegen.wrapper import CppWrapperCodeGen, WrapperCodeGen
+from .codegen.wrapper import CppAotWrapperCodeGen, CppWrapperCodeGen, WrapperCodeGen
 from .exc import (
     LoweringException,
     MissingOperatorWithDecomp,
@@ -37,7 +38,7 @@ from .lowering import (
     make_fallback,
     needs_realized_inputs,
 )
-from .sizevars import CppSizeVarAllocator, SizeVarAllocator
+from .sizevars import SizeVarAllocator
 from .utils import (
     convert_shape_to_inductor,
     gather_origins,
@@ -47,6 +48,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
 def supported_dtype_of_cpp_wrapper(dtype):
@@ -114,6 +116,7 @@ class GraphLowering(torch.fx.Interpreter):
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
+        aot_mode=False,
     ):
         super().__init__(gm)
         self.extra_traceback = False  # we do our own error wrapping
@@ -129,6 +132,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
+        self.device_idxs: Set[int] = set()
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -143,6 +147,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.creation_time = time.time()
         self.name = "GraphLowering"
         self._can_use_cpp_wrapper = config.cpp_wrapper
+        self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.scheduler = None
         self._warned_fallback = {"aten.convolution_backward"}
@@ -286,7 +291,7 @@ class GraphLowering(torch.fx.Interpreter):
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
-        example: torch.Tensor = super().placeholder(target, args, kwargs)
+        example = super().placeholder(target, args, kwargs)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -317,6 +322,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
+        if example.device.type == "cuda":
+            self.device_idxs.add(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -485,7 +492,6 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
-                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
@@ -553,11 +559,13 @@ class GraphLowering(torch.fx.Interpreter):
         if config.cpp_wrapper:
             self.check_cpp_wrapper()
             if self._can_use_cpp_wrapper:
-                self.sizevars = CppSizeVarAllocator(self._shape_env)
-                self.wrapper_code = CppWrapperCodeGen()
+                self.wrapper_code = (
+                    CppAotWrapperCodeGen() if self.aot_mode else CppWrapperCodeGen()
+                )
                 return
+            else:
+                assert not self.aot_mode, "Model does not support AOT compilation"
         self.wrapper_code = WrapperCodeGen()
-        return
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -615,14 +623,16 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code = self.codegen()
+        code, linemap = self.codegen()
         if config.debug:
             print(code)
 
-        mod = PyCodeCache.load(code)
+        mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        log.debug(f"Output code written to: {mod.__file__}")
+        output_code_log.debug(f"Output code: \n{code}")
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
@@ -630,7 +640,18 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        return self.compile_to_module().call
+        if self.aot_mode:
+            from .codecache import AotCodeCache
+
+            code = self.codegen()
+            if config.debug:
+                print(code)
+
+            # return the generated .so file path
+            output_path = AotCodeCache.compile(code)
+            return lambda dummy: output_path
+        else:
+            return self.compile_to_module().call
 
     def get_output_names(self):
         assert self.graph_outputs is not None

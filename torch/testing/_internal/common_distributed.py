@@ -1189,11 +1189,13 @@ def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
         c10d.init_process_group("nccl", rank=rank, world_size=world_size)
     torch._dynamo.reset()
     torch._dynamo.utils.counters.clear()
-    yield
-    torch._dynamo.reset()
-    torch._dynamo.utils.counters.clear()
-    if init_pg:
-        c10d.destroy_process_group()
+    try:
+        yield
+    finally:
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        if init_pg:
+            c10d.destroy_process_group()
 
 
 class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):

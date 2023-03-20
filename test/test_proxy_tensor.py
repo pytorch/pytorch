@@ -1332,8 +1332,6 @@ symbolic_tensor_failures = {
     xfail('linalg.eigvals'),
     skip('masked.logsumexp', ''),  # Tensors of type TensorImpl do not have numel
     xfail('masked.cumprod', ''),  # aten._to_copy.default - couldn't find symbolic meta function/decomposition
-    xfail('addmv', ''),  # aten.addmv.default - couldn't find symbolic meta function/decomposition
-    xfail('baddbmm', ''),  # aten.baddbmm.default - couldn't find symbolic meta function/decomposition
     xfail('cdist', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('cholesky_solve', ''),  # Could not run 'aten::_cholesky_solve_helper' with arguments from the 'Meta' back...
     xfail('column_stack', ''),  # Tensors of type TensorImpl do not have numel
@@ -1414,7 +1412,6 @@ symbolic_tensor_failures = {
     xfail('masked_select', ''),  # aten.masked_select.default - couldn't find symbolic meta function/decomposition
     xfail('matrix_exp', ''),  # aten.linalg_matrix_exp.default - couldn't find symbolic meta function/decomposition
     xfail('median', ''),  # Could not run 'aten::median' with arguments from the 'Meta' backend. This could be becau...
-    xfail('min', 'reduction_with_dim'),  # aten.min.dim - couldn't find symbolic meta function/decomposition
     xfail('mode', ''),  # aten.mode.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
