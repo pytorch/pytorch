@@ -63,12 +63,16 @@ def replace_fx(gm: torch.fx.GraphModule):
     return gm
 
 
-def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
-    is_cpu = all(
+def _is_cpu(example_inputs):
+    return all(
         example_input.device == torch.device("cpu")
         for example_input in example_inputs
         if isinstance(example_input, torch.Tensor)
     )
+
+
+def fuse_fx(gm: torch.fx.GraphModule, example_inputs):
+    is_cpu = _is_cpu(example_inputs)
 
     fake_mode = fake_mode_from_tensors(example_inputs)
 
@@ -442,7 +446,7 @@ def prepack_weight_in_graph(gm: torch.fx.GraphModule):
 
 def fuse_quantization(gm: torch.fx.GraphModule, example_inputs):
     # skip if gm is not a quantized graph module
-    if not is_quantized_graph_module(gm):
+    if not (is_quantized_graph_module(gm) and _is_cpu(example_inputs)):
         return gm
     gm.graph.eliminate_dead_code()
     gm.recompile()
