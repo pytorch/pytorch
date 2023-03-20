@@ -3,7 +3,7 @@ import ctypes
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Type, Union
+from typing import Any, Callable, Dict, List, Type, Union
 
 import torch._C
 
@@ -290,7 +290,7 @@ def temporarily_pop_mode(mode_stack):
         mode_stack.append(top_mode)
 
 
-_mode_stack_per_key = {}
+_mode_stack_per_key: Dict[torch._C.DispatchKey, List] = {}
 
 
 def mode_stack_per_key():
@@ -458,7 +458,7 @@ class OpOverload(OperatorBase):
             return handler
 
         cache_result = True
-        functionality_key = torch._C._to_functionality_key(key)
+        functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
         if functionality_key in mode_stack_per_key():
             curr_stack = mode_stack_per_key()[functionality_key]
             # The check for Python in the exclude set is so we properly respect `with no_dispatch()`

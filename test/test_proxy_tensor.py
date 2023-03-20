@@ -147,7 +147,6 @@ class TestGenericProxyTensor(TestCase):
 
     def test_pre_autograd_mode_stack(self):
         def f(a):
-            import pdb; pdb.set_trace()
             b = torch.ones(4, 4)
             return torch.matmul(a, b)
         # We expect to see matmul in the trace - it should NOT be decomposed into mm.
@@ -157,9 +156,9 @@ class TestGenericProxyTensor(TestCase):
         fx_g = make_fx(f, pre_autograd=True)(torch.ones(4, 4))
         self.assertExpectedInline(fx_g.code.strip(), """\
 def forward(self, a_1):
-    _tensor_constant0 = self._tensor_constant0
-    mm = torch.ops.aten.mm.default(a_1, _tensor_constant0);  a_1 = _tensor_constant0 = None
-    return mm""")
+    ones = torch.ops.aten.ones.default([4, 4], device = device(type='cpu'), pin_memory = False)
+    matmul = torch.ops.aten.matmul.default(a_1, ones);  a_1 = ones = None
+    return matmul""")
 
 
     def test_make_fx_simple(self):
