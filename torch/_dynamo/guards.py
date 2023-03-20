@@ -774,8 +774,8 @@ def guard_fail_hook(
     guard_fn: GuardFn,
     code: types.CodeType,
     f_locals: Dict[str, object],
-    last: bool,
     first: bool,
+    last: bool,
 ) -> None:
     """
     called whenever a guard fails.
@@ -826,7 +826,11 @@ def guard_fail_hook(
 
 
 def guard_error_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    first: bool,
+    last: bool,
 ):
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"

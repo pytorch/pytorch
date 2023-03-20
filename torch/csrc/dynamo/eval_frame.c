@@ -473,8 +473,8 @@ static PyObject* call_guard_fail_hook(
       e->check_fn,
       e->code,
       f_locals,
-      (e->next == NULL ? Py_True : Py_False),
-      (prev == NULL ? Py_True : Py_False));
+      (prev == NULL ? Py_True : Py_False),
+      (e->next == NULL ? Py_True : Py_False));
   if (args == NULL) return NULL;
   PyObject* result = PyObject_CallObject(hook, args);
   Py_DECREF(args);

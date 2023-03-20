@@ -1084,7 +1084,7 @@ class CompileProfiler:
                 )
 
         report = textwrap.dedent(
-            f"""
+            """
             Torchdynamo Profiler Report
             ===========================
 
@@ -1099,7 +1099,7 @@ class CompileProfiler:
         )
         report += graph_break_report() or "No graph breaks detected.\n"
         report += textwrap.dedent(
-            f"""
+            """
             Recompilation
             -------------
             These subgraphs were recompiled more than once due to guard failures

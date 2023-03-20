@@ -5202,6 +5202,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 prof.report()
             )
 
+
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
     def forward(ctx, foo):
