@@ -73,7 +73,6 @@ def bench_op(
     warmup=25,
     rep=75,
 ):
-
     skip = False
     # allocate inputs, nchw
     x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device="cuda")

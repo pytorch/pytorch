@@ -1,9 +1,9 @@
-TorchDynamo Troubleshooting
+PyTorch 2.0 Troubleshooting
 ===========================
 
 **Author**: `Michael Lazos <https://github.com/mlazos>`_
 
-TorchDynamo is still in active development, and many of the reasons for
+`torch.compile` is still in active development, and many of the reasons for
 graph breaks and excessive recompilation will be fixed with upcoming
 support for `tracing dynamic tensor
 shapes <https://docs.google.com/document/d/1QJB-GOnbv-9PygGlOMXwiO9K6vVNm8sNg_olixJ9koc/edit?usp=sharing>`__,
@@ -484,7 +484,7 @@ Inside this directory, each run will have a separate folder named with the times
    $ ls
    run_2023_03_01_08_20_52_143510-pid_180167
 
-In the run folder there will be a torchdynamo directory which contains debug logs, and an aot_torchinductor
+In the run folder there will be a torchdynamo directory which contains debug logs, and an torchinductor
 folder which contains a subfolder for each compiled kernel with inductor debug artifacts.
 
 ::
@@ -492,13 +492,13 @@ folder which contains a subfolder for each compiled kernel with inductor debug a
    $ cd
    run_2023_03_01_08_20_52_143510-pid_180167
    $ ls
-   aot_torchinductor  torchdynamo
+   torchinductor  torchdynamo
 
-Moving further into the aot_torchinductor directory, the \*.log files are logs from the aot autograd phase of compilation, model__0_forward_1.0 contains the inductor debug artifacts.
+Moving further into the torchinductor directory, the \*.log files are logs from the aot autograd phase of compilation, model__0_forward_1.0 contains the inductor debug artifacts.
 
 ::
 
-   $ cd aot_torchinductor
+   $ cd torchinductor
    $ ls
    aot_model___0_debug.log  model__0_forward_1.0
    $ cd model__0_forward_1.0
@@ -706,6 +706,9 @@ Triton code or the C++ backend, the numerics from those downstream
 compilers can be different in subtle ways yet have dramatic impact on
 your training stability. So the accuracy debugger is very useful for us
 to detect bugs in our codegen or with a backend compiler.
+
+If you'd like to ensure that random number generation is the same across both torch
+and triton then you can enable ``torch._inductor.config.fallback_random = True``
 
 File an Issue
 ~~~~~~~~~~~~~
