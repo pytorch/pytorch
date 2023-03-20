@@ -2280,7 +2280,7 @@ class DeviceCachingAllocator {
         CachingAllocatorConfig::garbage_collection_threshold() *
         allowed_memory_maximum);
     // No need to trigger GC yet
-    if (total_allocated_memory <= gc_threshold) {
+    if (total_allocated_memory <= (int64_t) gc_threshold) {
       return;
     }
     const auto target_size = total_allocated_memory - gc_threshold;
