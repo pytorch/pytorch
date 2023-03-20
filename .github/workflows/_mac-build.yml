@@ -112,10 +112,15 @@ jobs:
           environment-file: ${{ inputs.environment-file }}
 
       - name: Install macOS homebrew dependencies
-        run: |
-          # Install dependencies
-          brew install libomp
-          brew link --force libomp
+        uses: nick-fields/retry@v2.8.2
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            # Install dependencies
+            brew install libomp
+            brew link --force libomp
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@v2.8.2
