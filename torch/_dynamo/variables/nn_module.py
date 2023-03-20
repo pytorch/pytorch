@@ -8,7 +8,6 @@ from typing import Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
-from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
@@ -223,22 +222,6 @@ class NNModuleVariable(VariableTracker):
                     )
                     arg = tx.pop()
                 return arg
-            elif is_allowed(mod.__class__):
-                # The module type will change after it is called
-                if is_lazy:
-                    self.module_type = mod.cls_to_become
-                from .builder import wrap_fx_proxy
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                    **options,
-                )
-
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
