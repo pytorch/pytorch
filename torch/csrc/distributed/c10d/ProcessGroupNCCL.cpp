@@ -280,8 +280,7 @@ inline void errorIfCapturingNonCapturableNCCL() {
 
 } // namespace
 
-const int64_t ProcessGroupNCCL::kWorkCleanupThreadSleepMillis = 1000;
-constexpr int64_t kWaitForAbortCommStoreKey = 1000;
+const int64_t ProcessGroupNCCL::kWatchdogThreadSleepMillis = 1000;
 constexpr int64_t kSynchronizeBusyWaitMillis = 10;
 thread_local uint64_t ProcessGroupNCCL::ncclActiveGroupCounter_ = 0;
 
@@ -762,14 +761,31 @@ uint64_t ProcessGroupNCCL::getSequenceNumberForGroup() {
   return seq_;
 }
 
+// Abort all communicators on this rank
 void ProcessGroupNCCL::abort(c10::optional<std::string> abortReason) {
   std::lock_guard<std::mutex> lock(mutex_);
+  // The process may control multiple devices, loop through the communicators on each device
   for (auto& it : devNCCLCommMap_) {
+    auto& devName = it.first;
     auto& ncclComms = it.second;
 
     for (const auto& ncclComm : ncclComms) {
       ncclComm->ncclCommAbort(abortReason);
     }
+    // Note that we don't remove the aborted communicators from the
+    // cache. The reason is that if we do remove the communicator
+    // from the cache, it is possible that a new collective operation
+    // calls `ncclCommInitRank` to create a new communicator whereas
+    // other ranks might have failed/timed out and didn't enter
+    // `ncclCommInitRank`. As a result, when there is a failure on
+    // a communicator the application receives an exception and its
+    // their responsibility to destroy the process group and recreate
+    // it to recover from errors.
+
+    LOG(INFO)
+        << "[Rank " << rank_
+        << "] Destroyed " << ncclComms.size()
+        << "communicators on CUDA device " << devName;
   }
 }
 
@@ -813,34 +829,6 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
   }
 }
 
-void ProcessGroupNCCL::abortAllComms() {
-  // We are aborting all communicators on this process due to an error in
-  // at least one of these communicators
-  std::lock_guard<std::mutex> lock(mutex_);
-  // The process may control multiple devices, loop through the communicators on each device
-  for (auto& it : devNCCLCommMap_) {
-    auto& devName = it.first;
-    auto& ncclComms = it.second;
-    LOG(INFO)
-        << "[Rank " << rank_
-        << "] Aborting all " << ncclComms.size()
-        << "communicators on CUDA device " << devName;
-
-    for (const auto& ncclComm : ncclComms) {
-      ncclComm->ncclCommAbort();
-      // Note that we don't remove the aborted communicators from the
-      // cache. The reason is that if we do remove the communicator
-      // from the cache, it is possible that a new collective operation
-      // calls `ncclCommInitRank` to create a new communicator whereas
-      // other ranks might have failed/timed out and didn't enter
-      // `ncclCommInitRank`. As a result, when there is a failure on
-      // a communicator the application receives an exception and its
-      // their responsibility to destroy the process group and recreate
-      // it to recover from errors.
-    }
-  }
-}
-
 void ProcessGroupNCCL::logWorkStart(WorkNCCL& work) {
   if (work.startTraceUpdated_) return;
 
@@ -878,7 +866,7 @@ void ProcessGroupNCCL::workCleanupLoop() {
     // milliseconds as long as the atomic is True.
     workMetaListCV_.wait_for(
         lock,
-        std::chrono::milliseconds(kWorkCleanupThreadSleepMillis),
+        std::chrono::milliseconds(kWatchdogThreadSleepMillis),
         [&]() -> bool { return terminateProcessGroup_.load(); });
 
     for (auto it = workMetaList_.begin(); it != workMetaList_.end();
