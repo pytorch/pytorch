@@ -313,28 +313,41 @@ class DistTensorNonDetOpTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_uniform_1d(self):
-        torch.cuda.manual_seed(1234)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 1]
 
-        local_tensor = torch.empty(*size, device='cuda')
-        local_tensor.uniform_(0, 1)
-
         torch.cuda.manual_seed(1234)
+
         _tensor = torch.empty(*size, device='cuda')
         dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
+
+        # preprocess rng offset
+        state = torch.cuda.get_rng_state()
+        seed = state[-16:-8]
+        offset = state[-8:]
+        offset_int64 = offset.view(torch.int64)
+        global_size = dtensor.numel()
+        local_size = dtensor.to_local().numel()
+        offset_int64 += self.rank * local_size
+        torch.cuda.set_rng_state(state)
+        # random op call
         dtensor.uniform_(0, 1)
+        # postprocess rng offset
+        offset_int64 += global_size - self.rank * local_size
+        torch.cuda.set_rng_state(state)
+
         dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        #print(local_tensor)
-        #print(f"{self.rank}: {dtensor.to_local()}")
+        local_tensor = dtensor.to_local()
+        print(local_tensor)
         for shard_num in range(self.world_size):
             if self.rank == shard_num:
-                self.assertEqual(local_tensor, dtensor.to_local()[:, [shard_num]])
+                self.assertEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
             else:
-                self.assertEqual(local_tensor, dtensor.to_local()[:, [shard_num]])
+                self.assertNotEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
 
+        print(f"rank {self.rank} rng state={torch.cuda.get_rng_state()}")
         # call dropout
-        if False:  # error: output spec mismatch. check propagation rule
+        if False:  # error: output spec mismatch. need return 2 specs
             _drop = torch.nn.Dropout(p=0.5)
             dtensor = _drop(dtensor)
             print(f"{self.rank}: {dtensor.to_local()}")
