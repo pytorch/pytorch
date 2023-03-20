@@ -86,6 +86,7 @@ INPLACE_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
     "polygamma_"
 ]
 
+
 # Groups "similar" NativeFunctions together
 # example add.Tensor, add_.Tensor, add.out
 # "similar" NativeFunctions are all expected to have an identical `signature()`,
@@ -194,7 +195,7 @@ def generate_out_args_from_schema(
     # - If every return is a plain tensor, then the new returns == the old returns, but with the out= alias annotations added.
     # - Otherwise, none of the out arguments show up in the returns (and we're only left with non-tensor-like returns, if any).
     new_returns: List[Return] = []
-    for (i, r) in enumerate(func.returns):
+    for i, r in enumerate(func.returns):
         if r.type.is_tensor_like():
             new_out = Argument(
                 name="out" if len(func.returns) == 1 else f"out{i}",
@@ -384,7 +385,6 @@ def add_generated_native_functions(
         #     variant, mostly so we can easily pair up functions into NativeFunctionsGroup,
         #     while maintaining the constraint that the out= variant is "required".
         if has_mutable or has_inplace or has_out or has_functional:
-
             # Don't bother generating functions trio's for native functions that bypass the dispatcher.
             are_manual = all(f.manual_cpp_binding for f in d.values())
             # Don't bother generating functional + out= variants for view operators
@@ -499,7 +499,7 @@ def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str
     aliased_rets = func.aliased_return_names()
     non_aliased_names = []
     is_out_var_a_tuple = len(func.returns) > 1
-    for (i, r) in enumerate(aliased_rets):
+    for i, r in enumerate(aliased_rets):
         if r is None:
             non_aliased_names.append(
                 f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var
