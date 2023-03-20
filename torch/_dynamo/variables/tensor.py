@@ -253,9 +253,7 @@ class TensorVariable(VariableTracker):
                 dim = kwargs.pop("dim").as_python_constant()
                 assert -len(self.size) <= dim and dim < len(
                     self.size
-                ), "Dimension out of range (expected to be in range of [{}, {}], but got {})".format(
-                    -len(self.size), len(self.size) - 1, dim
-                )
+                ), f"Dimension out of range (expected to be in range of [{-len(self.size)}, {len(self.size) - 1}], but got {dim})"
                 constant_result = variables.ConstantVariable(self.size[dim])
             else:
                 sizes = [variables.ConstantVariable(x) for x in self.size]
