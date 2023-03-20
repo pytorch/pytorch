@@ -41,11 +41,11 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
       mat2_sizes = NestedTensor_get_sizes(mat2_ptr),
       self_strides = NestedTensor_get_strides(self_ptr),
       mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  int64_t *self_offsets_ptr = self_ptr->get_offsets_tensor().data_ptr<int64_t>();
-  int64_t *mat2_offsets_ptr = mat2_ptr->get_offsets_tensor().data_ptr<int64_t>();
+  int64_t *self_offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  int64_t *mat2_offsets_ptr = mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
   // create a contiguous output
   int64_t out_numel = 0;
-  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
+  const Tensor& self_sizemat = self_ptr->get_nested_sizes();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
   for (int64_t i = 0; i < ntensors; i++) {
@@ -146,14 +146,14 @@ Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // metadata for self
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
-  int64_t *self_offsets_ptr = self_ptr->get_offsets_tensor().data_ptr<int64_t>();
-  auto opt = self_ptr->get_nested_size_tensor().options();
+  int64_t *self_offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  auto opt = self_ptr->get_nested_sizes().options();
 
   // metadata for mat2
   std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
-  int64_t *mat2_offsets_ptr = mat2_ptr->get_offsets_tensor().data_ptr<int64_t>();
-  auto opt2 = mat2_ptr->get_nested_size_tensor().options();
+  int64_t *mat2_offsets_ptr = mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
+  auto opt2 = mat2_ptr->get_nested_sizes().options();
 
   int64_t N = self_sizes.size();
   int64_t n_heads = self_sizes[0][0];
@@ -286,8 +286,8 @@ Tensor matmul_nested(const Tensor& self, const Tensor& mat2) {
       "matmul: Expected size for the 1st dimension of 2nd input tensor to be: ", ntensors,
       " but got: ", ntensors2, ".");
   // Ensure batch dimensions have the same sizes (no broadcasting).
-  const auto& self_sizes = self_ptr->get_nested_size_tensor();
-  const auto& mat2_sizes = mat2_ptr->get_nested_size_tensor();
+  const auto& self_sizes = self_ptr->get_nested_sizes();
+  const auto& mat2_sizes = mat2_ptr->get_nested_sizes();
   const auto& self_batch_sizes = self_sizes.narrow(1, 0, self_dim-3);
   const auto& mat2_batch_sizes = mat2_sizes.narrow(1, 0, mat2_dim-3);
   TORCH_CHECK(at::equal(self_batch_sizes, mat2_batch_sizes),

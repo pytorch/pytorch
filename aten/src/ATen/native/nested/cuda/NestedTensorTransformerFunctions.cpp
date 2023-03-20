@@ -151,7 +151,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
 
     if (t_dim == 3 && nt_input->opt_size(2) && (*nt_input->opt_size(2) > 0) &&
         !(output_size.has_value())) {
-      Tensor nt_sizes = nt_input->get_nested_size_tensor();
+      Tensor nt_sizes = nt_input->get_nested_sizes();
       Tensor sizes_dim1 = at::native::narrow_symint(nt_sizes, 1, 0, 1);
       Tensor sizes_dim2 = at::native::narrow_symint(nt_sizes, 1, 1, 1);
       Tensor result = at::detail::make_tensor<NestedTensorImpl>(
@@ -162,7 +162,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       return result.reshape({result.sizes()[0], -1, *nt_input->opt_size(2)});
     }
 
-    Tensor nt_sizes = nt_input->get_nested_size_tensor();
+    Tensor nt_sizes = nt_input->get_nested_sizes();
     Tensor offsets = batch_offsets_from_efficient_size(nt_sizes);
     auto new_size = NestedTensor_get_max_size(*nt_input);
     new_size.insert(new_size.begin(), nt_sizes.sizes()[0]);
@@ -230,7 +230,7 @@ std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
       qkv.is_nested(),
       "QKV must be nested for flash cumulative_seq_len calculation.")
   auto* nt_impl = get_nested_tensor_impl(qkv);
-  const auto& sizes = nt_impl->get_nested_size_tensor();
+  const auto& sizes = nt_impl->get_nested_sizes();
   auto size_tensor_stride = sizes.stride(0);
 
   const int64_t batch_size = qkv.size(0);
@@ -269,9 +269,9 @@ std::tuple<Tensor, int64_t, int64_t> cumulative_and_max_seq_len(Tensor qkv) {
  * @return A boolean indicating of contiguous needs to be called for input
  */
 bool is_safe_to_get_storage_as_tensor(const NestedTensorImpl* tensor) {
-  const int64_t *tensor_offsets_ptr = tensor->get_offsets_tensor().data_ptr<int64_t>();
-  const Tensor& tensor_sizes = tensor->get_nested_size_tensor();
-  const Tensor& tensor_strides = tensor->get_nested_stride_tensor();
+  const int64_t *tensor_offsets_ptr = tensor->get_storage_offsets().data_ptr<int64_t>();
+  const Tensor& tensor_sizes = tensor->get_nested_sizes();
+  const Tensor& tensor_strides = tensor->get_nested_strides();
 
   const int64_t n_tensors = tensor_strides.size(0);
   const int64_t n_dims = tensor_strides.size(1);
@@ -431,10 +431,10 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
     }
     Tensor q_storage_as_tensor =
       get_nested_tensor_impl(q_t)->get_unsafe_storage_as_tensor();
-    auto query_stride_tensor = query_impl->get_nested_stride_tensor();
+    auto query_stride_tensor = query_impl->get_nested_strides();
 
     const int64_t* q_strides = query_stride_tensor.data_ptr<int64_t>();
-    const int64_t* q_offsets_ptr = query_impl->get_offsets_tensor().data_ptr<int64_t>();
+    const int64_t* q_offsets_ptr = query_impl->get_storage_offsets().data_ptr<int64_t>();
     const int64_t nnz_q_stride = q_strides[0];
     const int64_t head_q_stride = q_num_heads_needs_broadcast ? 0 : q_strides[1];
 
@@ -474,16 +474,16 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
   Tensor v_storage_as_tensor =
       get_nested_tensor_impl(v_t)->get_unsafe_storage_as_tensor();
 
-  auto key_stride_tensor = key_impl->get_nested_stride_tensor();
-  auto value_stride_tensor = value_impl->get_nested_stride_tensor();
+  auto key_stride_tensor = key_impl->get_nested_strides();
+  auto value_stride_tensor = value_impl->get_nested_strides();
 
   const int64_t* k_strides = key_stride_tensor.data_ptr<int64_t>();
-  const int64_t* k_offsets_ptr = key_impl->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t* k_offsets_ptr = key_impl->get_storage_offsets().data_ptr<int64_t>();
   const int64_t nnz_k_stride = k_strides[0];
   const int64_t head_k_stride = k_num_heads_needs_broadcast ? 0 : k_strides[1];
 
   const int64_t* v_strides = value_stride_tensor.data_ptr<int64_t>();
-  const int64_t* v_offsets_ptr = value_impl->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t* v_offsets_ptr = value_impl->get_storage_offsets().data_ptr<int64_t>();
   const int64_t nnz_v_stride = v_strides[0];
   const int64_t head_v_stride = v_num_heads_needs_broadcast ? 0 : v_strides[1];
 
@@ -518,7 +518,7 @@ inline auto sdpa_nested_preprocessing_with_broadcast(
 
   Tensor output_shape;
   if (!q_batch_size_needs_broadcast) {
-    output_shape = get_nested_size_tensor(q_t).clone();
+    output_shape = get_nested_sizes(q_t).clone();
     if (head_dim_v != head_dim_qk) {
       output_shape.select(1, -1).fill_(head_dim_v);
     }
@@ -627,24 +627,24 @@ inline auto sdpa_nested_preprocessing(
   Tensor v_storage_as_tensor =
       get_nested_tensor_impl(v_t)->get_unsafe_storage_as_tensor();
 
-  auto query_stride_tensor = query_impl->get_nested_stride_tensor();
-  auto key_stride_tensor = key_impl->get_nested_stride_tensor();
-  auto value_stride_tensor = value_impl->get_nested_stride_tensor();
+  auto query_stride_tensor = query_impl->get_nested_strides();
+  auto key_stride_tensor = key_impl->get_nested_strides();
+  auto value_stride_tensor = value_impl->get_nested_strides();
 
   const int64_t head_dim_stride = 1;
 
   const int64_t* q_strides = query_stride_tensor.data_ptr<int64_t>();
-  const int64_t* q_offsets_ptr = query_impl->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t* q_offsets_ptr = query_impl->get_storage_offsets().data_ptr<int64_t>();
   const int64_t nnz_q_stride = q_strides[0];
   const int64_t head_q_stride = q_strides[1];
 
   const int64_t* k_strides = key_stride_tensor.data_ptr<int64_t>();
-  const int64_t* k_offsets_ptr = key_impl->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t* k_offsets_ptr = key_impl->get_storage_offsets().data_ptr<int64_t>();
   const int64_t nnz_k_stride = k_strides[0];
   const int64_t head_k_stride = k_strides[1];
 
   const int64_t* v_strides = value_stride_tensor.data_ptr<int64_t>();
-  const int64_t* v_offsets_ptr = value_impl->get_offsets_tensor().data_ptr<int64_t>();
+  const int64_t* v_offsets_ptr = value_impl->get_storage_offsets().data_ptr<int64_t>();
   const int64_t nnz_v_stride = v_strides[0];
   const int64_t head_v_stride = v_strides[1];
 
@@ -661,7 +661,7 @@ inline auto sdpa_nested_preprocessing(
       {nnz_v_stride, head_v_stride, head_dim_stride},
       v_offsets_ptr[0]);
 
-  auto output_shape = get_nested_size_tensor(q_t).clone();
+  auto output_shape = get_nested_sizes(q_t).clone();
   if (head_dim_v != head_dim_qk) {
     output_shape.select(1, -1).fill_(head_dim_v);
   }

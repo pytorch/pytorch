@@ -77,7 +77,7 @@ void _nested_op_dense_esuhm_kernel(Tensor& result, const Tensor& self, const Ten
   auto result_ptr = get_nested_tensor_impl(result);
 
   const auto self_buffer = self_ptr->get_buffer();
-  const auto offsets = self_ptr->get_offsets_tensor();
+  const auto offsets = self_ptr->get_storage_offsets();
   const auto batch_size = other.size(0);
   const auto embedding_size = other.size(2);
 
