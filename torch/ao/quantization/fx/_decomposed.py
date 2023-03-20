@@ -2,7 +2,6 @@ import torch
 from torch.library import Library, impl
 from torch.ao.quantization.utils import determine_qparams, validate_qmin_qmax
 from typing import Tuple
-from torch._meta_registrations import calc_conv_nd_return_shape
 
 
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
