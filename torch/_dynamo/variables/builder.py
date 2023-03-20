@@ -1077,7 +1077,8 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import torch._logging
 from . import config
@@ -1354,15 +1354,12 @@ def get_custom_getattr(value: Any):
 
 
 class TensorStaticReason(enum.Enum):
-    NO_SOURCE = 1
     PARAMETER = 2
     CONFIG_NOT_DYN = 3
     NOT_TENSOR = 4
 
 
 def tensor_static_reason_to_message(reason: TensorStaticReason):
-    if reason == TensorStaticReason.NO_SOURCE:
-        return "mark_dynamic usage without a source is illegal."
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.CONFIG_NOT_DYN:
@@ -1373,23 +1370,19 @@ def tensor_static_reason_to_message(reason: TensorStaticReason):
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any], source: Optional["Source"], is_tensor: bool
+    tensor: Union[torch.Tensor, Any], is_tensor: bool
 ) -> Tuple[bool, TensorStaticReason]:
     """
     Given a tensor, source, and is_tensor flag, determine if a shape should be static.
 
     Args:
     tensor - the real tensor to evaluate, parameters force a static shape.
-    source - an optional source, None forces a static shape
     is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
     tensors not in a TensorVariable for whatever reason are forced static.
 
     Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
     The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
     """
-    if source is None:
-        # TODO(voz): Look into why we need this case?
-        return True, TensorStaticReason.NO_SOURCE
     if type(tensor) is torch.nn.Parameter:
         return True, TensorStaticReason.PARAMETER
     if config.dynamic_shapes is False:
