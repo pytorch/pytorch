@@ -86,6 +86,10 @@ def _make_grads(outputs: Sequence[torch.Tensor], grads: Sequence[_OptionalTensor
             if out.requires_grad:
                 if out.numel() != 1:
                     raise RuntimeError("grad can be implicitly created only for scalar outputs")
+                if not out.dtype.is_floating_point:
+                    msg = ("grad can be implicitly created only for real scalar outputs"
+                           f" but got {out.dtype}")
+                    raise RuntimeError(msg)
                 new_grads.append(torch.ones_like(out, memory_format=torch.preserve_format))
             else:
                 new_grads.append(None)
@@ -194,7 +198,7 @@ def backward(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment below is that
+    # The reason we repeat the same comment below is that
     # some Python versions print out the first line of a multi-line function
     # calls in the traceback and some print out the last line
     Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
@@ -290,7 +294,7 @@ def grad(
     if retain_graph is None:
         retain_graph = create_graph
 
-    # The reason we repeat same the comment several times below is because
+    # The reason we repeat the same comment several times below is because
     # some Python versions print out the first line of multi-line function
     # calls in the traceback and some print out the last line
     if is_grads_batched:

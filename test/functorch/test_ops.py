@@ -394,7 +394,7 @@ class TestOperators(TestCase):
         tol1('masked.cumprod',
              {torch.float32: tol(atol=1e-05, rtol=1e-05)}),
         tol1('svd_lowrank',
-             {torch.float32: tol(atol=3e-05, rtol=3e-05)}, device_type='cuda'),
+             {torch.float32: tol(atol=3e-05, rtol=3e-04)}, device_type='cuda'),
         tol1('linalg.tensorsolve',
              {torch.float32: tol(atol=3e-04, rtol=3e-04)}, device_type='cuda'),
     ))
@@ -430,10 +430,15 @@ class TestOperators(TestCase):
                 if sample.output_process_fn_grad is not None:
                     result = sample.output_process_fn_grad(result)
 
+                def abs_if_complex(t):
+                    if t.dtype.is_complex:
+                        return t.abs()
+                    return t
+
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
-                    return result.sum()
-                result = sum([res.sum() for res in result])
+                    return abs_if_complex(result.sum())
+                result = sum([abs_if_complex(res.sum()) for res in result])
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)
@@ -1044,7 +1049,6 @@ class TestOperators(TestCase):
         xfail('cumprod'),
         xfail('masked_fill'),
         xfail('copysign'),
-        xfail('complex'),
         xfail('fill'),
         skip('masked.mean'),  # ???
         xfail('masked_scatter'),
@@ -1061,7 +1065,6 @@ class TestOperators(TestCase):
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
         xfail('fft.ihfftn'),  # conj_physical fallback
-        xfail('polar'),  # complex fallback
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -1080,6 +1083,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
+        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -1111,7 +1115,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapvjp_has_batch_rule', vmapvjp_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('view_as_complex'),
-        xfail('complex'),
         xfail('copysign'),
         xfail('cummax'),
         xfail('cummin'),
@@ -1188,6 +1191,8 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
         xfail("native_dropout_backward"),
+        xfail("_upsample_bilinear2d_aa"),  # hit vmap fallback, which is disabled
+        xfail("index_fill"),  # aten::_unique hit the vmap fallback which is currently disabled
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:

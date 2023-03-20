@@ -84,6 +84,8 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+    # segfault: Internal Triton PTX codegen error
+    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 
@@ -184,7 +186,6 @@ SKIP_ACCURACY_CHECK_MODELS = {
     "hf_T5_large",
     "timm_vision_transformer_large",
     "maml",  # accuracy https://github.com/pytorch/pytorch/issues/93847
-    "timm_vision_transformer",  # accuracy https://github.com/pytorch/pytorch/issues/94687
 }
 
 
@@ -241,7 +242,6 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         batch_size=None,
         part=None,
     ):
-
         is_training = self.args.training
         use_eval_mode = self.args.use_eval_mode
         dynamic_shapes = self.args.dynamic_shapes

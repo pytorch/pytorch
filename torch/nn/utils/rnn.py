@@ -1,24 +1,21 @@
-from collections import namedtuple
 import warnings
+from typing import Iterable, List, NamedTuple, Tuple, Union
 
 import torch
 from torch import Tensor
 from ... import _VF
 from ..._jit_internal import Optional
 
-from typing import List, Tuple, Union, Iterable
-
 
 __all__ = ['PackedSequence', 'invert_permutation', 'pack_padded_sequence', 'pad_packed_sequence', 'pad_sequence',
            'unpad_sequence', 'pack_sequence', 'unpack_sequence']
 
-PackedSequence_ = namedtuple('PackedSequence_',
-                             ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
 
-# type annotation for PackedSequence_ to make it compatible with TorchScript
-PackedSequence_.__annotations__ = {'data': torch.Tensor, 'batch_sizes': torch.Tensor,
-                                   'sorted_indices': Optional[torch.Tensor],
-                                   'unsorted_indices': Optional[torch.Tensor]}
+class PackedSequence_(NamedTuple):
+    data: torch.Tensor
+    batch_sizes: torch.Tensor
+    sorted_indices: Optional[torch.Tensor]
+    unsorted_indices: Optional[torch.Tensor]
 
 
 def bind(optional, fn):
@@ -244,13 +241,17 @@ def pack_padded_sequence(
     Returns:
         a :class:`PackedSequence` object
     """
-    if torch._C._get_tracing_state() and not isinstance(lengths, torch.Tensor):
-        warnings.warn('pack_padded_sequence has been called with a Python list of '
-                      'sequence lengths. The tracer cannot track the data flow of Python '
-                      'values, and it will treat them as constants, likely rendering '
-                      'the trace incorrect for any other combination of lengths.',
-                      stacklevel=2)
-    lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    if not isinstance(lengths, torch.Tensor):
+        if torch._C._get_tracing_state():
+            warnings.warn('pack_padded_sequence has been called with a Python list of '
+                          'sequence lengths. The tracer cannot track the data flow of Python '
+                          'values, and it will treat them as constants, likely rendering '
+                          'the trace incorrect for any other combination of lengths.',
+                          stacklevel=2)
+        lengths = torch.as_tensor(lengths, dtype=torch.int64)
+    else:
+        lengths = lengths.to(dtype=torch.int64)
+
     if enforce_sorted:
         sorted_indices = None
     else:

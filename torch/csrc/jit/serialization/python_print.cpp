@@ -923,7 +923,7 @@ struct PythonPrintImpl {
       if (val.isString()) {
         const auto maxASCII = 0x7fu;
         for (auto c : val.toStringRef()) {
-          if (c > maxASCII) {
+          if (static_cast<decltype(maxASCII)>(c) > maxASCII) {
             hasNonASCII = true;
             return true;
           }
@@ -1235,7 +1235,7 @@ struct PythonPrintImpl {
           auto num_necessary = specified_args.first;
           auto num_out = specified_args.second;
 
-          for (size_t i = 0; i < num_necessary; ++i) {
+          for (const auto i : c10::irange(static_cast<size_t>(num_necessary))) {
             if (i > 0)
               stmt << ", ";
             auto v = useOf(node->inputs().at(i));
@@ -1745,7 +1745,7 @@ void jitModuleToPythonCodeAndConstants(
     class_deps.add(class_type);
   }
 
-  for (int i = 0; i < class_deps.size(); ++i) {
+  for (const auto i : c10::irange(class_deps.size())) {
     auto type = class_deps[i];
     auto qualname = uniquer.getUniqueName(type);
     std::string qualifier = qualname.prefix();

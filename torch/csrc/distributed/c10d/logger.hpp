@@ -69,7 +69,7 @@ class TORCH_API Logger {
   );
   // Set stats that can be collected only during
   // training loop. It is called at the beginning of forward call
-  // to record the run time stats of sampled iterations that previouly ran.
+  // to record the run time stats of sampled iterations that previously ran.
   // GPU performance stats are collected only for single process
   // single device program and single device module right now.
   // TODO to support single process multiple devices and multi device modules,
