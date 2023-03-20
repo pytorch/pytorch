@@ -14,6 +14,7 @@ __all__ = [
     "register_multi_grad_hook",
     "allow_mutation_on_saved_tensors",
     "Node",
+    "increment_version",
 ]
 
 class Node(abc.ABC):
@@ -127,6 +128,21 @@ class Node(abc.ABC):
                     or issubclass(C, torch.autograd.function.BackwardCFunction)):
                 return True
         return NotImplemented
+
+def increment_version(tensor):
+    """This function can be used to let autograd know that a given Tensor was modified
+    inplace to enable more accurate error checking within the autograd engine.
+
+    This is already done automatically by PyTorch functions and within custom Function
+    when mark_dirty() is called appropriately so you only need to call this explicitly
+    if you are doing inplace operation on the Tensor data in a way that Pytorch doesn't
+    know about. For example a custom kernel that reads the Tensor data_ptr and modifies
+    the memory inplace based on this pointer.
+
+    Note that incrementing the version counter multiple times for a single inplace operation
+    is not problematic.
+    """
+    torch._C._increment_version(tensor)
 
 class saved_tensors_hooks():
     """Context-manager that sets a pair of pack / unpack hooks for saved tensors.
@@ -345,7 +361,7 @@ def register_multi_grad_hook(tensors: Sequence[torch.Tensor], fn: Callable[[Sequ
     def get_grad_fn(t):
         # or grad accumulator
         if t.requires_grad and t.grad_fn is None:
-            return t.clone().grad_fn.next_functions[0][0]
+            return t.expand_as(t).grad_fn.next_functions[0][0]
         else:
             return t.grad_fn
 

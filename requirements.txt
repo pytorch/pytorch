@@ -13,3 +13,4 @@ sympy
 filelock
 networkx
 jinja2
+fsspec

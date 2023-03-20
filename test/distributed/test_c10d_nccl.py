@@ -1029,6 +1029,45 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         self.assertIsInstance(cm.exception, RuntimeError)
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_abort_pg(self):
+        # Disable ASYNC_ERROR_HANDLING for this test to ensure we can programmatically
+        # abort the process group.
+        os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        t = torch.rand(10, 10, device=device)
+        # First allreduce to initialize state.
+        dist.all_reduce(t)
+
+        def abortpg():
+            c10d.distributed_c10d._get_default_group()._get_backend(torch.device(device))._abort()
+
+        # Initialize DDP to ensure "destroy_process_group" will not call
+        # ProcessGroupNCCL destructor since DDP holds a reference to process group.
+        # Run a single iteration of DDP to initialize state.
+        model = DistributedDataParallel(
+            torch.nn.Linear(10, 10).to(device), device_ids=[device]
+        )
+        model(t).sum().backward()
+
+        # Now simulate collective getting stuck and abort gets us unstuck
+        if self.rank == 0:
+            dist.all_reduce(t)
+
+            # Schedule thread before we get stuck to abort pg.
+            thread = threading.Thread(target=abortpg)
+            thread.start()
+
+            # We would get stuck here due to d2h if we didn't abort.
+            t_cpu = t.cpu()
+
+            thread.join()
+
 class DistributedDataParallelTest(
     test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):

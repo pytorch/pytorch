@@ -12,7 +12,7 @@ import tempfile
 import textwrap
 import time
 from io import StringIO
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -80,7 +80,7 @@ def unique(it):
 def ceildiv(numer: int, denom: int):
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
-    # --amp --only YituTechConvBert --dynamic-shapes --unspecialize-int
+    # --amp --only YituTechConvBert --dynamic-shapes
     assert isinstance(numer, int) and isinstance(
         denom, int
     ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
@@ -221,6 +221,13 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
+def pad_list(x):
+    if len(x) == 1:
+        return [x[0], x[0]]
+    else:
+        return x
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
@@ -234,23 +241,58 @@ def cache_on_self(fn):
 
 
 def get_fused_kernel_name(node_schedule):
-    return "_".join(
-        ["fused"]
-        + sorted(
-            [
-                str(origin.name)
-                for origin in functools.reduce(
-                    operator.or_,
-                    [
-                        node.node.origins
-                        for node in node_schedule
-                        if hasattr(node, "node")
-                    ],
-                )
-                if origin.op == "call_function"
-            ]
-        )[0 : config.kernel_name_max_ops]
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
+    if config.triton.descriptive_names == "original_aten":
+        # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
+        sources = [
+            origin.meta["original_aten"]._overloadpacket.__name__
+            for origin in all_origins
+            if origin.op == "call_function" and "original_aten" in origin.meta
+        ]
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "torch":
+        # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
+        sources = []
+        for origin in all_origins:
+            if origin.op == "call_function" and "source_fn" in origin.meta:
+                if isinstance(origin.meta["source_fn"], str):
+                    sources.append(origin.meta["source_fn"])
+                else:
+                    sources.append(origin.meta["source_fn"].__name__)
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "inductor_node":
+        sources = [
+            origin.name for origin in all_origins if origin.op == "call_function"
+        ]
+    else:
+        raise NotImplementedError
+    sources = sources
+    return "_".join(["fused"] + sources)
+
+
+def get_kernel_metadata(node_schedule):
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+    )
+    inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+    original_aten_dict = collections.defaultdict(list)
+    for node in inductor_nodes:
+        if "original_aten" in node.meta:
+            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
+                node
+            )
+    metadata = [
+        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+    ]
+    for original_aten, nodes in original_aten_dict.items():
+        metadata.append(
+            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
+        )
+    return "\n".join(metadata)
 
 
 def gather_origins(args, kwargs):
@@ -316,6 +358,10 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
 
 
+def free_symbol_has(index: sympy.Expr, pattern: str):
+    return any(pattern in v.name for v in index.free_symbols)
+
+
 def has_incompatible_cudagraph_ops(gm):
     forbidden_list = {
         "aten._fused_moving_avg_obs_fq_helper.default",
@@ -374,6 +420,10 @@ def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
 
 
+class LineContext(NamedTuple):
+    context: Any
+
+
 class IndentedBuffer:
     tabwidth = 4
 
@@ -381,19 +431,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -402,6 +460,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -421,7 +481,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -436,8 +498,10 @@ class IndentedBuffer:
         @contextlib.contextmanager
         def ctx():
             self._indent += offset
-            yield
-            self._indent -= offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
 
         return ctx()
 
@@ -445,12 +509,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -498,16 +565,20 @@ class DeferredLineBase:
 def is_big_gpu(index):
     cores = torch.cuda.get_device_properties(index).multi_processor_count
     if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune mode")
+        log.warning("not enough cuda cores to use max_autotune_gemm mode")
         return False
     return True
 
 
 def use_triton_template(layout):
     return (
-        (config.max_autotune or config.search_autotune_cache)
+        (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.search_autotune_cache
+        )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
 
@@ -580,6 +651,19 @@ def get_num_bytes(*args):
     )
 
 
+def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
+    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
+    try:
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+    except ImportError:
+        log.warning("Colorama is not installed. Install it if you want colored output")
+
+    return info_str
+
+
 def get_benchmark_name():
     """
     An experimental API used only when config.benchmark_kernel is true.
@@ -611,7 +695,30 @@ def get_benchmark_name():
             return arg[len("--only=") :]
 
 
-def benchmark_all_kernels(benchmark_name):
+def get_kernel_category(kernel_mod):
+    """
+    Given the module defining a triton kernel, return the category of the kernel.
+    Cateogry can be one of:
+    - pointwise
+    - reduction
+    - persistent_reduction
+
+    Currently we simply decide the cateory depending on what decorator is imported
+    by the kernel.
+    """
+    choices = [
+        "pointwise",
+        "reduction",
+        "persistent_reduction",
+    ]
+    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
     """
     An experimental API used only when config.benchmark_kernel is true.
 
@@ -627,19 +734,51 @@ def benchmark_all_kernels(benchmark_name):
     for kernel_key, kernel_mod in PyCodeCache.cache.items():
         if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
             continue
+
+        kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
-        ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
         num_gb = get_num_bytes(*args) / 1e9
-        gb_per_s = num_gb / (ms / 1e3)
 
-        # follow what we do in DebugAutotuner
-        info_str = f"{benchmark_name:20} {kernel_key[:10]} {ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s"
-        import colorama
+        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+            if not any(x is None for x in [n_regs, n_spills, shared]):
+                kernel_detail_str = (
+                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+                )
+            else:
+                kernel_detail_str = ""
 
-        if ms > 0.012 and gb_per_s < 650:
-            print(colorama.Fore.RED + info_str + colorama.Fore.RESET)
+            gb_per_s = num_gb / (ms / 1e3)
+            return create_bandwidth_info_str(
+                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
+            )
+
+        bench_result = []
+        kernel_desc = (
+            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+        )
+        if benchmark_all_configs:
+            assert hasattr(kernel_mod, "benchmark_all_configs")
+            bench_result = kernel_mod.benchmark_all_configs(args)
+            print(kernel_desc)
+            for launcher, ms in bench_result.items():
+                print(
+                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
+                )
         else:
-            print(info_str)
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            assert (
+                len(kernel_mod.triton_.launchers) == 1
+            ), "Autotuner should have selected the best config"
+            launcher = kernel_mod.triton_.launchers[0]
+            print(
+                get_info_str(
+                    ms,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
+                    prefix=f"{kernel_desc} ",
+                )
+            )
 
         nfound += 1
     if nfound == 0:

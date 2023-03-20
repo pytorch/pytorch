@@ -9,15 +9,11 @@ import traceback
 from dataclasses import dataclass
 from typing import Any, Dict, List, NamedTuple, Optional, OrderedDict, Set, Union
 
+import torch._logging
+
 import torch.nn
 from torch import fx
-from torch._guards import (
-    Checkpointable,
-    Guard,
-    GuardsCheckpointState,
-    tracing,
-    TracingContext,
-)
+from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -48,6 +44,7 @@ from .utils import (
     count_calls,
     counters,
     dynamo_timed,
+    format_graph_code,
     format_graph_tabular,
     same,
 )
@@ -61,6 +58,8 @@ from .variables.tensor import (
 )
 
 log = logging.getLogger(__name__)
+graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 
 
 class OutputGraphState(NamedTuple):
@@ -618,31 +617,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         name = unique_id("__compiled_fn")
 
         assert_no_fake_params_or_buffers(gm)
-        with tracing(self.tracing_context):
-            compiled_fn = self.call_user_compiler(gm)
+        compiled_fn = self.call_user_compiler(gm)
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
         self.install_global(name, compiled_fn)
 
-        try:
-            # the call to tabulate can cause a lot of memory to be allocated
-            if config.log_level <= logging.INFO and config.output_code:
-                graph_str = (
-                    gm.print_readable()
-                    if config.output_graph_code
-                    else format_graph_tabular(gm.graph)
-                )
-                log.log(
-                    logging.INFO,
-                    f"TRACED GRAPH\n {name} {gm.forward.__code__.co_filename} {graph_str}\n",
-                )
-        except ImportError:
-            log.warning(
-                "Unable to print graph: `format_graph_tabular` relies on the library `tabulate`, "
-                "which could not be found on this machine. Run `pip "
-                "install tabulate` to install the library."
-            )
+        graph_code_log.debug(format_graph_code(name, gm))
+        graph_tabular_log.debug(format_graph_tabular(name, gm))
 
         cg = PyCodegen(tx)
         cg.make_call_generated_code(name)
@@ -810,6 +792,9 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
 
         if kind in {"call_function", "call_method"}:
             rv.node.meta["source_fn"] = target
+        elif kind == "call_module":
+            # For modules we store the class
+            rv.node.meta["source_fn"] = rv.node.meta["nn_module_stack"][target][1]
 
         frame_summaries: List[traceback.FrameSummary] = []
         while tx:

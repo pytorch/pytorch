@@ -328,6 +328,14 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         {
             F.pixel_shuffle,
         },
+        # pixel unshuffle
+        {
+            F.pixel_unshuffle,
+        },
+        # narrow
+        {
+            torch.narrow,
+        },
     ]
 
     # for each floating point op, add versions of the op added by
@@ -529,6 +537,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.max_pool3d,
         F.relu6,
         F.pixel_shuffle,
+        F.pixel_unshuffle,
         torch.avg_pool1d,
         torch._C._nn.avg_pool2d,
         torch._C._nn.avg_pool3d,
@@ -540,6 +549,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         torch.max,
         torch.mean,
         torch.min,
+        torch.narrow,
         torch.repeat_interleave,
         torch.sort,
         torch.squeeze,

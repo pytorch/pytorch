@@ -4082,6 +4082,15 @@ class TestSWAUtils(TestCase):
             self.assertEqual(p_swa, p_swa2)
         self.assertTrue(averaged_dnn.n_averaged == averaged_dnn2.n_averaged)
 
+    def test_averaged_model_default_avg_fn_picklable(self):
+        dnn = torch.nn.Sequential(
+            torch.nn.Conv2d(1, 5, kernel_size=3),
+            torch.nn.BatchNorm2d(5),
+            torch.nn.Linear(5, 5),
+        )
+        averaged_dnn = AveragedModel(dnn)
+        pickle.dumps(averaged_dnn)
+
     def test_averaged_model_exponential(self):
         # Test AveragedModel with EMA as avg_fn
         dnn = torch.nn.Sequential(

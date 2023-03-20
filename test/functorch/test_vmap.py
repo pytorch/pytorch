@@ -27,8 +27,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     TEST_WITH_UBSAN,
-    IS_MACOS,
-    IS_X86
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -46,7 +44,6 @@ from common_utils import (
     compute_quantities_for_vmap_test,
     is_valid_inplace_sample_input,
     decorate,
-    expectedFailureIf
 )
 import types
 from collections import namedtuple
@@ -1050,6 +1047,11 @@ class TestVmapAPI(TestCase):
 
         y = reshape_dim_outof(-1, 6, x)
         self.assertEqual(y, x.reshape(12, 12, 6, 2))
+
+        # Case: `0` sized dim.
+        x = torch.randn(12, 12, 0)
+        y = reshape_dim_outof(-1, 6, x)
+        self.assertEqual(y.shape, torch.Size((12, 12, 6, 0)))
 
     def test_batch_rule_does_not_need_to_handle_no_batched_input(self):
         def f(x, y):
@@ -3567,10 +3569,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('addcdiv'),
         xfail('addcmul'),
         xfail('clamp'),
-        # AssertionError: Tensor-likes are not equal!
-        xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', device_type='cpu',
-                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
 
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
@@ -3596,7 +3594,6 @@ class TestVmapOperatorsOpInfo(TestCase):
     @skipOps('TestVmapOperatorsOpInfo', 'test_op_has_batch_rule', vmap_fail.union({
         xfail('as_strided', 'partial_views'),
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('complex'),
         xfail('copysign'),
         xfail('fill'),
         # Batch norm got a batched tensor as input while the running_mean or running_var,
@@ -3730,22 +3727,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('linalg.lu', ''),
         skip('linalg.ldl_solve', ''),
         skip('_softmax_backward_data'),
-        # AssertionError: Tensor-likes are not equal!
-        # Issue: https://github.com/pytorch/pytorch/issues/70904
-        xfail('bitwise_left_shift', device_type='cpu'),
-        decorate('bitwise_right_shift', device_type='cpu',
-                 decorator=expectedFailureIf(not (IS_MACOS and IS_X86))),
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # One or more of the overload doesn't have a Batch rule.
-        xfail('where'),
         xfail('bincount'),
-        xfail('float_power'),
-        xfail('gt'),
-        xfail('le'),
-        xfail('lt'),
-        xfail('ne'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'
         decorate('special.zeta', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         # RuntimeError: Expected all tensors to be on the same device,
@@ -3798,8 +3784,6 @@ class TestVmapOperatorsOpInfo(TestCase):
             'scatter',
             'square',
             'sub',
-            'tril',
-            'triu',
             'trunc',
             'xlogy',
         )
