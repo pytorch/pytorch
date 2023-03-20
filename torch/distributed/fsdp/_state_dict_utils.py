@@ -27,7 +27,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _get_buffer_dtypes,
+    _get_orig_buffer_dtypes,
     _lazy_init,
 )
 from torch.distributed.fsdp.api import FullStateDictConfig, StateDictType
@@ -239,7 +239,7 @@ def _common_unshard_post_state_dict_hook(
             else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
         if mixed_precision_enabled_for_buffers:
-            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            buffer_dtypes = _get_orig_buffer_dtypes(fsdp_state, buffer_clean_fqns)
             _cast_buffers_to_dtype_and_device(
                 buffers, buffer_dtypes, fsdp_state.compute_device
             )
