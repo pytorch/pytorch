@@ -269,8 +269,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
 fi
 
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-  # TODO: make specialize_int = False default, then remove this
-  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --unspecialize-int)
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes)
 fi
 
 if [[ "${TEST_CONFIG}" == *cpu_accuracy* ]]; then
