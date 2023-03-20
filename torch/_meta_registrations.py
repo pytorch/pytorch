@@ -15,9 +15,10 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     IntLike,
     make_contiguous_strides_for,
+    TensorLike,
 )
 
-from torch._prims_common.wrappers import out_wrapper
+from torch._prims_common.wrappers import _maybe_resize_out, _safe_copy_out, out_wrapper
 from torch._refs import _broadcast_shapes
 
 from torch.utils._pytree import tree_map
@@ -2251,23 +2252,17 @@ def meta__scaled_dot_product_efficient_backward(
 
     grad_kv_needs_init = is_causal and N > M
 
-    if chunk_grad_outputs:
-        chunk = torch.empty((B, M, 3, nH, K), dtype=query.dtype, device=query.device)
-        grad_q = chunk.select(2, 0)
-        grad_k = chunk.select(2, 1)
-        grad_v = chunk.select(2, 2)
-    else:
-        grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
-        grad_k = (
-            torch.zeros(key.shape, dtype=key.dtype, device=key.device)
-            if grad_kv_needs_init
-            else torch.empty(key.shape, dtype=key.dtype, device=key.device)
-        )
-        grad_v = (
-            torch.zeros(value.shape, dtype=value.dtype, device=value.device)
-            if grad_kv_needs_init
-            else torch.empty(value.shape, dtype=value.dtype, device=value.device)
-        )
+    grad_q = torch.empty(query.shape, dtype=query.dtype, device=query.device)
+    grad_k = (
+        torch.zeros(key.shape, dtype=key.dtype, device=key.device)
+        if grad_kv_needs_init
+        else torch.empty(key.shape, dtype=key.dtype, device=key.device)
+    )
+    grad_v = (
+        torch.zeros(value.shape, dtype=value.dtype, device=value.device)
+        if grad_kv_needs_init
+        else torch.empty(value.shape, dtype=value.dtype, device=value.device)
+    )
     return grad_q.transpose(1, 2), grad_k.transpose(1, 2), grad_v.transpose(1, 2)
 
 
@@ -2394,9 +2389,26 @@ def upsample_nearest3d(input, output_size, scales_d=None, scales_h=None, scales_
     )
 
 
-@register_meta([aten.sort.default, aten.sort.stable])
-def meta_sort(self, stable=None, dim=-1, descending=False):
-    return torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+@register_meta(
+    [aten.sort.default, aten.sort.stable, aten.sort.values, aten.sort.values_stable]
+)
+def meta_sort(self, stable=None, dim=-1, descending=False, values=None, indices=None):
+    v, i = torch.empty_like(self), torch.empty_like(self, dtype=torch.int64)
+    if values is not None and indices is not None:
+        assert isinstance(values, TensorLike)
+        assert isinstance(indices, TensorLike)
+        # Makes sure values and indices have the same strides. For cases where
+        # these have different shapes, like (5, 10, 5) and (0) in msort.
+        out_shape = v.shape
+        out_stride = v.stride()
+        values = _maybe_resize_out(values, out_shape)
+        indices = _maybe_resize_out(indices, out_shape)
+        values.as_strided_(out_shape, out_stride)
+        indices.as_strided_(out_shape, out_stride)
+        _safe_copy_out(copy_from=v, copy_to=values)  # type: ignore[arg-type]
+        _safe_copy_out(copy_from=i, copy_to=indices)  # type: ignore[arg-type]
+        return values, indices
+    return v, i
 
 
 def rnn_cell_checkSizes(
