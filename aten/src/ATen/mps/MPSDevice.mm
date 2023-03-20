@@ -91,6 +91,7 @@ MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
 
 bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
   id mpsCD = NSClassFromString(@"MPSGraph");
+  static auto compileOptions = [[[MTLCompileOptions alloc] init] autorelease];
   static bool _macos_13_0_plus = [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:
                                                                                                 axis:name:)] == YES;
   static bool _macos_13_1_plus =
@@ -100,7 +101,7 @@ bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
                                         :samplingMode:constantValue:name:)] == YES;
   static bool _macos_13_2_plus =
       [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
-  static bool _macos_13_3_plus = [_mtl_device respondsToSelector:@selector(maximumConcurrentCompilationTaskCount)];
+  static bool _macos_13_3_plus = [compileOptions respondsToSelector:@selector(maxTotalThreadsPerThreadgroup)] == YES;
 
   switch (version) {
     case MacOSVersion::MACOS_VER_13_0_PLUS:

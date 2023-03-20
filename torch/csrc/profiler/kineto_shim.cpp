@@ -183,7 +183,7 @@ class ExperimentalConfigWrapper {
     configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
              << "CUPTI_PROFILER_METRICS=";
 
-    for (int i = 0; i < num_metrics; i++) {
+    for (size_t i = 0; i < num_metrics; i++) {
       configss << config_.profiler_metrics[i];
       if (num_metrics > 1 && i < (num_metrics - 1)) {
         configss << ",";
