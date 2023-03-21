@@ -239,21 +239,30 @@ class DistTensorOpsTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         shard_spec = [Shard(0)]
 
-        if self.rank == 0:
-            input_tensor_1 = torch.ones(4, 4)
-        else:
-            input_tensor_1 = torch.randn(4, 4)
-        input_tensor_2 = torch.ones(4, 4)
-
+        input_tensor_1 = torch.ones(4, 4)
         dist_tensor_1 = DTensor.from_local(input_tensor_1, device_mesh, shard_spec)
-        dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
-        # TODO: equal op currently returns each shard's local result
-        eq_result = dist_tensor_1.equal(dist_tensor_2)
 
+        # tensors are equal
+        input_tensor_2 = torch.ones(4, 4)
+        dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
+
+        eq_result = dist_tensor_1.equal(dist_tensor_2)
+        self.assertTrue(eq_result)
+
+        # tensors are different on some shards
         if self.rank == 0:
-            self.assertTrue(eq_result)
+            input_tensor_2 = torch.ones(4, 4)
         else:
-            self.assertTrue(not eq_result)
+            input_tensor_2 = torch.randn(4, 4)
+        dist_tensor_2 = DTensor.from_local(input_tensor_2, device_mesh, shard_spec)
+
+        eq_result = dist_tensor_1.equal(dist_tensor_2)
+        if self.rank == 0:
+            # TODO: equal op currently returns each shard's local result
+            with self.assertRaises(AssertionError):
+                self.assertFalse(eq_result)
+        else:
+            self.assertFalse(eq_result)
 
     def _test_op(self, mesh, op_call, *args, **kwargs):
         out = op_call(*args, **kwargs)
