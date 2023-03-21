@@ -491,10 +491,10 @@ static void _get_tensors_to_save(
   if (!self->to_save)
     return;
   THPFunction_assert(
-        PyTuple_Check(self->to_save),
-        "autograd internal "
-        "error: to_save attribute is expected to be a tuple but is %s",
-        THPUtils_typename(self->to_save));
+      PyTuple_Check(self->to_save),
+      "autograd internal "
+      "error: to_save attribute is expected to be a tuple but is %s",
+      THPUtils_typename(self->to_save));
   Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
   for (const auto i : c10::irange(num_saved)) {
     PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
