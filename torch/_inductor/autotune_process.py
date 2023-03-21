@@ -11,12 +11,14 @@ from torch._dynamo.testing import rand_strided
 from torch._inductor import ir
 from torch._inductor.codecache import PyCodeCache
 
-from torch._inductor.select_algorithm import ChoiceCaller
 from .utils import do_bench
 from .virtualized import V
 
 DEBUG = False
+
+DEBUG = False
 EXIT_HANDLER_REGISTERED = False
+
 
 # Used to synchronize between parent and child processes
 class Ping:
@@ -155,7 +157,7 @@ class BenchmarkRequest:
     input_tensors: List[TensorMeta]
     output_tensor: TensorMeta
 
-    def benchmark(self) -> float:
+    def benchmark(self, *input_tensors, output_tensor=None) -> float:
         if DEBUG:
             start_ts = time.time()
 
@@ -167,8 +169,10 @@ class BenchmarkRequest:
             start_ts = time.time()
 
         # create args and out tensor
-        input_tensors = [x.to_tensor() for x in self.input_tensors]
-        output_tensor = self.output_tensor.to_tensor()
+        if output_tensor is None:
+            assert len(input_tensors) == 0
+            input_tensors = [x.to_tensor() for x in self.input_tensors]
+            output_tensor = self.output_tensor.to_tensor()
 
         if DEBUG:
             create_tensor_elapse = time.time() - start_ts
@@ -197,7 +201,7 @@ class BenchmarkRequest:
 
 
 def benchmark_in_sub_process(
-    choice: ChoiceCaller,
+    choice: "ChoiceCaller",
 ) -> float:
     """
     Do benchmarking in subprocess and return the perf number (latency).
@@ -225,7 +229,7 @@ def benchmark_in_sub_process(
 
             tuning_process.clear()
 
-            # return a large value to this choice will be ignored
+            # return INF so this choice will be ignored
             return float("inf")
 
         return timing
