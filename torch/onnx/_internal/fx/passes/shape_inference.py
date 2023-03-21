@@ -34,6 +34,14 @@ def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *a
         )
     }
 
+    # input nodes (plaveholder) can never be skipped in FakeTensorProp,
+    # or made up inputs would be generated in the graph
+    initial_env = {
+        node: node.meta["val"]
+        for node in decomposed_module.graph.nodes
+        if "val" in node.meta and node.op != "placeholder"
+    }
+
     # Shape inference via FakeTensorProp
     with stateless._reparametrize_module(
         decomposed_module, fake_parameters_and_buffers
@@ -43,7 +51,7 @@ def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *a
         # for each node's output. Consider to set "tracing_mode=symbolic"
         # when calling make_fx and then remove FakeTensorProp below.
         fake_tensor_prop.FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(
-            *args
+            *args, initial_env=initial_env
         )
 
     return decomposed_module
