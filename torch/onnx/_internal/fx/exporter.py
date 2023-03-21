@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import copy
+import contextlib
 import inspect
-
-from typing import Callable, Optional, Union
+from typing import Any, Callable, List, Tuple, Union
 
 import onnx
 
@@ -13,23 +12,69 @@ import torch._decomp
 import torch._dynamo
 import torch._ops
 import torch.fx
-
 from torch.onnx import _constants
-
 from torch.onnx._internal import _beartype
 from torch.onnx._internal.fx import function_dispatcher, options, passes
 from torch.utils import _pytree
 
-# TODO: Separate into individual components.
-# TODO: make_fx lose stack info https://github.com/pytorch/pytorch/issues/90276
+
+@contextlib.contextmanager
+def _patch_pytree_huggingface_modeloutput():
+    """Patch 'torch.utils._pytree' to support family of 'ModelOutput' from HuggingFace 'transformers'.
+
+    The source and details of the issue is described at https://github.com/pytorch/pytorch/issues/96386.
+    This patch enables 'torch.utils._pytree' to flatten and unflatten all 'ModelOutput'
+    subclasses defined in HuggingFace 'transformers'. Hence resolving the mismatch between
+    `dynamo` eager traced model outputs and `dynamo.export` fx graph computed outputs.
+
+    FIXME(bowbao): Remove this patch after above issue is resolved for `dynamo.export`.
+    """
+    try:
+        from transformers import modeling_outputs  # type: ignore[import]
+    except ImportError as e:
+        # Do nothing if 'transformers' is not installed.
+        try:
+            yield
+        finally:
+            pass
+        return
+
+    def model_output_flatten(
+        output: modeling_outputs.ModelOutput,
+    ) -> Tuple[List[Any], _pytree.Context]:
+        return list(output.values()), (type(output), list(output.keys()))
+
+    def model_output_unflatten(
+        values: List[Any], context: _pytree.Context
+    ) -> modeling_outputs.ModelOutput:
+        output_type, keys = context
+        return output_type(**dict(zip(keys, values)))
+
+    # All 'ModelOutput' subclasses are defined under module 'modeling_outputs'.
+    named_model_output_classes = inspect.getmembers(
+        modeling_outputs,
+        lambda x: inspect.isclass(x) and issubclass(x, modeling_outputs.ModelOutput),
+    )
+
+    for _, class_type in named_model_output_classes:
+        _pytree._register_pytree_node(
+            class_type, model_output_flatten, model_output_unflatten
+        )
+
+    try:
+        yield
+    finally:
+        for _, class_type in named_model_output_classes:
+            _pytree.SUPPORTED_NODES.pop(class_type)
 
 
 @_beartype.beartype
 def _export(
     module: torch.fx.GraphModule,
-    args,
+    *args,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
+    # TODO: Move `ExportOptions` to top level API. Avoid `.update(**)`.
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
@@ -63,38 +108,8 @@ def _export(
 
 
 @_beartype.beartype
+@_patch_pytree_huggingface_modeloutput()
 def export(
-    fn: Union[torch.nn.Module, Callable],
-    *args,
-    use_binary_format: bool = True,
-    opset_version: int = _constants.ONNX_DEFAULT_OPSET,
-    op_level_debug: bool = False,
-) -> Union["onnx.ModelProto", bytes]:
-    # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-    args = copy.deepcopy(args)
-    # Translate callable to FX graph.
-    #
-    # TODO(wechi): There are several symbolic tracing mechanisms to convert
-    # nn.Module to FX graph. We should choose the right one after they are
-    # matured.
-    graph_module, graph_guard = torch._dynamo.export(fn, *args, aten_graph=True)
-    del graph_guard  # Unused
-    # Export FX graph to ONNX ModelProto.
-    #
-    # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
-    # to _export.
-    return _export(
-        graph_module,
-        args,
-        opset_version=opset_version,
-        decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
-        use_binary_format=use_binary_format,
-        op_level_debug=op_level_debug,
-    )
-
-
-@_beartype.beartype
-def export_after_normalizing_args_and_kwargs(
     fn: Union[torch.nn.Module, Callable],
     *args,
     use_binary_format: bool = True,
@@ -105,77 +120,33 @@ def export_after_normalizing_args_and_kwargs(
     """Export an nn.Module or a callable to ONNX.
 
     This traces the given nn.Module or a callable into FX graph and then
-    and exports it to ONNX by calling `_export`. Notice that ONNX does
-    not represent keyword arguments, so `args` and `kwargs` are normalized by
-    calling `inspect.Signature.bind` and `inspect.BoundArgument.apply_defaults`
-    in the beginning.
-
+    and exports it to ONNX by calling `_export`.
     Args:
         fn: nn.Module or a callable to be exported to ONNX.
         opset_version: the opset version to export the model to. E.g., 14.
         args: the positional arguments to pass to `fn`.
         use_binary_format: whether to return the ONNX model in binary format.
-            If False, `onnx.ModelProto` will be returned. If False, the byte array
+            If False, `onnx.ModelProto` will be returned. If True, the byte array
             generated by `onnx.ModelProto.SerializeToString` is returned.
         kwargs: the keyword arguments to pass to `fn`.
-
     Returns:
         ONNX model in binary format or `onnx.ModelProto`. To select return type,
         use `use_binary_format` argument.
     """
-
-    if isinstance(fn, torch.nn.Module):
-        signature = inspect.signature(fn.forward)
-    else:
-        signature = inspect.signature(fn)
-
-    # We hope the input kwargs will be mapped to bound.args after binding.
-    # If not, we will raise an error.
-    bound = signature.bind(*args, **kwargs)
-    bound.apply_defaults()
-    # keyword-only arguments are not handled.
-    # bound.kwargs only contains keyword-only arguments after calling
-    # bind & apply_defaults, so we throw if it's not empty.
-    assert not bound.kwargs
-
-    class Wrapper(torch.nn.Module):
-        def __init__(self, fn):
-            super().__init__()
-            self.fn = fn
-
-        def forward(self, *args):
-            result, _ = _pytree.tree_flatten(self.fn(*args))
-            return result
-
-    # args will be converted to symbolic tensor. Let's copy to avoid side effects.
-    bound_args = copy.deepcopy(bound.args)
     # Translate callable to FX graph.
-    #
-    # TODO(wechi): There are several symbolic tracing mechanisms to convert
-    # nn.Module to FX graph. We should choose the right one after they are
-    # matured.
-
-    class GraphCaptureCompiler:
-        def __init__(self):
-            self.captured_graph: Optional["torch.fx.GraphModule"] = None
-            self.captured_graph_count = 0
-
-        def compile(self, graph_module: "torch.fx.GraphModule", _):
-            assert self.captured_graph_count == 0
-            self.captured_graph = graph_module
-            self.captured_graph_count += 1
-            return graph_module
-
-    compiler = GraphCaptureCompiler()
-    torch._dynamo.reset()
-    torch._dynamo.optimize(compiler.compile, nopython=True)(Wrapper(fn))(*bound_args)
-    torch._dynamo.reset()
-    assert compiler.captured_graph
+    # TODO(bowbao, titai): Change "real" to "symbolic" after symbolic shape export is supported.
+    graph_module, graph_guard = torch._dynamo.export(
+        fn, *args, aten_graph=True, **kwargs
+    )
+    del graph_guard  # Unused
     # Export FX graph to ONNX ModelProto.
+    #
+    # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
+    # to _export.
     return _export(
-        compiler.captured_graph,
-        # Function optimized by _dynamo doesn't have None in args.
-        tuple(arg for arg in bound_args if arg is not None),
+        graph_module,
+        *args,
+        *tuple(kwargs.values()),
         opset_version=opset_version,
         decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
