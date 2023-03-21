@@ -5510,6 +5510,37 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
+    def test_bool_return_issue97083(self):
+        def fn():
+            a = torch.tensor([1])
+            a = a[0:1]
+            b = a.squeeze()
+            # NB: graph break is important
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        opt_fn = torch.compile(fn)
+        with torch.no_grad():
+            self.assertEqual(fn().item(), opt_fn().item())
+
+    # When this starts passing, delete the test above
+    @unittest.expectedFailure
+    def test_bool_return_issue97083_better(self):
+        def fn():
+            a = torch.tensor([1])
+            a = a[0:1]
+            b = a.squeeze()
+            if a[0] < 1e5:
+                pass
+            a[0] = 2
+            return b
+
+        opt_fn = torch.compile(fn)
+        with torch.no_grad():
+            self.assertEqual(fn(), opt_fn())
+
     def test_zero_dim_reductions(self):
         for kd in [True, False]:
             inps0 = (torch.zeros(2, 0, device=self.device, dtype=torch.float16), 1, kd)
@@ -5842,15 +5873,12 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
             # a reference. Otherwise, we would lose access to the value.
             skips = test_skips and test_skips.get(name)
             if skips and suffix in skips:
-                setattr(
-                    other_cls,
-                    f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
-                )
+                test = unittest.skip("Skipped!")(lambda self, value=value: value(self))
             else:
-                setattr(
-                    other_cls, f"{name}_{suffix}", lambda self, value=value: value(self)
-                )
+                test = lambda self, value=value: value(self)
+            setattr(other_cls, f"{name}_{suffix}", test)
+            # Propagate expectedFailures, e.g.
+            functools.update_wrapper(test, value)
 
 
 if HAS_CPU:
