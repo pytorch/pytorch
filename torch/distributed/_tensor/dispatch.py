@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from typing import Callable, cast, Dict, Tuple, Union, Optional, Sequence
+from typing import Callable, cast, Dict, Tuple, Union, Optional, Sequence, List
 
 import torch
 
@@ -178,7 +178,7 @@ def operator_dispatch(
             ret_type = str(ret_list[0].type)
             if ret_type == "bool":
                 import operator
-                local_results = functools.reduce(operator.and_, obj_list, True)
+                local_results: object = functools.reduce(operator.and_, obj_list, True)
             else:
                 raise NotImplementedError(
                     f"return type {ret_type} in DTensor op is not supported"
@@ -204,9 +204,8 @@ def operator_dispatch(
                 local_results = default_tensor(spec)
             elif (isinstance(spec, Sequence)):
                 # return a List[Tensor] value
-                local_results: List[Any] = [
-                    default_tensor(s) if s is not None else None for s in spec
-                ]
+                local_results = [default_tensor(s) if s is not None else None for s in spec]
+                assert isinstance(local_results, List)
                 if None in local_results:
                     ret_type = str(ret_list[0].type)
                     raise NotImplementedError(
