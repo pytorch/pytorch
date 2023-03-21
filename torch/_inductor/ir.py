@@ -2781,6 +2781,7 @@ class ExternKernelAlloc(ExternKernel):
         kwargs=None,
         kernel=None,
         cpp_kernel=None,
+        ordered_kwargs_for_cpp_kernel=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
@@ -2789,6 +2790,7 @@ class ExternKernelAlloc(ExternKernel):
         if kernel is not None:
             self.kernel = kernel
         self.cpp_kernel = cpp_kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return False
@@ -3515,7 +3517,12 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
