@@ -38,14 +38,15 @@ def _export(
     decomposed_module = passes.decompose(
         module, export_options.decomposition_table, export_options.dynamic_axes, *args
     )
-
-    # Run FakeTensorProp on decomposed_module.
-    # Symbolic output of the i-th node can be accessed via
-    # decomposed_module.graph.nodes[i].meta["val"]
-    decomposed_module = passes.shape_inference_with_fake_tensor(
-        decomposed_module, *args
-    )
-
+    # TODO(titaiwang): in fake mode we have seen fx.nodes without node.meta["val"]
+    # Do we need this in symbolic mode?
+    if not export_options.dynamic_axes:
+        # Run FakeTensorProp on decomposed_module.
+        # Symbolic output of the i-th node can be accessed via
+        # decomposed_module.graph.nodes[i].meta["val"]
+        decomposed_module = passes.shape_inference_with_fake_tensor(
+            decomposed_module, *args
+        )
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based

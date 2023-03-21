@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import operator
+
 from typing import Callable, Dict, Union
 
 import onnxscript  # type: ignore[import]
@@ -178,12 +180,13 @@ def _create_op_overload_to_exporter_key_table() -> (
                 # different exporter keys.
 
                 table[op_overload] = op_overload_packet._qualified_op_name
+    # NOTE: Below are not in torch.ops.aten/torch.ops.prim
     # TODO(justinchuby): is baddbmm different?
     table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
     # https://github.com/pytorch/pytorch/issues/97201
-    table[torch.ops.aten.sym_size] = "aten::sym_size"
+    table[torch.ops.aten.sym_size.int] = "aten::sym_size"
     return table
 
 
@@ -191,10 +194,10 @@ def _create_op_overload_to_exporter_key_table() -> (
 # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
-# FIXME(titaiwang): https://github.com/pytorch/pytorch/pull/96350#discussion_r1137746020
-_SYMINT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
-    "mul": "aten::mul",
-    "add": "aten::add",
+_BUILTIN_TO_EXPORTER_KEY_TABLE = {
+    operator.getitem: "getitem",
+    operator.mul: "aten::mul",
+    operator.add: "aten::add",
 }
 
 

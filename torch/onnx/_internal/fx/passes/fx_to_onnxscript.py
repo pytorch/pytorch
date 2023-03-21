@@ -298,16 +298,6 @@ def _wrap_fx_args_as_onnxscript_args(
     complete_kwargs: Dict[str, Any] = {}
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
-    elif isinstance(node.target, torch._ops.OpOverloadPacket):
-        # aten::sym_size is the only OverloadPacket that we support.
-        # schema: aten::sym_size(Tensor self, int dim) -> Tensor
-        if str(node.target) != "aten.sym_size":
-            raise ValueError(
-                f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
-            )
-        # The first arg is the tensor, the second arg is the dim.
-        complete_args.append(node.args[0])
-        complete_kwargs["dim"] = node.args[1]
     else:
         for i, expected_arg in enumerate(node.target._schema.arguments):  # type: ignore[union-attr]
             if i < len(node.args):
@@ -395,10 +385,15 @@ def _export_fx_node_to_onnxscript(
 
             fx_name_to_onnxscipt_value[node.name] = output
             return
-
-        if node.target == operator.getitem:
-            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
-            exporter_key = "getitem"
+        if (
+            isinstance(node.target, types.BuiltinFunctionType)
+            and node.target in function_dispatcher._BUILTIN_TO_EXPORTER_KEY_TABLE
+        ):
+            # This function expects built-in functions to have name like mul, mul_1, ...
+            # symbolic fx.graph contains built-in functions to calculate python values.
+            exporter_key = function_dispatcher._BUILTIN_TO_EXPORTER_KEY_TABLE[
+                node.target  # type: ignore[index]
+            ]
         elif (
             isinstance(node.target, torch._ops.OpOverload)
             and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
@@ -406,24 +401,20 @@ def _export_fx_node_to_onnxscript(
             exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
                 node.target
             ]
-        elif (
-            isinstance(node.target, torch._ops.OpOverloadPacket)
-            and node.target in function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE
-        ):
+        elif isinstance(node.target, torch._ops.OpOverloadPacket):
             # aten::sym_size is the only OverloadPacket that we support.
+            # schema: aten::sym_size(Tensor self, int dim) -> Tensor
+            if node.target != torch.ops.aten.sym_size:
+                raise ValueError(
+                    f"Unsupported OverloadPacket: {node.target}, aten.sym_size is the only allowed OverloadPacket!"
+                )
+            # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+            # overloadpacket for some reasons.
+            # https://github.com/pytorch/pytorch/issues/97201
+            # We manually assigned overload for aten::sym_size.
+            node.target = torch.ops.aten.sym_size.int
             exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target
-            ]
-        elif (
-            isinstance(node.target, types.BuiltinFunctionType)
-            and node.name.split("_")[0]
-            in function_dispatcher._SYMINT_BUILTIN_TO_EXPORTER_KEY_TABLE
-        ):
-            # This function expects built-in functions to have name like mul, mul_1, ...
-
-            # symbolic fx.graph contains built-in functions to calculate python values.
-            exporter_key = function_dispatcher._SYMINT_BUILTIN_TO_EXPORTER_KEY_TABLE[
-                node.name.split("_")[0]
+                node.target  # type: ignore[index]
             ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")
