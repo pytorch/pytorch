@@ -60,6 +60,9 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
+# We will disable creating subprocess for autotuning if this is False
+autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
@@ -185,6 +188,14 @@ class cpp:
 class triton:
     # Use cudagraphs on output code
     cudagraphs = False
+
+    # Use cudagraph trees for memory pooling if `cudagraphs` is True
+    cudagraph_trees = False
+
+    debug_cudagraph_trees = True
+
+    # skip warmup for cudagraph trees
+    skip_cudagraph_warmup = False
 
     # Synchronize before and after every compiled graph.
     debug_sync_graph = False
