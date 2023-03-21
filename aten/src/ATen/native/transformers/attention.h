@@ -3,12 +3,13 @@
 #include <c10/macros/Export.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/attention.h>
+#include <c10/util/Optional.h>
 
 namespace at {
 namespace native {
 
 using fused_sdp_choice_fn = int64_t (*)(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool need_attn_weights, bool is_causal);
+        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale);
 
 DECLARE_DISPATCH(fused_sdp_choice_fn, _fused_sdp_choice_stub);
 
@@ -17,7 +18,7 @@ TORCH_API Tensor masked_softmax(
     Tensor& attn_scores,
     c10::optional<Tensor> attn_mask,
     const Tensor& query,
-    c10::optional<int64_t> mask_type = NULL);
+    c10::optional<int64_t> mask_type = {});
 
 TORCH_API Tensor transform0213_gemm_nt_bias(
     const Tensor& a,

@@ -1,6 +1,5 @@
 import collections
 import contextlib
-import dataclasses
 import functools
 import importlib
 import inspect
@@ -14,7 +13,12 @@ from .. import variables
 from ..exc import unimplemented
 from ..guards import GuardBuilder
 from ..source import AttrSource, ODictGetItemSource, RandomValueSource
-from ..utils import is_namedtuple_cls, namedtuple_fields
+from ..utils import (
+    get_custom_getattr,
+    is_namedtuple_cls,
+    namedtuple_fields,
+    object_has_getattribute,
+)
 from .base import MutableLocal, VariableTracker
 from .misc import NullContextVariable
 
@@ -30,6 +34,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def as_python_constant(self):
         return self.value
+
+    def python_type(self):
+        return type(self.value)
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from . import ConstantVariable
@@ -58,7 +65,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             elif ConstantVariable.is_literal(obj):
                 return ConstantVariable(obj, **options)
 
-        return super(UserDefinedClassVariable, self).var_getattr(tx, name)
+        return super().var_getattr(tx, name)
 
     def call_method(
         self,
@@ -93,10 +100,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         options = VariableTracker.propagate(self, args, kwargs.values())
 
-        if self.value in (
-            contextlib.nullcontext,
-            torch.autograd.profiler.profile,
-        ):
+        if self.value is contextlib.nullcontext:
             return NullContextVariable(**options)
         elif is_namedtuple_cls(self.value):
             fields = namedtuple_fields(self.value)
@@ -136,7 +140,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     """
 
     def __init__(self, value, value_type=None, **kwargs):
-        super(UserDefinedObjectVariable, self).__init__(**kwargs)
+        super().__init__(**kwargs)
         self.value = value
         self.value_type = value_type or type(value)
         assert type(value) is self.value_type
@@ -262,27 +266,17 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return super().call_function(tx, args, kwargs)
 
     def _check_for_getattribute(self):
-        try:
-            if isinstance(
-                inspect.getattr_static(type(self.value), "__getattribute__"),
-                types.FunctionType,
-            ):
-                unimplemented("UserDefinedObjectVariable with custom __getattribute__")
-        except AttributeError:
-            pass
+        if object_has_getattribute(self.value):
+            unimplemented("UserDefinedObjectVariable with custom __getattribute__")
 
     def _check_for_getattr(self):
-        try:
-            getattr_fn = inspect.getattr_static(type(self.value), "__getattr__")
-        except AttributeError:
-            getattr_fn = None
-        if getattr_fn is torch.nn.Module.__getattr__:
-            # ignore this case of getattr
-            getattr_fn = None
-        return getattr_fn
+        return get_custom_getattr(self.value)
 
     def _getattr_static(self, name):
-        if isinstance(self.value, (dataclasses.Field, torch.nn.Module)):
+        if (
+            isinstance(self.value, torch.nn.Module)
+            or "__slots__" in self.value.__class__.__dict__
+        ):
             # getattr_static doesn't work on these
             subobj = getattr(self.value, name)
         else:
@@ -302,6 +296,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
+            subobj = None
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source, **options
@@ -313,6 +308,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source, **options
             ).call_function(tx, [], {})
+        elif isinstance(subobj, staticmethod):
+            return variables.UserFunctionVariable(
+                subobj.__get__(self.value), source=source, **options
+            )
+        elif isinstance(subobj, classmethod):
+            return variables.UserMethodVariable(
+                subobj.__func__, self, source=source, **options
+            )
+        elif isinstance(subobj, types.FunctionType):
+            return variables.UserMethodVariable(subobj, self, source=source, **options)
 
         if (
             name in getattr(value, "__dict__", {})
@@ -359,11 +364,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ),
         ):
             return UserDefinedObjectVariable(subobj, **options)
-
-        if isinstance(subobj, staticmethod):
-            return variables.UserFunctionVariable(subobj.__get__(self.value), **options)
-        elif isinstance(subobj, classmethod):
-            return variables.UserMethodVariable(subobj.__func__, self, **options)
 
         if name == "__class__":
             return UserDefinedClassVariable(type(self.value), **options)

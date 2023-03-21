@@ -40,8 +40,8 @@ jobs:
           . "${SETUP_SCRIPT}"
           conda activate pr-ci
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
-                           setuptools cmake=3.22.* cffi typing_extensions boto3 \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+                           setuptools cmake=3.22.* typing-extensions boto3 \
+                           pillow pytest tabulate gitpython git-lfs tqdm psutil
           pip install --pre torch torchvision torchtext -f https://download.pytorch.org/whl/nightly/cu116/torch_nightly.html
       - name: Setup TorchBench branch
         run: |

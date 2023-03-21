@@ -6,6 +6,8 @@
 #include <ATen/functorch/ADInterpreters.h>
 #include <ATen/functorch/DynamicLayer.h>
 
+#include <utility>
+
 namespace at { namespace functorch {
 
 static DispatchKeySet get_all_dynlayer_keyset() {
@@ -92,7 +94,7 @@ void sanityCheckStack(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
         auto result = unwrapIfDead(tensor);
         auto* wrapper = maybeGetTensorWrapper(result);
         TORCH_INTERNAL_ASSERT(wrapper == nullptr);
-        auto* batched = maybeGetBatchedImpl(result);
+        auto* batched = maybeGetBatchedImpl(std::move(result));
         TORCH_INTERNAL_ASSERT(batched == nullptr);
         return tensor;
       });

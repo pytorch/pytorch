@@ -488,8 +488,7 @@ Value LazyGraphExecutor::GetIrValueForScalarFromCodegen(
   if (IsSpecialScalar(value)) {
     return MakeScalar(value, value.type());
   }
-  BackendDataPtr data =
-      getBackend()->MakeComputationDataFromScalar(value, device);
+  auto data = GetDeviceData(value, value.type(), device);
   data->SetInfo(
       std::make_shared<DeviceDataInfo>(/*tensor_id=*/-1, /*read_only=*/true));
   return MakeDeviceData(std::move(data));
@@ -561,7 +560,7 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
-bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr& tensor) const {
   return tensor->GetIrValue()->op() != ltc_not_supported;
 }
 
@@ -669,7 +668,7 @@ std::vector<torch::lazy::BackendDataPtr> LazyGraphExecutor::SetTensorData(
     const std::vector<BackendDataPtr>& tensor_data_vec) {
   std::vector<BackendDataPtr> tensors_data;
   tensors_data.reserve(indices.size());
-  for (int i = 0; i < indices.size(); i++) {
+  for (const auto i : c10::irange(indices.size())) {
     auto index = indices[i];
     LazyTensorPtr& tensor = (*tensors)[index];
     // If the config.force_ltc_data flag is true, the purpose of this tensor
@@ -784,7 +783,8 @@ LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
     // TODO(whc) should computation be allowed null here? (because it is in one
     // case)
     TORCH_CHECK(
-        computation->parameters_size() == po_data->parameters_data.size());
+        computation->parameters_size() ==
+        static_cast<int>(po_data->parameters_data.size()));
   }
 
   return {
@@ -1035,13 +1035,12 @@ std::vector<BackendDataPtr> LazyGraphExecutor::GatherTensorsData(
 }
 
 void LazyGraphExecutor::TensorCollectionBarrier(SyncTensorCollection* coll) {
-  static const std::string invalid_device(
-      "Unknown0"); /* Temp solution to idetify unassigned devices */
-  if (coll->device.toString().compare(invalid_device) == 0 ||
-      coll->unlocker.size() > 0) {
-    return;
-  }
   if (coll) {
+    static const std::string invalid_device(
+        "Unknown0"); /* Temp solution to idetify unassigned devices */
+    if (coll->device.toString() == invalid_device || !coll->unlocker.empty()) {
+      return;
+    }
     VLOG(4) << "Waiting on device barrier for device " << coll->device
             << " ...";
     {

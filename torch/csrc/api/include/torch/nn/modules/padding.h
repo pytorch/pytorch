@@ -11,7 +11,6 @@ namespace nn {
 
 /// Base class for all (dimension-specialized) ReflectionPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReflectionPadImpl(ExpandingArray<D * 2> padding)
@@ -43,7 +42,6 @@ class TORCH_API ReflectionPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ReflectionPad1d model(ReflectionPad1dOptions({3, 1}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPad1dImpl
     : public ReflectionPadImpl<1, ReflectionPad1dImpl> {
  public:
@@ -71,7 +69,6 @@ TORCH_MODULE(ReflectionPad1d);
 /// ```
 /// ReflectionPad2d model(ReflectionPad2dOptions({1, 1, 2, 0}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPad2dImpl
     : public ReflectionPadImpl<2, ReflectionPad2dImpl> {
  public:
@@ -100,7 +97,6 @@ TORCH_MODULE(ReflectionPad2d);
 /// ReflectionPad3d model(ReflectionPad3dOptions(1));
 /// ReflectionPad3d model(ReflectionPad3dOptions({1, 1, 2, 0, 1, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReflectionPad3dImpl
     : public ReflectionPadImpl<3, ReflectionPad3dImpl> {
  public:
@@ -118,7 +114,6 @@ TORCH_MODULE(ReflectionPad3d);
 
 /// Base class for all (dimension-specialized) ReplicationPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ReplicationPadImpl(ExpandingArray<D * 2> padding)
@@ -150,7 +145,6 @@ class TORCH_API ReplicationPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ReplicationPad1d model(ReplicationPad1dOptions({3, 1}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad1dImpl
     : public ReplicationPadImpl<1, ReplicationPad1dImpl> {
  public:
@@ -178,7 +172,6 @@ TORCH_MODULE(ReplicationPad1d);
 /// ```
 /// ReplicationPad2d model(ReplicationPad2dOptions({1, 1, 2, 0}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad2dImpl
     : public ReplicationPadImpl<2, ReplicationPad2dImpl> {
  public:
@@ -206,7 +199,6 @@ TORCH_MODULE(ReplicationPad2d);
 /// ```
 /// ReplicationPad3d model(ReplicationPad3dOptions({1, 2, 1, 2, 1, 2}));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ReplicationPad3dImpl
     : public ReplicationPadImpl<3, ReplicationPad3dImpl> {
  public:
@@ -220,35 +212,46 @@ class TORCH_API ReplicationPad3dImpl
 /// `ModuleHolder` to learn about PyTorch's module storage semantics.
 TORCH_MODULE(ReplicationPad3d);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ============================================================================
 
-/// Applies ZeroPad over a 2-D input.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.ZeroPad2d to learn
-/// about the exact behavior of this module.
-///
-/// See the documentation for `torch::nn::ZeroPad2dOptions` class to learn what
-/// constructor arguments are supported for this module.
-///
-/// Example:
-/// ```
-/// ZeroPad2d model(ZeroPad2dOptions({1, 1, 2, 0}));
-/// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
-class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
+/// Base class for all (dimension-specialized) ZeroPad modules.
+template <size_t D, typename Derived>
+class TORCH_API ZeroPadImpl : public torch::nn::Cloneable<Derived> {
  public:
-  ZeroPad2dImpl(ExpandingArray<4> padding)
-      : ZeroPad2dImpl(ZeroPad2dOptions(padding)) {}
-  explicit ZeroPad2dImpl(const ZeroPad2dOptions& options_);
+  ZeroPadImpl(ExpandingArray<D * 2> padding)
+      : ZeroPadImpl(ZeroPadOptions<D>(padding)) {}
+  explicit ZeroPadImpl(const ZeroPadOptions<D>& options_);
 
   void reset() override;
 
-  /// Pretty prints the `ZeroPad2d` module into the given `stream`.
-  void pretty_print(std::ostream& stream) const override;
-
   Tensor forward(const Tensor& input);
 
+  /// Pretty prints the `ZeroPad{1,2}d` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
   /// The options with which this `Module` was constructed.
-  ZeroPad2dOptions options;
+  ZeroPadOptions<D> options;
+};
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 1-D input.
+class TORCH_API ZeroPad1dImpl : public ZeroPadImpl<1, ZeroPad1dImpl> {
+ public:
+  using ZeroPadImpl<1, ZeroPad1dImpl>::ZeroPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad1dImpl`.
+/// See the documentation for `ZeroPad1dImpl` class to learn what methods it
+/// provides, and examples of how to use `ZeroPad1d` with
+/// `torch::nn::ZeroPad1dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(ZeroPad1d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 2-D input.
+class TORCH_API ZeroPad2dImpl : public ZeroPadImpl<2, ZeroPad2dImpl> {
+ public:
+  using ZeroPadImpl<2, ZeroPad2dImpl>::ZeroPadImpl;
 };
 
 /// A `ModuleHolder` subclass for `ZeroPad2dImpl`.
@@ -258,11 +261,24 @@ class TORCH_API ZeroPad2dImpl : public Cloneable<ZeroPad2dImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(ZeroPad2d);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ZeroPad3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Applies ZeroPad over a 3-D input.
+class TORCH_API ZeroPad3dImpl : public ZeroPadImpl<3, ZeroPad3dImpl> {
+ public:
+  using ZeroPadImpl<3, ZeroPad3dImpl>::ZeroPadImpl;
+};
+
+/// A `ModuleHolder` subclass for `ZeroPad3dImpl`.
+/// See the documentation for `ZeroPad3dImpl` class to learn what methods it
+/// provides, and examples of how to use `ZeroPad3d` with
+/// `torch::nn::ZeroPad3dOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(ZeroPad3d);
+
 // ============================================================================
 
 /// Base class for all (dimension-specialized) ConstantPad modules.
 template <size_t D, typename Derived>
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
  public:
   ConstantPadImpl(ExpandingArray<D * 2> padding, double value)
@@ -293,7 +309,6 @@ class TORCH_API ConstantPadImpl : public torch::nn::Cloneable<Derived> {
 /// ```
 /// ConstantPad1d model(ConstantPad1dOptions({3, 1}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad1dImpl
     : public ConstantPadImpl<1, ConstantPad1dImpl> {
  public:
@@ -320,7 +335,6 @@ TORCH_MODULE(ConstantPad1d);
 /// ```
 /// ConstantPad2d model(ConstantPad2dOptions({3, 0, 2, 1}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad2dImpl
     : public ConstantPadImpl<2, ConstantPad2dImpl> {
  public:
@@ -347,7 +361,6 @@ TORCH_MODULE(ConstantPad2d);
 /// ```
 /// ConstantPad3d model(ConstantPad3dOptions({1, 2, 1, 2, 1, 2}, 3.5));
 /// ```
-// NOLINTNEXTLINE(bugprone-exception-escape)
 class TORCH_API ConstantPad3dImpl
     : public ConstantPadImpl<3, ConstantPad3dImpl> {
  public:

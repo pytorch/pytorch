@@ -13,7 +13,7 @@ import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributed.rpc import RRef
-from torch.testing._internal.common_utils import IS_MACOS, sandcastle_skip_if
+from torch.testing._internal.common_utils import IS_MACOS, skip_but_pass_in_sandcastle_if
 from torch.testing._internal.dist_utils import (
     dist_init,
     initialize_pg,
@@ -81,7 +81,9 @@ def create_tensor():
 def build_sparse_tensor(coalesce=False, requires_grad=True, dtype=torch.float32):
     i = [[0, 1, 1], [2, 0, 2]]
     v = [3.2, 4.1, 5.3]
-    tensor = torch.sparse_coo_tensor(i, v, (3, 3), requires_grad=requires_grad, dtype=dtype)
+    tensor = torch.sparse_coo_tensor(
+        i, v, (3, 3), requires_grad=requires_grad, dtype=dtype
+    )
     if coalesce:
         tensor = tensor.coalesce()
     return tensor
@@ -1702,7 +1704,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 dist_autograd.backward(context_id, [val.sum()])
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -1899,7 +1901,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     _backward_done = False
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -2375,7 +2377,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 i = torch.ones(1, 1, dtype=torch.long)
                 nv = v.expand(8, 3)
                 ni = i.expand(1, 8)
-                ngrad = torch.sparse.FloatTensor(ni, nv, torch.Size([10, 3]))
+                ngrad = torch.sparse_coo_tensor(ni, nv, (10, 3), dtype=torch.float32)
                 NonContGradFunc.static_grad_ptr = ngrad._values().data_ptr()
                 return ngrad, ngrad
 
@@ -2680,9 +2682,6 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         rpc.shutdown()
 
     class MyRemoteCompute(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-
         def forward(self, input):
             input = input * 2.0
             return input

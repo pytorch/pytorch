@@ -20,7 +20,7 @@ TensorOrTensors = Union[Tensor, Tensors]
 Function = Callable[[TensorOrTensors], Union[List[Any], Tensor]]
 
 
-class NoChunk(object):
+class NoChunk:
     """
     Wrapper for a Tensor in :meth:`Pipe.forward` indicating that the tensor
     should not be chunked on the batch dimension and instead be replicated

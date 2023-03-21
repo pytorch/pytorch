@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import yaml
-from typing_extensions import TypedDict
+from typing_extensions import TypedDict  # Python 3.11+
 
 Step = Dict[str, Any]
 

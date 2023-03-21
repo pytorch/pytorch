@@ -2,6 +2,7 @@ import faulthandler
 import logging
 import multiprocessing
 import os
+import queue
 import subprocess
 import sys
 import tempfile
@@ -17,8 +18,10 @@ from enum import Enum
 from functools import partial, reduce, wraps
 from io import StringIO
 from typing import Dict, NamedTuple, Optional, Union
+from unittest.mock import patch
 
 import torch
+import torch._dynamo.test_case
 import torch.cuda.nccl
 import torch.distributed as c10d
 import torch.nn as nn
@@ -27,13 +30,17 @@ from torch.testing._internal.common_utils import (
     find_free_port,
     IS_SANDCASTLE,
     retry_on_connect_failures,
-    sandcastle_skip,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
     TEST_WITH_TSAN,
     TestCase,
 )
-from torch.testing._internal.distributed.multi_threaded_pg import run_with_threaded_pg
+from torch.testing._internal.distributed.multi_threaded_pg import (
+    _install_threaded_pg,
+    _uninstall_threaded_pg,
+    ProcessLocalGroup,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -279,7 +286,7 @@ def with_dist_debug_levels(levels):
 
 
 def requires_gloo():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_gloo_available(),
         "c10d was not compiled with the Gloo backend",
     )
@@ -287,11 +294,11 @@ def requires_gloo():
 
 def requires_nccl_version(version, msg):
     if not c10d.is_nccl_available():
-        return sandcastle_skip(
+        return skip_but_pass_in_sandcastle(
             "c10d was not compiled with the NCCL backend",
         )
     else:
-        return sandcastle_skip_if(
+        return skip_but_pass_in_sandcastle_if(
             torch.cuda.nccl.version() < version,
             "Requires NCCL version greater than or equal to: {}, found: {}, reason: {}".format(
                 version, torch.cuda.nccl.version(), msg
@@ -300,19 +307,19 @@ def requires_nccl_version(version, msg):
 
 
 def requires_nccl():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_nccl_available(),
         "c10d was not compiled with the NCCL backend",
     )
 
 def requires_ucc():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_ucc_available(),
         "c10d was not compiled with the UCC backend",
     )
 
 def requires_mpi():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         not c10d.is_mpi_available(),
         "c10d was not compiled with the MPI backend",
     )
@@ -332,7 +339,7 @@ def skip_if_rocm(func):
 
 
 def skip_if_win32():
-    return sandcastle_skip_if(
+    return skip_but_pass_in_sandcastle_if(
         sys.platform == "win32",
         "This unit test case is not supported on Windows platform",
     )
@@ -623,15 +630,7 @@ class MultiProcessTestCase(TestCase):
 
     @classmethod
     def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
-        # Enable DDP + ReplicatedTensor
-        from torch.nn.parallel._replicated_tensor_ddp_utils import (
-            _set_ddp_with_replicated_tensor,
-        )
-
-        _set_ddp_with_replicated_tensor(True)
-
         self = cls(test_name)
-
         self.rank = rank
         self.file_name = file_name
         self.run_test(test_name, parent_pipe)
@@ -889,66 +888,193 @@ def spawn_threads_and_init_comms(
             spawn_threads_and_init_comms, timeout=timeout, world_size=world_size
         )
 
+
+    def _run_test_method_with_multi_threads(world_size, callback):
+        world = _install_threaded_pg()
+        global_store = c10d.HashStore()
+
+        def world_is_valid():
+            return world == c10d.distributed_c10d._world
+
+        def worker(rank, world_pg, store):
+            c10d.init_process_group(
+                backend="threaded", rank=rank, world_size=world_size, store=store
+            )
+            try:
+                callback()
+            except BaseException as ex:
+                # Exceptions are handled in MultiThreadedTestCase
+                MultiThreadedTestCase.exception_queue.put((rank, sys.exc_info()))
+                ProcessLocalGroup.exception_handle(ex)  # trigger _terminate event and awaken worker threads
+            finally:
+                if world_is_valid():
+                    c10d.destroy_process_group()
+
+        threads = []
+        for rank in range(world_size):
+            t = threading.Thread(target=worker, args=(rank, world, global_store))
+            t.start()
+            threads.append(t)
+
+        return threads
+
+
     @wraps(func)
     def wrapper(self, *args, **kwargs):
         # TODO: get test name from kwargs
-        MultiThreadedTestCase._run_test_with_mt_pg(
-            "runTest", timeout, world_size, lambda: func(self, *args, **kwargs)
-        )
+        threads = _run_test_method_with_multi_threads(world_size, lambda: func(self, *args, **kwargs))
+        # join and error handling
+        MultiThreadedTestCase._join_threads(threads, func)
 
     return wrapper
 
 
 class MultiThreadedTestCase(TestCase):
     """
-    Simple test runner that executes all tests with the in-proc process group.
+    Test runner that runs all tests with the in-proc process group using
+    multiple threads with the threaded process group.
 
-    A single instance of the TestCase object for all threads.
+    Each test spawns world_size threads and run the test method in each thread.
 
-    Difference from regular test runner:
+    Difference from regular MultiProcess test runner:
+    Must explicitly defines SetUp and call self._spawn_threads() to run the tests.
     Cannot use setUp / tearDown (must use perThreadSetup / perThreadShutdown)
-        Not sure what these two would be good for though.
+        to set up / tear down each thread when running each test.
     No global state possible
         How bad of a limitation is this?
     """
+    exception_queue = queue.Queue()
+
+    MAIN_THREAD_RANK = -1
+
+    def join_or_run(self, fn):
+        @wraps(fn)
+        def wrapper(self):
+            if self.rank == self.MAIN_THREAD_RANK:
+                self._join_threads(self.threads, fn)
+            else:
+                fn()
+
+        return types.MethodType(wrapper, self)
 
     def __init__(self, method_name: str = "runTest") -> None:
         super().__init__(method_name)
-        self._test_method = getattr(self, method_name, None)
-        setattr(self, method_name, self.threaded_run_test)
-        if TestCase.setUp != type(self).setUp:
-            raise RuntimeError(
-                f"Test class {type(self)} overrides disabled method setUp. Use perThreadSetUp instead"
-            )
-        if TestCase.tearDown != type(self).tearDown:
-            raise RuntimeError(
-                f"Test class {type(self)} overrides disabled method tearDown. Use perThreadTearDown instead"
-            )
-
-    def threaded_run_test(self):
-        self.perThreadSetUp()
-        try:
-            MultiThreadedTestCase._run_test_with_mt_pg(
-                name=self._current_test_name,
-                timeout=TIMEOUT_DEFAULT,
-                world_size=self.world_size,
-                callback=self._test_method,
-            )
-        finally:
-            self.perThreadTearDown()
+        test_fn = getattr(self, method_name, None)
+        setattr(self, method_name, self.join_or_run(test_fn))
 
     def perThreadSetUp(self):
-        super().setUp()  # TestCase.setUp() calls torch.manual_seed()
+        # super().setUp()  # TestCase.setUp() calls torch.manual_seed()
+        pass
 
     def perThreadTearDown(self):
         pass
 
-    @classmethod
-    def _run_test_with_mt_pg(cls, name, timeout, world_size, callback):
+    def setUp(self) -> None:
+        """
+        setUp only set up things in the main thread, if you want to configure things
+        in the spawned threads, use perThreadSetUp
+        """
+        super().setUp()
+        self.rank = self.MAIN_THREAD_RANK
+        self.threads = []
         # Show full C++ stacktraces when a Python error originating from C++ is raised.
         os.environ["TORCH_SHOW_CPP_STACKTRACES"] = "1"
-        failed_ranks = run_with_threaded_pg(world_size, timeout, callback)
 
+    def tearDown(self):
+        """
+        tearDown only set up things in the main thread, if you want to configure things
+        in the spawned threads, use perThreadTearDown
+        """
+        super().tearDown()
+        self.threads = []
+
+    def _spawn_threads(self):
+        """
+        class method to spawn threads and run test, use this method in the SetUp of your TestCase
+        """
+        test_name = self._current_test_name
+        # for each test case, we need to create thread local world, and a global store
+        world = _install_threaded_pg()
+        self.__class__.global_store = c10d.HashStore()
+
+        def world_is_valid():
+            return world == c10d.distributed_c10d._world
+
+        if not world_is_valid():
+            raise RuntimeError("Invalid world")
+
+        for rank in range(self.world_size):
+            t = threading.Thread(target=self.__class__._run, args=(test_name, rank, self.world_size))
+            t.start()
+            self.threads.append(t)
+
+    @classmethod
+    def _run(cls, test_name, rank, world_size):
+        self = cls(test_name)
+        self.rank = rank
+
+        # precision/rel_tol is a thread-local setting since it may be overridden per test, need to make
+        # every thread have the same value. This would be relevant when we use op db tests, where it
+        # needs those states to be set i.e. using instantiate_device_type_tests()
+        # TODO: figure out a better way to do this
+        if hasattr(self, "_tls"):
+            self._tls = threading.local()
+            self._tls.precision = TestCase._precision
+            self._tls.rel_tol = TestCase._rel_tol
+
+        self.run_test_with_threaded_pg(test_name, rank, world_size)
+
+    def run_test_with_threaded_pg(self, test_name, rank, world_size):
+        """
+        Run the current test associated with `test_name` using the threaded process group.
+        """
+
+        c10d.init_process_group(
+            backend="threaded", rank=rank, world_size=world_size, store=self.__class__.global_store
+        )
+        self.perThreadSetUp()
+
+        try:
+            getattr(self, test_name)()
+        except BaseException as ex:
+            self.exception_queue.put((rank, sys.exc_info()))
+            ProcessLocalGroup.exception_handle(ex)  # trigger _terminate event and awaken worker threads
+        finally:
+            c10d.destroy_process_group()
+            self.perThreadTearDown()
+
+
+    @classmethod
+    def _join_threads(cls, threads, fn):
+        timeout = TIMEOUT_DEFAULT
+        try:
+            for idx, thread in enumerate(threads):
+                thread.join(max(0, timeout))
+                if thread.is_alive():
+                    MultiThreadedTestCase.exception_queue.put(
+                        (
+                            idx,
+                            (
+                                TimeoutError,
+                                TimeoutError(
+                                    f"Rank failed to join in under {timeout} seconds"
+                                ),
+                                None,
+                            ),
+                        )
+                    )
+            ProcessLocalGroup.reset()
+            failed_ranks = []
+            while not cls.exception_queue.empty():
+                failure = cls.exception_queue.get()
+                failed_ranks.append(failure)
+        finally:
+            _uninstall_threaded_pg()
+
+        cls._check_return_codes(failed_ranks, timeout, fn)
+
+    @classmethod
+    def _check_return_codes(cls, failed_ranks, timeout, fn):
         # Print based on exceptions raised from threads
         #   SkipTest: print info for each thread
         #   TimeoutError: raise RuntimeError for any timed out thread
@@ -960,7 +1086,7 @@ class MultiThreadedTestCase(TestCase):
             exc = exc_info[1]
             if isinstance(exc, unittest.SkipTest):
                 logger.info(
-                    f"Thread {rank} skipping test {name} for following reason: {str(exc)}"
+                    f"Thread {rank} skipping test {fn} for following reason: {str(exc)}"
                 )
                 if skip_code < 0:
                     skip_code = TEST_SKIPS["generic"].exit_code
@@ -992,7 +1118,7 @@ class MultiThreadedTestCase(TestCase):
                     if IS_SANDCASTLE:
                         # "pass" the test with an appropriate message.
                         logger.info(
-                            f"Skipping {name} on sandcastle for the following reason: {skip.message}"
+                            f"Skipping {fn} on sandcastle for the following reason: {skip.message}"
                         )
                         return
                     else:
@@ -1000,29 +1126,26 @@ class MultiThreadedTestCase(TestCase):
 
     @property
     def world_size(self) -> int:
-        raise RuntimeError("world size not implemented")
-
-    @property
-    def rank(self) -> int:
-        return c10d.get_rank()
+        return DEFAULT_WORLD_SIZE
 
     @property
     def _current_test_name(self) -> str:
         # self.id() == e.g. '__main__.TestDistributed.TestAdditive.test_get_rank'
         return self.id().split(".")[-1]
 
-    def assertEqualOnRank(self, x, y, rank=0):
+    def assertEqualOnRank(self, x, y, msg=None, *, rank=0):
         """
         The reason why we have this util function instead of
         self.assertEqual is all threads are sharing one CPU RNG
         so the assertion result is only reliable on rank 0
         """
         if self.rank == rank:
-            self.assertEqual(x, y)
+            self.assertEqual(x, y, msg)
 
-    def assertNotEqualOnRank(self, x, y, rank):
+    def assertNotEqualOnRank(self, x, y, msg=None, *, rank=0):
         if self.rank == rank:
             self.assertNotEqual(x, y)
+
 
 class SaveForwardInputsModule(nn.Module):
     def __init__(
@@ -1054,3 +1177,88 @@ class SaveForwardInputsModel(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         self.forward_inputs[self] = x
         return self.c2(self.c1(x))
+
+@contextmanager
+def _dynamo_dist_per_rank_init(rank, world_size, init_pg=True):
+    # To avoid multiple inheritance from _dynamo.test_case.TestCase and MultiProcessTestCase,
+    # Just manually implement the most important part of the dynamo behavior to reset/clear.
+    torch.cuda.set_device(rank)
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '6789'
+    if init_pg:
+        c10d.init_process_group("nccl", rank=rank, world_size=world_size)
+    torch._dynamo.reset()
+    torch._dynamo.utils.counters.clear()
+    try:
+        yield
+    finally:
+        torch._dynamo.reset()
+        torch._dynamo.utils.counters.clear()
+        if init_pg:
+            c10d.destroy_process_group()
+
+
+class DynamoDistributedSingleProcTestCase(torch._dynamo.test_case.TestCase):
+    """
+    Test harness for single-process dynamo distributed tests,
+    initializes dist process group.
+
+    Prefer this for simple tests, as it's easier to debug.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # _exit_stack is set up in TestCase
+        cls._exit_stack.enter_context(
+            patch.dict(
+                os.environ,
+                {
+                    "MASTER_ADDR": "localhost",
+                    "MASTER_PORT": "12355",
+                },
+            )
+        )
+        cls.rank = 0
+        cls.device = f"cuda:{cls.rank}"
+        cls.device_ids = None if "cuda" in cls.device else [cls.rank]
+        c10d.init_process_group("nccl", rank=cls.rank, world_size=1)
+
+    @classmethod
+    def tearDownClass(cls):
+        c10d.destroy_process_group()
+        super().tearDownClass()
+
+
+class DynamoDistributedMultiProcTestCase(MultiProcessTestCase):
+    """
+    Use this for tests that actually run on multiple GPUs.
+
+    Decorate tests with @skip_if_lt_x_gpu(ngpu)
+
+    Note: MultiProcTestCase spawns processes per test and is slow.
+    Prefer MultiThreadedTestCase for most tests. Perhaps use this one
+    sparingly for integration tests.
+    """
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @property
+    def world_size(self) -> int:
+        return torch.cuda.device_count()
+
+    @classmethod
+    def _run(cls, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        # The rest is copypasta from MultiProcessTestCase._run
+        self = cls(test_name)
+        self.rank = rank
+        self.file_name = file_name
+        self.run_test(test_name, parent_pipe)

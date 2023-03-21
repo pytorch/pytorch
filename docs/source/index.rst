@@ -46,16 +46,15 @@ Features described in this documentation are classified by release status:
    :glob:
    :maxdepth: 1
    :caption: torch.compile
-   :hidden:
 
-   dynamo/index
-   dynamo/installation
-   dynamo/get-started
-   dynamo/guards-overview
-   dynamo/custom-backends
-   dynamo/deep-dive
-   dynamo/troubleshooting
-   dynamo/faq
+   compile/index
+   compile/get-started
+   compile/troubleshooting
+   compile/faq
+   compile/technical-overview
+   compile/guards-overview
+   compile/custom-backends
+   compile/deep-dive
    ir
 
 .. toctree::
@@ -81,6 +80,7 @@ Features described in this documentation are classified by release status:
    torch.autograd <autograd>
    torch.library <library>
    cuda
+   mps
    torch.backends <backends>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
@@ -144,7 +144,7 @@ Features described in this documentation are classified by release status:
    TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   PyTorch on XLA Devices <http://pytorch.org/xla/>
+   PyTorch on XLA Devices <https://pytorch.org/xla/>
 
 Indices and tables
 ==================

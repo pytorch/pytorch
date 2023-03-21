@@ -227,6 +227,8 @@ class _ExecOrderData:
                 local_num_valid_indices,
                 group=self.process_group,
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_num_valid_indices = world_num_valid_indices.cpu()
             # Check that all ranks plan to all-gather the same number of
             # parameters
             # TODO (awgu): Since every module has at most one handle in the
@@ -251,6 +253,8 @@ class _ExecOrderData:
             dist.all_gather_into_tensor(
                 world_indices, local_indices, group=self.process_group
             )
+            # Copy entire tensor from D2H once to avoid per element D2H copies
+            world_indices = world_indices.cpu()
             # Check that all ranks plan to all-gather the same index parameters
             for (r1, i1), (r2, i2) in itertools.combinations(
                 (
@@ -333,35 +337,34 @@ class _ExecOrderData:
         handle_indices: Tuple[int, ...],
     ) -> List[List[str]]:
         """
-        Returns a list of prefixed parameter names for each handle in
-        ``handle_indices``. If a handle index is invalid, then its prefixed
-        parameter names are omitted from the returned list.
+        Returns a list of FQNs for each handle in ``handle_indices``. If a
+        handle index is invalid, then its FQNs are omitted from the returned
+        list.
         """
-        prefixed_param_names: List[List[str]] = []
+        fqns: List[List[str]] = []
         for index in handle_indices:
             if index is None or index < 0 or index >= len(self.all_handles):
                 continue
             handle = self.all_handles[index]
             flat_param = handle.flat_param
-            prefixed_param_names.append(self.param_to_fqn[flat_param])
-        return prefixed_param_names
+            fqns.append(self.param_to_fqn[flat_param])
+        return fqns
 
     def _get_names_from_handles(
         self,
         handles_key: _HandlesKey,
     ) -> List[List[str]]:
         """
-        Returns a list of prefixed parameter names for each handle in
-        ``handles_key``. If a handle is invalid, then its prefixed parameter
-        names are omitted from the returned list.
+        Returns a list of FQNs for each handle in ``handles_key``. If a handle
+        is invalid, then its FQNs are omitted from the returned list.
         """
-        prefixed_param_names: List[List[str]] = []
+        fqns: List[List[str]] = []
         for handle in handles_key:
             flat_param = handle.flat_param
             if flat_param not in self.param_to_fqn:
                 continue
-            prefixed_param_names.append(self.param_to_fqn[flat_param])
-        return prefixed_param_names
+            fqns.append(self.param_to_fqn[flat_param])
+        return fqns
 
     def next_iter(self):
         """

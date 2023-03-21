@@ -95,6 +95,9 @@
 #   USE_FFMPEG
 #     enables use of ffmpeg for additional operators
 #
+#   USE_FLASH_ATTENTION=0
+#     disables building flash attention for scaled dot product attention
+#
 #   USE_LEVELDB
 #     enables use of LevelDB for storage
 #
@@ -172,6 +175,9 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   NVFUSER_SOURCE_DIR
+#     specify nvfuser root directory
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -211,7 +217,7 @@ if sys.platform == 'win32' and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
-python_min_version = (3, 7, 0)
+python_min_version = (3, 8, 0)
 python_min_version_str = '.'.join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print("You are using Python {}. Python >={} is required.".format(platform.python_version(),
@@ -544,6 +550,11 @@ class build_ext(setuptools.command.build_ext.build_ext):
         else:
             report('-- Not using ITT')
 
+        if cmake_cache_vars['BUILD_NVFUSER']:
+            report('-- Building nvfuser')
+        else:
+            report('-- Not Building nvfuser')
+
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
         c_flags = str(os.getenv('CFLAGS', ''))
@@ -625,6 +636,22 @@ class build_ext(setuptools.command.build_ext.build_ext):
             filename = self.get_ext_filename(fullname)
             fileext = os.path.splitext(filename)[1]
             src = os.path.join(os.path.dirname(filename), "functorch" + fileext)
+            dst = os.path.join(os.path.realpath(self.build_lib), filename)
+            if os.path.exists(src):
+                report("Copying {} from {} to {}".format(ext.name, src, dst))
+                dst_dir = os.path.dirname(dst)
+                if not os.path.exists(dst_dir):
+                    os.makedirs(dst_dir)
+                self.copy_file(src, dst)
+
+        # Copy nvfuser extension
+        for i, ext in enumerate(self.extensions):
+            if ext.name != "nvfuser._C":
+                continue
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+            fileext = os.path.splitext(filename)[1]
+            src = os.path.join(os.path.dirname(filename), "nvfuser" + fileext)
             dst = os.path.join(os.path.realpath(self.build_lib), filename)
             if os.path.exists(src):
                 report("Copying {} from {} to {}".format(ext.name, src, dst))
@@ -798,12 +825,7 @@ def configure_extension_build():
         # /MD links against DLL runtime
         # and matches the flags set for protobuf and ONNX
         # /EHsc is about standard C++ exception handling
-        # /DNOMINMAX removes builtin min/max functions
-        # /wdXXXX disables warning no. XXXX
-        extra_compile_args = ['/MD', '/FS', '/EHsc', '/DNOMINMAX',
-                              '/wd4267', '/wd4251', '/wd4522', '/wd4522', '/wd4838',
-                              '/wd4305', '/wd4244', '/wd4190', '/wd4101', '/wd4996',
-                              '/wd4275']
+        extra_compile_args = ['/MD', '/FS', '/EHsc']
     else:
         extra_link_args = []
         extra_compile_args = [
@@ -812,7 +834,6 @@ def configure_extension_build():
             '-Wno-strict-overflow',
             '-Wno-unused-parameter',
             '-Wno-missing-field-initializers',
-            '-Wno-write-strings',
             '-Wno-unknown-pragmas',
             # This is required for Python 2 declarations that are deprecated in 3.
             '-Wno-deprecated-declarations',
@@ -891,6 +912,8 @@ def configure_extension_build():
         excludes.extend(['caffe2', 'caffe2.*'])
     if not cmake_cache_vars['BUILD_FUNCTORCH']:
         excludes.extend(['functorch', 'functorch.*'])
+    if not cmake_cache_vars['BUILD_NVFUSER']:
+        excludes.extend(['nvfuser', 'nvfuser.*'])
     packages = find_packages(exclude=excludes)
     C = Extension("torch._C",
                   libraries=main_libraries,
@@ -913,6 +936,13 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
+    if cmake_cache_vars['USE_ROCM']:
+        triton_req_file = os.path.join(cwd, ".github", "requirements", "triton-requirements-rocm.txt")
+        if os.path.exists(triton_req_file):
+            with open(triton_req_file) as f:
+                triton_req = f.read().strip()
+                extra_install_requires.append(triton_req)
+
     if cmake_cache_vars['BUILD_CAFFE2']:
         extensions.append(
             Extension(
@@ -935,6 +965,12 @@ def configure_extension_build():
         extensions.append(
             Extension(
                 name=str('functorch._C'),
+                sources=[]),
+        )
+    if cmake_cache_vars['BUILD_NVFUSER']:
+        extensions.append(
+            Extension(
+                name=str('nvfuser._C'),
                 sources=[]),
         )
 
@@ -981,20 +1017,25 @@ def print_box(msg):
 def main():
     # the list of runtime dependencies required by this built package
     install_requires = [
-        'typing_extensions',
+        'filelock',
+        'typing-extensions',
         'sympy',
         'networkx',
+        'jinja2',
     ]
 
     extras_require = {
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':
-        triton_pin_file = os.path.join(cwd, ".github", "ci_commit_pins", "triton.txt")
-        if os.path.exists(triton_pin_file):
+        triton_pin_file = os.path.join(cwd, ".ci", "docker", "ci_commit_pins", "triton.txt")
+        triton_version_file = os.path.join(cwd, ".ci", "docker", "triton_version.txt")
+        if os.path.exists(triton_pin_file) and os.path.exists(triton_version_file):
             with open(triton_pin_file) as f:
                 triton_pin = f.read().strip()
-                extras_require['dynamo'] = ['pytorch-triton==2.0.0+' + triton_pin[:10], 'jinja2']
+            with open(triton_version_file) as f:
+                triton_version = f.read().strip()
+            extras_require['dynamo'] = ['pytorch-triton==' + triton_version + '+' + triton_pin[:10], 'jinja2']
 
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
@@ -1061,6 +1102,7 @@ def main():
         'include/ATen/hip/detail/*.cuh',
         'include/ATen/hip/detail/*.h',
         'include/ATen/hip/impl/*.h',
+        'include/ATen/miopen/*.h',
         'include/ATen/detail/*.h',
         'include/ATen/native/*.h',
         'include/ATen/native/cpu/*.h',
@@ -1114,6 +1156,9 @@ def main():
         'include/torch/csrc/distributed/c10d/*.h',
         'include/torch/csrc/distributed/c10d/*.hpp',
         'include/torch/csrc/distributed/rpc/*.h',
+        'include/torch/csrc/distributed/autograd/context/*.h',
+        'include/torch/csrc/distributed/autograd/functions/*.h',
+        'include/torch/csrc/distributed/autograd/rpc_messages/*.h',
         'include/torch/csrc/jit/*.h',
         'include/torch/csrc/jit/backends/*.h',
         'include/torch/csrc/jit/generated/*.h',

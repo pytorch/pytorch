@@ -6,7 +6,7 @@ from typing import Any
 
 __all__ = ["RemovableHandle", "unserializable_hook", "warn_if_has_hooks", "BackwardHook"]
 
-class RemovableHandle(object):
+class RemovableHandle:
     r"""
     A handle which provides the capability to remove a hook.
 
@@ -89,7 +89,7 @@ def warn_if_has_hooks(tensor):
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
                               "to suppress this warning".format(repr(hook)))
 
-class BackwardHook(object):
+class BackwardHook:
     """
     A wrapper class to implement nn.Module backward hooks.
     It handles:

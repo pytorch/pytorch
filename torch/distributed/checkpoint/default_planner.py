@@ -4,6 +4,7 @@ import dataclasses
 import io
 import logging
 import operator
+from collections import ChainMap
 from functools import reduce
 from typing import List, Tuple, Dict, Any, Union, cast
 
@@ -11,6 +12,7 @@ import torch
 
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._shard.sharded_tensor import ShardedTensor
+from torch.distributed._tensor import DTensor
 
 
 from torch.distributed.checkpoint.planner import (
@@ -43,13 +45,12 @@ from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
 )
-from torch.distributed.checkpoint._nested_tensor import flatten_sharded_tensors
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
-from torch.distributed.checkpoint.utils import (
-    find_state_dict_object,
-    find_tensor_shard,
+from torch.distributed.checkpoint._sharded_tensor_utils import (
+    _flatten_sharded_tensors,
 )
-from torch.distributed.checkpoint._traverse import set_element, get_element
+from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint.utils import find_state_dict_object
+from torch.distributed.checkpoint._traverse import set_element
 
 logger: logging.Logger = logging.getLogger(__file__)
 
@@ -65,27 +66,27 @@ __all__ = [
 
 
 # TODO: Update docstrings for default_planner.py
-
-
 class DefaultSavePlanner(SavePlanner):
     mappings: FLATTEN_MAPPING
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
-        dedup_replicated_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
+        dedup_replicated_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
 
-    def init(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self, state_dict: STATE_DICT_TYPE, is_coordinator: bool
+    ) -> None:
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
         if self.flatten_sharded_tensors:
-            state_dict = flatten_sharded_tensors(state_dict)
+            state_dict = _flatten_sharded_tensors(state_dict)
         self.state_dict = state_dict
         self.is_coordinator = is_coordinator
 
@@ -108,9 +109,12 @@ class DefaultSavePlanner(SavePlanner):
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
         if self.flatten_state_dict:
-            merged_mappings = reduce(
-                lambda x, y: x | y, (p.planner_data for p in global_plan)
-            )
+            # | does not work for Python 3.8 or older version.
+            # merged_mappings = reduce(
+            #     lambda x, y: x | y, (p.planner_data for p in global_plan)
+            # )
+            planner_data_dict = [p.planner_data for p in global_plan]
+            merged_mappings = dict(ChainMap(*planner_data_dict))
             metadata = dataclasses.replace(
                 metadata, planner_data=merged_mappings
             )
@@ -165,24 +169,24 @@ class DefaultLoadPlanner(LoadPlanner):
 
     def __init__(
         self,
-        flatten_state_dict: bool = False,
-        flatten_sharded_tensors: bool = False,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
         self.original_state_dict = {}
         self.mappings = {}
 
-    def init(
+    def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
-        if self.flatten_sharded_tensors:
-            state_dict = flatten_sharded_tensors(state_dict)
-
         self.original_state_dict = state_dict
+
+        if self.flatten_sharded_tensors:
+            state_dict = _flatten_sharded_tensors(state_dict)
 
         if self.flatten_state_dict:
             state_dict, self.mappings = flatten_state_dict(state_dict)
@@ -221,14 +225,7 @@ class DefaultLoadPlanner(LoadPlanner):
         """
         This is an extension from the planner interface to make it easy to extend the default planner
         """
-        if self.flatten_state_dict:
-            obj = get_element(
-                self.original_state_dict, self.mappings[index.fqn]
-            )
-            assert isinstance(obj, torch.Tensor)
-            return find_tensor_shard(obj, index)
-        else:
-            return find_state_dict_object(self.state_dict, index)
+        return find_state_dict_object(self.state_dict, index)
 
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """
@@ -285,7 +282,7 @@ def create_default_local_save_plan(
     """
     requests = []
     for fqn, obj in state_dict.items():
-        if isinstance(obj, ShardedTensor) or is_coordinator:
+        if isinstance(obj, (ShardedTensor, DTensor)) or is_coordinator:
             requests += _create_write_items(fqn, obj)
     return SavePlan(requests)
 
@@ -396,6 +393,7 @@ def _validate_global_plan(
             continue
         chunks_volume = 0
         for chunk_idx, chunk0 in enumerate(value.chunks):
+            # Compute the volume
             if not _check_box_bounds(value.size, chunk0):
                 logger.warning(
                     f"""
@@ -406,6 +404,7 @@ def _validate_global_plan(
                 all_good = False
             chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
 
+            # Check for overlap
             for chunk1 in value.chunks[chunk_idx + 1 :]:
                 if _check_box_overlap(chunk0, chunk1):
                     logger.warning(
@@ -413,6 +412,7 @@ def _validate_global_plan(
                     )
                     all_good = False
 
+        # Check whether combined chunk cover the whole tensor
         tensor_volume = reduce(operator.mul, value.size, 1)
         if chunks_volume != tensor_volume:
             logger.warning(

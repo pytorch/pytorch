@@ -37,7 +37,7 @@ class Linear(nnq.Linear):
     _version = 4
 
     def __init__(self, in_features, out_features, bias_=True, dtype=torch.qint8):
-        super(Linear, self).__init__(in_features, out_features, bias_, dtype=dtype)
+        super().__init__(in_features, out_features, bias_, dtype=dtype)
         # We don't muck around with buffers or attributes or anything here
         # to keep the module simple. *everything* is simply a Python attribute.
         # Serialization logic is explicitly handled in the below serialization and
@@ -75,8 +75,8 @@ class Linear(nnq.Linear):
                               missing_keys, unexpected_keys, error_msgs):
         version = local_metadata.get('version', None)
         self.version = version
-        super(Linear, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
-                                                  missing_keys, unexpected_keys, error_msgs)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, False,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
     def from_float(cls, mod):
@@ -87,7 +87,7 @@ class Linear(nnq.Linear):
                           utilities or provided by the user
         """
         float_modules = [torch.nn.Linear, torch.nn.modules.linear.NonDynamicallyQuantizableLinear,
-                         torch.nn.intrinsic.modules.fused.LinearReLU, torch.ao.nn.qat.dynamic.Linear]
+                         torch.ao.nn.intrinsic.modules.fused.LinearReLU, torch.ao.nn.qat.dynamic.Linear]
 
         assert type(mod) in float_modules, \
             'nn.quantized.dynamic.Linear.from_float only works for one of' + \

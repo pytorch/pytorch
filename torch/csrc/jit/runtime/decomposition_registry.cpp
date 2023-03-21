@@ -51,7 +51,7 @@ void loadModule(const CompilationUnit& module) {
 
 void loadDecompositionFunctions() {
   std::lock_guard<std::mutex> guard(lock);
-  if (schema_to_decomposition.size() != 0) {
+  if (!schema_to_decomposition.empty()) {
     return;
   }
 

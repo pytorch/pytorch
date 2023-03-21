@@ -27,7 +27,7 @@ def timed_log(text):
     print(f"{datetime.now().strftime('%H:%M:%S')} {text}")
 
 
-class BatchUpdateParameterServer(object):
+class BatchUpdateParameterServer:
 
     def __init__(self, batch_update_size):
         self.model = nn.Linear(in_features, out_features)
@@ -47,7 +47,10 @@ class BatchUpdateParameterServer(object):
     def update_and_fetch_model(ps_rref, grads):
         self = ps_rref.local_value()
         for p, g in zip(self.model.parameters(), grads):
-            p.grad += g
+            if p.grad is None:
+                p.grad = g
+            else:
+                p.grad += g
         with self.lock:
             timed_log(f"PS got {self.curr_update_size}/{self.batch_update_size} updates")
             self.curr_update_size += 1
@@ -66,7 +69,7 @@ class BatchUpdateParameterServer(object):
         return fut
 
 
-class Trainer(object):
+class Trainer:
 
     def __init__(self, ps_rref):
         self.ps_rref = ps_rref

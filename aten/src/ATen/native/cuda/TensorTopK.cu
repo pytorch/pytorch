@@ -19,8 +19,7 @@
 
 using namespace at::native;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // TODO: remove this when CUDA <11.6 is no longer supported
 bool disable_sort_for_topk() {
@@ -513,11 +512,22 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<T, IndexType> input,
 
                            T *kthValues,
                            uint32_t* withinKCounts,
-                           uint32_t* kthCounts) {
+                           uint32_t* kthCounts,
+                           uint32_t num_blocks) {
 
   uint32_t items_per_block = items_per_thread * BLOCK_THREADS;
   uint32_t tidx = threadIdx.x;
   uint32_t block_idx = getLinearBlockId<uint32_t>();
+
+  // The grid is computed from `getGridFromTiles`, when there are lots of
+  // elements, we will use both blockIdx.x and blockIdx.y, and maybe blockIdx.z
+  // when this is the case, the number of blocks that we are launching can be
+  // more than the number of blocks we need. So we need to check the range of
+  // `block_idx`.
+  if (block_idx >= num_blocks) {
+    return;
+  }
+
   uint32_t slice_idx = block_idx / blocks_per_slice;
   uint32_t blk_idx_in_slice = block_idx % blocks_per_slice;
 
@@ -732,7 +742,7 @@ void launch(
   gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
     input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
     topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
-    blocks_per_slice, kthValues, withinKCounts, kthCounts);
+    blocks_per_slice, kthValues, withinKCounts, kthCounts, num_blocks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 #else
   // Find topk values based on kth values
@@ -895,4 +905,3 @@ void launch_gather_topk_kernel(
 }
 
 } // at::native
-} // at

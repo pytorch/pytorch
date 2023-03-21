@@ -3,6 +3,8 @@
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 
+#include <utility>
+
 namespace torch {
 namespace autograd {
 
@@ -10,7 +12,7 @@ VariableInfo::VariableInfo(const Variable& var)
     : layout(var.layout()),
       device(var.device()),
       scalar_type(var.scalar_type()),
-      size(var.sizes().vec()),
+      size(var.sym_sizes().vec()),
       requires_grad(var.requires_grad()),
       is_empty(false) {}
 
@@ -21,13 +23,13 @@ Variable VariableInfo::zeros(at::OptionalDeviceGuard& device_guard) const {
     // Return undefined tensor.
     return at::Tensor();
   } else {
-    return at::zeros(
+    return at::zeros_symint(
         size, at::TensorOptions(scalar_type).device(device).layout(layout));
   }
 }
 
 // This function has two main goals:
-//  1) Use the user-provided jvp function to populate the the outputs' forward
+//  1) Use the user-provided jvp function to populate the outputs' forward
 //  gradient 2) Perform error checking to ensure that view and inplace ops are
 //  properly handled
 //
@@ -113,7 +115,7 @@ void _process_forward_mode_AD(
   torch::autograd::variable_list forward_grads;
   {
     at::AutoFwGradMode fw_grad_mode(false);
-    forward_grads = jvp_user_function(inputs, input_grads);
+    forward_grads = jvp_user_function(inputs, std::move(input_grads));
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -330,8 +332,8 @@ optional_variable_list _process_backward_mode_ad(
       var.mutable_grad().reset();
       impl::clear_hooks(var);
       if (auto grad_acc_fn = impl::try_get_grad_accumulator(var)) {
-        auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
-        grad_acc->variable.reset();
+        auto& grad_acc = dynamic_cast<AccumulateGrad&>(*grad_acc_fn);
+        grad_acc.variable.reset();
       }
       if (cdata) {
         impl::rebase_history(var, {cdata, output_nr});
@@ -439,12 +441,12 @@ optional_variable_list _wrap_outputs(
   // computations happening here to track backward mode gradients.
   _process_forward_mode_AD(
       input_vars,
-      inputs_mapping,
+      std::move(inputs_mapping),
       raw_outputs,
       outputs,
       non_differentiable,
       dirty_inputs,
-      jvp_user_function);
+      std::move(jvp_user_function));
 
   return outputs;
 }

@@ -775,9 +775,6 @@ class TestSubgraphRewriter(JitTestCase):
 
     def test_replace_pattern_with_filters(self):
         class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
             def forward(self, x, scale, zero_point):
                 # Match, second input to add is a scalar
                 x = x.dequantize()

@@ -1,0 +1,265 @@
+# Python dependencies required for unit tests
+
+#awscli==1.6 #this breaks some platforms
+#Description: AWS command line interface
+#Pinned versions: 1.6
+#test that import:
+
+boto3==1.19.12
+#Description: AWS SDK for python
+#Pinned versions: 1.19.12, 1.16.34
+#test that import:
+
+click
+#Description: Command Line Interface Creation Kit
+#Pinned versions:
+#test that import:
+
+coremltools==5.0b5
+#Description: Apple framework for ML integration
+#Pinned versions: 5.0b5
+#test that import:
+
+#dataclasses #this breaks some platforms
+#Description: Provides decorators for auto adding special methods to user classes
+#Pinned versions:
+#test that import:
+
+expecttest==0.1.3
+#Description: method for writing tests where test framework auto populates
+# the expected output based on previous runs
+#Pinned versions: 0.1.3
+#test that import:
+
+flatbuffers==2.0
+#Description: cross platform serialization library
+#Pinned versions: 2.0
+#test that import:
+
+hypothesis==5.35.1
+# Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
+#Description: advanced library for generating parametrized tests
+#Pinned versions: 3.44.6, 4.53.2
+#test that import: test_xnnpack_integration.py, test_pruning_op.py, test_nn.py
+
+junitparser==2.1.1
+#Description: unitparser handles JUnit/xUnit Result XML files
+#Pinned versions: 2.1.1
+#test that import:
+
+librosa>=0.6.2 ; python_version < "3.11"
+#Description: A python package for music and audio analysis
+#Pinned versions: >=0.6.2
+#test that import: test_spectral_ops.py
+
+#mkl #this breaks linux-bionic-rocm4.5-py3.7
+#Description: Intel oneAPI Math Kernel Library
+#Pinned versions:
+#test that import: test_profiler.py, test_public_bindings.py, test_testing.py,
+#test_nn.py, test_mkldnn.py, test_jit.py, test_fx_experimental.py,
+#test_autograd.py
+
+#mkl-devel
+# see mkl
+
+#mock
+#Description: A testing library that allows you to replace parts of your
+#system under test with mock objects
+#Pinned versions:
+#test that import: test_module_init.py, test_modules.py, test_nn.py,
+#test_testing.py
+
+#MonkeyType # breaks pytorch-xla-linux-bionic-py3.7-clang8
+#Description: collects runtime types of function arguments and return
+#values, and can automatically generate stub files
+#Pinned versions:
+#test that import:
+
+mypy==0.960
+# Pin MyPy version because new errors are likely to appear with each release
+#Description: linter
+#Pinned versions: 0.960
+#test that import: test_typing.py, test_type_hints.py
+
+networkx==2.6.3
+#Description: creation, manipulation, and study of
+#the structure, dynamics, and functions of complex networks
+#Pinned versions: 2.6.3 (latest version that works with Python 3.7+)
+#test that import: functorch
+
+#ninja
+#Description: build system.  Note that it install from
+#here breaks things so it is commented out
+#Pinned versions: 1.10.0.post1
+#test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
+
+numba==0.49.0 ; python_version < "3.9"
+numba==0.54.1 ; python_version == "3.9"
+numba==0.55.2 ; python_version == "3.10"
+#Description: Just-In-Time Compiler for Numerical Functions
+#Pinned versions: 0.54.1, 0.49.0, <=0.49.1
+#test that import: test_numba_integration.py
+#For numba issue see https://github.com/pytorch/pytorch/issues/51511
+
+#numpy
+#Description: Provides N-dimensional arrays and linear algebra
+#Pinned versions: 1.20
+#test that import: test_view_ops.py, test_unary_ufuncs.py, test_type_promotion.py,
+#test_type_info.py, test_torch.py, test_tensorexpr_pybind.py, test_tensorexpr.py,
+#test_tensorboard.py, test_tensor_creation_ops.py, test_static_runtime.py,
+#test_spectral_ops.py, test_sort_and_select.py, test_shape_ops.py,
+#test_segment_reductions.py, test_reductions.py, test_pruning_op.py,
+#test_overrides.py, test_numpy_interop.py, test_numba_integration.py
+#test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
+#test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
+#test_binary_ufuncs.py
+
+#onnxruntime
+#Description: scoring engine for Open Neural Network Exchange (ONNX) models
+#Pinned versions: 1.9.0
+#test that import:
+
+opt-einsum==3.3
+#Description: Python library to optimize tensor contraction order, used in einsum
+#Pinned versions: 3.3
+#test that import: test_linalg.py
+
+#pillow
+#Description:  Python Imaging Library fork
+#Pinned versions:
+#test that import:
+
+protobuf==3.20.2
+#Description:  Google’s data interchange format
+#Pinned versions: 3.20.1
+#test that import: test_tensorboard.py
+
+psutil
+#Description: information on running processes and system utilization
+#Pinned versions:
+#test that import: test_profiler.py, test_openmp.py, test_dataloader.py
+
+pytest
+#Description: testing framework
+#Pinned versions:
+#test that import: test_typing.py, test_cpp_extensions_aot.py, run_test.py
+
+pytest-xdist
+#Description: plugin for running pytest in parallel
+#Pinned versions:
+#test that import:
+
+pytest-shard
+#Description: plugin spliting up tests in pytest
+#Pinned versions:
+#test that import:
+
+pytest-flakefinder==1.1.0
+#Description: plugin for rerunning tests a fixed number of times in pytest
+#Pinned versions: 1.1.0
+#test that import:
+
+pytest-rerunfailures>=10.3
+#Description: plugin for rerunning failure tests in pytest
+#Pinned versions:
+#test that import:
+
+#pytest-benchmark
+#Description: fixture for benchmarking code
+#Pinned versions: 3.2.3
+#test that import:
+
+#pytest-sugar
+#Description: shows failures and errors instantly
+#Pinned versions:
+#test that import:
+
+xdoctest==1.1.0
+#Description: runs doctests in pytest
+#Pinned versions: 1.1.0
+#test that import:
+
+pygments==2.12.0
+#Description: support doctest highlighting
+#Pinned versions: 2.12.0
+#test that import: the doctests
+
+#PyYAML
+#Description: data serialization format
+#Pinned versions:
+#test that import:
+
+#requests
+#Description: HTTP library
+#Pinned versions:
+#test that import: test_type_promotion.py
+
+#rich
+#Description: rich text and beautiful formatting in the terminal
+#Pinned versions: 10.9.0
+#test that import:
+
+scikit-image
+#Description: image processing routines
+#Pinned versions:
+#test that import: test_nn.py
+
+#scikit-learn
+#Description: machine learning package
+#Pinned versions: 0.20.3
+#test that import:
+
+scipy==1.6.3 ; python_version < "3.10"
+scipy==1.8.1 ; python_version == "3.10"
+scipy==1.9.3 ; python_version == "3.11"
+# Pin SciPy because of failing distribution tests (see #60347)
+#Description: scientific python
+#Pinned versions: 1.6.3
+#test that import: test_unary_ufuncs.py, test_torch.py,test_tensor_creation_ops.py
+#test_spectral_ops.py, test_sparse_csr.py, test_reductions.py,test_nn.py
+#test_linalg.py, test_binary_ufuncs.py
+
+#tabulate
+#Description: Pretty-print tabular data
+#Pinned versions:
+#test that import:
+
+tb-nightly
+#Description: TensorBoard
+#Pinned versions:
+#test that import:
+
+#typing-extensions
+#Description: type hints for python
+#Pinned versions:
+#test that import:
+
+#virtualenv
+#Description: virtual environment for python
+#Pinned versions:
+#test that import:
+
+unittest-xml-reporting<=3.2.0,>=2.0.0
+#Description: saves unit test results to xml
+#Pinned versions:
+#test that import:
+
+lintrunner==0.10.7
+#Description: all about linters!
+#Pinned versions: 0.10.7
+#test that import:
+
+rockset==1.0.3
+#Description: queries Rockset
+#Pinned versions: 1.0.3
+#test that import:
+
+ghstack==0.7.1
+#Description: ghstack tool
+#Pinned versions: 0.7.1
+#test that import:
+
+jinja2==3.1.2
+#Description: jinja2 template engine
+#Pinned versions: 3.1.2
+#test that import:

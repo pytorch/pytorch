@@ -2,7 +2,8 @@ import warnings
 
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVar, Deque
+import copy as copymodule
+from typing import Any, Callable, Iterator, List, Literal, Optional, Sized, Tuple, TypeVar, Deque
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
@@ -70,6 +71,14 @@ class ForkerIterDataPipe(IterDataPipe):
         buffer_size: this restricts how far ahead the leading child DataPipe
            can read relative to the slowest child DataPipe.
            Defaults to ``1000``. Use ``-1`` for the unlimited buffer.
+        copy: copy strategy to use for items yielded by each branch. Supported
+            options are ``None`` for no copying, ``"shallow"`` for shallow object
+            copies, and ``"deep"`` for deep object copies. Defaults to ``None``.
+
+    Note:
+        All branches of the forked pipeline return the identical object unless
+        the copy parameter is supplied. If the object is mutable or contains
+        mutable objects, changing them in one branch will affect all others.
 
     Example:
         >>> # xdoctest: +REQUIRES(module:torchdata)
@@ -81,12 +90,18 @@ class ForkerIterDataPipe(IterDataPipe):
         >>> list(dp2)
         [0, 1, 2, 3, 4]
     """
-    def __new__(cls, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+    def __new__(
+        cls,
+        datapipe: IterDataPipe,
+        num_instances: int,
+        buffer_size: int = 1000,
+        copy: Optional[Literal["shallow", "deep"]] = None
+    ):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
         if num_instances == 1:
             return datapipe
-        container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size)
+        container = _ForkerIterDataPipe(datapipe, num_instances, buffer_size, copy)
         return [_ChildDataPipe(container, i) for i in range(num_instances)]
 
 
@@ -114,13 +129,23 @@ class _ContainerTemplate(ABC):
         """
 
 
+def _no_op(x):
+    return x
+
+
 class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
     r"""
     Container to hold instance-specific information on behalf of ForkerIterDataPipe. It tracks
     the state of its child DataPipes, maintains the buffer, and yields the next value
     as requested by the child DataPipes.
     """
-    def __init__(self, datapipe: IterDataPipe, num_instances: int, buffer_size: int = 1000):
+    def __init__(
+        self,
+        datapipe: IterDataPipe,
+        num_instances: int,
+        buffer_size: int = 1000,
+        copy: Optional[Literal["shallow", "deep"]] = None
+    ):
         self.main_datapipe = datapipe
         self._datapipe_iterator: Optional[Iterator[Any]] = None
         self.num_instances = num_instances
@@ -132,6 +157,15 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 "please be aware of OOM at random places",
                 UserWarning
             )
+        if copy is None:
+            self.copy_fn = _no_op
+        elif copy == "shallow":
+            self.copy_fn = copymodule.copy
+        elif copy == "deep":
+            self.copy_fn = copymodule.deepcopy
+        else:
+            raise ValueError(f"Unknown copy method `{copy}` requested, choose one of None, `shallow` or `deep`.")
+
         self.child_pointers: List[int] = [0] * num_instances  # Indicate the indices of the next element to get
         self.slowest_ptr = 0  # The index to read by the slowest child
         self.leading_ptr = 0  # The index to read by the fastest child
@@ -175,7 +209,8 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
                 if self.buffer_size >= 0 and self.leading_ptr > self.buffer_size + self.slowest_ptr:
                     raise BufferError("ForkerIterDataPipe buffer overflow," +
                                       f"buffer size {self.buffer_size} is insufficient.")
-                yield return_val
+
+                yield self.copy_fn(return_val)
         finally:
             self._child_stop[instance_id] = True
             # Cleanup _datapipe_iterator for the case that fork exits earlier
@@ -203,6 +238,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self.copy_fn,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         )
@@ -215,6 +251,7 @@ class _ForkerIterDataPipe(IterDataPipe, _ContainerTemplate):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self.copy_fn,
             self._valid_iterator_id,
             self._number_of_samples_yielded,
         ) = state
@@ -586,8 +623,7 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
-        for data in zip(*iterators):
-            yield data
+        yield from zip(*iterators)
 
     def __len__(self) -> int:
         if all(isinstance(dp, Sized) for dp in self.datapipes):

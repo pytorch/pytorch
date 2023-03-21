@@ -27,7 +27,7 @@ from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 
 
@@ -101,14 +101,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -127,14 +127,14 @@ class ElasticLaunchTest(unittest.TestCase):
             master_port = sock.getsockname()[1]
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--master_addr=localhost",
-            f"--master_port={master_port}",
-            "--node_rank=0",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--master-addr=localhost",
+            f"--master-port={master_port}",
+            "--node-rank=0",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -144,7 +144,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_user_script_bash(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -152,19 +152,19 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             launch.main(args + ["--module"] + script_args)
 
         launch.main(args + script_args)
@@ -175,25 +175,25 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_user_script_default_nproc(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
         world_size = 1
         args = [
             f"--nnodes={nnodes}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             launch.main(args + ["--module"] + script_args)
 
         launch.main(args + script_args)
@@ -204,7 +204,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_with_env_vars(self):
         run_id = str(uuid.uuid4().int)
         nnodes = 1
@@ -223,7 +223,7 @@ class ElasticLaunchTest(unittest.TestCase):
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
 
         with self.assertRaises(ValueError):
-            # --no_python cannot be used with --module
+            # --no-python cannot be used with --module
             os.environ["PET_MODULE"] = "1"
             launch.main(script_args)
 
@@ -242,13 +242,13 @@ class ElasticLaunchTest(unittest.TestCase):
 
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_type}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
-            "--no_python",
+            f"--nproc-per-node={nproc_type}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
+            "--no-python",
         ]
 
         script_args = [path("bin/test_script.sh"), f"{self.test_dir}"]
@@ -262,27 +262,27 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_auto_configurations(self):
         self._test_nproc_launch_configuration("auto", os.cpu_count())
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_number_configurations(self):
         self._test_nproc_launch_configuration("4", 4)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_nproc_launch_unknown_configurations(self):
         with self.assertRaises(ValueError):
             self._test_nproc_launch_configuration("unknown", 4)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     @patch("torch.cuda.is_available", return_value=True)
     @patch("torch.cuda.device_count", return_value=3)
     def test_nproc_gpu_launch_configurations(self, _mock1, _mock2):
         self._test_nproc_launch_configuration("auto", 3)
         self._test_nproc_launch_configuration("gpu", 3)
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         run_id = str(uuid.uuid4().int)
         min_nodes = 1
@@ -292,14 +292,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nproc_per_node
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -310,7 +310,7 @@ class ElasticLaunchTest(unittest.TestCase):
         )
 
     @mock.patch("torch.distributed.elastic.events.record")
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_worker_raise_exception(self, record_mock):
         """
         Asserts that when the worker program fails and lancher raieses exception
@@ -323,13 +323,13 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--max_restarts=0",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--max-restarts=0",
+            "--start-method=spawn",
             path("bin/test_script.py"),
             "--fail",
         ]
@@ -338,7 +338,7 @@ class ElasticLaunchTest(unittest.TestCase):
 
         record_mock.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     @mock.patch(
         "torch.distributed.elastic.agent.server.local_elastic_agent.LocalElasticAgent.run"
     )
@@ -354,15 +354,15 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--max_restarts=0",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--max-restarts=0",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
 
         mock_agent_run.side_effect = MockException
@@ -370,19 +370,19 @@ class ElasticLaunchTest(unittest.TestCase):
             launch.main(args)
         record_mock.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_standalone(self):
         nnodes = 1
         nproc_per_node = 4
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
+            f"--nproc-per-node={nproc_per_node}",
             "--standalone",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -392,19 +392,19 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_run_path(self):
         nnodes = 1
         nproc_per_node = 4
         world_size = nnodes * nproc_per_node
         args = [
-            "--run_path",
+            "--run-path",
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         launch.main(args)
 
@@ -414,7 +414,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_multiple_agents(self):
         run_id = str(uuid.uuid4().int)
         min_nodes = 1
@@ -424,14 +424,14 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--rdzv_backend=etcd",
-            f"--rdzv_endpoint={self._etcd_endpoint}",
-            f"--rdzv_id={run_id}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
+            f"--rdzv-id={run_id}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         procs = []
         for _ in range(nnodes - 1):
@@ -466,11 +466,11 @@ class ElasticLaunchTest(unittest.TestCase):
         nproc_per_node = 4
         args = [
             f"--nnodes={nnodes}",
-            f"--nproc_per_node={nproc_per_node}",
-            "--monitor_interval=1",
-            "--start_method=spawn",
+            f"--nproc-per-node={nproc_per_node}",
+            "--monitor-interval=1",
+            "--start-method=spawn",
             path("bin/test_script.py"),
-            f"--touch_file_dir={self.test_dir}",
+            f"--touch-file-dir={self.test_dir}",
         ]
         agent_mock = Mock()
         agent_mock.run.return_value = RunResult(WorkerState.SUCCEEDED)
@@ -483,7 +483,7 @@ class ElasticLaunchTest(unittest.TestCase):
             launch.main(args)
             rdzv_handler_mock.shutdown.assert_called_once()
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_is_torchelastic_launched(self):
         # launch test script with torchelastic and validate that
         # torch.distributed.is_torchelastic_launched() returns True
@@ -492,12 +492,12 @@ class ElasticLaunchTest(unittest.TestCase):
 
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=1",
-                "--monitor_interval=1",
+                "--nproc-per-node=1",
+                "--monitor-interval=1",
                 path("bin/test_script_is_torchelastic_launched.py"),
-                f"--out_file={out_file}",
+                f"--out-file={out_file}",
             ]
         )
 
@@ -519,7 +519,7 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_is_torchelastic_launched.py"),
-                f"--out_file={out_file}",
+                f"--out-file={out_file}",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
@@ -534,27 +534,27 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_init_method.py"),
-                f"--init_method=tcp://localhost:{port}",
+                f"--init-method=tcp://localhost:{port}",
                 "--rank=0",
-                "--world_size=1",
+                "--world-size=1",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
             # nothing to validate, just make sure it runs
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_init_method_tcp_with_torchelastic(self):
         port = get_free_port()
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=4",
-                "--master_addr=localhost",
-                f"--master_port={port}",
-                "--monitor_interval=1",
+                "--nproc-per-node=4",
+                "--master-addr=localhost",
+                f"--master-port={port}",
+                "--monitor-interval=1",
                 path("bin/test_script_init_method.py"),
-                f"--init_method=tcp://localhost:{port}",
+                f"--init-method=tcp://localhost:{port}",
             ]
         )
         # nothing to validate, just make sure it runs
@@ -574,25 +574,25 @@ class ElasticLaunchTest(unittest.TestCase):
             "argv",
             [
                 path("bin/test_script_init_method.py"),
-                "--init_method=env://",
+                "--init-method=env://",
             ],
         ):
             runpy.run_path(sys.argv[0], run_name="__main__")
             # nothing to validate, just make sure it runs
 
-    @sandcastle_skip_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_init_method_env_with_torchelastic(self):
         port = get_free_port()
         launch.main(
             [
-                "--run_path",
+                "--run-path",
                 "--nnodes=1",
-                "--nproc_per_node=4",
-                "--master_addr=localhost",
-                f"--master_port={port}",
-                "--monitor_interval=1",
+                "--nproc-per-node=4",
+                "--master-addr=localhost",
+                f"--master-port={port}",
+                "--monitor-interval=1",
                 path("bin/test_script_init_method.py"),
-                "--init_method=env://",
+                "--init-method=env://",
             ]
         )
         # nothing to validate, just make sure it runs
