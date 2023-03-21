@@ -131,7 +131,10 @@ class TritonCSEVariable(CSEVariable):
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
 
+
 mathlib = config.triton.mathlib_name
+
+
 class TritonOverrides(OpOverrides):
     """Map element-wise ops to Triton"""
 
