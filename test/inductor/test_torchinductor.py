@@ -6377,7 +6377,8 @@ if HAS_CPU:
                     )
 
                 def forward(self, x):
-                    return self.bn(x)
+                    x = self.bn(x)
+                    return (x,)
 
             bn = Model().to(dtype=torch.bfloat16).eval()
             x = torch.randn((2, 64, 16, 16), dtype=torch.bfloat16)
@@ -6387,7 +6388,7 @@ if HAS_CPU:
                 metrics.reset()
                 traced = make_fx(bn)(x, y)
                 compiled = compile_fx_inner(traced, [x])
-                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
+                assert same(bn(x)[0], compiled([x])[0], equal_nan=True, tol=1e-2)
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
