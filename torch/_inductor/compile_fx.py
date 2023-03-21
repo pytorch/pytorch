@@ -139,6 +139,7 @@ def compile_fx_inner(
     is_backward=False,
     graph_id=None,
     aot_mode=False,
+    is_inference=False,
 ):
     if is_tf32_warning_applicable(gm):
         _warn_tf32_disabled()
@@ -162,10 +163,6 @@ def compile_fx_inner(
         cudagraphs = config.triton.cudagraphs
 
     shape_env = _shape_env_from_inputs(example_inputs)
-
-    graph_name = torch._functorch.aot_autograd.get_graph_being_compiled()
-    graph_no_id_suffix = graph_name[0 : -(len(str(graph_id)) + 1)]
-    is_inference = graph_no_id_suffix[-(len("inference")) :] == "inference"
 
     fake_mode = fake_mode_from_tensors(
         example_inputs
@@ -521,7 +518,7 @@ def compile_fx(
     graph_id = next(_graph_counter)
 
     @dynamo_utils.dynamo_timed
-    def fw_compiler(model: torch.fx.GraphModule, example_inputs):
+    def fw_compiler_base(model: torch.fx.GraphModule, example_inputs, is_inference):
         fixed = len(example_inputs) - num_example_inputs
         # Why convert outplace op to inplace? Inductor can support inplace operations well and for custom
         # inplace ops which are lowered as ExternKernel, it is beneficial to performance when the inplace
@@ -533,7 +530,11 @@ def compile_fx(
             num_fixed=fixed,
             cudagraphs=cudagraphs,
             graph_id=graph_id,
+            is_inference=is_inference,
         )
+
+    fw_compiler = functools.partial(fw_compiler_base, is_inference=False)
+    inference_compiler = functools.partial(fw_compiler_base, is_inference=True)
 
     # Save and restore dynamic shapes setting for backwards, as it is
     # sometimes done as a context manager which won't be set when we
@@ -562,6 +563,7 @@ def compile_fx(
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
+            inference_compiler=inference_compiler,
             decompositions=decompositions,
             partition_fn=functools.partial(
                 min_cut_rematerialization_partition, compiler="inductor"
