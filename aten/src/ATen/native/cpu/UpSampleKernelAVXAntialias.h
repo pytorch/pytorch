@@ -394,19 +394,15 @@ void ImagingResampleHorizontalConvolution8u4x(
   //   [ ... r3 g3 b3 a3  r4 g4 b4 a4 | ... R3 G3 B3 A3  R4 G4 B4 A4 ] ->
   //   [r3 0 r4 0  g3 0 g4 0  b3 0 b4 0  a3 0 a4 0 | R3 0 R4 0  G3 0 G4 0  B3 0 B4 0  A3 0 A4 0]
 
-  const __m256i masks_low_high_c4[2] = {
-    _mm256_set_epi8(
+  const auto mask_low_c4 = _mm256_set_epi8(
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+  const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8
-    )
-  };
+      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
 
-  const auto mask_low = masks_low_high_c4[0];
-  const auto mask_high = masks_low_high_c4[1];
+  const auto mask_low = mask_low_c4;
+  const auto mask_high = mask_high_c4;
 
   const auto zero = _mm256_setzero_si256();
   const auto initial = _mm256_set1_epi32(1 << (coefs_precision - 1));
@@ -568,44 +564,26 @@ void ImagingResampleHorizontalConvolution8u(
       7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4,
       3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0);
 
-  const __m256i masks_low_high_c4[2] = {
-    _mm256_set_epi8(
+  const auto mask_low_c4 = _mm256_set_epi8(
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+  const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8
-    )
-  };
-  const __m256i masks_lh_c3_c4[2] = {
-    _mm256_set_epi8(
-      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
+  const auto mask_hl_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    )
-  };
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+  const auto mask_low128_c4 = _mm_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
 
-  const __m128i masks_low128_c3_c4[2] = {
-    _mm_set_epi8(
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm_set_epi8(
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    )
-  };
-
-  const auto mask_low = masks_low_high_c4[0];
-  const auto mask_high = masks_low_high_c4[1];
-  const auto mask_hl = masks_lh_c3_c4[1];
-  const auto mask_low128 = masks_low128_c3_c4[1];
+  const auto mask_low = mask_low_c4;
+  const auto mask_high = mask_high_c4;
+  const auto mask_hl = mask_hl_c4;
+  const auto mask_low128 = mask_low128_c4;
 
   // out_xsize = output width, out_x = output x index
-  // ids_size = interpolation size
-  // ids_min = input x start index corresponding to output x index (out_x)
+  // ids_min is the input offset index corresponding to out_x
+  // ids_size is the interpolation size for out_x
 
   const auto zero = _mm_setzero_si128();
 
