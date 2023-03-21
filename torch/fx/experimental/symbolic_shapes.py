@@ -1,5 +1,5 @@
 import torch
-from typing import Set, Dict, List, Type, Optional, cast, Union
+from typing import Set, Dict, List, Tuple, Type, Optional, cast, Union
 import sys
 import builtins
 import itertools
@@ -1149,6 +1149,7 @@ def _lru_cache(fn, maxsize=None):
             fn_cache.cache_clear()
         return fn_cache(self, *args, **kwargs)
 
+    wrapper.cache_clear = fn_cache.cache_clear
     wrapper.cache_info = fn_cache.cache_info  # type: ignore[attr-defined]
     return wrapper
 
@@ -1212,6 +1213,7 @@ class ShapeEnv:
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
+        self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict["sympy.Symbol", "sympy.Expr"] = {}  #
@@ -1550,99 +1552,37 @@ class ShapeEnv:
 
         # 2. Every guard must evaluate to True (but remember many guards
         #    like s0 == s1*2 because trivial due to simplification)
-        def simplify_until_no_change(expr: sympy.Expr) -> sympy.Expr:
-            new_expr = self.simplify(expr)
-            while new_expr != expr:
-                expr = new_expr
-                new_expr = self.simplify(expr)
-            return expr
+        issued = set()
 
-        simplified_guards = [(simplify_until_no_change(g), tb) for g, tb in self.guards]
-        var_to_guards = dict()
-        var_to_range = self.var_to_range.copy()
-        unhandled_guards = []
+        def issue_guard(guard: ShapeGuard) -> None:
+            if guard.expr in issued:
+                return
 
-        for g, tb in simplified_guards:
-            if self._maybe_evaluate_static_impl(g, var_to_range=var_to_range) is not None:
-                continue
-
-            if not isinstance(g, sympy.Rel):
-                unhandled_guards.append((g, tb))
-                continue
-
-            symbol = g.lhs
-
-            if not isinstance(g.lhs, sympy.Symbol):
-                unhandled_guards.append((g, tb))
-                continue
-
-            assert symbol in self.var_to_range
-
-            # Consider actually issuing the guard if it is used for refining
-            # the value range of a symbol. Otherwise, it is discarded.
-
-            vr = var_to_range[symbol]
-            lower, upper = vr.lower, vr.upper
-
-            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, g.rhs)
-            lower_guard, upper_guard = var_to_guards.get(symbol, (None, None))
-
-            if lower < rhs_vr.lower and isinstance(g, (sympy.Eq, sympy.Ge, sympy.Gt)):
-                lower = rhs_vr.lower + (1 * isinstance(g, sympy.Gt))
-                lower_guard = (g, tb)
-            if upper < rhs_vr.upper and isinstance(g, (sympy.Eq, sympy.Le, sympy.Lt)):
-                upper = rhs_vr.upper - (1 * isinstance(g, sympy.Lt))
-                upper_guard = (g, tb)
-
-            # If the value range is still the same, ignore the guard.
-            # i.e. the guard didn't provide any additional information for this symbol.
-            if vr == ValueRanges(lower, upper):
-                continue
-
-            var_to_range[symbol] = ValueRanges(lower, upper)
-            var_to_guards[symbol] = (lower_guard, upper_guard)
-
-        # First, issue the unhandled guards. i.e. guards we can't prove that are
-        # not useful.
-        for g, tb in unhandled_guards:
-            if self._maybe_evaluate_static_impl(g, var_to_range=var_to_range) is not None:
-                continue
+            issued.add(guard.expr)
 
             try:
-                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
+                expr = self.simplify(guard.expr)
+                guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(expr)
                 exprs.append(guard_expr)
                 if self.strict_mark_dyn:
-                    _verify(g, guard_expr)
+                    _verify(expr, guard_expr)
             except Exception:
-                log.warning(f"Failing guard allocated at: \n{tb}")
+                log.warning(f"Failing guard allocated at: \n{guard.stack}")
                 raise
+
+        for guard in self.guards:
+            if self._maybe_evaluate_static(guard.expr) is not None:
+                continue
+            issue_guard(guard)
 
         # Then, issue the guards that actually refine the value range of tracked
         # symbols. Avoid duplicates with a set.
-        issued = set()
-        for symbol, guards in var_to_guards.items():
+        for symbol, guards in self.var_to_guards.items():
             if symbol not in symbol_to_source:
                 continue
-
-            for pair in guards:
-                if pair is None:
-                    continue
-
-                g, tb = pair
-
-                if g in issued:
-                    continue
-
-                issued.add(g)
-
-                try:
-                    guard_expr = ShapeGuardPrinter(symbol_to_source, source_ref, self.var_to_sources).doprint(g)
-                    exprs.append(guard_expr)
-                    if self.strict_mark_dyn:
-                        _verify(g, guard_expr)
-                except Exception:
-                    log.warning(f"Failing guard allocated at: \n{tb}")
-                    raise
+            for guard in guards:
+                if guard is not None:
+                    issue_guard(guard)
 
         # 3. Every symbol must be within its value range (this handles 0/1
         # specialization too).  NB: because we never update value ranges
@@ -1652,8 +1592,8 @@ class ShapeEnv:
         if not _simplified:
             for symbol, sources in symbol_to_source.items():
                 assert sources
-                r = var_to_range[symbol]
-                g_lower, g_upper = var_to_guards.get(symbol, (None, None))
+                r = self.var_to_range[symbol]
+                g_lower, g_upper = self.var_to_guards.get(symbol, (None, None))
                 bounds = []
                 if r.lower != -sympy.oo and g_lower is None:
                     bounds.append(str(r.lower))
@@ -1740,9 +1680,6 @@ class ShapeEnv:
 
     @_lru_cache
     def _maybe_evaluate_static(self, expr: "sympy.Expr", *, unbacked_only: bool = False) -> "Optional[sympy.Expr]":
-        return self._maybe_evaluate_static_impl(expr, unbacked_only=unbacked_only, var_to_range=self.var_to_range)
-
-    def _maybe_evaluate_static_impl(self, expr: "sympy.Expr", *, unbacked_only: bool = False, var_to_range: Dict["sympy.Symbol", ValueRanges]) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
         """
@@ -1753,7 +1690,7 @@ class ShapeEnv:
         new_shape_env = {}
         new_range_env = {}
         for idx, k in enumerate(symbols):
-            vr = var_to_range[k]
+            vr = self.var_to_range[k]
             # Don't do anything if we don't have a nontrivial lower bound
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
@@ -1805,8 +1742,34 @@ class ShapeEnv:
         self.divisible = new_divisible
 
     @_lru_cache
+    def maybe_simplify_floordiv(self, expr: "sympy.Expr") -> "sympy.Expr":
+        if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
+            numerator, denominator = expr.lhs.args
+            expr = sympy.And(
+                sympy.Ge(numerator - (expr.rhs * denominator), 0),  # type: ignore
+                sympy.Lt(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
+            )
+        if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
+            numerator, denominator = expr.lhs.args
+            expr = sympy.Or(
+                sympy.Lt(numerator - (expr.rhs * denominator), 0),  # type: ignore
+                sympy.Ge(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
+            )
+        if isinstance(expr, (sympy.Gt, sympy.Ge)) and isinstance(expr.lhs, FloorDiv):
+            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore
+            expr = sympy.Ge(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
+        if isinstance(expr, (sympy.Lt, sympy.Le)) and isinstance(expr.lhs, FloorDiv):
+            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore
+            expr = sympy.Lt(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
+
+        return expr
+
+    @_lru_cache
     def simplify(self, expr: "sympy.Expr") -> "sympy.Expr":
-        def get_const(expr):
+        def get_added_const(expr):
+            """
+            Returns an integer constant being added at the top-level of this expression.
+            """
             if isinstance(expr, sympy.Integer):
                 return expr
             elif isinstance(expr, sympy.Add):
@@ -1849,34 +1812,16 @@ class ShapeEnv:
             # divisions simplified away
             if new_pows.issubset(pows) and new_rationals.issubset(rationals):
                 expr = new_expr
-
         if isinstance(expr, sympy.Rel):
-            lhs_const = get_const(expr.lhs)
-            rhs_const = get_const(expr.rhs)
+            lhs_const = get_added_const(expr.lhs)
+            rhs_const = get_added_const(expr.rhs)
             if (
                     lhs_const is not None
                     and rhs_const is not None
                     and lhs_const != 0
             ):
                 expr = type(expr)(expr.lhs - lhs_const, expr.rhs - lhs_const)  # type: ignore
-        if isinstance(expr, sympy.Eq) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.And(
-                sympy.Ge(numerator - (expr.rhs * denominator), 0),  # type: ignore
-                sympy.Lt(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
-            )
-        if isinstance(expr, sympy.Ne) and isinstance(expr.lhs, FloorDiv):
-            numerator, denominator = expr.lhs.args
-            expr = sympy.Or(
-                sympy.Lt(numerator - (expr.rhs * denominator), 0),  # type: ignore
-                sympy.Ge(numerator - ((expr.rhs + 1) * denominator), 0)  # type: ignore
-            )
-        if isinstance(expr, (sympy.Gt, sympy.Ge)) and isinstance(expr.lhs, FloorDiv):
-            quotient = expr.rhs if isinstance(expr, sympy.Ge) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Ge(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
-        if isinstance(expr, (sympy.Lt, sympy.Le)) and isinstance(expr.lhs, FloorDiv):
-            quotient = expr.rhs if isinstance(expr, sympy.Lt) else (expr.rhs + 1)  # type: ignore
-            expr = sympy.Lt(expr.lhs.args[0] - (quotient * expr.lhs.args[1]), 0)  # type: ignore
+
         return expr
 
     @lru_cache(256)
@@ -2042,13 +1987,75 @@ class ShapeEnv:
         if not self._suppress_guards_tls():
             stack = ''.join(traceback.format_list(traceback.extract_stack()[:-2]))
             if concrete_val is sympy.true:
-                self.guards.append(ShapeGuard(expr, stack))
+                guard = ShapeGuard(expr, stack)
             elif concrete_val is sympy.false:
-                self.guards.append(ShapeGuard(sympy.Not(expr), stack))
+                guard = ShapeGuard(sympy.Not(expr), stack)
             else:
-                self.guards.append(
-                    ShapeGuard(sympy.Eq(expr, concrete_val), stack))  # type: ignore[arg-type]
+                guard = ShapeGuard(sympy.Eq(expr, concrete_val), stack)  # type: ignore[arg-type]
+
+            self.guards.append(guard)
+            self.refine_ranges(guard)
+
         return concrete_val
+
+    def refine_ranges(self, guard: ShapeGuard) -> None:
+        def simplify(expr: sympy.Expr) -> sympy.Expr:
+            """
+            Simplification specialized for range refinement.
+            """
+            return self.maybe_simplify_floordiv(self.simplify(expr))
+
+        # First, try to simplify the guard.
+        # Since we do not guarantee that the function is monotonic,
+        # we set a maximum number of iterations.
+        max_iterations = 10
+        it = 0
+        expr = guard.expr
+
+        while True:
+            it += 1
+            previous = expr
+            expr = simplify(previous)
+            if expr == previous or it >= max_iterations:
+                break
+
+        # Filter the guards that:
+        #   1. are relational operations
+        #   2. have a symbol as the left-hand side
+        #   3. already have a range
+        if (
+            not isinstance(expr, sympy.Rel)
+            or not isinstance(expr.lhs, sympy.Symbol)
+            or expr.lhs not in self.var_to_range
+        ):
+            return
+
+
+        # Update the value range of the left-hand side, if the
+        # right-hand side provides a better range.
+        symbol = expr.lhs
+
+        vr = self.var_to_range[symbol]
+        lower, upper = vr.lower, vr.upper
+
+        rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore
+        lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
+
+        if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
+            lower = rhs_vr.lower + (1 * isinstance(expr, sympy.Gt))
+            lower_guard = guard
+        if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
+            upper = rhs_vr.upper - (1 * isinstance(expr, sympy.Lt))
+            upper_guard = guard
+
+        # Do nothing if the new value range is no better than what we already have.
+        if vr == ValueRanges(lower, upper):
+            return
+
+        self.var_to_range[symbol] = ValueRanges(lower, upper)
+        self.var_to_guards[symbol] = (lower_guard, upper_guard)
+        self._maybe_evaluate_static.cache_clear()
+
 
 def _should_allocate(user_marked_dynamic, assume_static_by_default):
     """
