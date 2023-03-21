@@ -3875,6 +3875,10 @@ class MutableBox(IRNode):
 
     data: IRNode
 
+    def __post_init__(self):
+        assert isinstance(object.__getattribute__(self, 'data'), IRNode)
+        super().__post_init__()
+
     def __getattr__(self, name):
         fn = getattr(self.data, name)
         if callable(fn):
