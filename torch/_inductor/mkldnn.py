@@ -17,6 +17,8 @@ from torch.fx.experimental.symbolic_shapes import guard_int
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn.modules.utils import _pair
 from . import config
+import torch._dynamo.config as dynamo_config
+
 
 from .fx_utils import matches_module_function_pattern
 
@@ -98,7 +100,7 @@ class ConvUnary2d(nn.Conv2d):
         self,
         conv: nn.Module,
         unary: Optional[nn.Module],
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv.in_channels,
@@ -131,8 +133,8 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                tuple(guard_int(x) for x in input_size),
-            ),
+                input_size,
+            ) if input_size is not None else self.weight.to_mkldnn(),
             requires_grad=self.weight.requires_grad,
         )
 
@@ -174,7 +176,7 @@ class ConvBinary2d(nn.Conv2d):
         self,
         conv: nn.Module,
         binary_op_name: str,
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv.in_channels,
@@ -205,8 +207,8 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                tuple(guard_int(x) for x in input_size),
-            ),
+                input_size,
+            ) if input_size is not None else self.weight.to_mkldnn(),
             requires_grad=self.weight.requires_grad,
         )
 
@@ -283,7 +285,7 @@ class PackedLinear(nn.Linear):
 
 
 class LinearUnary(nn.Linear):
-    def __init__(self, linear: nn.Module, unary: Optional[nn.Module], input_size: list):
+    def __init__(self, linear: nn.Module, unary: Optional[nn.Module], input_size: Optional[list]):
         super().__init__(
             linear.in_features,
             linear.out_features,
@@ -302,10 +304,11 @@ class LinearUnary(nn.Linear):
             self.attr, self.scalars, self.algorithm = unary_modules_map[
                 unary.__class__
             ](unary)
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1]) if input_size is not None else None
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
+                self.weight.to_mkldnn(),
+                self.batch_size,
             ),
             requires_grad=self.weight.requires_grad,
         )
@@ -327,7 +330,7 @@ class LinearBinary(nn.Linear):
         self,
         linear: nn.Module,
         binary_op_name: str,
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             linear.in_features,
@@ -341,11 +344,12 @@ class LinearBinary(nn.Linear):
     def _update_module_params(self, linear, binary_op_name, input_size):
         self.__dict__ = copy.deepcopy(linear.__dict__)
         self.attr = binary_op_name
-        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1])
+        self.batch_size = reduce(lambda x, y: x * y, input_size[:-1]) if input_size is not None else None
         self.packed_weight = torch.nn.Parameter(
             torch.ops.mkldnn._reorder_linear_weight(
-                self.weight.to_mkldnn(), self.batch_size
-            ),
+                self.weight.to_mkldnn(),
+                self.batch_size
+            ) if self.batch_size is not None else self.weight.to_mkldnn(),
             requires_grad=self.weight.requires_grad,
         )
 
@@ -361,7 +365,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
         self,
         conv_transpose: nn.Module,
         unary: Optional[nn.Module],
-        input_size: list,
+        input_size: Optional[list],
     ):
         super().__init__(
             conv_transpose.in_channels,
@@ -392,7 +396,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
             self.dilation,
             self.groups,
             input_size,
-        )
+        ) if input_size is not None else self.weight.to_mkldnn()
         self.weight = torch.nn.Parameter(
             packed_weight,
             requires_grad=self.weight.requires_grad,
@@ -433,7 +437,7 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
         return self._conv_transpose_forward(input, self.weight, self.bias)
 
 
-def packed_conv_eval(conv: nn.Module, input_size: list):
+def packed_conv_eval(conv: nn.Module, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
@@ -442,7 +446,7 @@ def packed_conv_eval(conv: nn.Module, input_size: list):
     )
 
 
-def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: list):
+def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: Optional[list]):
     assert not (conv_transpose.training), "Fusion only for eval!"
     return ConvTransposeUnary2d(
         conv_transpose,
@@ -451,7 +455,7 @@ def packed_conv_transpose_eval(conv_transpose: nn.Module, input_size: list):
     )
 
 
-def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: list):
+def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
     return ConvUnary2d(
         conv,
@@ -460,7 +464,7 @@ def fused_conv_unary_eval(conv: nn.Module, unary: nn.Module, input_size: list):
     )
 
 
-def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: list):
+def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: Optional[list]):
     assert not (conv.training), "Fusion only for eval!"
     return ConvBinary2d(
         conv,
@@ -470,7 +474,7 @@ def fused_conv_binary_eval(conv: nn.Module, binary_op_name: str, input_size: lis
 
 
 def fused_conv_binary_unary_eval(
-    conv_binary: nn.Module, unary: nn.Module, input_size: list
+    conv_binary: nn.Module, unary: nn.Module, input_size: Optional[list]
 ):
     assert not (conv_binary.training), "Fusion only for eval!"
     # reuse origin conv module, and just update its' unary attr.
@@ -478,26 +482,26 @@ def fused_conv_binary_unary_eval(
     return conv_binary
 
 
-def packed_linear_eval(linear: nn.Module, input_size: list):
+def packed_linear_eval(linear: nn.Module, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     if linear.weight.dtype == torch.bfloat16:
         return LinearUnary(linear, None, input_size)
     return PackedLinear(linear, input_size)
 
 
-def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: list):
+def fused_linear_unary_eval(linear: nn.Module, unary: nn.Module, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     return LinearUnary(linear, unary, input_size)
 
 
-def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: list):
+def fused_linear_binary_eval(linear: nn.Module, attr: str, input_size: Optional[list]):
     assert not (linear.training), "Fusion only for eval!"
     linear_binary = LinearBinary(linear, attr, input_size)
     return linear_binary
 
 
 def fused_conv_transpose_unary_eval(
-    conv_transpose: nn.Module, unary: nn.Module, input_size: list
+    conv_transpose: nn.Module, unary: nn.Module, input_size: Optional[list]
 ):
     assert not (conv_transpose.training), "Fusion only for eval!"
     return ConvTransposeUnary2d(
@@ -531,6 +535,7 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
+    #if config.cpp.weight_prepack and not dynamo_config.dynamic_shapes:
     if config.cpp.weight_prepack:
         gm = pack_module(gm)
     return gm
@@ -630,6 +635,8 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 computation_node_input_size = (
                     node.args[0].args[0].meta.get("tensor_meta").shape
                 )
+                if dynamo_config.dynamic_shapes:
+                    computation_node_input_size = None
                 fused_module = fuse_func(
                     computation_node, unary_node, computation_node_input_size
                 )
@@ -648,6 +655,8 @@ def replace_and_fuse_for_binary(
     computation_node_input_size = (
         node.args[index_node].args[0].meta.get("tensor_meta").shape
     )
+    if dynamo_config.dynamic_shapes:
+        computation_node_input_size = None
     fused_module = fuse_func(computation_node, attr, computation_node_input_size)
     replace_node_module(node.args[index_node], modules, fused_module)
     node.args[index_node].args = node.args[index_node].args + (
@@ -762,11 +771,11 @@ def pack_module(gm: torch.fx.GraphModule):
                 if cur_module.training:
                     continue
                 computation_node_input_meta = node.args[0].meta.get("tensor_meta")
-                # for fp32 linear, only packed when has mkl
+                # for fp32 linear, only packed when has mkl and static shape
                 if (
                     computation_node_input_meta.dtype == torch.float32
                     and type(cur_module) in [torch.nn.Linear]
-                    and not torch._C.has_mkl
+                    and (not torch._C.has_mkl or dynamo_config.dynamic_shapes)
                 ):
                     continue
                 computation_node_input_size = computation_node_input_meta.shape
@@ -782,6 +791,8 @@ def pack_module(gm: torch.fx.GraphModule):
                 # TODO: remove this when group depthwise ConvTranspose is supported
                 if is_group_depthwise_conv_transpose(cur_module):
                     continue
+                if dynamo_config.dynamic_shapes:
+                    computation_node_input_size = None
                 new_module = computation_op_packed_map[type(cur_module)](
                     cur_module, computation_node_input_size
                 )
