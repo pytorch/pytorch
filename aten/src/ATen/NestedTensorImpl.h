@@ -92,7 +92,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
    * If possible use get_buffer() instead. This function returns the storage
    * as a tensor directly, which is not safe to use in general. If using this
    * function, The caller must ensure to account for nested_sizes,
-   * nested_strides and offsets.
+   * nested_strides and storage_offsets.
    *
    * @return A newly constructed view tensor
    */
@@ -258,7 +258,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
       stridemat_ptr += orig_dim;
     }
     // if there is blank memory between underlying tensors
-    if (offsets[0] != 0) {
+    if (offsets_ptr[0] != 0) {
       return false;
     }
     sizemat_ptr = sizemat.data_ptr<int64_t>();
