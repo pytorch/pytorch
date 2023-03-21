@@ -185,6 +185,12 @@ Tensor threshold_backwards_nested(const Tensor& grad_output, const Tensor& input
     return map_nt_binary(grad_output, input, partial_relu_backward);
 }
 
+// Tensor grad_output, Tensor self, *, Tensor(a!) grad_input) -> Tensor(a!)
+Tensor silu_backward_nested(const Tensor& grad_output, const Tensor& self){
+    auto partial_silu_backward = [](auto && PH1, auto && PH2) { return at::silu_backward(std::forward<decltype(PH1)>(PH1), std::forward<decltype(PH2)>(PH2)); };
+    return map_nt_binary(grad_output, self, partial_silu_backward);
+}
+
 std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     const Tensor& grad,
     const Tensor& input,
