@@ -2735,8 +2735,8 @@ def aot_function(
     hasher_type=None,  # deprecated
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
-    *,
     inference_compiler: Optional[Callable] = None,
+    *,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
 ) -> Callable:
@@ -2773,7 +2773,10 @@ def aot_function(
             backward graphs.
         decompositions (Dict): A dictionary to define the decomposition of
             larger Aten ops into simpler or core Aten ops.
-
+        inference_compiler (Optional[Callable]): A Python function that accepts an
+            Fx graph with Aten ops and input args, and returns a Callable that
+            semantically is equivalent to the input Fx graph.  Default: None
+            (when None, it defaults to the :attr:`fw_compiler`)
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
         :attr:`fn`, but with forward and backward graph compiled via
