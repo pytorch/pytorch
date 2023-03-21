@@ -10,7 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
-from typing import Any, Callable
+from typing import Callable
 from unittest.mock import patch
 
 import numpy as np

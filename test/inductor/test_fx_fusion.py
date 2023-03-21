@@ -12,7 +12,7 @@ from torch._inductor.overrides import (
     transpose_matmul,
 )
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 

@@ -2,7 +2,7 @@ import copy
 import logging
 import random
 import weakref
-from typing import List, Optional
+from typing import Optional
 
 import torch
 import torch._dynamo.config as dynamo_config
