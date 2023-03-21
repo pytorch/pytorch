@@ -235,6 +235,15 @@ def fetch_tensor_proxy(tracer):
 
 HANDLED_TYPES = (torch.Tensor, torch.nn.Parameter)
 
+@contextlib.contextmanager
+def inside_mode(proxy_mode):
+    old = proxy_mode.is_inside_mode
+    proxy_mode.is_inside_mode = True
+    try:
+        yield
+    finally:
+        proxy_mode.is_inside_mode = old
+
 def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     def can_handle_tensor(x):
         return type(x) in HANDLED_TYPES or has_proxy_slot(x, proxy_mode.tracer)
@@ -330,6 +339,12 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
     if func is torch.ops.aten.lift_fresh.default:
         func = torch.ops.aten.lift_fresh_copy.default
 
+    # See Note [Per-Dispatch-Key Modes Must Be Reentrant]
+    # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
+    # then we only want it to trace out proxies the first time that we hit an op.
+    if proxy_mode.is_inside_mode:
+        return func(*args, **kwargs)
+
     proxy_out = proxy_mode.tracer.create_proxy('call_function', func, proxy_args, proxy_kwargs,
                                                name=proxy_mode.tracer.graph._target_to_str(func.overloadpacket.__name__))
 
@@ -345,7 +360,8 @@ def proxy_call(proxy_mode, func, pre_autograd, args, kwargs):
         else:
             args[0].proxy = proxy_out
 
-    out = func(*args, **kwargs)
+    with inside_mode(proxy_mode):
+        out = func(*args, **kwargs)
 
     # In some circumstances, we will be tracing in a situation where a tensor
     # is *statically* known to be a constant (currently, this only happens if
@@ -534,18 +550,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if func in [prim.device.default]:
             return func(*args, **kwargs)
 
-
-        # If our mode is on multiple mode stacks (e.g. the Autograd and Python mode stacks)
-        # then we only want it to trace out proxies the first time that we hit an op.
-        if self.is_inside_mode:
-            out = func(*args, **kwargs)
-            return out
-        else:
-            try:
-                self.is_inside_mode = True
-                return proxy_call(self, func, self.pre_autograd, args, kwargs)
-            finally:
-                self.is_inside_mode = False
+        return proxy_call(self, func, self.pre_autograd, args, kwargs)
 
 
 class ProxySymDispatchMode(SymDispatchMode):
@@ -674,7 +679,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, pre_autograd=False):
+def make_fx(f, *, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, pre_autograd=False):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:

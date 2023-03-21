@@ -81,9 +81,10 @@ def _push_mode(mode, k: Optional[DispatchKey] = None):
         for op in get_cached_ops():
             op._uncache_dispatch(k)
         push_mode_for_key(k, mode)
+    # Note [Per-Dispatch-Key Modes Must Be Reentrant]
     # The idea here is that we are allowed to push modes onto any dispatch key's mode stack, but:
     # (1) We **always** push the mode onto the python mode stack. Operators can have fallthrough
-    #     kernels registered to any dispatch key, so we use the Python mode stack as a fallthrough,
+    #     kernels registered to any dispatch key, so we use the Python mode stack as a catchall,
     #     to guarantee that every op will be seen by our mode.
     # (2) We expect the mode that you push to handle being re-entrant: If we end up invoking the mode
     #     at both the Autograd key and the Python key, nothing bad should happen.

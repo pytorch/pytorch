@@ -638,7 +638,7 @@ def forward(self, x_1):
                 return NotImplemented
             return beta * a + alpha * (b @ c)
 
-        decomposed_fx = make_fx(f, {aten.addmm.default: addmm})(*inps)
+        decomposed_fx = make_fx(f, decomposition_table={aten.addmm.default: addmm})(*inps)
 
         self.assertEqual(fx_g(*inps), decomposed_fx(*inps))
         self.assertEqual(len([n for n in fx_g.graph.nodes if n.target == aten.addmm.default]), 2)
