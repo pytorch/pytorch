@@ -567,17 +567,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertEqual(all_live_block_count(), 2)
 
-            self.assertEqual(self.get_manager().called_forwards_on_stack, 2)
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 2)
 
             out2.sum().backward()
 
-            self.assertEqual(self.get_manager().called_forwards_on_stack, 0)
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
 
             del out
             del out2
 
             out = foo_opt(ones.detach())
-            self.assertEqual(self.get_manager().called_forwards_on_stack, 0)
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
 
 
 if __name__ == "__main__":
