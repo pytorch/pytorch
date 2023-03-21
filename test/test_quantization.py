@@ -134,5 +134,8 @@ try:
 except ImportError:
     pass
 
+# Experimental functionality
+from quantization.core.experimental.test_bits import TestBits  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()

@@ -8119,6 +8119,23 @@ class TestNNDeviceType(NNTestCase):
         if self.device_type == 'cuda':
             self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input, device)
 
+    @parametrize_test("instance_norm_cls", [nn.InstanceNorm1d, nn.InstanceNorm2d, nn.InstanceNorm3d], name_fn=lambda c: c.__name__)
+    @parametrize_test("no_batch_dim", [True, False])
+    @parametrize_test("affine", [True, False])
+    def test_instancenorm_raises_error_if_input_channels_is_not_num_features(self, device, instance_norm_cls, no_batch_dim, affine):
+        inst_norm = instance_norm_cls(4, affine=affine)
+        size = [2] * inst_norm._get_no_batch_dim()
+        if not no_batch_dim:
+            size = [3] + size
+        t = torch.randn(size)
+        if affine:
+            with self.assertRaisesRegex(ValueError, "expected input's size at dim="):
+                inst_norm(t)
+        else:
+            with warnings.catch_warnings(record=True) as w:
+                inst_norm(t)
+            self.assertIn("which is not used because affine=False", str(w[0].message))
+
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -8662,6 +8679,19 @@ class TestNNDeviceType(NNTestCase):
                 x = torch.randn(10, 0, requires_grad=True, device=device, dtype=dtype)
                 y = torch.ones(10, 0, device=device).type(torch.long)
                 mod(x, y)
+
+    @onlyCUDA
+    def test_MarginLoss_warnings(self, device):
+        model = torch.nn.Linear(128, 22, device=device)
+        loss = torch.nn.MultiMarginLoss()
+        x = torch.rand((56, 128), device=device)
+        targets = torch.randint(22, (56,), device=device)
+        f = io.StringIO()
+        with contextlib.redirect_stderr(f):
+            out = model(x)
+            l = loss(out, targets)
+            l.backward()
+        self.assertTrue(len(f.getvalue()) == 0)
 
     @onlyNativeDeviceTypes
     def test_Unfold_empty(self, device):
@@ -9924,10 +9954,11 @@ class TestNNDeviceType(NNTestCase):
                 (1, 1, 3, 3, 3))
             grid[:, 1, 1, 1, 0] = float('inf')
             result = torch.nn.functional.grid_sample(image, grid, padding_mode='zeros')
+            tol_override = {'atol': 0.005, 'rtol': 0} if dtype == torch.half else {}
             self.assertEqual(result, torch.tensor([[[[[27., 26., 25.], [24., 23., 22.], [21., 20., 19.]],
                                                      [[18., 17., 16.], [15., 0., 13.], [12., 11., 10.]],
                                                      [[9., 8., 7.], [6., 5., 4.], [3., 2., 1.]]]]],
-                                                  device=device, dtype=dtype))
+                                                  device=device, dtype=dtype), **tol_override)
             result.backward(torch.ones_like(result))
             expected_grad = torch.ones_like(image)
             expected_grad[0, 0, 1, 1, 1] = 0
@@ -10036,20 +10067,23 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     def test_grid_sample_half_precision(self):
-        def helper(shape_in, shape_out):
+        def helper(shape_in, shape_out, align_corners):
             for mode in ('bilinear', 'nearest', 'bicubic'):
                 if len(shape_in) != 4 and mode == 'bicubic':
                     continue
                 data = torch.randn(shape_in, device='cuda', dtype=torch.half)
                 grid = torch.rand(shape_out, device='cuda', dtype=torch.half) * 2.0 - 1.0
 
-                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=False)
-                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros', align_corners=False)
+                out_half = F.grid_sample(data, grid, mode=mode, padding_mode='zeros', align_corners=align_corners)
+                out_double = F.grid_sample(data.double(), grid.double(), mode=mode, padding_mode='zeros',
+                                           align_corners=align_corners)
 
                 self.assertEqual(out_half, out_double.half(), msg="grid_sample with mode = {} doesn't match".format(mode))
 
-        helper((32, 64, 16, 16), (32, 8, 8, 2))
-        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3))
+        helper((32, 64, 16, 16), (32, 8, 8, 2), True)
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), True)
+        helper((32, 64, 16, 16), (32, 8, 8, 2), False)
+        helper((32, 64, 16, 16, 16), (32, 8, 8, 8, 3), False)
 
     def _test_gumbel_softmax_st_shapes(self, device, dtype, shape, dim, count_expected):
         logits = torch.randn(shape, dtype=torch.float, device=device)

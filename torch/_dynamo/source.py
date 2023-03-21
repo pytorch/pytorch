@@ -136,9 +136,15 @@ class AttrSource(Source):
         return self.base.guard_source()
 
     def name(self):
-        if self.member.isnumeric():
+        if not self.member.isidentifier():
             return f"getattr({self.base.name()}, {self.member!r})"
         return f"{self.base.name()}.{self.member}"
+
+
+@dataclasses.dataclass
+class ParamBufferSource(AttrSource):
+    def guard_source(self):
+        return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
 
 
 class TensorProperty(enum.Enum):

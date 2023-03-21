@@ -390,8 +390,6 @@ aten::_mps_convolution_transpose.out
 aten::_native_batch_norm_legit.no_stats_out
 aten::_native_batch_norm_legit.out
 aten::_native_batch_norm_legit_no_training.out
-aten::_native_decoder_only_multi_head_attention
-aten::_native_decoder_only_multi_head_attention.out
 aten::_native_multi_head_attention
 aten::_native_multi_head_attention.out
 aten::_neg_view
@@ -511,8 +509,6 @@ aten::_to_dense
 aten::_to_dense.out
 aten::_transform_bias_rescale_qkv
 aten::_transform_bias_rescale_qkv.out
-aten::_transformer_decoder_only_layer_fwd
-aten::_transformer_decoder_only_layer_fwd.out
 aten::_transformer_encoder_layer_fwd
 aten::_transformer_encoder_layer_fwd.out
 aten::_trilinear
@@ -568,8 +564,6 @@ aten::adaptive_max_pool3d_backward
 aten::adaptive_max_pool3d_backward.grad_input
 aten::addbmm
 aten::addbmm.out
-aten::addmv
-aten::addmv.out
 aten::addr_
 aten::affine_grid_generator
 aten::affine_grid_generator.out
@@ -578,8 +572,6 @@ aten::alias_copy.out
 aten::all_gather_into_tensor
 aten::all_reduce
 aten::allclose
-aten::aminmax
-aten::aminmax.out
 aten::angle
 aten::angle.out
 aten::argmax
@@ -892,6 +884,7 @@ aten::median.out
 aten::min
 aten::min.dim
 aten::min.dim_min
+aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
 aten::miopen_batch_norm_backward
@@ -960,8 +953,6 @@ aten::nanmedian
 aten::nanmedian.dim
 aten::nanmedian.dim_values
 aten::nanmedian.out
-aten::nansum
-aten::nansum.out
 aten::native_group_norm.out
 aten::native_norm
 aten::native_norm.ScalarOpt_dim_dtype
@@ -1074,6 +1065,7 @@ aten::range.out
 aten::range.out_
 aten::range.step
 aten::record_stream
+aten::reduce_scatter_tensor
 aten::reflection_pad1d
 aten::reflection_pad1d.out
 aten::reflection_pad1d_backward

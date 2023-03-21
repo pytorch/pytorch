@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import unittest
+from functools import partial
 
 import numpy as np
 import torch
@@ -490,14 +491,27 @@ class TestNestedTensor(TestCase):
             t.fill_(11.)
             self.assertEqual(nt_ub, t)
 
-    def test_ones_like(self):
+    def test_zero_(self):
         ntensors = 4
         nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
-        ones_nt = torch.ones_like(nt)
-
-        for nt_ub in ones_nt.unbind():
-            t = torch.ones_like(nt_ub)
+        nt.zero_()
+        for nt_ub in nt.unbind():
+            t = torch.empty_like(nt_ub)
+            t.fill_(0.)
             self.assertEqual(nt_ub, t)
+
+    @parametrize("func", [torch.ones_like, torch.zeros_like, torch.randn_like],
+                 name_fn=lambda f: f.__name__)
+    def test_like_functions(self, func):
+        ntensors = 4
+        nt = random_nt(torch.device('cpu'), torch.float32, ntensors, (4, 4))
+        torch.manual_seed(1)
+        nt_like = func(nt)
+
+        torch.manual_seed(1)
+        for nt_ub in nt_like.unbind():
+            t_like = func(nt_ub)
+            self.assertEqual(nt_ub, t_like)
 
 
 class TestNestedTensorDeviceType(TestCase):
@@ -832,7 +846,9 @@ class TestNestedTensorDeviceType(TestCase):
                           subtest(torch._C._nn.gelu_, name='gelu_'),
                           subtest(torch.tanh, name='tanh'),
                           subtest(torch.tanh_, name='tanh_'),
-                          subtest(torch.neg, name='neg')])
+                          subtest(torch.neg, name='neg'),
+                          subtest(torch.nn.functional.silu, name='silu'),
+                          subtest(partial(torch.nn.functional.silu, inplace=True), name='silu_'), ])
     def test_activations(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
@@ -2387,6 +2403,29 @@ class TestNestedTensorAutograd(TestCase):
 
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_selu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_relu = torch.nn.functional.silu(nt)
+            return torch.nested.to_padded_tensor(nt_relu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    # Previously would error when input NT doesn't require grad
+    # NotImplementedError: Cannot access storage of UndefinedTensorImpl
+    def test_layer_norm_backward_edge_case(self, device):
+        size = 4
+        a = torch.randn(1, 2, size, requires_grad=False, dtype=torch.float64, device=device)
+        nt = torch.nested.nested_tensor([a])
+        nt_layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+        out = nt_layer_norm(nt)
+        out.backward(out.clone())
 
     # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv

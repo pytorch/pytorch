@@ -686,9 +686,19 @@ def _optimize_graph(
     graph = _C._jit_pass_canonicalize(graph)
     _C._jit_pass_lint(graph)
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
+
     return graph
 
 
@@ -1169,23 +1179,32 @@ def _model_to_graph(
     _set_input_and_output_names(graph, input_names, output_names)
     params_dict = _get_named_param_dict(graph, params)
 
-    if training is None or training == _C_onnx.TrainingMode.EVAL:
-        params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
-
     if (
         do_constant_folding
         and GLOBALS.export_onnx_opset_version
         >= _constants.ONNX_CONSTANT_FOLDING_MIN_OPSET
     ):
+        if training is None or training == _C_onnx.TrainingMode.EVAL:
+            params_dict = _C._jit_pass_onnx_eval_peephole(graph, params_dict)
+
         params_dict = _C._jit_pass_onnx_constant_fold(
             graph, params_dict, GLOBALS.export_onnx_opset_version
         )
         _C._jit_pass_dce_allow_deleting_nodes_with_side_effects(graph)
 
     if GLOBALS.onnx_shape_inference:
-        _C._jit_pass_onnx_graph_shape_type_inference(
-            graph, params_dict, GLOBALS.export_onnx_opset_version
-        )
+        try:
+            _C._jit_pass_onnx_graph_shape_type_inference(
+                graph, params_dict, GLOBALS.export_onnx_opset_version
+            )
+        except RuntimeError as exc:
+            if (
+                _C_onnx._CAFFE2_ATEN_FALLBACK
+                and exc.args[0]
+                == "ScalarType UNKNOWN_SCALAR is an unexpected tensor scalar type!"
+            ):
+                # Caffe2 builds can have UNKNOWN_SCALAR for some tensors
+                pass
 
     params_dict = _C._jit_pass_onnx_eliminate_unused_items(graph, params_dict)
 
@@ -1333,7 +1352,7 @@ def unconvertible_ops(
     unsupported_ops = []
     for node in graph.nodes():
         domain_op = node.kind()
-        if domain_op.startswith("onnx::") or domain_op.startswith("prim::"):
+        if domain_op.startswith(("onnx::", "prim::")):
             # We consider onnx and prim ops as supported ops, even though some "prim"
             # ops are not implemented as symbolic functions, because they may be
             # eliminated in the conversion passes. Users may still see errors caused
@@ -1436,7 +1455,6 @@ def _reset_trace_module_map():
 
 @_beartype.beartype
 def _get_module_attributes(module):
-
     annotations = typing.get_type_hints(type(module))
     base_m_annotations = typing.get_type_hints(torch.nn.Module)
     [annotations.pop(k, None) for k in base_m_annotations]
@@ -1781,7 +1799,6 @@ def _need_symbolic_context(symbolic_fn: Callable) -> bool:
 def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
     """Decorator that provides the symbolic context to the symbolic function if needed."""
     if _need_symbolic_context(symbolic_fn):
-
         # TODO(justinchuby): Update the module name of GraphContext when it is public
         warnings.warn(
             "The first argument to symbolic functions is deprecated in 1.13 and will be "
@@ -1805,7 +1822,6 @@ def _symbolic_context_handler(symbolic_fn: Callable) -> Callable:
 
 @_beartype.beartype
 def _get_aten_op_overload_name(n: _C.Node) -> str:
-
     # Returns `overload_name` attribute to ATen ops on non-Caffe2 builds
     schema = n.schema()
     if not schema.startswith("aten::") or symbolic_helper.is_caffe2_aten_fallback():
