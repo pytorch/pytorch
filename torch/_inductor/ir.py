@@ -907,7 +907,6 @@ class Reduction(Loops):
                     reduction_hint,
                 )
         elif split_reduction and dynamo_config.dynamic_shapes:
-
             _warn_split_reductions()
 
         return TensorBox.create(
@@ -3533,7 +3532,12 @@ class ConvolutionUnary(ExternKernelAlloc):
         algorithm,
     ):
         kernel = "torch.ops.mkldnn._convolution_pointwise"
-        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _
+        ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
         constant_args = constant_args + [attr, scalars, algorithm]
