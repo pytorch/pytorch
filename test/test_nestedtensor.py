@@ -1,6 +1,7 @@
 # Owner(s): ["module: nestedtensor"]
 
 import unittest
+from functools import partial
 
 import numpy as np
 import torch
@@ -845,7 +846,9 @@ class TestNestedTensorDeviceType(TestCase):
                           subtest(torch._C._nn.gelu_, name='gelu_'),
                           subtest(torch.tanh, name='tanh'),
                           subtest(torch.tanh_, name='tanh_'),
-                          subtest(torch.neg, name='neg')])
+                          subtest(torch.neg, name='neg'),
+                          subtest(torch.nn.functional.silu, name='silu'),
+                          subtest(partial(torch.nn.functional.silu, inplace=True), name='silu_'), ])
     def test_activations(self, device, func):
         nt, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3, 6, 7), device=device, dtype=torch.float32)
         nested_result = func(nt)
@@ -2400,6 +2403,29 @@ class TestNestedTensorAutograd(TestCase):
 
         data = (a, b, c)
         assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    def test_selu_backward(self, device):
+        a = torch.randn(1, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.randn(2, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+        c = torch.randn(3, 2, 4, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b, c):
+            nt = torch.nested.as_nested_tensor([a, b, c])
+            nt_relu = torch.nn.functional.silu(nt)
+            return torch.nested.to_padded_tensor(nt_relu, 0)
+
+        data = (a, b, c)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
+
+    # Previously would error when input NT doesn't require grad
+    # NotImplementedError: Cannot access storage of UndefinedTensorImpl
+    def test_layer_norm_backward_edge_case(self, device):
+        size = 4
+        a = torch.randn(1, 2, size, requires_grad=False, dtype=torch.float64, device=device)
+        nt = torch.nested.nested_tensor([a])
+        nt_layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
+        out = nt_layer_norm(nt)
+        out.backward(out.clone())
 
     # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv
