@@ -12,7 +12,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
-from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
+from torch._prims_common import IntLike, NumberType, TensorLike, TensorLikeType, TensorSequenceType
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
     _maybe_resize_out,
@@ -154,6 +154,14 @@ def fill_tensor(self, value: Tensor):
         lambda: f"fill only supports 0-dimension value tensor but got tensor with {value.dim()} dimensions",
     )
     return torch.full_like(self, value.item())
+
+@register_decomposition(aten.__rshift__.Scalar)
+def bitwise_right_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    return prims.shift_right_arithmetic(a, b)
+
+@register_decomposition(aten.__lshift__.Scalar)
+def bitwise_left_shift(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
+    return prims.shift_left_arithmetic(a, b)
 
 
 @register_decomposition(aten.hardsigmoid)
@@ -1497,7 +1505,7 @@ def _native_batch_norm_legit_no_training(
         momentum,
         eps,
     )
-
+@register_decomposition(aten.add)
 
 @register_decomposition(aten._native_batch_norm_legit.default)
 def _native_batch_norm_legit(
