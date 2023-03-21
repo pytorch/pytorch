@@ -2,16 +2,14 @@
 from __future__ import annotations
 
 import inspect
-
 import io
 import os
 import tempfile
-
+import unittest
 from typing import Any, Callable, Sequence, Tuple, Union
 
 import onnx.reference
 import onnx_test_common
-
 import onnxruntime  # type: ignore[import]
 
 import torch
@@ -57,7 +55,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     # Feed args and kwargs into exporter.
     # Note that exporter should flatten kwargs into positional args the exported model;
     # since ONNX doesn't represent kwargs.
-    onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+    onnx_model = fx_onnx.export(
         model,
         *input_args,
         opset_version=opset_version,
@@ -114,7 +112,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
 
-    def test_func_with_args_and_kwargs(self):
+    # AssertionError: Dynamo input/output is not consistent with traced input/output
+    # https://github.com/pytorch/pytorch/issues/96379
+    @unittest.expectedFailure
+    def test_func_with_args_and_tensor_kwargs(self):
         # Non-tensor optional kwargs are always folded into constant and
         # removed from input list in Dynamo-traced graph, so we can't
         # define a function like
@@ -145,6 +146,25 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             func, (tensor_x,), b=torch.tensor(5.0)
         )
+
+    # beartype.roar.BeartypeCallHintParamViolation:
+    # @beartyped onnxscript.function_libs.torch_aten.graph_building.TorchScriptGraph.add_input()
+    # parameter input_value=8.0 violates type hint typing.Union[torch.Tensor, NoneType],
+    # as float 8.0 not <class "builtins.NoneType"> or <protocol "torch.Tensor">.
+    @unittest.expectedFailure
+    def test_func_with_args_and_kwargs(self):
+        def func(x, b=1.0):
+            y = x + b
+            z = y.relu()
+            return (y, z)
+
+        tensor_x = torch.randn(1, 1, 2, dtype=torch.float32)
+
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,))
+        # Test with only positional args.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x, 8.0))
+        # Test while specifying optional kwarg.
+        _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(func, (tensor_x,), b=5.0)
 
     def test_mnist(self):
         class MNISTModel(nn.Module):
@@ -210,7 +230,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
-        onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
+        onnx_model = fx_onnx.export(
             model, use_binary_format=True, opset_version=self.opset_version, **inputs
         )
 
