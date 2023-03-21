@@ -469,13 +469,6 @@ class Scatter(Pointwise):
         )
 
 
-@functools.lru_cache(None)
-def _warn_split_reductions():
-    log.warning(
-        "Could not do split reduction due to dynamic shapes; performance may be worse"
-    )
-
-
 class ReductionHint(Enum):
     INNER = 0
     OUTER = 1
@@ -907,7 +900,9 @@ class Reduction(Loops):
                     reduction_hint,
                 )
         elif split_reduction and dynamo_config.dynamic_shapes:
-            _warn_split_reductions()
+            log.warning(
+                "Could not do split reduction due to dynamic shapes; performance may be worse"
+            )
 
         return TensorBox.create(
             Reduction(
