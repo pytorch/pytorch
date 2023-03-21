@@ -1,7 +1,8 @@
 Frequently Asked Questions
 ==========================
+**Author**: `Mark Saroufim <https://github.com/msaroufim>`_
 
-At a high level, the TorchDynamo stack consists of a graph capture from
+At a high level, the PyTorch 2.0 stack consists of a graph capture from
 Python code using dynamo and a backend compiler. In this example the
 backend compiler consists of backward graph tracing using AOTAutograd
 and graph lowering using TorchInductor. There are of course many more
@@ -43,7 +44,7 @@ nodes it organizes its gradients and parameters into buckets which
 reduces communication times and allows a node to broadcast a fraction of
 its gradients to other waiting nodes.
 
-Graph breaks in distributed code means you can expect dynamo and its
+Graph breaks in distributed code mean you can expect dynamo and its
 backends to optimize the compute overhead of a distributed program but
 not its communication overhead. Graph-breaks may interfere with
 compilation speedups, if the reduced graph-size robs the compiler of
@@ -369,12 +370,15 @@ compilers can be different in subtle ways yet have dramatic impact on
 your training stability. So the accuracy debugger is very useful for us
 to detect bugs in our codegen or with a backend compiler.
 
+If you'd like to ensure that random number generation is the same across both torch
+and triton then you can enable ``torch._inductor.config.fallback_random = True``
+
 Why am I getting OOMs?
 ----------------------
 
 Dynamo is still an alpha product so there’s a few sources of OOMs and if
 you’re seeing an OOM try disabling the following configurations in this
-order and then open an issue on Github so we can solve the root problem
+order and then open an issue on GitHub so we can solve the root problem
 1. If you’re using dynamic shapes try disabling them, we’ve disabled
 them by default: ``env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`` 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
