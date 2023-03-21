@@ -412,7 +412,8 @@ class KernelArgs:
 class CSEVariable:
     """A CSEVariable is just a name for an expression but it is useful to be able to annotate them on a backend dependent basis.
     The backends can inherit from this class and overload the "create_cse_var" Kernel to do that.
-    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py."""
+    The "update_on_args" method gives you a hook for annotations, see example of TritonCSEVariable in triton.py.
+    """
 
     def __init__(self, name):
         self.name = name
