@@ -1,9 +1,9 @@
 # Owner(s): ["module: inductor"]
 
 import torch
-from parameterized import parameterized
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
+from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 from torch._inductor import config
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
@@ -29,6 +29,7 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
+@instantiate_parametrized_tests
 class TestDoBench(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
@@ -107,7 +108,7 @@ class TestDoBench(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
-    @parameterized.expand([[True], [False]])
+    @parametrize("autotune_in_subproc", (True, False))
     def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
