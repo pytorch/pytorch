@@ -201,10 +201,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     bool is_low_precision = !std::is_same<opmath_t, scalar_t>::value;
     std::vector<opmath_t> sum;
     if (is_low_precision) {
-      sum.reserve(m);
-      for (const auto i : c10::irange(m)) {
-        sum[i] = y[i * incy];
-      }
+      sum.resize(m);
     }
     for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
