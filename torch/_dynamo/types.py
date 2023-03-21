@@ -1,9 +1,18 @@
 import dataclasses
 import sys
 import types
-from typing import Callable, Dict, List, NamedTuple, Optional, OrderedDict, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    OrderedDict,
+    Protocol,
+    Union,
+)
 
-from typing_extensions import Protocol
 
 if sys.version_info >= (3, 11):
     from torch._C._dynamo import eval_frame
@@ -59,4 +68,18 @@ class DynamoGuardHook(Protocol):
         f_locals: Dict[str, object],
         last: bool,
     ) -> None:
+        ...
+
+
+class ProfilerStartHook(Protocol):
+    def __call__(
+        self,
+        name: str,
+        # TODO(whc) how do I annotate a _RecordFunction here?
+    ) -> Any:
+        ...
+
+
+class ProfilerEndHook(Protocol):
+    def __call__(self, record: Any) -> None:
         ...

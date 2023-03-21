@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <string>
 #include <typeinfo>
+#include <utility>
 #include <vector>
 
 namespace torch {
@@ -120,7 +121,7 @@ ViewInfo ViewInfo::chain(
     };
   }
 
-  return ViewInfo(base_, view_func);
+  return ViewInfo(base_, std::move(view_func));
 }
 
 namespace {
@@ -156,42 +157,43 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
-void update_cpp_hooks_on_new_gradfn(
+void update_tensor_hooks_on_new_gradfn(
     const at::TensorBase& self,
+    const std::shared_ptr<torch::autograd::Node>& old_fn,
     const std::shared_ptr<torch::autograd::Node>& new_fn) {
   // This function is called whenever the grad_fn of the tensor is
   // changed. We assume here that new_fn does not yet have hooks of
-  // its own
+  // its own.
   //
   // This function does two things:
+  // (1) reset the list when grad_fn is updated, so new hooks don't
+  //     get erroneously registered to the old grad_fn.
+  //     Note that the old cpp_hooks_list_ is still kept alive by the
+  //     old grad_fn so hooks registered to the older version of the tensor
+  //     will continue to be active.
+  // (2) If there is a retains_grad hook registered, move that from the
+  //     old cpp_hooks_list_ to the new one
   const auto& meta = impl::get_autograd_meta(self);
   TORCH_INTERNAL_ASSERT(meta);
   TORCH_INTERNAL_ASSERT(new_fn);
-  if (!self.retains_grad()) {
-    // (1) reset the list when grad_fn is updated, so new hooks don't
-    //     get erroneously registered to the old grad_fn.
-    //     Note that the old cpp_hooks_list_ is still kept alive by the
-    //     old grad_fn so hooks registered to the older version of the tensor
-    //     will continue to be active.
-    meta->cpp_hooks_list_ = nullptr;
-    return;
+  meta->cpp_hooks_list_ = nullptr;
+  const c10::impl::PyInterpreter* interp =
+      self.unsafeGetTensorImpl()->pyobj_slot()->pyobj_interpreter();
+  if (interp) {
+    (*interp)->reset_backward_hooks(self.unsafeGetTensorImpl());
   }
-  // (2) If there is a retains_grad hook registered, move that from the
-  //     old cpp_hooks_list_ to the new one
-  auto idx = meta->retains_grad_;
-  auto new_list = std::make_shared<hooks_list>();
-  new_list->push_back(std::move((*meta->cpp_hooks_list_)[idx]));
-  (*meta->cpp_hooks_list_)[idx] = nullptr;
-  meta->cpp_hooks_list_ = new_list;
-  // Since this is a new list, 0 is the index of the retains_grad hook
-  meta->retains_grad_ = 0;
-  std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionPreHook(meta->cpp_hooks_list_, self.output_nr()));
-  new_fn->add_pre_hook(std::move(hook_ptr));
+  if (self.retains_grad()) {
+    TORCH_INTERNAL_ASSERT(old_fn);
+    auto out = old_fn->pop_retains_grad_hook(self.output_nr());
+    TORCH_INTERNAL_ASSERT(out != nullptr);
+    new_fn->add_retains_grad_hook(std::move(out), self.output_nr());
+  }
 }
 
 void rebase_history(const Variable& self, Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
+  const auto& meta = impl::get_autograd_meta(self);
+  auto old_fn = meta != nullptr ? meta->grad_fn_ : nullptr;
   auto diff_view_meta = get_view_autograd_meta(self);
   if (diff_view_meta && diff_view_meta->has_bw_view()) {
     // See NOTE [ View + Inplace detection ]
@@ -218,20 +220,25 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
 
   set_gradient_edge(self, std::move(gradient_edge));
   // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
-  torch::autograd::impl::update_cpp_hooks_on_new_gradfn(self, self.grad_fn());
+  torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+      self, old_fn, self.grad_fn());
 }
 
-void create_cpp_hook(const at::TensorBase& self) {
-  auto& list = materialize_autograd_meta(self)->cpp_hooks_list_;
+void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
+  const auto& fn = self.grad_fn();
+  std::shared_ptr<hooks_list>& list =
+      materialize_autograd_meta(self)->cpp_hooks_list_;
   // NOLINTNEXTLINE(modernize-make-shared)
   list.reset(new hooks_list());
-  std::unique_ptr<FunctionPreHook> hook_ptr(
-      new CppFunctionPreHook(list, self.output_nr()));
+  std::unique_ptr<FunctionPreHook> hook_ptr{
+      new CppFunctionTensorPreHook(list, self.output_nr())};
+  // NB: we could potentially only update hooks_ if !fn, but it shouldn't
+  // matter
+  //     and this was the way before, so we keep it like this for now.
   clear_hooks(self);
-  add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
-  const auto& fn = self.grad_fn();
+  add_hook(self, std::make_unique<CppFunctionTensorPreHook>(list, 0));
   if (fn) {
-    fn->add_pre_hook(std::move(hook_ptr));
+    fn->add_tensor_pre_hook(std::move(hook_ptr));
   }
 }
 
@@ -342,23 +349,15 @@ const c10::VariableVersion& version_counter(const Variable& self) {
 
 void add_hook(
     const at::TensorBase& self,
-    std::shared_ptr<FunctionPreHook> hook) {
-  materialize_autograd_meta(self)->hooks_.push_back(std::move(hook));
+    std::unique_ptr<FunctionPreHook> hook) {
+  AutogradMeta* meta = materialize_autograd_meta(self);
+  TORCH_INTERNAL_ASSERT(meta->hooks_.empty());
+  meta->hooks_.push_back(std::move(hook));
 }
 
-namespace {
-std::vector<std::shared_ptr<FunctionPreHook>> empty_singleton;
-}
-
-// TODO: Return an ArrayRef instead (and delete the singleton while you're at
-// it
-const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
-    const Variable& self) {
-  if (get_autograd_meta(self)) {
-    return get_autograd_meta(self)->hooks_;
-  } else {
-    return empty_singleton;
-  }
+std::vector<std::unique_ptr<FunctionPreHook>>& hooks(const Variable& self) {
+  TORCH_INTERNAL_ASSERT(get_autograd_meta(self));
+  return get_autograd_meta(self)->hooks_;
 }
 
 void clear_hooks(const at::TensorBase& self) {
@@ -533,15 +532,14 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   if (self.is_leaf()) { // no-op for leaves
     return;
   }
-  if (impl::get_autograd_meta(self)->retains_grad_ != -1) {
+  if (impl::get_autograd_meta(self)->retains_grad_) {
     return;
   }
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
 
-  auto retain_grad_hook = [weak_self](const at::Tensor& grad) {
-    if (weak_self.expired()) {
-      return;
-    } else {
+  auto retain_grad_hook = [weak_self](const at::TensorBase& grad_base) {
+    at::Tensor grad{grad_base};
+    if (!weak_self.expired() && grad.defined()) {
       auto var = weak_self.lock();
       if (!var->grad().defined()) {
         if (grad.is_sparse()) {
@@ -553,15 +551,19 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
         var->mutable_grad() = var->grad() + grad;
       }
     }
+    return at::TensorBase{};
   };
 
-  auto idx = at::OptionalTensorRef(self)->register_hook(retain_grad_hook);
-  impl::get_autograd_meta(self)->retains_grad_ = idx;
+  const auto& fn = self.grad_fn();
+  std::unique_ptr<FunctionPreHook> hook_ptr{new CppFunctionSingleTensorPreHook(
+      std::move(retain_grad_hook), self.output_nr())};
+  fn->add_retains_grad_hook(std::move(hook_ptr), self.output_nr());
+  impl::get_autograd_meta(self)->retains_grad_ = true;
 }
 
 bool VariableHooks::retains_grad(const at::TensorBase& self) const {
   if (impl::get_autograd_meta(self)) {
-    return impl::get_autograd_meta(self)->retains_grad_ != -1;
+    return impl::get_autograd_meta(self)->retains_grad_;
   } else {
     return false;
   }
@@ -580,7 +582,7 @@ void VariableHooks::_backward(
   std::vector<torch::autograd::Variable> input_vars(
       inputs.begin(), inputs.end());
   torch::autograd::backward(
-      {self}, {_gradient}, keep_graph, create_graph, input_vars);
+      {self}, {std::move(_gradient)}, keep_graph, create_graph, input_vars);
 }
 
 void VariableHooks::requires_grad_(
@@ -646,6 +648,7 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       return diff_view_meta->grad_fn_;
     }
     auto current_version = self._version();
+    auto old_fn = diff_view_meta->grad_fn_;
     if (diff_view_meta->get_attr_version() != current_version) {
       // This is an indirect rebase_history due to another view or the base
       // being modified inplace
@@ -661,14 +664,14 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       //   self = inplace_op(self)
       //
       // For CPU/CUDA backends, we employ one AsStridedBackward0 Node to
-      // represent the chain of view backward ops for effienciency.
+      // represent the chain of view backward ops for efficiency.
       //
       // However in XLA backend we don't have full support of
       // AsStridedBackward0, we instead run a full forward pass with a tensor
       // that requires gradient to get proper grad_fn setup, then save it to
       // DifferentiableViewMeta for future use. This is fairly cheap for XLA
       // lazy tensor approach (but would be really expensive for CPU/CUDA). XLA
-      // Tensor only run thorugh VariableType dispatch and lower the forward
+      // Tensor only run through VariableType dispatch and lower the forward
       // pass to a XLA HLO graph, then we take grad_fn and never materialize the
       // tensor content. So we only construct the graph but not execute it,
       // which is a fairly cheap operation to do.
@@ -706,8 +709,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
       }
       diff_view_meta->set_attr_version(current_version);
 
-      torch::autograd::impl::update_cpp_hooks_on_new_gradfn(
-          self, diff_view_meta->grad_fn_);
+      torch::autograd::impl::update_tensor_hooks_on_new_gradfn(
+          self, old_fn, diff_view_meta->grad_fn_);
     }
     return diff_view_meta->grad_fn_;
   }
@@ -739,7 +742,8 @@ unsigned VariableHooks::_register_hook(
   // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
-    torch::autograd::impl::create_cpp_hook(self);
+    torch::autograd::impl::create_cpp_hook(
+        self, /*is_retains_grad_hook=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);

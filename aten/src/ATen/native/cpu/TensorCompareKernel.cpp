@@ -26,7 +26,7 @@
 #include <ATen/ops/result_type.h>
 #endif
 
-namespace at { namespace native { namespace {
+namespace at::native { namespace {
 
 template <typename scalar_t, typename scalar_t_2 = int64_t, typename loop1d_t>
 static inline void compare_base_kernel_core(
@@ -176,6 +176,14 @@ static void aminmax_kernel(
   TORCH_CHECK(min_result.scalar_type() == self.scalar_type() && max_result.scalar_type() == self.scalar_type(),
     "Expect min and max dtype ", self.scalar_type(),
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
+
+  if (self.numel() == 1 && self.ndimension() == 0) {
+    min_result.resize_({});
+    max_result.resize_({});
+    min_result.fill_(self);
+    max_result.fill_(self);
+    return;
+  }
 
   AT_DISPATCH_ALL_TYPES_AND(ScalarType::Bool, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
@@ -404,4 +412,4 @@ REGISTER_DISPATCH(clamp_min_scalar_stub, &clamp_min_scalar_kernel_impl);
 REGISTER_DISPATCH(clamp_max_scalar_stub, &clamp_max_scalar_kernel_impl);
 REGISTER_DISPATCH(isin_default_stub, &isin_default_kernel_cpu);
 
-}} // namespace at::native
+} // namespace at::native

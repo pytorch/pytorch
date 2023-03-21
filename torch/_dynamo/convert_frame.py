@@ -2,22 +2,25 @@ import functools
 import itertools
 import logging
 import os
-import traceback
 import types
 import weakref
-from traceback import FrameSummary
-from typing import cast, Dict, List, Optional, Set
+from typing import Dict, Optional, Set
 
 import torch
+import torch._logging
+from torch._guards import tracing
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 
 from . import config, exc
 from .allowed_functions import is_allowed
+from .backends.registry import CompilerFn
 from .bytecode_analysis import remove_dead_code, remove_pointless_jumps
 from .bytecode_transformation import is_generator, transform_code_object
 from .eval_frame import always_optimize_code_objects, skip_code, TorchPatcher
 from .exc import (
+    augment_exc_message,
     BackendCompilerFailed,
+    format_error_msg,
     InternalTorchDynamoError,
     TorchRuntimeError,
     unimplemented,
@@ -25,26 +28,29 @@ from .exc import (
 )
 from .guards import CheckFunctionManager, GuardedCode
 from .hooks import Hooks
-from .output_graph import CompilerFn, OutputGraph
+from .output_graph import OutputGraph
 from .replay_record import ExecutionRecord
 from .symbolic_convert import InstructionTranslator
 from .utils import (
     CleanupManager,
     counters,
     dynamo_timed,
-    filter_stack,
     format_bytecode,
     gen_record_file_name,
     guard_failures,
-    init_logging,
+    increment_frame,
     is_namedtuple,
     istype,
     orig_code_map,
+    reset_graph_break_dup_checker,
+    setup_compile_debug,
     troubleshooting_url,
     write_record_to_file,
 )
 
 log = logging.getLogger(__name__)
+guards_log = torch._logging.getArtifactLogger(__name__, "guards")
+bytecode_log = torch._logging.getArtifactLogger(__name__, "bytecode")
 
 
 class Tracker:
@@ -99,9 +105,11 @@ def wrap_convert_context(fn):
             cuda_rng_state = torch.cuda.get_rng_state()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
+        cleanup = setup_compile_debug()
         try:
             return fn(*args, **kwargs)
         finally:
+            cleanup.close()
             torch._C._set_grad_enabled(prior_grad_mode)
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
@@ -173,84 +181,6 @@ def has_tensor_in_frame(frame):
     return False
 
 
-def format_error_msg(exc, code, record_filename=None, frame=None):
-    msg = os.linesep * 2
-
-    if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
-        )
-        msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
-        msg += traceback.format_exc()
-        if hasattr(exc, "real_stack"):
-            msg += (
-                "\n"
-                + "=" * 10
-                + " The above exception occurred while processing the following code "
-                + "=" * 10
-                + "\n\n"
-            )
-            stack_above_dynamo = []
-            if frame is not None:
-                stack_above_dynamo = filter_stack(traceback.extract_stack(frame))
-
-            msg += "".join(
-                traceback.format_list(
-                    stack_above_dynamo + list(reversed(get_real_stack(exc)))
-                )
-            )
-            msg += "\n"
-            msg += "=" * 10
-
-    else:
-        msg = f"WON'T CONVERT {code.co_name} {code.co_filename}\
- line {code.co_firstlineno} \ndue to: \n{traceback.format_exc(limit=-1)}"
-
-    return msg
-
-
-def get_real_stack(exc) -> List[FrameSummary]:
-    assert hasattr(exc, "real_stack")
-    return cast(List[FrameSummary], exc.real_stack)
-
-
-def augment_exc_message(exc, msg="\n"):
-    if (
-        hasattr(exc, "real_stack")
-        and len(exc.real_stack) > 0
-        and not (config.verbose and config.suppress_errors)
-    ):
-        msg += f"\nfrom user code:\n {''.join(traceback.format_list(list(reversed(get_real_stack(exc)[0:2]))))}"
-
-    if config.replay_record_enabled and hasattr(exc, "record_filename"):
-        msg += f"\nLast frame execution written to {exc.record_filename}. To run only this frame while debugging, run\
- {config.dynamo_import}.replay('{exc.record_filename}').\n"
-
-    if not config.verbose:
-        msg += (
-            f"\nSet {config.dynamo_import}.config.verbose=True for more information\n"
-        )
-
-    if hasattr(exc, "inner_exception") and hasattr(
-        exc.inner_exception, "minifier_path"
-    ):
-        msg += (
-            f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
-            "this script to find the smallest traced graph which reproduces this error.\n"
-        )
-
-    if not config.suppress_errors:
-        msg += (
-            "\n\n"
-            "You can suppress this exception and fall back to eager by setting:\n"
-            "    torch._dynamo.config.suppress_errors = True\n"
-        )
-
-    old_msg = "" if len(exc.args) == 0 else exc.args[0]
-    new_msg = old_msg + msg
-    exc.args = (new_msg,) + exc.args[1:]
-
-
 def exception_handler(e, code, frame=None):
     record_filename = None
     if hasattr(e, "exec_record"):
@@ -271,10 +201,10 @@ def convert_frame_assert(
     export: bool = False,
 ):
     """Fully convert a frame into an FX graph"""
-    init_logging()
+    reset_graph_break_dup_checker()
 
-    @dynamo_timed
     def _convert_frame_assert(frame: types.FrameType, cache_size: int, hooks: Hooks):
+        increment_frame()
         code = frame.f_code
         input_codes.add(code)
         if code in output_codes:
@@ -323,7 +253,7 @@ def convert_frame_assert(
 
             assert code in guard_failures, "TODO(whc) any other recompile reasons?"
             log.warning(
-                f"{config.dynamo_import} hit config.cache_size_limit ({config.cache_size_limit})\n"
+                f"torch._dynamo hit config.cache_size_limit ({config.cache_size_limit})\n"
                 + f"   function: {format_func_info(code)}\n"
                 + f"   reasons:  {format_guard_failures(code)}\n"
                 + f"to diagnose recompilation issues, see {troubleshooting_url}."
@@ -348,10 +278,11 @@ def convert_frame_assert(
             frame,
         )
 
-    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn
+    _convert_frame_assert._torchdynamo_orig_callable = compiler_fn  # type: ignore[attr-defined]
     return wrap_convert_context(_convert_frame_assert)
 
 
+@dynamo_timed(phase_name="entire_frame_compile")
 def _compile(
     code: types.CodeType,
     globals: Dict[str, object],
@@ -363,7 +294,6 @@ def _compile(
     hooks: Hooks,
     frame: Optional[types.FrameType] = None,
 ) -> Optional[GuardedCode]:
-
     output: Optional[OutputGraph] = None
     # This is shared across restarts
     mutated_closure_cell_contents: Set[str] = set()
@@ -384,7 +314,8 @@ def _compile(
             export,
             mutated_closure_cell_contents,
         )
-        tracer.run()
+        with tracing(tracer.output.tracing_context):
+            tracer.run()
         output = tracer.output
         assert output is not None
         assert output.output_instructions
@@ -404,9 +335,9 @@ def _compile(
                 log.debug("Restarting analysis ...")
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
-            except exc.SkipFrame:
+            except exc.SkipFrame as e:
                 log.debug(
-                    f"Skipping frame {code.co_name} \
+                    f"Skipping frame {e} {code.co_name} \
                     {code.co_filename} {code.co_firstlineno}"
                 )
                 if one_graph:
@@ -414,25 +345,26 @@ def _compile(
                 return None
         output_codes.add(out_code)
 
-        if config.output_code:
-            log.info(
-                format_bytecode(
-                    "ORIGINAL BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    code,
-                ),
-            )
-            log.info(
-                format_bytecode(
-                    "MODIFIED BYTECODE",
-                    code.co_name,
-                    code.co_filename,
-                    code.co_firstlineno,
-                    out_code,
-                ),
-            )
+        def log_bytecode(prefix, name, filename, line_no, code):
+            if bytecode_log.isEnabledFor(logging.DEBUG):
+                bytecode_log.debug(
+                    format_bytecode(prefix, name, filename, line_no, code)
+                )
+
+        log_bytecode(
+            "ORIGINAL BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+        log_bytecode(
+            "MODIFIED BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            out_code,
+        )
 
         assert output is not None
         assert output.guards is not None
@@ -446,12 +378,12 @@ def _compile(
 
         guarded_code = GuardedCode(out_code, check_fn.check_fn)
 
-        if config.output_code:
+        if guards_log.isEnabledFor(logging.DEBUG):
             guard_str = "GUARDS:\n"
             guard_str += "\n".join(
                 [f" - {str(guard)}" for guard in sorted(output.guards)]
             )
-            log.info(guard_str)
+            guards_log.debug(guard_str)
 
         if hooks.guard_export_fn is not None:
             hooks.guard_export_fn(output.guards)
@@ -494,16 +426,13 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
 
 # TODO mlazos: add support for same args, or record them
 def replay(filename):
-    from .optimizations.backends import eager
+    from .backends.debugging import eager
 
     original_replay_val = config.replay_record_enabled
     config.replay_record_enabled = False
-    init_logging()
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = {
-        k: v for k, v in itertools.chain(record.globals.items(), globals().items())
-    }
+    record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
         _compile(

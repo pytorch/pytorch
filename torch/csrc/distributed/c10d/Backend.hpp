@@ -34,7 +34,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
         std::string backend,
         std::chrono::milliseconds timeout = kBackendDefaultTimeout)
         : timeout(timeout), backend(std::move(backend)) {}
-    virtual ~Options() = default;
+    ~Options() override = default;
 
     std::chrono::milliseconds timeout;
 
@@ -43,7 +43,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   };
 
   explicit Backend(int rank, int size);
-  virtual ~Backend() = 0;
+  ~Backend() override = 0;
 
   int getRank() const {
     return rank_;
@@ -113,7 +113,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Gathers a single tensor inputBuffer into a single buffer outputBuffer that
-  // is interpreted as a contigious collection of size inputBuffer * WORLD_SIZE.
+  // is interpreted as a contiguous collection of size inputBuffer * WORLD_SIZE.
   // For implementers of ProcessGroup API and advanced users only.
   // Note: this function will be deprecated in near future.
   virtual c10::intrusive_ptr<Work> _allgather_base(

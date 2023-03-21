@@ -43,7 +43,7 @@ TEST_YAML = """
     MkldnnCPU: mkldnn_add
     ZeroTensor: add_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_add_Tensor
-  tags: canonical
+  tags: core
 
 - func: mul.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -67,7 +67,7 @@ TEST_YAML = """
     MkldnnCPU: mkldnn_mul
     ZeroTensor: mul_zerotensor
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_mul_Tensor
-  tags: canonical
+  tags: core
 
 """
 
@@ -84,7 +84,7 @@ class TestParseNativeYaml(unittest.TestCase):
         with open(self.tags_yaml_path, "w") as f:
             f.write(
                 """
-- tag: canonical
+- tag: core
   desc: test
             """
             )
@@ -181,8 +181,8 @@ class TestGenFunctionsDeclarations(unittest.TestCase):
 namespace custom_1 {
 
 // custom_1::op_1() -> bool
-TORCH_API inline bool op_1() {
-    return ::at::native::kernel_1();
+TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+    return ::at::native::kernel_1(context);
 }
 
 } // namespace custom_1
@@ -195,11 +195,35 @@ TORCH_API inline bool op_1() {
 namespace custom_2 {
 
 // custom_2::op_2() -> bool
-TORCH_API inline bool op_2() {
-    return ::at::native::kernel_2();
+TORCH_API inline bool op_2(torch::executor::RuntimeContext & context) {
+    return ::at::native::kernel_2(context);
 }
 
 } // namespace custom_2
+        """
+            in declarations
+        )
+
+    def test_aten_lib_has_context_arg(self) -> None:
+        declarations = gen_functions_declarations(
+            native_functions=[
+                self.custom_1_native_function,
+            ],
+            static_dispatch_idx=self.static_dispatch_idx,
+            selector=SelectiveBuilder.get_nop_selector(),
+            use_aten_lib=True,
+        )
+        print(declarations)
+        self.assertTrue(
+            """
+namespace custom_1 {
+
+// custom_1::op_1() -> bool
+TORCH_API inline bool op_1(torch::executor::RuntimeContext & context) {
+    return at::op_1();
+}
+
+} // namespace custom_1
         """
             in declarations
         )

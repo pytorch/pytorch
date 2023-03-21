@@ -32,6 +32,16 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
+def skip_if_pytest(fn):
+    @functools.wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
+
+
 def named_parameters_for_optimized_module(mod):
     assert isinstance(mod, eval_frame.OptimizedModule)
     return mod._orig_mod.named_parameters
@@ -46,7 +56,7 @@ def remove_optimized_module_prefix(name):
     prefix = "_orig_mod."
     assert name.startswith(prefix)
     name = name[len(prefix) :]
-    return torch.distributed.fsdp._common_utils.clean_tensor_name(name)
+    return name
 
 
 def collect_results(model, prediction, loss, example_inputs):
@@ -175,7 +185,7 @@ class CompileCounterWithBackend:
         self.backend = backend
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs):
-        from torch._dynamo.eval_frame import lookup_backend
+        from .backends.registry import lookup_backend
 
         self.frame_count += 1
         for node in gm.graph.nodes:
@@ -259,8 +269,8 @@ def _make_fn_with_patches(fn, *patches):
     @functools.wraps(fn)
     def _fn(*args, **kwargs):
         with contextlib.ExitStack() as stack:
-            for attr, val in patches:
-                stack.enter_context(patch.object(config, attr, val))
+            for module, attr, val in patches:
+                stack.enter_context(patch.object(module, attr, val))
 
             return fn(*args, **kwargs)
 
@@ -272,6 +282,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
         pass
 
     DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):
@@ -281,7 +292,6 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
             new_name = f"{name}{fn_suffix}"
             fn = _make_fn_with_patches(fn, *patches)
             fn.__name__ = new_name
-            setattr(DummyTestClass, name, None)
             setattr(DummyTestClass, new_name, fn)
 
     return DummyTestClass

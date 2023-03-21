@@ -1,8 +1,6 @@
 #include <torch/nn/functional/instancenorm.h>
 #include <torch/nn/modules/instancenorm.h>
 
-namespace F = torch::nn::functional;
-
 namespace torch {
 namespace nn {
 

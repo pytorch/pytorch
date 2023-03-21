@@ -19,8 +19,7 @@
 #include <tuple>
 #include <limits>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 template <typename scalar_t, typename accscalar_t,
@@ -334,7 +333,7 @@ void conv_depthwise_shape_check(
   if (grad_output.defined()) {
     auto expected_output_size = conv_output_size(input.sizes(), weight.sizes(),
                                                  padding, stride, dilation);
-    TORCH_CHECK(grad_output.dim() == expected_output_size.size(),
+    TORCH_CHECK(static_cast<size_t>(grad_output.dim()) == expected_output_size.size(),
                 "Expect grad_output to be ",
                 expected_output_size.size(), "D, got ",
                 grad_output.dim(), "D.");
@@ -698,5 +697,4 @@ REGISTER_CUDA_DISPATCH(conv_depthwise3d_backward_stub, &conv_depthwise3d_backwar
 #undef NODEF_OR_EQUAL_3
 #undef NODEF_OR_EQUAL
 
-}
-}
+} // namespace at::native

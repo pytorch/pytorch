@@ -54,6 +54,7 @@ TORCH_API IValueComparator getGreaterThanComparator(const IValue& v);
 namespace ivalue {
 struct Tuple;
 struct Future;
+struct Await;
 struct ConstantString;
 struct GenericDict;
 struct Object;
@@ -72,6 +73,17 @@ struct ComplexHolder : c10::intrusive_ptr_target {
     ComplexHolder() = default;
     c10::complex<double> val;
 };
+
+// Similar to ComplexHolder, for StreamData3
+struct StreamData3Holder : c10::intrusive_ptr_target {
+  public:
+    StreamData3Holder(struct c10::StreamData3 d) {
+      val = d;
+    }
+    StreamData3Holder() = delete;
+    struct c10::StreamData3 val;
+};
+
 } // namespace ivalue
 
 // This is an owning wrapper for a c10::optional<std::vector<T>>
@@ -157,6 +169,7 @@ struct Capsule {
   _(GenericList)             \
   _(GenericDict)             \
   _(Future)                  \
+  _(Await)                   \
   _(Device)                  \
   _(Stream)                  \
   _(Object)                  \
@@ -540,6 +553,13 @@ public:
   c10::intrusive_ptr<ivalue::Future> toFuture() &&;
   c10::intrusive_ptr<ivalue::Future> toFuture() const&;
 
+  IValue(c10::intrusive_ptr<ivalue::Await> v);
+  bool isAwait() const {
+    return Tag::Await == tag;
+  }
+  c10::intrusive_ptr<ivalue::Await> toAwait() &&;
+  c10::intrusive_ptr<ivalue::Await> toAwait() const&;
+
   // RRef
   IValue(c10::intrusive_ptr<c10::RRefInterface> v);
   bool isRRef() const {
@@ -868,10 +888,11 @@ public:
     return c10::Device(payload.u.as_device.type, payload.u.as_device.index);
   }
 
-  //Stream
-  IValue(c10::Stream stream)
+  // Stream
+  IValue(c10::Stream s)
     : tag(Tag::Stream) {
-    payload.u.as_int = stream.pack();
+    auto v = c10::make_intrusive<ivalue::StreamData3Holder>(s.pack3());
+    payload.u.as_intrusive_ptr = v.release();
   }
   c10::Stream toStream() &&;
   c10::Stream toStream() const &;
@@ -1164,10 +1185,12 @@ public:
         return true;
       case Tag::Future:
         return true;
+      case Tag::Await:
+        return true;
       case Tag::Device:
         return false;
       case Tag::Stream:
-        return false;
+        return true;
       case Tag::Object:
         return true;
       case Tag::PyObject:
@@ -1238,12 +1261,12 @@ public:
   friend MaybeOwnedTraits<IValue>;
 
   Payload payload;
-  Tag tag;
+  Tag tag{IValue::Tag::None};
   friend struct WeakIValue;
 };
 
 struct TORCH_API WeakIValue final {
-  WeakIValue() : tag(IValue::Tag::None), is_intrusive_ptr(false) {}
+  WeakIValue() = default;
 
   WeakIValue(const WeakIValue& rhs)
       : payload(rhs.payload),
@@ -1355,8 +1378,8 @@ struct TORCH_API WeakIValue final {
  private:
   using Payload = IValue::Payload::TriviallyCopyablePayload;
   Payload payload;
-  IValue::Tag tag;
-  bool is_intrusive_ptr;
+  IValue::Tag tag{IValue::Tag::None};
+  bool is_intrusive_ptr{false};
 };
 
 // An owning pointer to a type. When the type is class type, it requires a pair

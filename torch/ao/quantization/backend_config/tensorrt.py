@@ -10,6 +10,7 @@ from ._common_operator_config_utils import (
     _get_linear_configs,
     _get_conv_configs,
     _get_share_qparams_op_configs,
+    _get_tensor_info_op_configs,
 )
 
 __all__ = [
@@ -59,6 +60,9 @@ def get_tensorrt_backend_config() -> BackendConfig:
     share_qparams_op_dtype_configs = [
         non_weighted_op_qint8_dtype_config,
     ]
+    tensor_info_op_dtype_configs = [
+        non_weighted_op_qint8_dtype_config,
+    ]
     # there might be things not supported in fx2trt, but it will error out
     # during fx2trt conversion and can support them after that
     return BackendConfig("tensorrt") \
@@ -67,7 +71,8 @@ def get_tensorrt_backend_config() -> BackendConfig:
         .set_backend_pattern_config(cat_config) \
         .set_backend_pattern_configs(_get_linear_configs(linear_dtype_configs)) \
         .set_backend_pattern_configs(_get_binary_op_configs(binary_op_dtype_configs)) \
-        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs))
+        .set_backend_pattern_configs(_get_share_qparams_op_configs(share_qparams_op_dtype_configs)) \
+        .set_backend_pattern_configs(_get_tensor_info_op_configs(tensor_info_op_dtype_configs))
 
 def get_tensorrt_backend_config_dict():
     """

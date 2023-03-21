@@ -169,7 +169,7 @@ static void autogradBasedTransformSendToNext(
   }
 
   // Re-dispatch
-  if (getDynamicLayerStack().size() == 0) {
+  if (getDynamicLayerStack().empty()) {
     sanityCheckStack(op, stack);
   }
 

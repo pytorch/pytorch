@@ -6,9 +6,7 @@
 
 #include <c10/util/irange.h>
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 RegisterCodeGen<SimpleIREvaluator> ir_eval_codegen_reg("simple_ir_eval");
 
@@ -690,8 +688,8 @@ class SimpleIREvaluatorImpl : public IRVisitor {
           throw malformed_input(
               "Number of dimensions did not match number of strides", buf);
         }
-        size_t buf_size = 1;
-        if (dims.size() > 0) {
+        int64_t buf_size = 1;
+        if (!dims.empty()) {
           ExprHandle buf_size_expr = ExprHandle(immLike(dims[0], 1));
           ExprHandle negative_one = ExprHandle(immLike(dims[0], -1));
           for (const auto& i : c10::irange(dims.size())) {
@@ -986,7 +984,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
       values[i] = this->value();
     }
     std::vector<TInput> v1;
-    if (values.size() >= 1ULL) {
+    if (!values.empty()) {
       v1 = values[0].as_vec<TInput>();
     }
     std::vector<TInput> v2;
@@ -1311,6 +1309,4 @@ c10::optional<int64_t> evalInt(ExprPtr e) {
   }
 }
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr

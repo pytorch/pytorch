@@ -2,8 +2,10 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/IndexKernels.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSStream.h>
 
 namespace at {
 namespace mps {
@@ -21,9 +23,7 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
 }
 
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] {
-      mps_device = std::unique_ptr<MPSDevice>(new MPSDevice());
-  });
+  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
   return mps_device.get();
 }
 
@@ -31,25 +31,31 @@ id<MTLFunction> MPSDevice::metalIndexingFunction(const std::string& kernel, MTLF
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
   NSError* error = nil;
   if (!_mtl_indexing_library) {
-    MTLCompileOptions *options = [MTLCompileOptions new];
-    [options setLanguageVersion: getMetalLanguageVersion(_mtl_device)];
-    [options setFastMathEnabled: YES];
-    _mtl_indexing_library = [_mtl_device newLibraryWithSource: [NSString stringWithCString: mps::indexing_metal_shaders encoding:NSASCIIStringEncoding]
-                                                      options: options
-                                                        error: &error];
+    MTLCompileOptions* options = [MTLCompileOptions new];
+    [options setLanguageVersion:getMetalLanguageVersion(_mtl_device)];
+    [options setFastMathEnabled:YES];
+    _mtl_indexing_library = [_mtl_device newLibraryWithSource:[NSString stringWithCString:mps::indexing_metal_shaders
+                                                                                 encoding:NSASCIIStringEncoding]
+                                                      options:options
+                                                        error:&error];
     TORCH_CHECK(_mtl_indexing_library, "Failed to create indexing library, error: ", [[error description] UTF8String]);
   }
 
   id<MTLFunction> indexFunction = nil;
   if (constantValues) {
-    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]
-                                                constantValues: constantValues
-                                                         error: &error] autorelease];
+    indexFunction = [[_mtl_indexing_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]
+                                                 constantValues:constantValues
+                                                          error:&error] autorelease];
   } else {
-    indexFunction = [[_mtl_indexing_library newFunctionWithName: [NSString stringWithUTF8String: kernel.c_str()]] autorelease];
+    indexFunction =
+        [[_mtl_indexing_library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]] autorelease];
   }
 
-  TORCH_CHECK(indexFunction, "Failed to create specialized function state object: ", kernel, ", error: ", [[error description] UTF8String]);
+  TORCH_CHECK(indexFunction,
+              "Failed to create specialized function state object: ",
+              kernel,
+              ", error: ",
+              [[error description] UTF8String]);
 
   return indexFunction;
 }
@@ -61,51 +67,70 @@ MPSDevice::~MPSDevice() {
   _mtl_indexing_library = nil;
 }
 
-MPSDevice::MPSDevice(): _mtl_device(nil), _mtl_indexing_library(nil)  {
+MPSDevice::MPSDevice() : _mtl_device(nil), _mtl_indexing_library(nil) {
   // Check that MacOS 12.3+ version of MPS framework is available
   // Create the MPSGraph and check method introduced in 12.3+
   // which is used by MPS backend.
   id mpsCD = NSClassFromString(@"MPSGraph");
-  _macos13plus = [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:axis:name:)] == YES;
-  if ([mpsCD instancesRespondToSelector:@selector(LSTMWithSourceTensor:
-                                                       recurrentWeight:
-                                                           inputWeight:
-                                                                  bias:
-                                                             initState:
-                                                              initCell:
-                                                            descriptor:
-                                                                  name:)] == NO) {
+
+  if ([mpsCD instancesRespondToSelector:@selector
+             (LSTMWithSourceTensor:recurrentWeight:inputWeight:bias:initState:initCell:descriptor:name:)] == NO) {
     return;
   }
 
   NSArray* devices = [MTLCopyAllDevices() autorelease];
-  for (unsigned long i = 0 ; i < [devices count] ; i++) {
-    id<MTLDevice>  device = devices[i];
-    if(![device isLowPower]) { // exclude Intel GPUs
+  for (unsigned long i = 0; i < [devices count]; i++) {
+    id<MTLDevice> device = devices[i];
+    if (![device isLowPower]) { // exclude Intel GPUs
       _mtl_device = [device retain];
       break;
     }
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(_mtl_device);
-
 }
 
-bool MPSDevice::isMacOS13Plus() const {
-  return _macos13plus;
+bool MPSDevice::isMacOS13Plus(MacOSVersion version) const {
+  id mpsCD = NSClassFromString(@"MPSGraph");
+  static auto compileOptions = [[[MTLCompileOptions alloc] init] autorelease];
+  static bool _macos_13_0_plus = [mpsCD instancesRespondToSelector:@selector(cumulativeSumWithTensor:
+                                                                                                axis:name:)] == YES;
+  static bool _macos_13_1_plus =
+      [mpsCD instancesRespondToSelector:@selector
+             (sampleGridWithSourceTensor:
+                        coordinateTensor:layout:normalizeCoordinates:relativeCoordinates:alignCorners:paddingMode
+                                        :samplingMode:constantValue:name:)] == YES;
+  static bool _macos_13_2_plus =
+      [mpsCD instancesRespondToSelector:@selector(convolution3DWithSourceTensor:weightsTensor:descriptor:name:)] == YES;
+  static bool _macos_13_3_plus = [compileOptions respondsToSelector:@selector(maxTotalThreadsPerThreadgroup)] == YES;
+
+  switch (version) {
+    case MacOSVersion::MACOS_VER_13_0_PLUS:
+      return _macos_13_0_plus;
+    case MacOSVersion::MACOS_VER_13_1_PLUS:
+      return _macos_13_1_plus;
+    case MacOSVersion::MACOS_VER_13_2_PLUS:
+      return _macos_13_2_plus;
+    case MacOSVersion::MACOS_VER_13_3_PLUS:
+      return _macos_13_3_plus;
+    default:
+      return false;
+  }
 }
 
-at::Allocator* getMPSSharedAllocator();
-at::Allocator* getMPSPrivateAllocator();
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
-  return useSharedAllocator ? getMPSSharedAllocator() : getMPSPrivateAllocator();
+  return getIMPSAllocator(useSharedAllocator);
 }
 
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
 }
 
-bool is_macos_13_or_newer() {
-  return MPSDevice::getInstance()->isMacOS13Plus();
+bool is_macos_13_or_newer(MacOSVersion version) {
+  return MPSDevice::getInstance()->isMacOS13Plus(version);
+}
+
+void device_synchronize() {
+  getDefaultMPSStream()->synchronize(SyncType::COMMIT_AND_WAIT);
 }
 
 } // namespace mps

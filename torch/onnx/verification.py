@@ -914,7 +914,7 @@ def verify_aten_graph(
     graph = graph.copy()
 
     # Execute aten graph and get reference torch jit outputs.
-    graph_inputs = list(v for v in graph.inputs())
+    graph_inputs = list(graph.inputs())
     jit_inputs = tuple([arg for arg in input_args if arg is not None])
     weights = [params_dict[v.debugName()] for v in graph_inputs[len(jit_inputs) :]]
     assert all([w is not None for w in weights])
@@ -940,7 +940,7 @@ def verify_aten_graph(
     # NOTE: Verification is unstable. Try catch to emit information for debugging.
     try:
         # NOTE: Input might be dce'ed, so we need to remove those from the input args.
-        new_input_names = set(v.debugName() for v in graph.inputs())
+        new_input_names = {v.debugName() for v in graph.inputs()}
         new_input_args = []
         for v, arg in zip(original_jit_graph.inputs(), input_args):
             if v.debugName() in new_input_names:
@@ -956,6 +956,7 @@ def verify_aten_graph(
 
         onnx_session = _onnx_backend_session(model_f, verification_options.backend)
         onnx_outs = _run_onnx(onnx_session, onnx_inputs)
+        del onnx_session  # To free device memory
 
         try:
             _compare_onnx_pytorch_outputs(

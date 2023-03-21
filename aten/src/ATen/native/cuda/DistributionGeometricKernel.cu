@@ -3,7 +3,7 @@
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/cuda/DistributionTemplates.h>
 
-namespace at { namespace native {
+namespace at::native {
 
 void geometric_kernel(TensorIteratorBase& iter, double p_, c10::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
@@ -12,4 +12,4 @@ void geometric_kernel(TensorIteratorBase& iter, double p_, c10::optional<Generat
 
 REGISTER_DISPATCH(geometric_stub, &geometric_kernel);
 
-}} // namespace at::native
+} // namespace at::native

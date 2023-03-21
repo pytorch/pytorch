@@ -53,7 +53,7 @@ if(USE_CUDA)
       caffe2_update_option(USE_NVRTC OFF)
     endif()
     if(CAFFE2_USE_CUDNN)
-      list(APPEND Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS caffe2::cudnn-public)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS torch::cudnn)
     else()
       caffe2_update_option(USE_CUDNN OFF)
     endif()
@@ -84,49 +84,34 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   enable_ubsan()
 endif()
 
-# For MSVC,
-# 1. Remove /Zi, /ZI and /Z7 for Release, MinSizeRel and Default builds
-# 2. Switch off incremental linking in debug builds
-# 3. If MSVC_Z7_OVERRIDE is ON, then /Zi and /ZI will be replaced with /Z7
-#    for Debug and RelWithDebInfo builds
-if(MSVC)
-  # skip unwanted includes from windows.h
-  add_definitions(-DWIN32_LEAN_AND_MEAN)
-
-  # Windows SDK broke compatibility since version 25131, but introduced this define for backward compatibility.
-  add_definitions(-D_UCRT_LEGACY_INFINITY)
-
-  foreach(flag_var
-      CMAKE_C_FLAGS CMAKE_C_FLAGS_RELEASE CMAKE_C_FLAGS_MINSIZEREL
-      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_MINSIZEREL)
-    if(${flag_var} MATCHES "/Z[iI7]")
-      string(REGEX REPLACE "/Z[iI7]" "" ${flag_var} "${${flag_var}}")
+if(USE_ASAN OR USE_TSAN)
+  find_package(Sanitizer REQUIRED)
+  if(USE_ASAN)
+    if(TARGET Sanitizer::address)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::address)
+    else()
+      message(WARNING "Not ASAN found. Suppress this warning with -DUSE_ASAN=OFF.")
+      caffe2_update_option(USE_ASAN OFF)
     endif()
-  endforeach(flag_var)
-  if(MSVC_Z7_OVERRIDE)
-    foreach(flag_var
-        CMAKE_C_FLAGS_DEBUG CMAKE_C_FLAGS_RELWITHDEBINFO
-        CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELWITHDEBINFO)
-      if(${flag_var} MATCHES "/Z[iI]")
-        string(REGEX REPLACE "/Z[iI]" "/Z7" ${flag_var} "${${flag_var}}")
-      endif()
-    endforeach(flag_var)
-  endif(MSVC_Z7_OVERRIDE)
-  foreach(flag_var
-      CMAKE_SHARED_LINKER_FLAGS_RELWITHDEBINFO CMAKE_STATIC_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_EXE_LINKER_FLAGS_RELWITHDEBINFO CMAKE_MODULE_LINKER_FLAGS_RELWITHDEBINFO
-      CMAKE_SHARED_LINKER_FLAGS_DEBUG CMAKE_STATIC_LINKER_FLAGS_DEBUG
-      CMAKE_EXE_LINKER_FLAGS_DEBUG CMAKE_MODULE_LINKER_FLAGS_DEBUG)
-    if(${flag_var} MATCHES "/INCREMENTAL" AND NOT ${flag_var} MATCHES "/INCREMENTAL:NO")
-      string(REGEX REPLACE "/INCREMENTAL" "/INCREMENTAL:NO" ${flag_var} "${${flag_var}}")
+    if(TARGET Sanitizer::undefined)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::undefined)
     endif()
-  endforeach(flag_var)
-endif(MSVC)
+  endif()
+  if(USE_TSAN)
+    if(TARGET Sanitizer::thread)
+      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Sanitizer::thread)
+    else()
+      message(WARNING "Not TSAN found. Suppress this warning with -DUSE_TSAN=OFF.")
+      caffe2_update_option(USE_TSAN OFF)
+    endif()
+  endif()
+endif()
 
 # ---[ Threads
-include(${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake)
-if(TARGET caffe2::Threads)
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::Threads)
+find_package(Threads REQUIRED)
+if(TARGET Threads::Threads)
+  list(APPEND Caffe2_DEPENDENCY_LIBS Threads::Threads)
+  add_library(caffe2::Threads ALIAS Threads::Threads)
 else()
   message(FATAL_ERROR
       "Cannot find threading library. Caffe2 requires Threads to compile.")
@@ -257,7 +242,6 @@ endif()
 if(NOT INTERN_BUILD_MOBILE)
   set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
-  set(AT_MKL_MT 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND))
     message(WARNING "Preferred BLAS (" ${BLAS} ") cannot be found, now searching for a general BLAS library")
@@ -270,10 +254,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(MKL_FOUND)
     if("${MKL_THREADING}" STREQUAL "SEQ")
       set(AT_MKL_SEQUENTIAL 1)
-    endif()
-    if(MSVC AND MKL_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
-      add_definitions(-D_OPENMP_NOFORCE_MANIFEST)
-      set(AT_MKL_MT 1)
     endif()
     set(AT_MKL_ENABLED 1)
   endif()
@@ -632,11 +612,24 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     set(XNNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(XNNPACK_BUILD_TESTS OFF CACHE BOOL "")
 
+    # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
+    # these new ISA features may not be supported on older compilers
+    set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
+    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
+    # Setting this global PIC flag for all XNNPACK targets.
+    # This is needed for Object libraries within XNNPACK which must
+    # be PIC to successfully link this static libXNNPACK with pytorch
+    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
     add_subdirectory(
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
-    set_property(TARGET XNNPACK PROPERTY POSITION_INDEPENDENT_CODE ON)
+    # Revert to whatever it was before
+    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
+
     # Workaround for https://github.com/pytorch/pytorch/issues/47292
     if(CMAKE_BUILD_TYPE STREQUAL "Debug" AND CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.5.0))
       # Compiling qu8-requantization/precise-psimd.c without any optimization flags on gcc-7.4 or older i
@@ -1072,7 +1065,7 @@ if(BUILD_PYTHON)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8 3.7)
+  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
@@ -1080,9 +1073,9 @@ if(BUILD_PYTHON)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
   endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.7)
+  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
     message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 3.6 is no longer supported by PyTorch.")
+      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
   endif()
 
   # When building pytorch, we pass this in directly from setup.py, and
@@ -1137,6 +1130,9 @@ message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
 target_link_libraries(pybind::pybind11 INTERFACE python::python)
+if(APPLE)
+  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
+endif()
 
 # ---[ MPI
 if(USE_MPI)
@@ -1170,77 +1166,26 @@ if(USE_MPI)
 endif()
 
 # ---[ OpenMP
-if(USE_OPENMP)
-  # OpenMP support?
-  set(WITH_OPENMP ON CACHE BOOL "OpenMP support if available?")
-
-  # macOS + GCC
-  if(APPLE AND CMAKE_COMPILER_IS_GNUCC)
-    exec_program(uname ARGS -v  OUTPUT_VARIABLE DARWIN_VERSION)
-    string(REGEX MATCH "[0-9]+" DARWIN_VERSION ${DARWIN_VERSION})
-    message(STATUS "macOS Darwin version: ${DARWIN_VERSION}")
-    if(DARWIN_VERSION GREATER 9)
-      set(APPLE_OPENMP_SUCKS 1)
-    endif(DARWIN_VERSION GREATER 9)
-    execute_process(COMMAND ${CMAKE_C_COMPILER} -dumpversion
-      OUTPUT_VARIABLE GCC_VERSION)
-    if(APPLE_OPENMP_SUCKS AND GCC_VERSION VERSION_LESS 4.6.2)
-      message(WARNING "Disabling OpenMP (unstable with this version of GCC). "
-        "Install GCC >= 4.6.2 or change your OS to enable OpenMP.")
-      add_compile_options(-Wno-unknown-pragmas)
-      set(WITH_OPENMP OFF CACHE BOOL "OpenMP support if available?" FORCE)
-    endif()
-  endif()
-
-  if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC"
-    AND "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    message(STATUS "Setting OpenMP flags for clang-cl")
-    set(OpenMP_CXX_FLAGS "-Xclang -fopenmp")
-    set(OpenMP_C_FLAGS "-Xclang -fopenmp")
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-    set(OPENMP_FOUND ON CACHE BOOL "OpenMP Support found")
-    if(NOT MKL_FOUND)
-      execute_process(COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_version_output)
-      string(REGEX REPLACE ".*InstalledDir: ([^\n]+).*" "\\1" CLANG_BINDIR ${clang_version_output})
-
-      get_filename_component(CLANG_ROOT ${CLANG_BINDIR} DIRECTORY)
-      set(CLANG_OPENMP_LIBRARY "${CLANG_ROOT}/lib/libiomp5md.lib")
-
-      if(NOT TARGET caffe2::openmp)
-        add_library(caffe2::openmp INTERFACE IMPORTED)
-      endif()
-
-      set_property(
-        TARGET caffe2::openmp PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CLANG_OPENMP_LIBRARY})
-
-      list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::openmp)
-    endif()
-  endif()
-
-  if(WITH_OPENMP AND NOT CHECKED_OPENMP)
-    find_package(OpenMP QUIET)
-    set(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-
-    # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
-    # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
-    set(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
-  endif()
-
+if(USE_OPENMP AND NOT TARGET caffe2::openmp)
+  include(${CMAKE_CURRENT_LIST_DIR}/Modules/FindOpenMP.cmake)
   if(OPENMP_FOUND)
     message(STATUS "Adding OpenMP CXX_FLAGS: " ${OpenMP_CXX_FLAGS})
-    if("${OpenMP_CXX_LIBRARIES}" STREQUAL "")
-        message(STATUS "No OpenMP library needs to be linked against")
-    else()
-        message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
+    if(OpenMP_CXX_LIBRARIES)
+      message(STATUS "Will link against OpenMP libraries: ${OpenMP_CXX_LIBRARIES}")
     endif()
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+    add_library(caffe2::openmp INTERFACE IMPORTED)
+    target_link_libraries(caffe2::openmp INTERFACE OpenMP::OpenMP_CXX)
+    list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::openmp)
+    if(MSVC AND OpenMP_CXX_LIBRARIES MATCHES ".*libiomp5md\\.lib.*")
+      target_compile_definitions(caffe2::openmp INTERFACE _OPENMP_NOFORCE_MANIFEST)
+      target_link_options(caffe2::openmp INTERFACE "/NODEFAULTLIB:vcomp")
+    endif()
   else()
     message(WARNING "Not compiling with OpenMP. Suppress this warning with -DUSE_OPENMP=OFF")
     caffe2_update_option(USE_OPENMP OFF)
   endif()
 endif()
+
 
 
 # ---[ Android specific ones
@@ -1275,7 +1220,7 @@ endif(USE_LLVM)
 # ---[ cuDNN
 if(USE_CUDNN)
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
-  include_directories(${CUDNN_FRONTEND_INCLUDE_DIR})
+  target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
 # ---[ HIP
@@ -1308,6 +1253,7 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_HCC__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
+    list(APPEND HIP_CXX_FLAGS -DUSE_ROCM)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_OPERATORS__=1)
     list(APPEND HIP_CXX_FLAGS -D__HIP_NO_HALF_CONVERSIONS__=1)
     list(APPEND HIP_CXX_FLAGS -DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
@@ -1473,8 +1419,7 @@ if(USE_GLOO)
         # https://github.com/facebookincubator/gloo/blob/950c0e23819779a9e0c70b861db4c52b31d1d1b2/cmake/Dependencies.cmake#L123
         set(NCCL_EXTERNAL ON)
       endif()
-      # gloo uses cuda_add_library
-      torch_update_find_cuda_flags()
+      set(GLOO_USE_CUDA_TOOLKIT ON CACHE BOOL "" FORCE)
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
     else()
       add_library(gloo SHARED IMPORTED)
@@ -1769,17 +1714,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_CUDA_ENABLED 1)
   endif()
 
-  if(NOT USE_CUDNN)
-    message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
-    set(AT_CUDNN_ENABLED 0)
-  elseif(NOT CUDNN_FOUND)
-    message(WARNING "CuDNN not found. Compiling without CuDNN support")
-    set(AT_CUDNN_ENABLED 0)
-  else()
-    include_directories(SYSTEM ${CUDNN_INCLUDE_PATH})
-    set(AT_CUDNN_ENABLED 1)
-  endif()
-
   if(NOT USE_ROCM)
     message("disabling ROCM because NOT USE_ROCM is set")
     message(STATUS "MIOpen not found. Compiling without MIOpen support")
@@ -1966,7 +1900,7 @@ if(USE_KINETO)
         include(CheckCXXSourceRuns)
         # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
         if(NOT APPLE)
-          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl" "pthread")
         endif()
         set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
         check_cxx_source_runs("#include <stdexcept>

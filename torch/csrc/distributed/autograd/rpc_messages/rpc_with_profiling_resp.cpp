@@ -18,9 +18,9 @@ RpcWithProfilingResp::RpcWithProfilingResp(
     rpc::ProfilingId profilingId)
     : messageType_(messageType),
       wrappedMessage_(std::move(wrappedMessage)),
+      tensors_(wrappedMessage_->tensors()),
       profiledEvents_(std::move(profiledEvents)),
       profilingId_(profilingId) {
-  tensors_ = wrappedMessage_->tensors();
   TORCH_INTERNAL_ASSERT(
       messageType_ == rpc::MessageType::RUN_WITH_PROFILING_RESP,
       "Incorrect Message type");
@@ -124,8 +124,7 @@ std::unique_ptr<RpcWithProfilingResp> RpcWithProfilingResp::fromMessage(
   for (const auto i : c10::irange(
            kProfileEventsStartIdx,
            kProfileEventsStartIdx + profiledEventsSize)) {
-    // NOLINTNEXTLINE(clang-diagnostic-sign-compare)
-    TORCH_CHECK(i < tupleElements.size());
+    TORCH_CHECK(static_cast<size_t>(i) < tupleElements.size());
     // Reconstruct remote event from the ivalues.
     torch::autograd::profiler::LegacyEvent fromIvalueEvent =
         torch::autograd::profiler::LegacyEvent::fromIValue(tupleElements[i]);

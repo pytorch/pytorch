@@ -5,7 +5,7 @@ import warnings
 from typing import Any, Dict, Union, Tuple
 
 import torch
-from . import is_initialized, _get_device_index, _lazy_init
+from . import is_initialized, _get_device_index, _lazy_init, _get_nvml_device_index
 from ._utils import _dummy_type
 
 from ._memory_viz import segments as _segments, memory as _memory
@@ -193,6 +193,15 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
       number of over-size allocation requests received by the memory allocator.
     - ``"oversize_segments.{current,peak,allocated,freed}"``:
       number of over-size reserved segments from ``cudaMalloc()``.
+
+    The caching allocator can be configured via ENV to round memory allocations in order
+    to reduce fragmentation. Sometimes the overhead from rounding can be higher than
+    the fragmentation it helps reduce. The following stat can be used to check if
+    rounding adds too much overhead:
+
+    - ``"requested_bytes.{all,large_pool,small_pool}.{current,peak,allocated,freed}"``:
+      memory requested by client code, compare this with allocated_bytes to check if
+      allocation rounding adds too much overhead.
 
     Args:
         device (torch.device or int, optional): selected device. Returns
@@ -453,7 +462,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     stats = memory_stats(device=device)
 
     def _format_size(sz, pref_sz):
-        prefixes = ["B ", "KB", "MB", "GB", "TB", "PB"]
+        prefixes = ["B  ", "KiB", "MiB", "GiB", "TiB", "PiB"]
         prefix = prefixes[0]
         for new_prefix in prefixes[1:]:
             if pref_sz < 768 * 1024:
@@ -461,7 +470,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
             prefix = new_prefix
             sz //= 1024
             pref_sz /= 1024
-        return "{:7d} {}".format(sz, prefix)
+        return "{:6d} {}".format(sz, prefix)
 
     def _format_count(cnt, pref_cnt):
         prefixes = [" ", "K", "M"]
@@ -477,6 +486,7 @@ def memory_summary(device: Union[Device, int] = None, abbreviated: bool = False)
     metrics_to_display = [
         ("allocated_bytes", "Allocated memory", _format_size),
         ("active_bytes", "Active memory", _format_size),
+        ("requested_bytes", "Requested memory", _format_size),
         ("reserved_bytes", "GPU reserved memory", _format_size),
         ("inactive_split_bytes", "Non-releasable memory", _format_size),
         ("allocation", "Allocations", _format_count),
@@ -577,7 +587,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
         pynvml.nvmlInit()
     except NVMLError_DriverNotLoaded:
         return ("cuda driver can't be loaded, is cuda enabled?")
-    device = _get_device_index(device, optional=True)
+    device = _get_nvml_device_index(device)
     handle = pynvml.nvmlDeviceGetHandleByIndex(device)
     procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
     lines = []
@@ -590,7 +600,7 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
     return "\n".join(lines)
 
 def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
-    r"""Returns the global free and total GPU memory occupied for a given
+    r"""Returns the global free and total GPU memory for a given
     device using cudaMemGetInfo.
 
     Args:
@@ -610,7 +620,7 @@ def mem_get_info(device: Union[Device, int] = None) -> Tuple[int, int]:
 def _record_memory_history(enabled: bool, record_context=True,
                            trace_alloc_max_entries=1,
                            trace_alloc_record_context=False, device: Union[Device, int] = None,
-                           _enable_expensive_cpp=False):
+                           record_context_cpp=False):
     """Enables recording of Python stack traces to be associated with memory
     allocations, so you can tell what allocated any piece of memory in
     :func:`torch.memory_snapshot`.
@@ -627,7 +637,7 @@ def _record_memory_history(enabled: bool, record_context=True,
         stack trace collection; file an issue with us if you need it.
     """
     with torch.cuda.device(device):
-        _C._cuda_recordMemoryHistory(enabled, record_context, _enable_expensive_cpp,
+        _C._cuda_recordMemoryHistory(enabled, record_context, record_context_cpp,
                                      trace_alloc_max_entries, trace_alloc_record_context)
 
 def _snapshot(device: Union[Device, int] = None):

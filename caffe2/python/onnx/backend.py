@@ -100,7 +100,7 @@ def convertAttributeProto(onnx_arg):
 
 
 # TODO: Move this into ONNX main library
-class OnnxNode(object):
+class OnnxNode:
     """
     Reimplementation of NodeProto from ONNX, but in a form
     more convenient to work with from Python.

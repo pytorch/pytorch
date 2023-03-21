@@ -74,9 +74,9 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Device=None"
+DEVICE_PARAM = "device: Device = None"
 FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype]=None, {DEVICE_PARAM}, requires_grad: _bool=False"
+    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
 )
 
 # this could be more precise w.r.t list contents etc. How to do Ellipsis?
@@ -298,6 +298,7 @@ def gen_nn_functional(fm: FileManager) -> None:
         "softplus",
         "softshrink",
         "one_hot",
+        "scaled_dot_product_attention",
     ]
     import_code = ["from .. import {0} as {0}".format(_) for _ in imports]
     # TODO make these types more precise
@@ -360,19 +361,21 @@ def gen_pyi(
         unsorted_function_hints.update(
             {
                 f"sparse_{n}_tensor": [
-                    f"def sparse_{n}_tensor({n1}_indices: Union[Tensor, List],"
-                    f"{n2}_indices: Union[Tensor, List],"
-                    " values: Union[Tensor, List], size: Optional[_size]=None,"
-                    " *, dtype: Optional[_dtype]=None,"
-                    " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
-                    " check_invariants:_bool=None) -> Tensor: ..."
-                ],
-                f"_sparse_{n}_tensor_unsafe": [
-                    f"def _sparse_{n}_tensor_unsafe({n1}_indices: Union[Tensor, List],"
-                    f"{n2}_indices: Union[Tensor, List],"
-                    " values: Union[Tensor, List], size: List[int],"
-                    " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                    " requires_grad: bool = False) -> Tensor: ..."
+                    f"def sparse_{n}_tensor({{}}) -> Tensor: ...".format(
+                        ", ".join(
+                            [
+                                f"{n1}_indices: Union[Tensor, List]",
+                                f"{n2}_indices: Union[Tensor, List]",
+                                "values: Union[Tensor, List]",
+                                "size: Optional[_size] = None",
+                                "*",
+                                "dtype: Optional[_dtype] = None",
+                                "device: Union[_device, str, None] = None",
+                                "requires_grad: _bool = False",
+                                "check_invariants: _bool = None",
+                            ]
+                        ),
+                    )
                 ],
             }
         )
@@ -382,19 +385,46 @@ def gen_pyi(
             "set_flush_denormal": ["def set_flush_denormal(mode: _bool) -> _bool: ..."],
             "get_default_dtype": ["def get_default_dtype() -> _dtype: ..."],
             "asarray": [
-                "def asarray(obj: Any, *, dtype: Optional[_dtype]=None, "
-                "device: Union[_device, str, None]=None, copy: Optional[_bool]=None, "
-                "requires_grad: _bool=False) -> Tensor: ..."
+                "def asarray({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "obj: Any",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "device: Union[_device, str, None] = None",
+                            "copy: Optional[_bool] = None",
+                            "requires_grad: _bool = False",
+                        ]
+                    )
+                )
             ],
             "from_numpy": ["def from_numpy(ndarray) -> Tensor: ..."],
             "frombuffer": [
-                "def frombuffer(buffer: Any, *, dtype: _dtype, count: int=-1, "
-                "offset: int=0, device: Union[_device, str, None]=None, "
-                "requires_grad: _bool=False) -> Tensor: ..."
+                "def frombuffer({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "buffer: Any",
+                            "*",
+                            "dtype: _dtype",
+                            "count: int = -1",
+                            "offset: int = 0",
+                            "device: Union[_device, str, None] = None",
+                            "requires_grad: _bool = False",
+                        ]
+                    )
+                )
             ],
             "numel": ["def numel(self: Tensor) -> _int: ..."],
             "as_tensor": [
-                f"def as_tensor(data: Any, dtype: Optional[_dtype]=None, {DEVICE_PARAM}) -> Tensor: ..."
+                "def as_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "data: Any",
+                            "dtype: Optional[_dtype] = None",
+                            DEVICE_PARAM,
+                        ]
+                    )
+                )
             ],
             "get_num_threads": ["def get_num_threads() -> _int: ..."],
             "set_num_threads": ["def set_num_threads(num: _int) -> None: ..."],
@@ -406,35 +436,40 @@ def gen_pyi(
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
             # Correspondingly, we must hand-write their signatures.
-            "tensor": [
-                "def tensor(data: Any, {}) -> Tensor: ...".format(FACTORY_PARAMS)
-            ],
+            "tensor": [f"def tensor(data: Any, {FACTORY_PARAMS}) -> Tensor: ..."],
             "sparse_coo_tensor": [
-                "def sparse_coo_tensor(indices: Tensor, values: Union[Tensor,List],"
-                " size: Optional[_size]=None, *, dtype: Optional[_dtype]=None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
-                " check_invariants:_bool=None) -> Tensor: ..."
-            ],
-            "_sparse_coo_tensor_unsafe": [
-                "def _sparse_coo_tensor_unsafe(indices: Tensor, values: Tensor, size: List[int],"
-                " dtype: Optional[_dtype] = None, device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
+                "def sparse_coo_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "indices: Tensor",
+                            "values: Union[Tensor, List]",
+                            "size: Optional[_size] = None",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "device: Union[_device, str, None] = None",
+                            "requires_grad: _bool = False",
+                            "check_invariants: _bool = None",
+                        ]
+                    )
+                )
             ],
             "sparse_compressed_tensor": [
-                "def sparse_compressed_tensor(compressed_indices: Union[Tensor, List],"
-                "plain_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: Optional[_size]=None,"
-                " *, dtype: Optional[_dtype]=None, layout: Optional[_layout] = None,"
-                " device: Union[_device, str, None]=None, requires_grad:_bool=False,"
-                " check_invariants:_bool=None) -> Tensor: ..."
-            ],
-            "_sparse_compressed_tensor_unsafe": [
-                "def _sparse_compressed_tensor_unsafe(comp_indices: Union[Tensor, List],"
-                "plain_indices: Union[Tensor, List],"
-                " values: Union[Tensor, List], size: List[int],"
-                " dtype: Optional[_dtype] = None, layout: Optional[_layout] = None,"
-                " device: Optional[_device] = None,"
-                " requires_grad: bool = False) -> Tensor: ..."
+                "def sparse_compressed_tensor({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "compressed_indices: Union[Tensor, List]",
+                            "plain_indices: Union[Tensor, List]",
+                            "values: Union[Tensor, List]",
+                            "size: Optional[_size] = None",
+                            "*",
+                            "dtype: Optional[_dtype] = None",
+                            "layout: Optional[_layout] = None",
+                            "device: Union[_device, str, None] = None",
+                            "requires_grad: _bool = False",
+                            "check_invariants: _bool = None",
+                        ]
+                    )
+                )
             ],
             "_sync": ["def _sync(t: Tensor) -> None: ..."],
             "_is_functional_tensor": [
@@ -451,116 +486,290 @@ def gen_pyi(
             ],
             "_disable_functionalization": ["def _disable_functionalization(): ..."],
             "range": [
-                "def range(start: Number, end: Number,"
-                " step: Number=1, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def range({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "step: Number = 1",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 )
             ],
             "arange": [
-                "def arange(start: Number, end: Number, step: Number, *,"
-                " out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "step: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                "def arange(start: Number, end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                "def arange(end: Number, *, out: Optional[Tensor]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def arange({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "end: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
             ],
             "linspace": [
-                "def linspace(start: Number, end: Number, steps: Optional[_int]=None, *,"
-                " out: Optional[Tensor]=None, {}) -> Tensor: ...".format(FACTORY_PARAMS)
+                "def linspace({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "steps: Optional[_int] = None",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
+                )
             ],
             "logspace": [
-                "def logspace(start: Number, end: Number, steps: Optional[_int]=None, base: _float=10.0, *,"
-                " out: Optional[Tensor]=None, {}) -> Tensor: ...".format(FACTORY_PARAMS)
+                "def logspace({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "start: Number",
+                            "end: Number",
+                            "steps: Optional[_int] = None",
+                            "base: _float = 10.0",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
+                )
             ],
             "randint": [
-                "def randint(low: _int, high: _int, size: _size, *,"
-                " generator: Optional[Generator]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def randint({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "low: _int",
+                            "high: _int",
+                            "size: _size",
+                            "*",
+                            "generator: Optional[Generator] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
-                "def randint(high: _int, size: _size, *,"
-                " generator: Optional[Generator]=None, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
+                "def randint({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "high: _int",
+                            "size: _size",
+                            "*",
+                            "generator: Optional[Generator] = None",
+                            FACTORY_PARAMS,
+                        ]
+                    )
                 ),
             ],
             "full": [
-                "def full(size: _size, fill_value: Number, *,"
-                " out: Optional[Tensor]=None,"
-                " layout: _layout=strided, {}) -> Tensor: ...".format(FACTORY_PARAMS),
-                "def full(size: _size, fill_value: Number, *,"
-                " names: List[Union[str, None]],"
-                " layout: _layout=strided, {}) -> Tensor: ...".format(FACTORY_PARAMS),
+                "def full({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "size: _size",
+                            "fill_value: Number",
+                            "*",
+                            "out: Optional[Tensor] = None",
+                            "layout: _layout = strided",
+                            FACTORY_PARAMS,
+                        ]
+                    )
+                ),
+                "def full({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "size: _size",
+                            "fill_value: Number",
+                            "*",
+                            "names: List[Union[str, None]]",
+                            "layout: _layout = strided",
+                            FACTORY_PARAMS,
+                        ]
+                    )
+                ),
             ],
             "is_grad_enabled": ["def is_grad_enabled() -> _bool: ..."],
             "is_inference_mode_enabled": [
                 "def is_inference_mode_enabled() -> _bool: ..."
             ],
             "nonzero": [
-                "def nonzero(input: Tensor, *, as_tuple: Literal[False]=False, out: Optional[Tensor]=None) -> Tensor: ...",
+                "def nonzero(input: Tensor, *, as_tuple: Literal[False] = False, out: Optional[Tensor] = None) -> Tensor: ...",
                 "def nonzero(input: Tensor, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
             "binary_cross_entropy_with_logits": [
-                "def binary_cross_entropy_with_logits(input: Tensor, target: Tensor, "
-                "weight: Optional[Tensor] = None, size_average: Optional[bool] = None, "
-                "reduce: Optional[bool] = None, reduction: str = ..., "
-                "pos_weight: Optional[Tensor] = None) -> Tensor: ..."
+                "def binary_cross_entropy_with_logits({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "weight: Optional[Tensor] = None",
+                            "size_average: Optional[bool] = None",
+                            "reduce: Optional[bool] = None",
+                            "reduction: str = ...",
+                            "pos_weight: Optional[Tensor] = None",
+                        ]
+                    )
+                )
             ],
             "cosine_embedding_loss": [
-                "def cosine_embedding_loss(input1: Tensor, input2: Tensor, "
-                "target: Tensor, margin: float = ..., size_average: Optional[bool] = ..., "
-                "reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ..."
+                "def cosine_embedding_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input1: Tensor",
+                            "input2: Tensor",
+                            "target: Tensor",
+                            "margin: float = ...",
+                            "size_average: Optional[bool] = ...",
+                            "reduce: Optional[bool] = ...",
+                            "reduction: str = ...",
+                        ]
+                    )
+                )
             ],
             "ctc_loss": [
-                "def ctc_loss(log_probs: Tensor, targets: Tensor, input_lengths: Tensor, target_lengths: Tensor,"
-                " blank: int = ..., reduction: str = ..., zero_infinity: bool = ...) -> Tensor: ..."
+                "def ctc_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "log_probs: Tensor",
+                            "targets: Tensor",
+                            "input_lengths: Tensor",
+                            "target_lengths: Tensor",
+                            "blank: int = ...",
+                            "reduction: str = ...",
+                            "zero_infinity: bool = ...",
+                        ]
+                    )
+                )
             ],
             "hinge_embedding_loss": [
-                "def hinge_embedding_loss(input: Tensor, target: Tensor, margin: float = ...,"
-                " size_average: Optional[bool] = ..., reduce: Optional[bool] = ..., "
-                "reduction: str = ...) -> Tensor: ..."
+                "def hinge_embedding_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "margin: float = ...",
+                            "size_average: Optional[bool] = ...",
+                            "reduce: Optional[bool] = ...",
+                            "reduction: str = ...",
+                        ]
+                    )
+                )
             ],
             "kl_div": [
-                "def kl_div(input: Tensor, target: Tensor, size_average: Optional[bool] = ..., "
-                "reduce: Optional[bool] = ..., reduction: str = ..., log_target: bool = ...) -> Tensor: ..."
+                "def kl_div({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "target: Tensor",
+                            "size_average: Optional[bool] = ...",
+                            "reduce: Optional[bool] = ...",
+                            "reduction: str = ...",
+                            "log_target: bool = ...",
+                        ]
+                    )
+                )
             ],
             "margin_ranking_loss": [
-                "def margin_ranking_loss(input1: Tensor, input2: Tensor, target: Tensor,"
-                " margin: float = ..., size_average: Optional[bool] = ..., "
-                " reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ..."
+                "def margin_ranking_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input1: Tensor",
+                            "input2: Tensor",
+                            "target: Tensor",
+                            "margin: float = ...",
+                            "size_average: Optional[bool] = ...",
+                            "reduce: Optional[bool] = ...",
+                            "reduction: str = ...",
+                        ]
+                    )
+                )
             ],
             "triplet_margin_loss": [
-                "def triplet_margin_loss(anchor: Tensor, positive: Tensor, negative: Tensor, "
-                "margin: float = ..., p: float = ..., eps: float = ..., swap: bool = ..., "
-                "size_average: Optional[bool] = ..., "
-                "reduce: Optional[bool] = ..., reduction: str = ...) -> Tensor: ..."
+                "def triplet_margin_loss({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "anchor: Tensor",
+                            "positive: Tensor",
+                            "negative: Tensor",
+                            "margin: float = ...",
+                            "p: float = ...",
+                            "eps: float = ...",
+                            "swap: bool = ...",
+                            "size_average: Optional[bool] = ...",
+                            "reduce: Optional[bool] = ...",
+                            "reduction: str = ...",
+                        ]
+                    )
+                )
             ],
             "dsmm": ["def dsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "hsmm": ["def hsmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "saddmm": [
-                "def saddmm(input: Tensor, mat1: Tensor, mat2: Tensor, *, beta: Number=1, "
-                "alpha: Number=1, out: Optional[Tensor]=None) -> Tensor: ..."
+                "def saddmm({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Tensor",
+                            "mat1: Tensor",
+                            "mat2: Tensor",
+                            "*",
+                            "beta: Number = 1",
+                            "alpha: Number = 1",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
             ],
             "spmm": ["def spmm(input: Tensor, mat2: Tensor) -> Tensor: ..."],
             "div": [
-                "def div(input: Union[Tensor, Number], other: Union[Tensor, Number], *, "
-                "rounding_mode: Optional[str] = None, out: Optional[Tensor]=None) -> Tensor: ..."
+                "def div({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "input: Union[Tensor, Number]",
+                            "other: Union[Tensor, Number]",
+                            "*",
+                            "rounding_mode: Optional[str] = None",
+                            "out: Optional[Tensor] = None",
+                        ]
+                    )
+                )
             ],
         }
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number],"
-            " other: Union[Tensor, Number],"
-            " *, out: Optional[Tensor]=None) -> Tensor: ...".format(binop)
+            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ...".format(binop)
         )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            "def {}(input: Union[Tensor, Number],"
-            " other: Union[Tensor, Number],"
-            " *, alpha: Optional[Number]=1, out: Optional[Tensor]=None) -> Tensor: ...".format(
+            "def {}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
+            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ...".format(
                 binop
             )
         )
@@ -608,59 +817,70 @@ def gen_pyi(
                 "def stride(self, _int) -> _int: ...",
             ],
             "new_ones": [
-                "def new_ones(self, size: _size, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
-                )
+                f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
             "new_tensor": [
-                "def new_tensor(self, data: Any, {}) -> Tensor: ...".format(
-                    FACTORY_PARAMS
-                )
+                f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                "def new(self, *args: Any, {}) ->Tensor: ...".format(DEVICE_PARAM),
+                f"def new(self, *args: Any, {DEVICE_PARAM}) ->Tensor: ...",
                 "def new(self, storage: Storage) -> Tensor: ...",
                 "def new(self, other: Tensor) -> Tensor: ...",
-                "def new(self, size: _size, *, {}) -> Tensor: ...".format(DEVICE_PARAM),
+                f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
             ],
             "__init__": [
-                "def __init__(self, *args: Any, {}) -> None: ...".format(DEVICE_PARAM),
+                f"def __init__(self, *args: Any, {DEVICE_PARAM}) -> None: ...",
                 "def __init__(self, storage: Storage) -> None: ...",
                 "def __init__(self, other: Tensor) -> None: ...",
-                "def __init__(self, size: _size, *, {}) -> None: ...".format(
-                    DEVICE_PARAM
-                ),
+                f"def __init__(self, size: _size, *, {DEVICE_PARAM}) -> None: ...",
             ],
             "as_subclass": ["def as_subclass(self, cls: Type[S]) -> S: ..."],
             "_make_subclass": [
-                "def _make_subclass(cls, data: Tensor, require_grad: _bool = False, dispatch_strides: _bool=False,"
-                " dispatch_device: _bool=False, device_for_backend_keys: Optional[_device] = None) -> Tensor: ..."
+                "def _make_subclass({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "cls",
+                            "data: Tensor",
+                            "require_grad: _bool = False",
+                            "dispatch_strides: _bool = False",
+                            "dispatch_device: _bool = False",
+                            "device_for_backend_keys: Optional[_device] = None",
+                        ]
+                    )
+                )
             ],
-            "__getitem__": ["def __getitem__(self, {}) -> Tensor: ...".format(INDICES)],
+            "__getitem__": [f"def __getitem__(self, {INDICES}) -> Tensor: ..."],
             "__setitem__": [
-                "def __setitem__(self, {}, val: Union[Tensor, Number])"
-                " -> None: ...".format(INDICES)
+                f"def __setitem__(self, {INDICES}, val: Union[Tensor, Number]) -> None: ..."
             ],
             "tolist": ["def tolist(self) -> List: ..."],
             "requires_grad_": [
-                "def requires_grad_(self, mode: _bool=True) -> Tensor: ..."
+                "def requires_grad_(self, mode: _bool = True) -> Tensor: ..."
             ],
             "element_size": ["def element_size(self) -> _int: ..."],
             "data_ptr": ["def data_ptr(self) -> _int: ..."],
             "dim": ["def dim(self) -> _int: ..."],
             "nonzero": [
-                "def nonzero(self, *, as_tuple: Literal[False]=False) -> Tensor: ...",
+                "def nonzero(self, *, as_tuple: Literal[False] = False) -> Tensor: ...",
                 "def nonzero(self, *, as_tuple: Literal[True]) -> Tuple[Tensor, ...]: ...",
             ],
             "numel": ["def numel(self) -> _int: ..."],
             "ndimension": ["def ndimension(self) -> _int: ..."],
             "nelement": ["def nelement(self) -> _int: ..."],
             "cuda": [
-                "def cuda(self, device: Optional[Union[_device, _int, str]]=None, non_blocking: _bool=False) -> Tensor: ..."
+                "def cuda({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                        ]
+                    )
+                )
             ],
-            "numpy": ["def numpy(self, *, force: _bool=False) -> Any: ..."],
+            "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
             "map_": [
                 "def map_(self, tensor: Tensor, callable: Callable) -> Tensor: ..."
@@ -671,8 +891,8 @@ def gen_pyi(
             "storage": ["def untyped_storage(self) -> Storage: ..."],
             "storage_type": ["def storage_type(self) -> Storage: ..."],
             "type": [
-                "def type(self, dtype: None=None, non_blocking: _bool=False) -> str: ...",
-                "def type(self, dtype: Union[str, _dtype], non_blocking: _bool=False) -> Tensor: ...",
+                "def type(self, dtype: None = None, non_blocking: _bool = False) -> str: ...",
+                "def type(self, dtype: Union[str, _dtype], non_blocking: _bool = False) -> Tensor: ...",
             ],
             "get_device": ["def get_device(self) -> _int: ..."],
             "contiguous": [
@@ -697,22 +917,31 @@ def gen_pyi(
             "is_ipu": ["is_ipu: _bool"],
             "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
-                "def to(self, dtype: _dtype, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...",
-                "def to(self, device: Optional[Union[_device, str]]=None, dtype: Optional[_dtype]=None, "
-                "non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...",
-                "def to(self, other: Tensor, non_blocking: _bool=False, copy: _bool=False) -> Tensor: ...",
+                "def to(self, dtype: _dtype, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
+                "def to({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, str]] = None",
+                            "dtype: Optional[_dtype] = None",
+                            "non_blocking: _bool = False",
+                            "copy: _bool = False",
+                        ]
+                    )
+                ),
+                "def to(self, other: Tensor, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
-                "def copy_(self, src: Tensor, non_blocking: _bool=False) -> Tensor: ..."
+                "def copy_(self, src: Tensor, non_blocking: _bool = False) -> Tensor: ..."
             ],
             "set_": [
                 "def set_(self, storage: Union[Storage, TypedStorage], offset: _int, size: _size, stride: _size) -> Tensor: ...",
                 "def set_(self, storage: Union[Storage, TypedStorage]) -> Tensor: ...",
             ],
             "split": [
-                "def split(self, split_size: _int, dim: _int=0) -> Sequence[Tensor]: ...",
-                "def split(self, split_size: Tuple[_int, ...], dim: _int=0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: _int, dim: _int = 0) -> Sequence[Tensor]: ...",
+                "def split(self, split_size: Tuple[_int, ...], dim: _int = 0) -> Sequence[Tensor]: ...",
             ],
             "div": [
                 "def div(self, other: Union[Tensor, Number], *, rounding_mode: Optional[str] = None) -> Tensor: ..."
@@ -724,7 +953,7 @@ def gen_pyi(
     )
     for binop in ["mul", "true_divide", "floor_divide"]:
         for inplace in [False, True]:
-            out_suffix = ", *, out: Optional[Tensor]=None"
+            out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
                 binop += "_"
                 out_suffix = ""
@@ -734,13 +963,13 @@ def gen_pyi(
             )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
-            out_suffix = ", out: Optional[Tensor]=None"
+            out_suffix = ", out: Optional[Tensor] = None"
             if inplace:
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
                 "def {}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                "*, alpha: Optional[Number]=1{})"
+                "*, alpha: Optional[Number] = 1{})"
                 " -> Tensor: ...".format(binop, out_suffix)
             )
     simple_conversions = [
@@ -802,9 +1031,7 @@ def gen_pyi(
     # Generate namedtuple definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = [
-        "{} = {}".format(name, defn) for name, defn in namedtuples.items()
-    ]
+    namedtuple_defs = ["{}\n".format(defn) for defn in namedtuples.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

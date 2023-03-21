@@ -232,7 +232,7 @@ class SerializedTestCase(hu.HypothesisTestCase):
         outputs_to_check=None,
         ensure_outputs_are_inferred=False,
     ):
-        outs = super(SerializedTestCase, self).assertReferenceChecks(
+        outs = super().assertReferenceChecks(
             device_option,
             op,
             inputs,

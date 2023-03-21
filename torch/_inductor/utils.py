@@ -1,16 +1,18 @@
 import collections
 import contextlib
 import functools
+import itertools
 import logging
 import math
 import operator
 import os
+import shutil
+import sys
 import tempfile
 import textwrap
 import time
-from importlib import import_module
 from io import StringIO
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 from unittest import mock
 
 import sympy
@@ -18,20 +20,13 @@ import sympy
 import torch
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 
-from . import config, config as inductor_config
+from . import config
 from .cuda_properties import get_device_capability
 
 log = logging.getLogger(__name__)
 
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-# We import torchdynamo modules indirectly to allow a future rename to torch.dynamo
-dynamo_config = import_module(f"{config.dynamo_import}.config")
-dynamo_debug_utils = import_module(f"{config.dynamo_import}.debug_utils")
-dynamo_logging = import_module(f"{config.dynamo_import}.logging")
-dynamo_optimizations = import_module(f"{config.dynamo_import}.optimizations")
-dynamo_testing = import_module(f"{config.dynamo_import}.testing")
-dynamo_utils = import_module(f"{config.dynamo_import}.utils")
 
 try:
     from triton.testing import do_bench
@@ -83,8 +78,56 @@ def unique(it):
 
 
 def ceildiv(numer: int, denom: int):
-    assert isinstance(numer, int) and isinstance(denom, int)
+    # TODO: There is a bug in a call to this function, to repro:
+    # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
+    # --amp --only YituTechConvBert --dynamic-shapes
+    assert isinstance(numer, int) and isinstance(
+        denom, int
+    ), f"{numer}: {type(numer)}, {denom}: {type(denom)}"
     return -(numer // -denom)
+
+
+def next_power_of_2(n):
+    """Return the smallest power of 2 greater than or equal to n"""
+    assert n <= 2**32, "32-bit only"
+    n -= 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    n += 1
+    return n
+
+
+def convert_shape_to_inductor(lst: List[Union[int, torch.SymInt]]) -> List[sympy.Expr]:
+    """
+    Gets the shape and stride of a tensor. For non-symbolic tensors, this is
+    trivial. But for symbolic tensors, we need to map from SymIntNode into
+    sympy.Expr.
+    """
+    return [
+        i.node.expr if isinstance(i, torch.SymInt) else sympy.Integer(i) for i in lst
+    ]
+
+
+def convert_shape_to_symint(
+    lst: List[Union[int, sympy.Expr]]
+) -> List[Union[int, torch.SymInt]]:
+    """
+    Takes a list of shapes from Inductor and converts them into symints (or just
+    ints if all shapes are static).
+    """
+    from .virtualized import V
+
+    return [
+        i
+        if isinstance(i, int)
+        else int(i)
+        if isinstance(i, sympy.Integer)
+        else V.graph.sizevars.shape_env.create_symintnode(i, hint=None)
+        for i in lst
+    ]
 
 
 def gen_gm_and_inputs(target, args, kwargs):
@@ -178,6 +221,13 @@ def cmp(a, b):
     return int(a > b) - int(a < b)
 
 
+def pad_list(x):
+    if len(x) == 1:
+        return [x[0], x[0]]
+    else:
+        return x
+
+
 def cache_on_self(fn):
     key = f"__{fn.__name__}_cache"
 
@@ -191,32 +241,71 @@ def cache_on_self(fn):
 
 
 def get_fused_kernel_name(node_schedule):
-    return "_".join(
-        ["fused"]
-        + sorted(
-            [
-                str(origin.name)
-                for origin in functools.reduce(
-                    operator.or_,
-                    [
-                        node.node.origins
-                        for node in node_schedule
-                        if hasattr(node, "node")
-                    ],
-                )
-                if origin.op == "call_function"
-            ]
-        )[0 : config.kernel_name_max_ops]
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
     )
+    if config.triton.descriptive_names == "original_aten":
+        # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
+        sources = [
+            origin.meta["original_aten"]._overloadpacket.__name__
+            for origin in all_origins
+            if origin.op == "call_function" and "original_aten" in origin.meta
+        ]
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "torch":
+        # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
+        sources = []
+        for origin in all_origins:
+            if origin.op == "call_function" and "source_fn" in origin.meta:
+                if isinstance(origin.meta["source_fn"], str):
+                    sources.append(origin.meta["source_fn"])
+                else:
+                    sources.append(origin.meta["source_fn"].__name__)
+        sources = sorted(set(sources))
+    elif config.triton.descriptive_names == "inductor_node":
+        sources = [
+            origin.name for origin in all_origins if origin.op == "call_function"
+        ]
+    else:
+        raise NotImplementedError
+    sources = sources
+    return "_".join(["fused"] + sources)
+
+
+def get_kernel_metadata(node_schedule):
+    all_origins = functools.reduce(
+        operator.or_,
+        [node.node.origins for node in node_schedule if hasattr(node, "node")],
+    )
+    inductor_nodes = [origin for origin in all_origins if origin.op == "call_function"]
+    original_aten_dict = collections.defaultdict(list)
+    for node in inductor_nodes:
+        if "original_aten" in node.meta:
+            original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
+                node
+            )
+    metadata = [
+        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+    ]
+    for original_aten, nodes in original_aten_dict.items():
+        metadata.append(
+            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
+        )
+    return "\n".join(metadata)
 
 
 def gather_origins(args, kwargs):
     import itertools
 
-    from .ir import ComputedBuffer, IRNode
+    from . import ir
 
     def is_unrealized_node(n):
-        return isinstance(n, IRNode) and not isinstance(n, ComputedBuffer)
+        if isinstance(n, ir.TensorBox):
+            return is_unrealized_node(n.data)
+        if isinstance(n, ir.StorageBox):
+            return is_unrealized_node(n.data)
+        return isinstance(n, ir.IRNode) and isinstance(n, ir.Pointwise)
 
     kwarg_origins = [val.origins for val in kwargs.values() if is_unrealized_node(val)]
     arg_origins = [arg.origins for arg in args if is_unrealized_node(arg)]
@@ -236,14 +325,17 @@ def sympy_str(expr: sympy.Expr):
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    from .ir import CleanDiv, IndexingDiv, ModularIndexing
+    from .ir import CleanDiv, FloorDiv, ModularIndexing
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, IndexingDiv)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
 
 def sympy_symbol(name):
+    # This should never be used for creating shape/stride symbols, as those
+    # should all be allocated before Inductor.
+    assert name[0] != "s"
     return sympy.Symbol(name, integer=True, positive=True)
 
 
@@ -266,15 +358,17 @@ def free_symbol_startswith(index: sympy.Expr, prefix: str):
     return any(v.name.startswith(prefix) for v in index.free_symbols)
 
 
+def free_symbol_has(index: sympy.Expr, pattern: str):
+    return any(pattern in v.name for v in index.free_symbols)
+
+
 def has_incompatible_cudagraph_ops(gm):
-    forbidden_list = set(
-        [
-            "aten._fused_moving_avg_obs_fq_helper.default",
-            "aten._fused_moving_avg_obs_fq_helper_functional.default",
-            "fbgemm.dense_to_jagged.default",
-            "fbgemm.jagged_to_padded_dense.default",
-        ]
-    )
+    forbidden_list = {
+        "aten._fused_moving_avg_obs_fq_helper.default",
+        "aten._fused_moving_avg_obs_fq_helper_functional.default",
+        "fbgemm.dense_to_jagged.default",
+        "fbgemm.jagged_to_padded_dense.default",
+    }
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_list:
             return True
@@ -316,12 +410,18 @@ def fresh_inductor_cache(cache_entries=None):
 
 def argsort(seq):
     # preserve original order for equal strides
-    return list(reversed(sorted(range(len(seq)), key=seq.__getitem__, reverse=True)))
+    getter = seq.__getitem__
+    a_r = range(len(seq))
+    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
 
 
 @functools.lru_cache(8)
 def get_dtype_size(dtype):
     return torch.empty((), dtype=dtype).element_size()
+
+
+class LineContext(NamedTuple):
+    context: Any
 
 
 class IndentedBuffer:
@@ -331,19 +431,27 @@ class IndentedBuffer:
         self._lines = []
         self._indent = initial_indent
 
-    def getvalue(
-        self,
-    ):
+    def getvaluewithlinemap(self):
         buf = StringIO()
+        p = 1
+        linemap = []
         for line in self._lines:
             if isinstance(line, DeferredLineBase):
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                linemap.append((p, line.context))
+                continue
             assert isinstance(line, str)
             buf.write(line)
             buf.write("\n")
-        return buf.getvalue()
+            p += 1 + line.count("\n")
+        return buf.getvalue(), linemap
+
+    def getvalue(self):
+        v, _ = self.getvaluewithlinemap()
+        return v
 
     def getrawvalue(self):
         buf = StringIO()
@@ -352,6 +460,8 @@ class IndentedBuffer:
                 line = line()
                 if line is None:
                     continue
+            elif isinstance(line, LineContext):
+                continue
             assert isinstance(line, str)
             # backslash implies line continuation
             if line.endswith("\\"):
@@ -371,7 +481,9 @@ class IndentedBuffer:
         return " " * (self._indent * self.tabwidth)
 
     def writeline(self, line):
-        if isinstance(line, DeferredLineBase):
+        if isinstance(line, LineContext):
+            self._lines.append(line)
+        elif isinstance(line, DeferredLineBase):
             self._lines.append(line.with_prefix(self.prefix()))
         elif line.strip():
             self._lines.append(f"{self.prefix()}{line}")
@@ -386,8 +498,10 @@ class IndentedBuffer:
         @contextlib.contextmanager
         def ctx():
             self._indent += offset
-            yield
-            self._indent -= offset
+            try:
+                yield
+            finally:
+                self._indent -= offset
 
         return ctx()
 
@@ -395,12 +509,15 @@ class IndentedBuffer:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
             for line in other_code._lines:
-                if line:
+                if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
             if math.isinf(dedent):
                 dedent = 0
             for line in other_code._lines:
-                IndentedBuffer.writeline(self, line[dedent:])
+                if isinstance(line, LineContext):
+                    self._lines.append(line)
+                else:
+                    IndentedBuffer.writeline(self, line[dedent:])
         else:
             other_code = textwrap.dedent(other_code)
             if strip:
@@ -448,15 +565,235 @@ class DeferredLineBase:
 def is_big_gpu(index):
     cores = torch.cuda.get_device_properties(index).multi_processor_count
     if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune mode")
+        log.warning("not enough cuda cores to use max_autotune_gemm mode")
         return False
     return True
 
 
 def use_triton_template(layout):
     return (
-        inductor_config.max_autotune
+        (
+            config.max_autotune
+            or config.max_autotune_gemm
+            or config.search_autotune_cache
+        )
         and layout.device.type == "cuda"
         and layout.dtype in (torch.float16, torch.bfloat16, torch.float32)
         and is_big_gpu(layout.device.index or 0)
     )
+
+
+class DebugDirManager:
+    counter = itertools.count(0)
+
+    def __init__(self):
+        self.id = next(DebugDirManager.counter)
+        self.prev_debug_name = None
+
+    def __enter__(self):
+        self.prev_debug_name = torch._dynamo.config.debug_dir_root
+        self.new_name = f"{self.prev_debug_name}_tmp_{self.id}"
+        torch._dynamo.config.debug_dir_root = self.new_name
+
+    def __exit__(self, *args):
+        shutil.rmtree(self.new_name)
+        torch._dynamo.config.debug_dir_root = self.prev_debug_name
+
+
+def run_and_get_code(fn, *args, **kwargs):
+    from .graph import GraphLowering
+
+    compile_to_module = GraphLowering.compile_to_module
+    source_codes = []
+
+    def patched_compile_to_module(self):
+        mod = compile_to_module(self)
+        with open(mod.__file__, "r") as f:
+            source_codes.append(f.read())
+        return mod
+
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ):
+        torch._dynamo.reset()
+        fn(*args, **kwargs)
+    return source_codes
+
+
+def run_and_get_triton_code(fn, *args, **kwargs):
+    source_codes = run_and_get_code(fn, *args, **kwargs)
+    assert (
+        len(source_codes) == 1
+    ), f"expected exactly one code output got {len(source_codes)}"
+    return source_codes[0]
+
+
+def developer_warning(msg):
+    """
+    Warnings that will be actionable for PyTorch developers, but not
+    end users.  Allows us to easily disable them in stable releases but
+    keep them on for nightly builds.
+    """
+    if config.developer_warnings:
+        log.warning(msg)
+    else:
+        log.info(msg)
+
+
+def get_num_bytes(*args, num_in_out_args=0):
+    """
+    Return the total number of bytes the arguments of tensor type takes.
+
+    For in/out args, tensor sizes are counted twice: once for reading and
+    once for writing.
+
+    The first num_in_out_args arguments are in out tensors.
+    """
+    return sum(
+        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
+        for i, arg in enumerate(args)
+        if isinstance(arg, torch.Tensor)
+    )
+
+
+def create_bandwidth_info_str(ms, num_gb, gb_per_s, prefix="", suffix=""):
+    info_str = f"{prefix}{ms:.3f}ms    \t{num_gb:.3f} GB \t {gb_per_s:7.2f}GB/s{suffix}"
+    try:
+        import colorama
+
+        if ms > 0.012 and gb_per_s < 650:
+            info_str = colorama.Fore.RED + info_str + colorama.Fore.RESET
+    except ImportError:
+        log.warning("Colorama is not installed. Install it if you want colored output")
+
+    return info_str
+
+
+def get_benchmark_name():
+    """
+    An experimental API used only when config.benchmark_kernel is true.
+
+    The benchmark name is only available at codegen time. So we can not
+    directly call it in benchmark_all_kernels which is run after codegen.
+
+    The function assumes the argument after --only is the benchmark name.
+    It works for torchbench.py/hugginface.py/timm_models.py. But for ad-hoc
+    scripts, this function may return None.
+
+    There are 2 flavors of --only argument we need handle:
+    1. --only model_name
+    2. --only=model_name
+    """
+    try:
+        idx = sys.argv.index("--only")
+        if (
+            idx + 1 < len(sys.argv)
+            and len(sys.argv[idx + 1]) > 0
+            and sys.argv[idx + 1][0] != "-"
+        ):
+            return sys.argv[idx + 1]
+    except ValueError:
+        pass
+
+    for arg in sys.argv:
+        if arg.startswith("--only="):
+            return arg[len("--only=") :]
+
+
+def get_kernel_category(kernel_mod):
+    """
+    Given the module defining a triton kernel, return the category of the kernel.
+    Cateogry can be one of:
+    - pointwise
+    - reduction
+    - persistent_reduction
+
+    Currently we simply decide the cateory depending on what decorator is imported
+    by the kernel.
+    """
+    choices = [
+        "pointwise",
+        "reduction",
+        "persistent_reduction",
+    ]
+    choices = [ch for ch in choices if ch in kernel_mod.__dict__]
+    if len(choices) == 1:
+        return choices[0]
+    else:
+        return "unknown"
+
+
+def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
+    """
+    An experimental API used only when config.benchmark_kernel is true.
+
+    Run the kernel benchmarks for all the kernels cached in PyCodeCache.
+    Used in the compiled modules.
+
+    Put this method here rather than codegen it for convenience since its implementation
+    does not change based on different graph modules being compiled.
+    """
+    from torch._inductor.codecache import PyCodeCache
+
+    nfound = 0
+    for kernel_key, kernel_mod in PyCodeCache.cache.items():
+        if not hasattr(kernel_mod, "get_args") or not hasattr(kernel_mod, "call"):
+            continue
+
+        kernel_category = get_kernel_category(kernel_mod)
+        args = kernel_mod.get_args()
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in kernel_mod.triton_.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
+
+        def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
+            if not any(x is None for x in [n_regs, n_spills, shared]):
+                kernel_detail_str = (
+                    f"  {n_regs:3} regs  {n_spills:3} spills  {shared:8} shared mem"
+                )
+            else:
+                kernel_detail_str = ""
+
+            gb_per_s = num_gb / (ms / 1e3)
+            return create_bandwidth_info_str(
+                ms, num_gb, gb_per_s, prefix=prefix, suffix=kernel_detail_str
+            )
+
+        bench_result = []
+        kernel_desc = (
+            f"{benchmark_name:20} {kernel_category[:3].upper()} {kernel_key[:10]}"
+        )
+        if benchmark_all_configs:
+            assert hasattr(kernel_mod, "benchmark_all_configs")
+            bench_result = kernel_mod.benchmark_all_configs(args)
+            print(kernel_desc)
+            for launcher, ms in bench_result.items():
+                print(
+                    f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
+                )
+        else:
+            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)[0]
+            assert (
+                len(kernel_mod.triton_.launchers) == 1
+            ), "Autotuner should have selected the best config"
+            launcher = kernel_mod.triton_.launchers[0]
+            print(
+                get_info_str(
+                    ms,
+                    launcher.n_regs,
+                    launcher.n_spills,
+                    launcher.shared,
+                    prefix=f"{kernel_desc} ",
+                )
+            )
+
+        nfound += 1
+    if nfound == 0:
+        print(
+            "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
+        )

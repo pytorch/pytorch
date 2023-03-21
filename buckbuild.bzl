@@ -187,7 +187,7 @@ def third_party(name):
 def get_pt_compiler_flags():
     return select({
         "DEFAULT": _PT_COMPILER_FLAGS + [
-            "-std=gnu++17",  #to accomodate for eigen
+            "-std=gnu++17",  #to accommodate for eigen
         ],
         "ovr_config//compiler:cl": windows_convert_gcc_clang_flags(_PT_COMPILER_FLAGS),
     })
@@ -822,28 +822,6 @@ def define_buck_targets(
     )
 
     fb_xplat_cxx_library(
-        name = "th_header",
-        header_namespace = "",
-        exported_headers = subdir_glob([
-            # TH
-            ("aten/src", "TH/*.h"),
-            ("aten/src", "TH/*.hpp"),
-            ("aten/src", "TH/generic/*.h"),
-            ("aten/src", "TH/generic/*.hpp"),
-            ("aten/src", "TH/generic/simd/*.h"),
-            ("aten/src", "TH/vector/*.h"),
-            ("aten/src", "TH/generic/*.c"),
-            ("aten/src", "TH/generic/*.cpp"),
-            ("aten/src/TH", "*.h"),  # for #include <THGenerateFloatTypes.h>
-            # THNN
-            ("aten/src", "THNN/*.h"),
-            ("aten/src", "THNN/generic/*.h"),
-            ("aten/src", "THNN/generic/*.c"),
-        ]),
-        labels = labels,
-    )
-
-    fb_xplat_cxx_library(
         name = "aten_header",
         header_namespace = "",
         exported_headers = subdir_glob([
@@ -909,7 +887,6 @@ def define_buck_targets(
             [
                 ("torch/csrc/api/include", "torch/**/*.h"),
                 ("", "torch/csrc/**/*.h"),
-                ("", "torch/csrc/generic/*.cpp"),
                 ("", "torch/script.h"),
                 ("", "torch/library.h"),
                 ("", "torch/custom_class.h"),
@@ -1486,6 +1463,7 @@ def define_buck_targets(
             "torch/csrc/jit/mobile/train/random.cpp",
             "torch/csrc/jit/mobile/train/sequential.cpp",
             ":gen_aten_libtorch[autograd/generated/Functions.cpp]",
+            "torch/csrc/quantized/quantized_backward.cpp",
         ],
         compiler_flags = get_pt_compiler_flags(),
         exported_preprocessor_flags = get_pt_preprocessor_flags() + ["-DUSE_MOBILE_CLASSTYPE"],

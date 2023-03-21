@@ -16,8 +16,7 @@
 #include <ATen/ops/multi_margin_loss_backward_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 constexpr int MULTIMARGIN_THREADS = 128;
 
@@ -386,10 +385,10 @@ Tensor multi_margin_loss_cuda_backward(
     const Tensor &grad_output, const Tensor &input, const Tensor &target,
     const Scalar &p, const Scalar &margin, const c10::optional<Tensor> &weights,
     int64_t reduction) {
-  auto grad_input = at::empty({}, input.options());
+  auto grad_input = at::empty({0}, input.options());
   multi_margin_loss_cuda_backward_out(
       grad_output, input, target, p, margin, weights, reduction, grad_input);
   return grad_input;
 }
 
-}}  // namespace at::native
+}  // namespace at::native

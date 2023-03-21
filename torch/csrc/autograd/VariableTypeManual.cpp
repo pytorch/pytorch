@@ -11,6 +11,8 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/library.h>
 
+#include <utility>
+
 using namespace at;
 using namespace torch::autograd::generated;
 using torch::autograd::as_view;
@@ -42,6 +44,10 @@ C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCPUTypes() {
 C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allCUDATypes() {
   at::globalContext().lazyInitCUDA();
   return allTypesForBackends({Backend::CUDA, Backend::SparseCUDA});
+}
+
+C10_EXPORT std::vector<at::DeprecatedTypeProperties*> allXPUTypes() {
+  return allTypesForBackends({Backend::XPU, Backend::SparseXPU});
 }
 
 namespace {
@@ -268,6 +274,7 @@ const Tensor& resize_as_(
   if (self._fw_grad(/* level */ 0).defined()) {
     AT_ERROR("cannot resize variables that has a forward grad");
   }
+
   return self;
 }
 
@@ -382,6 +389,51 @@ Tensor& copy_(
   return self;
 }
 
+const Tensor& resize_(
+    c10::DispatchKeySet ks,
+    const Tensor& self,
+    SymIntArrayRef size,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  // Hold sizes to verify if we actually resize `self`.
+  auto org_size = self.sym_sizes();
+  {
+    at::AutoDispatchBelowADInplaceOrView guard;
+    at::redispatch::resize__symint(
+        ks & c10::after_ADInplaceOrView_keyset,
+        self,
+        size,
+        optional_memory_format);
+  }
+  // If `self` was resized, increment the version.
+  if (org_size != size) {
+    torch::autograd::increment_version(self);
+  }
+  return self;
+}
+
+const Tensor& resize_as_(
+    c10::DispatchKeySet ks,
+    const Tensor& self,
+    const Tensor& the_template,
+    c10::optional<MemoryFormat> optional_memory_format) {
+  // Hold sizes to verify if we actually resize `self`.
+  auto org_size = self.sym_sizes();
+  {
+    at::AutoDispatchBelowADInplaceOrView guard;
+    at::redispatch::resize_as_(
+        ks & c10::after_ADInplaceOrView_keyset,
+        self,
+        the_template,
+        optional_memory_format);
+  }
+
+  // If `self` was resized, increment the version.
+  if (org_size != the_template.sym_sizes()) {
+    torch::autograd::increment_version(self);
+  }
+  return self;
+}
+
 Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
   auto out = ([&]() {
     at::AutoDispatchBelowADInplaceOrView guard;
@@ -397,7 +449,7 @@ Tensor detach(c10::DispatchKeySet ks, const Tensor& self) {
       /* output */ out,
       /* is_bw_differentiable */ false,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CreationMeta::DEFAULT,
       /*allow_tensor_metadata_change=*/false);
 
@@ -421,7 +473,7 @@ Tensor _fw_primal(c10::DispatchKeySet ks, const Tensor& self, int64_t level) {
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
@@ -449,7 +501,7 @@ Tensor _make_dual(
       /* output */ tmp,
       /* is_bw_differentiable */ true,
       /* is_fw_differentiable */ false,
-      /* view_func */ func,
+      /* view_func */ std::move(func),
       /* creation_meta */ CREATION_META_DEFINITION);
 
   return result;
@@ -465,6 +517,14 @@ TORCH_LIBRARY_IMPL(aten, ADInplaceOrView, m) {
       "detach",
       torch::dispatch(
           DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::detach)));
+  m.impl(
+      "resize_",
+      torch::dispatch(
+          DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::resize_)));
+  m.impl(
+      "resize_as_",
+      torch::dispatch(
+          DispatchKey::ADInplaceOrView, TORCH_FN(ADInplaceOrView::resize_as_)));
   m.impl(
       "_fw_primal",
       torch::dispatch(
