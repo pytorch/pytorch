@@ -508,21 +508,27 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
   synchronizeStreams();
 
   // In case of blocking, wait for the operation to complete.
-  while (blockingWait_ && !isCompleted()) {
-    bool timedOut = checkTimeout();
-    // Explicitly abort ncclComms here before throwing this timed out
-    // exception to users.
-    // If throwing timed out excepiton without aborting nccl communicators
-    // here, it was observed that CUDA GPU will have 100% utilization and
-    // can not run new events successfully.
-    if (timedOut) {
-      std::string exceptionMsg = c10::str(
-          "[Rank ",
-          rank_,
-          "] Work ",
-          (*this),
-          " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
-      LOG(ERROR) << exceptionMsg;
+  if (blockingWait_) {
+    while (!isCompleted()) {
+      bool timedOut = checkTimeout();
+      // Explicitly abort ncclComms here before throwing this timed out
+      // exception to users.
+      // If throwing timed out excepiton without aborting nccl communicators
+      // here, it was observed that CUDA GPU will have 100% utilization and
+      // can not run new events successfully.
+      if (timedOut) {
+        std::string exceptionMsg = c10::str(
+            "[Rank ",
+            rank_,
+            "] Work ",
+            (*this),
+            " timed out in blocking wait (NCCL_BLOCKING_WAIT=1).");
+        LOG(ERROR) << exceptionMsg;
+        break;
+      }
+      // Yield
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
     }
     // exception() includes timeout and error during blocking wait
     if (exception()) {
@@ -531,9 +537,6 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
       // Throw exception (from main thread here)
       handleException(TearDown);
     }
-    // Yield
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(kSynchronizeBusyWaitMillis));
   }
 
   // Device synchronize only after we've completed timeout checks.
