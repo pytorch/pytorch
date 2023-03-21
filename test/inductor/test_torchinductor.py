@@ -4417,6 +4417,21 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put4(self):
+        # a, b[0] are not broadcastable
+        # https://github.com/pytorch/pytorch/issues/97104
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c)
+
+        self.common(
+            fn,
+            [
+                torch.rand([8, 2]),
+                torch.rand([8]) > 0.5,
+                torch.rand([]),
+            ],
+        )
+
     def test_index_put_as_masked_fill(self):
         def fn(a, b, c, d):
             a = a.clone()
