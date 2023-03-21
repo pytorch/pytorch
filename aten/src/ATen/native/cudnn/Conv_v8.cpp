@@ -373,7 +373,7 @@ void generate_and_filter_plans(const cudnnHandle_t handle, cudnn_frontend::Opera
   if (remove_invalid) {
     cudnn_frontend::executionPlans_t new_valid_plans;
     for (auto &plan : valid_plans) {
-      if (plan.getWorkspaceSize() <= max_workspace_size) {
+      if (static_cast<size_t>(plan.getWorkspaceSize()) <= max_workspace_size) {
         new_valid_plans.emplace_back(std::move(plan));
       }
     }
