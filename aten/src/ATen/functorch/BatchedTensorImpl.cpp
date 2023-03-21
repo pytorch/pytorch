@@ -103,6 +103,28 @@ const char* BatchedTensorImpl::tensorimpl_type_name() const {
   return "BatchedTensorImpl";
 }
 
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    const c10::VariableVersion& version_counter,
+    bool allow_tensor_metadata_change) const {
+  DispatchKeySet key_set = getKeysToPropagateToWrapper(value());
+  auto impl = c10::make_intrusive<BatchedTensorImpl>(key_set, value(), bdim(), level());
+  impl->set_version_counter(version_counter);
+  return impl;
+}
+
+c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    c10::VariableVersion&& version_counter,
+    bool allow_tensor_metadata_change) const {
+  DispatchKeySet key_set = getKeysToPropagateToWrapper(value());
+  auto impl = c10::make_intrusive<BatchedTensorImpl>(key_set, value(), bdim(), level());
+  impl->set_version_counter(version_counter);
+  return impl;
+}
+
+void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
+  TORCH_CHECK(false, "mutating directly with `.data` inside functorch transform is not allowed.");
+}
+
 Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
   DispatchKeySet key_set = getKeysToPropagateToWrapper(tensor);
   auto* batched = maybeGetBatchedImpl(tensor);
