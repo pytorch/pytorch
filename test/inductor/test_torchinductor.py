@@ -6125,15 +6125,17 @@ if HAS_CPU:
                 value = torch.randn((2, 17), dtype=dtype)
                 mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    opt_fn(value, mask)
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            opt_fn = torch._dynamo.optimize("inductor")(fn)
+                            opt_fn(value, mask)
 
-                    real_out = fn(value, mask)
-                    compiled_out = opt_fn(value, mask)
-                    assert same(real_out, compiled_out, equal_nan=True)
-                    assert metrics.generated_cpp_vec_kernel_count >= 1
+                            real_out = fn(value, mask)
+                            compiled_out = opt_fn(value, mask)
+                            assert same(real_out, compiled_out, equal_nan=True)
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
@@ -6229,12 +6231,16 @@ if HAS_CPU:
                 tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    traced = make_fx(fn)(x)
-                    compiled = compile_fx_inner(traced, [x])
-                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol)
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            traced = make_fx(fn)(x)
+                            compiled = compile_fx_inner(traced, [x])
+                            assert same(
+                                fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol
+                            )
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
