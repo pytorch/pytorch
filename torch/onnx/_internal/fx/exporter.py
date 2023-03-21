@@ -19,9 +19,8 @@ from torch.utils import _pytree
 
 
 @contextlib.contextmanager
-def patch_pytree_huggingface_modeloutput():
-    """
-    Patch 'torch.utils._pytree' to support family of 'ModelOutput' from HuggingFace 'transformers'.
+def _patch_pytree_huggingface_modeloutput():
+    """Patch 'torch.utils._pytree' to support family of 'ModelOutput' from HuggingFace 'transformers'.
 
     The source and details of the issue is described at https://github.com/pytorch/pytorch/issues/96386.
     This patch enables 'torch.utils._pytree' to flatten and unflatten all 'ModelOutput'
@@ -75,6 +74,7 @@ def _export(
     *args,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
+    # TODO: Move `ExportOptions` to top level API. Avoid `.update(**)`.
     export_options = options.ExportOptions()
     export_options.update(**kwargs)
     # Apply decomposition table to the input graph.
@@ -108,7 +108,7 @@ def _export(
 
 
 @_beartype.beartype
-@patch_pytree_huggingface_modeloutput()
+@_patch_pytree_huggingface_modeloutput()
 def export(
     fn: Union[torch.nn.Module, Callable],
     *args,
@@ -144,7 +144,8 @@ def export(
     # to _export.
     return _export(
         graph_module,
-        *(args + tuple(kwargs.values())),
+        *args,
+        *tuple(kwargs.values()),
         opset_version=opset_version,
         decomposition_table=function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE,
         use_binary_format=use_binary_format,
