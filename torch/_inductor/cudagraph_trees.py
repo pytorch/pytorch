@@ -1378,8 +1378,9 @@ class CUDAGraphTreeManager:
             if t():
                 torch._C._free_And_Remove_DeleterFn(t())
                 warnings.warn(
-                    f"CUDA Graphs is Deallocating Tensor Output from {stack_trace.strip()}. "
-                    "Deallocate output tensor no longer in use or copy output."
+                    f"CUDAGraphTrees triggered deallocating tensor output from {stack_trace.strip()}. "
+                    "Subsequent use of this storage may return garbage result. "
+                    "Deallocate the cudagraph tree output no longer in use or copy output."
                 )
 
     def clear_current_node_outputs_and_set_to_none(self):
