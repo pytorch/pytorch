@@ -145,12 +145,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   // this holds all the tensors for this interpreter run
   // we don't bother minimizing the size of this vector, since the extra
   // memory used by the pointers in this will be small
-  // instead we are very aggressive about releasing tensors when they become dead
-  // to make sure memory management happens efficiently.
-  // We optimize for the case where derivatives are run with retain_graph=False
-  // in the case where it is true, then the interpreter and this array get
-  // copied if this every becomes a bottleneck then we _should_ consider
-  // minimizing the total number or register
+  // instead we are very aggressive about releasing tensors when they become
+  // dead to make sure memory management happens efficiently. We optimize for
+  // the case where derivatives are run with retain_graph=False in the case
+  // where it is true, then the interpreter and this array get copied if this
+  // every becomes a bottleneck then we _should_ consider minimizing the total
+  // number or register
   std::vector<IValue> registers;
 
   // A stack of objects that have been __enter__'d.
