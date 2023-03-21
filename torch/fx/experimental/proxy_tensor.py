@@ -658,7 +658,10 @@ def disable_autocast_cache():
 
 
 def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, existing_fake_mode=None):
-    assert tracing_mode in ["real", "fake", "symbolic"]
+    assert tracing_mode in ["real", "fake", "symbolic", "existing"]
+    if tracing_mode == "existing":
+        assert existing_fake_mode is not None
+        tracing_mode = "symbolic" if existing_fake_mode.shape_env is not None else "fake"
 
     if decomposition_table is None:
         decomposition_table = {}
@@ -669,8 +672,8 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
         if existing_fake_mode is not None:
-            assert tracing_mode in ("fake", "symbolic")
-            assert existing_fake_mode.shape_env is not None == (tracing_mode == "symbolic")
+            assert tracing_mode in ("fake", "symbolic", "existing")
+            assert (existing_fake_mode.shape_env is not None) == (tracing_mode == "symbolic")
             fake_tensor_mode = existing_fake_mode
         elif tracing_mode == "real":
             fake_tensor_mode = nullcontext()
@@ -710,7 +713,6 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
             return x
 
         sym_mode = proxy_mode.sym_mode
-
         wrap_fn_map = {
             "real": lambda x: x,
             "fake": wrap_fake,

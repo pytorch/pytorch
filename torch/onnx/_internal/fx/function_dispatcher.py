@@ -11,6 +11,7 @@ from onnxscript.function_libs.torch_aten import ops  # type: ignore[import]
 import torch
 from torch.onnx._internal import _beartype
 
+
 TORCH_ONNX_OPSET = onnxscript.values.Opset(domain="torch.onnx", version=1)
 
 

@@ -48,8 +48,9 @@ def decompose(
     decomposed_module = proxy_tensor.make_fx(
         graph_with_interpreter,
         decomposition_table=decomposition_table,
-        tracing_mode="real",
+        tracing_mode="existing",
         _allow_non_fake_inputs=True,
+        existing_fake_mode=torch._dynamo.utils.fake_mode_from_tensors(args),
     )(*args)
     # Rename placeholder targets to match the original module's signature since
     # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).

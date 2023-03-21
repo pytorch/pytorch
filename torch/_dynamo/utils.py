@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Iterable, Tuple, Union
 
 import torch._logging
 from . import config
@@ -1283,7 +1283,7 @@ def assert_no_fake_params_or_buffers(gm):
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
-def fake_mode_from_tensors(inputs: List[Any]):
+def fake_mode_from_tensors(inputs: Iterable[Any]):
     """
     Takes a list of anything, unflattened is fine, returns a fake_mode
     if any are fake. All fake modes on all fake tensors must be identical.
