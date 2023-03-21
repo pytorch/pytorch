@@ -35,16 +35,18 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-static __m128i inline mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+static __m128i inline mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
   int32_t v;
   if (i32_aligned) {
     v = *(const int32_t*)ptr;
   } else {
-    uint8_t aligned_ptr[4];
-    std::memcpy(aligned_ptr, ptr, 4);
-    v = *(int32_t*)aligned_ptr;
+    std::memcpy(&v, ptr, 4);
   }
-  return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(v));
+  return _mm_cvtsi32_si128(v);
+}
+
+static __m128i inline mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+  return _mm_cvtepu8_epi32(mm_cvtsi32_si128(ptr, i32_aligned));
 }
 
 // TODO: We may want to hard-code an unrolled version for the case where
@@ -440,29 +442,21 @@ void ImagingResampleHorizontalConvolution8u4x(
   //   [ ... r3 g3 b3 a3  r4 g4 b4 a4 | ... R3 G3 B3 A3  R4 G4 B4 A4 ] ->
   //   [r3 0 r4 0  g3 0 g4 0  b3 0 b4 0  a3 0 a4 0 | R3 0 R4 0  G3 0 G4 0  B3 0 B4 0  A3 0 A4 0]
 
-  const __m256i masks_low_high_c4[2] = {
-    _mm256_set_epi8(
+  const auto mask_low_c4 = _mm256_set_epi8(
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+  const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8
-    )
-  };
-  const __m256i masks_low_high_c3[2] = {
-    _mm256_set_epi8(
+      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
+  const auto mask_low_c3 = _mm256_set_epi8(
       -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0,
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_high_c3 = _mm256_set_epi8(
       -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
-      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6
-    )
-  };
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6);
 
-  const auto mask_low = (num_channels == 3) ? masks_low_high_c3[0] : masks_low_high_c4[0];
-  const auto mask_high = (num_channels == 3) ? masks_low_high_c3[1] : masks_low_high_c4[1];
+  const auto mask_low = (num_channels == 3) ? mask_low_c3 : mask_low_c4;
+  const auto mask_high = (num_channels == 3) ? mask_high_c3 : mask_high_c4;
 
   const auto stride = num_channels * 1;  // num channels * sizeof(uint8)
 
@@ -647,9 +641,9 @@ void ImagingResampleHorizontalConvolution8u4x(
       auto p0 = mm_cvtepu8_epi32(lineIn2_min + stride * i, i32_aligned);
       __m128i p1;
       if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
-        uint8_t output1[4];
-        std::memcpy(output1, lineIn3_min + stride * i, 3);
-        p1 = mm_cvtepu8_epi32(output1, true);
+        uint8_t input[4];
+        std::memcpy(input, lineIn3_min + stride * i, 3);
+        p1 = mm_cvtepu8_epi32(input, true);
       } else {
         p1 = mm_cvtepu8_epi32(lineIn3_min + stride * i, i32_aligned);
       }
@@ -679,7 +673,8 @@ void ImagingResampleHorizontalConvolution8u4x(
     const auto out_x_strided = stride * out_x;
 
     if (num_channels == 3 && C10_UNLIKELY(out_x_strided + 4 >= max_out_x_strided)) {
-      // This is a boundary case when we want to write 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+      // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
+      // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
       // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
       // value which was preveiously computed by another line. In other words, it means that we can not overwrite
       // it by simply writing 4 bytes from the register to the output. We'll do the following:
@@ -717,7 +712,8 @@ void ImagingResampleHorizontalConvolution8u4x(
         std::memcpy(lineOut3 + out_x_strided + stride, next3, 4);
       }
     } else if (num_channels == 3) {
-      // We simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
+      // Memcpy 4-bytes is faster than 3-bytes and here
+      // we simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
       // that we will overwrite on the next iteration: (... R G B R G B X 0 0 ...)
       std::memcpy(lineOut0 + out_x_strided, (uint8_t *) &o0, 4);
       std::memcpy(lineOut1 + out_x_strided, (uint8_t *) &o1, 4);
@@ -764,50 +760,34 @@ void ImagingResampleHorizontalConvolution8u(
       7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4, 7, 6, 5, 4,
       3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0);
 
-  const __m256i masks_low_high_c4[2] = {
-    _mm256_set_epi8(
+  const auto mask_low_c4 = _mm256_set_epi8(
       -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
+  const auto mask_high_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8
-    )
-  };
-  const __m256i masks_low_high_c3[2] = {
-    _mm256_set_epi8(
+      -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8);
+  const auto mask_low_c3 = _mm256_set_epi8(
       -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0,
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_high_c3 = _mm256_set_epi8(
       -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
-      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6
-    )
-  };
-  const __m256i masks_lh_c3_c4[2] = {
-    _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6);
+  const auto mask_hl_c3 = _mm256_set_epi8(
       -1, -1, -1, -1, -1, 11, -1, 8, -1, 10, -1, 7, -1, 9, -1, 6,
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm256_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_hl_c4 = _mm256_set_epi8(
       -1, 15, -1, 11, -1, 14, -1, 10, -1, 13, -1, 9, -1, 12, -1, 8,
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    )
-  };
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
 
-  const __m128i masks_low128_c3_c4[2] = {
-    _mm_set_epi8(
-      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0
-    ),
-    _mm_set_epi8(
-      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0
-    )
-  };
+  const auto mask_low128_c3 = _mm_set_epi8(
+      -1, -1, -1, -1, -1, 5, -1, 2, -1, 4, -1, 1, -1, 3, -1, 0);
+  const auto mask_low128_c4 = _mm_set_epi8(
+      -1, 7, -1, 3, -1, 6, -1, 2, -1, 5, -1, 1, -1, 4, -1, 0);
 
-  const auto mask_low = (num_channels == 3) ? masks_low_high_c3[0] : masks_low_high_c4[0];
-  const auto mask_high = (num_channels == 3) ? masks_low_high_c3[1] : masks_low_high_c4[1];
-  const auto mask_hl = (num_channels == 3) ? masks_lh_c3_c4[0] : masks_lh_c3_c4[1];
-  const auto mask_low128 = (num_channels == 3) ? masks_low128_c3_c4[0] : masks_low128_c3_c4[1];
+  const auto mask_low = (num_channels == 3) ? mask_low_c3 : mask_low_c4;
+  const auto mask_high = (num_channels == 3) ? mask_high_c3 : mask_high_c4;
+  const auto mask_hl = (num_channels == 3) ? mask_hl_c3 : mask_hl_c4;
+  const auto mask_low128 = (num_channels == 3) ? mask_low128_c3 : mask_low128_c4;
 
   // out_xsize = output width, out_x = output x index
   // ids_min is the input offset index corresponding to out_x
@@ -1022,11 +1002,11 @@ void ImagingResampleHorizontalConvolution8u(
       __m128i pix;
       auto p = lineIn_min + stride * i;
       if (num_channels == 3 && C10_UNLIKELY(is_last_line && ids_min + stride * i + 4 >= max_in_x_strided)) {
-        uint8_t output[4];
-        std::memcpy(output, p, 3);
-        pix = mm_cvtepu8_epi32(output, true);
+        uint8_t input[4];
+        std::memcpy(input, p, 3);
+        pix = mm_cvtepu8_epi32(input, true);
       } else {
-        pix = mm_cvtepu8_epi32(p, true);
+        pix = mm_cvtepu8_epi32(p, i32_aligned);
       }
       sss = _mm_add_epi32(sss, _mm_madd_epi16(pix, mmk));
     }
@@ -1049,7 +1029,8 @@ void ImagingResampleHorizontalConvolution8u(
         // as they are out of memory bounds.
         std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 3);
       } else {
-        // This is a boundary case when we want to write 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
+        // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
+        // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
         // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
         // value which was preveiously computed by another line. In other words, it means that we can not overwrite
         // it by simply writing 4 bytes from the register to the output. We'll do the following:
@@ -1067,7 +1048,8 @@ void ImagingResampleHorizontalConvolution8u(
         std::memcpy(lineOut + out_x_strided + stride, next, 4);
       }
     } else if (num_channels == 3) {
-      // We simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
+      // Memcpy 4-bytes is faster than 3-bytes and here
+      // we simply write 4 bytes (... R G B X 0 0 0 0 0 ...) where X is a garbage value
       // that we will overwrite on the next iteration: (... R G B R G B X 0 0 ...)
       std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 4);
     } else {
@@ -1299,8 +1281,8 @@ void ImagingResampleVerticalConvolution8u(
       // RGB: source1 = [
       //    r0 g0 b0 r1  0 0 0 0  0 0 0 0  0 0 0 0
       // ]
-      auto source1 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + i * data_size));
-      auto source2 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + (i + 1) * data_size));
+      auto source1 = mm_cvtsi32_si128(lineIn_min + i * data_size, i32_aligned);
+      auto source2 = mm_cvtsi32_si128(lineIn_min + (i + 1) * data_size, i32_aligned);
 
       // Interleave source1 and source2 and cast the result to epi16
       // RGBA: pix = [
@@ -1343,8 +1325,8 @@ void ImagingResampleVerticalConvolution8u(
       auto mmk = _mm_set1_epi32(*(int32_t*)&k[i]);
 
       // Load 2 lines
-      auto source1 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + i * data_size));
-      auto source2 = _mm_cvtsi32_si128(*(int32_t*)(lineIn_min + (i + 1) * data_size));
+      auto source1 = mm_cvtsi32_si128(lineIn_min + i * data_size, i32_aligned);
+      auto source2 = mm_cvtsi32_si128(lineIn_min + (i + 1) * data_size, i32_aligned);
 
       auto source = _mm_unpacklo_epi8(source1, source2);
       auto pix = _mm_unpacklo_epi8(source, zero);
