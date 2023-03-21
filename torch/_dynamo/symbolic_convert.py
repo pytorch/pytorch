@@ -235,7 +235,6 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
     def inner(self: "InstructionTranslatorBase", inst: Instruction):
         value: VariableTracker = self.pop()
         self.output.guards.update(value.guards)
-        # breakpoint()
         if (
             config.rewrite_assert_with_torch_assert
             and _detect_and_normalize_assert_statement(self, truth_fn, push)
