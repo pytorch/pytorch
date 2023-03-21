@@ -1171,6 +1171,7 @@ class TestVmapAPI(TestCase):
     def test_data_attribute(self):
         def foo(x):
             y = x.data
+            y.sum()
             return x
 
         torch.func.vmap(foo)(torch.randn(3, 3))
