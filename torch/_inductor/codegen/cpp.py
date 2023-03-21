@@ -469,7 +469,7 @@ class CppVecOverrides(OpOverrides):
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx
-        assert opt_ctx.dtype in [torch.int32, torch.float32]
+        assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
         if dtype in [torch.bfloat16]:
             assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_directly_load_bf16
         proposed_dtype = opt_ctx.dtype
