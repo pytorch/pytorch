@@ -1442,7 +1442,7 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(linear, linear_mps)
 
-    def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False, gradgrad_atol=6e-02):
+    def _linear_helper(self, in_features, out_features, shape, bias=True, backward_pass=False):
         cpu_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="cpu", bias=bias)
         mps_linear = torch.nn.Linear(in_features=in_features, out_features=out_features, device="mps", bias=bias)
 
@@ -1478,7 +1478,7 @@ class TestMPS(TestCaseMPS):
 
             self.assertEqual(cpu_linear.weight.grad.size(), mps_linear.weight.grad.size())
             self.assertEqual(cpu_linear.weight.grad, mps_linear.weight.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
-            self.assertTrue(gradgradcheck(mps_linear, mps_linear.weight, atol=gradgrad_atol, rtol=10.4e-05))
+            self.assertTrue(gradgradcheck(mps_linear, mps_linear.weight, atol=7e-03, rtol=10.4e-05))
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
@@ -1499,7 +1499,7 @@ class TestMPS(TestCaseMPS):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=False, backward_pass=False)
 
     def test_linear2D_no_bias_backward(self):
-        self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=False, backward_pass=True, gradgrad_atol=1.1e-01)
+        self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=False, backward_pass=True)
 
     def test_linear3D(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 5, 2)), bias=True, backward_pass=False)
