@@ -4859,10 +4859,14 @@
 - func: silu(Tensor self) -> Tensor
   structured_delegate: silu.out
   python_module: nn
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu
 
 - func: silu_(Tensor(a!) self) -> Tensor(a!)
   structured_delegate: silu.out
   python_module: nn
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_silu_
 
 - func: silu.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -4885,6 +4889,7 @@
   python_module: nn
   dispatch:
     CompositeImplicitAutograd: math_silu_backward
+    NestedTensorCPU, NestedTensorCUDA: silu_backward_nested
 
 - func: mish(Tensor self) -> Tensor
   structured_delegate: mish.out
