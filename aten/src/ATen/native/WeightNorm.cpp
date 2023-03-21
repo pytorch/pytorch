@@ -17,6 +17,7 @@
 #endif
 
 #include <vector>
+#include <iostream>
 
 namespace at {
 namespace native {
