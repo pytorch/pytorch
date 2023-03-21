@@ -410,9 +410,7 @@ class parametrize(_TestParametrizer):
                                        'values and {} names for test "{}"'.format(
                                            len(values), len(self.arg_names), test.__name__))
 
-                param_kwargs = {
-                    name: value for name, value in zip(self.arg_names, values)
-                }
+                param_kwargs = dict(zip(self.arg_names, values))
 
                 test_name = self._get_subtest_name(values, explicit_name=maybe_name)
 
