@@ -6366,6 +6366,29 @@ if HAS_CPU:
                 if codecache.valid_vec_isa_list():
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
+        def test_bn_bf16(self):
+            class Model(torch.nn.Module):
+                def __init__(self):
+                    super(Model, self).__init__()
+                    self.bn = torch.nn.BatchNorm2d(
+                        64,
+                        eps=1e-05,
+                        momentum=0.1,
+                    )
+
+                def forward(self, x):
+                    return self.bn(x)
+
+            bn = Model().to(dtype=torch.bfloat16).eval()
+            x = torch.randn((2, 64, 16, 16), dtype=torch.bfloat16)
+
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                traced = make_fx(bn)(x, y)
+                compiled = compile_fx_inner(traced, [x])
+                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
+
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )

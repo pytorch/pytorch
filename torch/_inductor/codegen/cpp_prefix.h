@@ -92,9 +92,21 @@ void flag_to_float(T src, float* dst, int64_t n) {
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
 
-inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
+template<typename T, std::enable_if_t<std::is_same<bfloat16, T>::value>* = nullptr>
+inline at::vec::Vectorized<float> load_bf16_as_float(const T* bf16_buf) {
   at::vec::Vectorized<float> res_vec(0);
   at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
+  return res_vec;
+}
+
+template<typename T, typename = std::enable_if_t<std::is_same<bfloat16, T>::value>>
+inline at::vec::Vectorized<float> load_bf16_as_float(const T bf16_buf) {
+  at::vec::Vectorized<float> res_vec(0);
+  __at_align__ float values[at::vec::Vectorized<float>::size()];
+  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    values[i] = bf16_buf;
+  }
+  res_vec = at::vec::Vectorized<float>::loadu(values);
   return res_vec;
 }
 
