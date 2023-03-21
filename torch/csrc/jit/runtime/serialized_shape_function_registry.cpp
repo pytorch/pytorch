@@ -959,8 +959,8 @@ def mv(self: List[int],
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
   _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
-  _4 = "AssertionError: stride should not be zeero"
-  _5 = "AssertionError: stride should not be zeero"
+  _4 = "AssertionError: stride should not be zero"
+  _5 = "AssertionError: stride should not be zero"
   if torch.eq(torch.len(kernel_size), 1):
     _6 = True
   else:
@@ -1172,7 +1172,7 @@ def mv(self: List[int],
   _1 = "AssertionError: max_pool2d: stride must either be omitted, a single int, or a tuple of two ints"
   _2 = "AssertionError: max_pool2d: padding must be either be a single int, or a tuple of two ints"
   _3 = "AssertionError: max_pool2d: dilation must be either a single int, or a tuple of two ints"
-  _4 = "AssertionError: stride should not be zeero"
+  _4 = "AssertionError: stride should not be zero"
   if torch.eq(torch.len(kernel_size), 1):
     _5 = True
   else:
