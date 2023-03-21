@@ -150,7 +150,7 @@ def export(
     # Translate callable to FX graph.
     # TODO(bowbao, titai): Change "real" to "symbolic" after symbolic shape export is supported.
     fx_frontend = frontend.DynamoExport(tracing_mode="real", aten_graph=True)
-    graph_module = fx_frontend.trace(fn, *args, **kwargs)
+    graph_module = fx_frontend.trace(fn, *args)
     # Export FX graph to ONNX ModelProto.
     #
     # Note that ALL kwargs are folded into constants in graph_module, so we don't pass kwargs
