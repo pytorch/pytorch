@@ -182,8 +182,8 @@ bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 
-int *LastSavedDevice() {
-  static int CUDA_LAST_SAVED_DEVICE = -1;
+std::atomic_int* LastSavedDevice() {
+  static std::atomic_int CUDA_LAST_SAVED_DEVICE = -1;
   return &CUDA_LAST_SAVED_DEVICE;
 }
 // Wrappers for raw CUDA device management functions
