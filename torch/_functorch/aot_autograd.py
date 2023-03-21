@@ -3007,7 +3007,6 @@ def aot_module_simplified(
                     # ... but not here!
                     if aot_autograd_arg_pos_to_source is None:
                         aot_autograd_arg_pos_to_source = []
-                    assert isinstance(args[i], torch.Tensor)
                     aot_autograd_arg_pos_to_source.append(node._dynamo_source)
 
     if aot_autograd_arg_pos_to_source is not None:
