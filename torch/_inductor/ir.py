@@ -93,6 +93,8 @@ def validate_ir(node_or_nodes):
             (
                 DynamicScalar,
                 TensorBox,
+                MultiOutput,
+                type(None),
                 RandSeedBuffer,
                 sympy.Symbol,
                 sympy.core.relational.Relational,
@@ -3878,7 +3880,8 @@ class MutableBox(IRNode):
     data: IRNode
 
     def __post_init__(self):
-        assert isinstance(object.__getattribute__(self, 'data'), IRNode)
+        data = object.__getattribute__(self, 'data')
+        assert isinstance(data, IRNode), repr(data)
         super().__post_init__()
 
     def __getattr__(self, name):

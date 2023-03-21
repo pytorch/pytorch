@@ -1021,8 +1021,8 @@ def fallback_handler(kernel):
     fallbacks.add(kernel)
 
     def handler(*args, **kwargs):
-        return pytree.tree_map(
-            TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
+        return pytree.tree_map_only(
+            torch.Tensor, TensorBox.create, ir.FallbackKernel.create(kernel, *args, **kwargs)
         )
 
     return handler
