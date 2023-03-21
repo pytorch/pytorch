@@ -163,7 +163,6 @@ TESTS = TESTS + ['doctests']
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 WINDOWS_BLOCKLIST = [
-    "test_ops_jit",  # TODO: Broken on Windows https://github.com/pytorch/pytorch/issues/96858
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
@@ -280,6 +279,7 @@ CI_SERIAL_LIST = [
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     '_nvfuser/test_torchscript',  # OOM on test_issue_1785
+    'test_schema_check',  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -784,7 +784,8 @@ def get_pytest_args(options):
     pytest_args = [
         "--use-pytest",
         "-vv",
-        "-rfEX"
+        "-rfEX",
+        "-p", "no:xdist",
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -864,14 +865,6 @@ CUSTOM_HANDLERS = {
     # not a test_ops file, but takes 2 hrs on some architectures and
     # run_test_ops is good at parallelizing things
     "test_decomp": run_test_ops,
-}
-
-
-PYTEST_BLOCKLIST = {
-    "profiler/test_profiler",
-    "dynamo/test_repros",  # skip_if_pytest
-    "dynamo/test_optimizers",  # skip_if_pytest
-    "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
 }
 
 
@@ -1129,7 +1122,7 @@ def must_serial(file: str) -> bool:
 
 
 def can_run_in_pytest(test):
-    return (test not in PYTEST_BLOCKLIST) and (os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0')
+    return os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0'
 
 
 def get_selected_tests(options):
