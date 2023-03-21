@@ -3415,6 +3415,12 @@ class TestBinaryUfuncs(TestCase):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
+        elif dtype in (torch.complex64, torch.complex128):
+            # numpy has not implemented logaddexp for complex
+            def _ref_func(x, y):
+                return scipy.special.logsumexp(np.stack((x, y), axis=0), axis=0)
+            ref_func = _ref_func
+            our_func = torch.logaddexp
         else:
             ref_func = np.logaddexp
             our_func = torch.logaddexp
@@ -3453,7 +3459,8 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @dtypes(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
+    @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
         self._test_logaddexp(device, dtype, base2=False)
 

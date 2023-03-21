@@ -84,6 +84,8 @@ SKIP_TRAIN = {
     # Unusual training setup
     "opacus_cifar10",
     "maml",
+    # segfault: Internal Triton PTX codegen error
+    "timm_efficientdet",
 }
 SKIP_TRAIN.update(DETECTRON2_MODELS)
 

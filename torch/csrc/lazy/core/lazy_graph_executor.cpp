@@ -560,7 +560,7 @@ void LazyGraphExecutor::Async::Wait() {
   }
 }
 
-bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr tensor) const {
+bool LazyGraphExecutor::ShouldSyncTensor(const LazyTensorPtr& tensor) const {
   return tensor->GetIrValue()->op() != ltc_not_supported;
 }
 

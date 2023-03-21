@@ -15,7 +15,7 @@ Where a complete example looks like this:
 
    from typing import List
    import torch
-   import torchdynamo
+   from torch import _dynamo as torchdynamo
    def my_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
        print("my_compiler() called with FX graph:")
        gm.graph.print_tabular()

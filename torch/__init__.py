@@ -246,9 +246,12 @@ class SymInt:
         self.node = node
 
     def __bool__(self):
-        return self.node.bool_()
+        return builtins.bool(self != 0)
 
     def __int__(self):
+        return self.node.int_()
+
+    def __index__(self):
         return self.node.int_()
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
@@ -288,8 +291,6 @@ class SymFloat:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
@@ -337,14 +338,15 @@ class SymBool:
     """
 
     def __init__(self, node):
-        from torch.fx.experimental.symbolic_shapes import SymNode
-        assert isinstance(node, SymNode)
         # This field MUST be named node; C++ binding code assumes that this
         # class has a field named node that stores SymNode
         self.node = node
 
     def __bool__(self):
         return self.node.bool_()
+
+    def __int__(self):
+        return builtins.int(self.node.bool_())
 
     # Magic methods installed by torch.fx.experimental.symbolic_shapes
     def __and__(self, other) -> "SymBool":
@@ -1323,7 +1325,6 @@ from ._linalg_utils import (  # type: ignore[misc]
 )
 from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
 
-
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
@@ -1337,7 +1338,7 @@ class _TorchCompileInductorWrapper:
             self.config["triton.cudagraphs"] = False
             assert "triton.cudagraphs" not in (
                 options or ()
-            ), "triton.cudagraphs does not support dynamic shapes"
+            ), "triton.cudagraphs does not support dynamic shapes. Please set dynamic=False or triton.cudagraphs=False"
 
     def __eq__(self, other):
         return (isinstance(other, _TorchCompileInductorWrapper) and
@@ -1347,17 +1348,8 @@ class _TorchCompileInductorWrapper:
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode == "reduce-overhead":
-            self.apply_options({
-                "triton.cudagraphs": True,
-                "size_asserts": False,
-            })
-        elif mode == "max-autotune":
-            self.apply_options({
-                "epilogue_fusion": True,
-                "max_autotune": True,
-                "triton.cudagraphs": True,
-            })
+        elif mode in ("reduce-overhead", "max-autotune"):
+            self.apply_options(torch._inductor.list_mode_options(mode))
         else:
             raise RuntimeError(
                 f"Unrecognized mode={mode}, should be one of: default, reduce-overhead, max-autotune"
@@ -1405,13 +1397,29 @@ def compile(model: Optional[Callable] = None, *,
        fullgraph (bool): Whether it is ok to break model into several subgraphs
        dynamic (bool): Use dynamic shape tracing
        backend (str or Callable): backend to be used
+        - "inductor" is the default backend, which is a good balance between performance and overhead
+        - Non experimental in-tree backends can be seen with `torch._dynamo.list_backends()`
+        - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
+        - To register an out-of-tree custom backend: https://pytorch.org/docs/master/dynamo/custom-backends.html
        mode (str): Can be either "default", "reduce-overhead" or "max-autotune"
-       options (dict): A dictionary of options to pass to the backend.
+        - "default" is the default mode, which is a good balance between performance and overhead
+        - "reduce-overhead" is a mode that reduces the overhead of python with CUDA graphs, useful for small batches
+        - "max-autotune" is a mode that that leverages Triton based matrix multiplications and convolutions
+        - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
+       options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
+        - `epilogue_fusion` which fuses pointwise ops into templates. Requires `max_autotune` to also be set
+        - `max_autotune` which will profile to pick the best matmul configuration
+        - `fallback_random` which is useful when debugging accuracy issues
+        - `shape_padding` which pads matrix shapes to better align loads on GPUs especially for tensor cores
+        - `triton.cudagraphs` which will reduce the overhead of python with CUDA graphs
+        - `trace.enabled` which is the most useful debugging flag to turn on
+        - `trace.graph_diagram` which will show you a picture of your graph after fusion
+        - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
     Example::
 
-        @torch.compile(options={"matmul-padding": True}, fullgraph=True)
+        @torch.compile(options={"triton.cudagraphs": True}, fullgraph=True)
         def foo(x):
             return torch.sin(x) + torch.cos(x)
 

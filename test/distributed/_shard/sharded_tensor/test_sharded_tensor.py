@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
@@ -111,7 +111,7 @@ class TestShardedTensorMetadata(TestCase):
             self.assertEqual(expected_st_metadata, st_metadata)
 
 class TestCreateTensorFromParams(TestCase):
-    @sandcastle_skip_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
+    @skip_but_pass_in_sandcastle_if(torch.cuda.device_count() < 1, 'CUDA GPU is needed')
     def test_empty(self):
         expected_dtype = torch.double
         tensor_properties = TensorProperties(

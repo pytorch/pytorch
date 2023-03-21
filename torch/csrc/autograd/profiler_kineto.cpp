@@ -567,7 +567,9 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_GPU_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!at::hasCUDA(), activities, config.experimental_config);
+      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU()),
+      activities,
+      config.experimental_config);
 
   if (!config.experimental_config.performance_events.empty()) {
     /* For now only CPU activity is supported */
