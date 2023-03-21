@@ -63,21 +63,6 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.coordesc_tuned = False
 
-        if DEBUG and False:
-            import itertools
-            self.configs = [] # skip existing ones
-
-            for stage, warp, xblk, rblk in itertools.product(
-                [1, 2, 3,], # stage, fix 1
-                [4,], # warp, fix 4
-                [1,], # xblk, fix 1
-                [128], # rblock, fix 128
-            ):
-                self.configs.append(Config(
-                    {"XBLOCK": xblk, "RBLOCK": rblk}, num_warps=warp, num_stages=stage
-                    # {"XBLOCK": xblk}, num_warps=warp, num_stages=stage
-                ))
-
         if DEBUG:
             print(f"CachingAutotuner got {len(self.configs)} configs")
             for c in self.configs:
@@ -227,6 +212,7 @@ class CachingAutotuner(KernelInterface):
                 cloned_args.append(arg)
 
         best_timing = self.bench(launcher, *cloned_args, **kwargs)[0]
+        # TODO should tune YZBLOCK as well.
         tuning_coordinates = ["XBLOCK", "RBLOCK", "num_warps"]
 
         def get_coord(config, name):
@@ -254,13 +240,11 @@ class CachingAutotuner(KernelInterface):
 
         print("= Do coordinate descent tuning =")
         while improved:
-            # import pdb; pdb.set_trace() # TODO
             improved = False
-            # import pdb; pdb.set_trace() # TODO
             for name in tuning_coordinates:
                 lhs_config, rhs_config = None, None
                 cur_val = get_coord(best_launcher.config, name)
-                # e.g. some kernel don't have RBLOCK
+                # some kernel don't have RBLOCK. So cur_val may be None
                 if cur_val is None:
                     continue
 
@@ -287,12 +271,11 @@ class CachingAutotuner(KernelInterface):
                         continue
                     if has_improvement(best_timing, timing):
                         improved = True
-                        print(f"Tune from {best_launcher.config} {best_timing} -> {launcher.config} {timing}") # TODO
+                        print(f"Tune from {best_launcher.config} {best_timing} -> {launcher.config} {timing}")
                         best_timing = timing
                         best_launcher = launcher
                         break
                     else:
-                        # print(f"skip {launcher.config} {improved}") # TODO
                         pass
 
         return best_launcher
@@ -300,11 +283,8 @@ class CachingAutotuner(KernelInterface):
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         timings = self.benchmark_all_configs(*args, **kwargs)
-        # for k, v in timings.items():
-        #     print(f"{k.config}: {v}")
         self.launchers = [builtins.min(timings, key=timings.get)]
 
-        # print(f"Best config {self.launchers[0].config}")
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config)
 
@@ -685,7 +665,6 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        # import pdb; pdb.set_trace() #TODO
         if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:

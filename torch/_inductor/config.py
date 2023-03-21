@@ -65,7 +65,6 @@ autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
 
 coordinate_descent_tuning = os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
-coordinate_descent_tuning = 1 # TODO 
 
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
