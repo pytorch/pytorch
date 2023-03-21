@@ -1232,13 +1232,13 @@ class AOTConfig:
 
     fw_compiler: Callable
     bw_compiler: Callable
-    inference_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
     num_params_buffers: int
     aot_id: int
     keep_inference_input_mutations: bool
     dynamic_shapes: bool = False
+    inference_compiler: Optional[Callable] = None
 
 def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
@@ -2494,10 +2494,11 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
-                                aot_config.bw_compiler, None, None, None,
+                                aot_config.bw_compiler, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
-                                aot_config.dynamic_shapes
+                                aot_config.dynamic_shapes,
+                                inference_compiler=None,
                             )
                         )
                     else:
