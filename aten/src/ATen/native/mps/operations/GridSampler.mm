@@ -4,8 +4,11 @@
 
 namespace at::native {
 namespace mps {
-void grid_sampler_2d_mps_impl(Tensor &output, const Tensor& input, const Tensor& grid,
-                              int64_t interpolation_mode, int64_t padding_mode,
+void grid_sampler_2d_mps_impl(Tensor& output,
+                              const Tensor& input,
+                              const Tensor& grid,
+                              int64_t interpolation_mode,
+                              int64_t padding_mode,
                               bool align_corners) {
 // Grid Sampler support has been added in macOS 13.1
 #if defined(__MAC_13_2)

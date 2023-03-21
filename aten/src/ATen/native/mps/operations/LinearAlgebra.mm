@@ -171,9 +171,7 @@ Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& output)
 }
 } // namespace mps
 
-Tensor addr_mps(const Tensor& self,
-            const Tensor& vec1, const Tensor& vec2,
-            const Scalar& beta, const Scalar& alpha) {
+Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
   Tensor result = at::empty({0}, self.options());
   addr_out_mps(self, vec1, vec2, beta, alpha, result);
   return result;

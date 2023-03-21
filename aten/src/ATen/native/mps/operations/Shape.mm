@@ -26,14 +26,11 @@ std::vector<int64_t> getTopK0Shape(IntArrayRef sizes, const int64_t dim_) {
   return numbers;
 }
 
-void check_shape_except_dim(const Tensor &first, const Tensor &second,
-                            int dimension, int index)
-{
+void check_shape_except_dim(const Tensor& first, const Tensor& second, int dimension, int index) {
   int first_dims = first.dim();
   int second_dims = second.dim();
-  TORCH_CHECK(first_dims == second_dims,
-      "Tensors must have same number of dimensions: got ", first_dims,
-      " and ", second_dims);
+  TORCH_CHECK(
+      first_dims == second_dims, "Tensors must have same number of dimensions: got ", first_dims, " and ", second_dims);
   for (int dim = 0; dim < first_dims; dim++) {
     if (dim == dimension) {
       continue;
@@ -41,10 +38,15 @@ void check_shape_except_dim(const Tensor &first, const Tensor &second,
     int64_t first_dim_size = at::native::size(first, dim);
     int64_t second_dim_size = at::native::size(second, dim);
     TORCH_CHECK(first_dim_size == second_dim_size,
-        "Sizes of tensors must match except in dimension ", dim, ". Got ",
-        static_cast<long long>(first_dim_size), " and ",
-        static_cast<long long>(second_dim_size), " (The offending index is ",
-        index, ")");
+                "Sizes of tensors must match except in dimension ",
+                dim,
+                ". Got ",
+                static_cast<long long>(first_dim_size),
+                " and ",
+                static_cast<long long>(second_dim_size),
+                " (The offending index is ",
+                index,
+                ")");
   }
 }
 } // namespace mps

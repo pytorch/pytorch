@@ -469,7 +469,7 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_mps_out(const T
 
 string get_mem_string(c10::MemoryFormat memory_format) {
   string mem_format_key;
-  switch(memory_format) {
+  switch (memory_format) {
     case at::MemoryFormat::Contiguous:
       mem_format_key = "Contiguous";
       break;
