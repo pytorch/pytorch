@@ -657,7 +657,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False):
+def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_inputs=False, existing_fake_mode=None):
     assert tracing_mode in ["real", "fake", "symbolic"]
 
     if decomposition_table is None:
@@ -668,7 +668,11 @@ def make_fx(f, decomposition_table=None, tracing_mode="real", _allow_non_fake_in
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
         fake_tensor_mode: Any = nullcontext()
-        if tracing_mode == "real":
+        if existing_fake_mode is not None:
+            assert tracing_mode in ("fake", "symbolic")
+            assert existing_fake_mode.shape_env is not None == (tracing_mode == "symbolic")
+            fake_tensor_mode = existing_fake_mode
+        elif tracing_mode == "real":
             fake_tensor_mode = nullcontext()
         elif tracing_mode == "fake":
             fake_tensor_mode = FakeTensorMode(

@@ -48,7 +48,7 @@ def decompose(
     decomposed_module = proxy_tensor.make_fx(
         graph_with_interpreter,
         decomposition_table=decomposition_table,
-        tracing_mode="fake",
+        tracing_mode="real",
         _allow_non_fake_inputs=True,
     )(*args)
     # Rename placeholder targets to match the original module's signature since

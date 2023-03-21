@@ -18,7 +18,12 @@ def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *a
     # 2. run FakeTensorProp
     # If (1) and (2) are done with difference FakeTensorMode's, undefined behavior may
     # happen.
-    fake_tensor_mode = fake_tensor.FakeTensorMode()
+    fake_tensor_mode = torch._dynamo.utils.fake_mode_from_tensors(args)  # type: ignore[arg-type]
+    fake_tensor_mode = (
+        fake_tensor_mode
+        if fake_tensor_mode is not None
+        else fake_tensor.FakeTensorMode()
+    )
 
     def to_fake_tensor(x):
         if isinstance(x, torch.Tensor) and not isinstance(x, fake_tensor.FakeTensor):
