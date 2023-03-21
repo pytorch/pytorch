@@ -11,6 +11,7 @@ import unittest
 
 from torch.testing._internal.common_utils import TestCase, run_tests, is_iterable_of_tensors, IS_MACOS, \
     IS_X86, parametrize, TEST_WITH_ASAN, noncontiguous_like
+from torch.testing._internal.common_utils import skipIfRocm
 import torch
 from torch import Tensor
 import functools
@@ -36,7 +37,7 @@ from common_utils import (
     is_valid_inplace_sample_input,
     loop,
     loop2,
-    expectedFailureIf
+    expectedFailureIf,
 )
 from torch.testing._internal.autograd_function_db import (
     autograd_function_db
@@ -318,6 +319,14 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail('tensor_split'),  # data_ptr composite compliance
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+    # https://github.com/pytorch/pytorch/issues/96560
+    decorate('nn.functional.scaled_dot_product_attention', decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -465,6 +474,13 @@ class TestOperators(TestCase):
 
         xfail('nn.functional.rrelu'),  # in-place test errors out with no formula implemented
         xfail('NumpyExpMarkDirtyAutogradFunction'),  # TODO: https://github.com/pytorch/pytorch/issues/91280
+
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
 
         # --- Non-Contiguous Failures! ---
         # This is expected to fail as the operator
@@ -773,6 +789,8 @@ class TestOperators(TestCase):
         xfail("normal", "number_mean"),  # calls random op
         xfail("pca_lowrank"),  # calls random op
         xfail("put"),  # vmap: inplace into a regular tensor
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('linalg.pinv', 'hermitian', decorator=skipIfRocm),
         xfail("quantile", device_type='cpu'),  # Batching rule not implemented for `at::equal`
         xfail("scatter_reduce", "prod"),  # vmap (looks like you are calling item/data-dependent)
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
@@ -999,6 +1017,12 @@ class TestOperators(TestCase):
         xfail("native_batch_norm"),
         xfail("_native_batch_norm_legit"),
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -1753,6 +1777,15 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool2d', 'grad'),  # contiguous call
         xfail('nn.functional.max_unpool2d'),  # contiguous call
         xfail('to_sparse'),  # dispatch key issue
+
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('xlogy', decorator=skipIfRocm),
 
         # numerical inconsistencies, look like bugs
         skip('matrix_exp', dtypes=(torch.float32,), device_type='cuda'),  # fails on linux, passes on windows
