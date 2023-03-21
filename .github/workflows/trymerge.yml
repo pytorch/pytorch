@@ -38,7 +38,6 @@ jobs:
           FORCE: ${{ github.event.client_payload.force}}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
           REBASE: ${{ github.event.client_payload.rebase }}
-          IGNORE_CURRENT: ${{ github.event.client_payload.ignore_current }}
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
           set -ex
@@ -55,12 +54,6 @@ jobs:
               python3 .github/scripts/trymerge.py --force --comment-id "${COMMENT_ID}" "${PR_NUM}"
             else
               python3 .github/scripts/trymerge.py --force "${PR_NUM}"
-            fi
-          elif [ -n "${IGNORE_CURRENT}" ]; then
-            if [ -n "${COMMENT_ID}" ]; then
-              python3 .github/scripts/trymerge.py --ignore-current --comment-id "${COMMENT_ID}" "${PR_NUM}"
-            else
-              python3 .github/scripts/trymerge.py --ignore-current "${PR_NUM}"
             fi
           elif [ -n "${COMMENT_ID}" ]; then
             python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
