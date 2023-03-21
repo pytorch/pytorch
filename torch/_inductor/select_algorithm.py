@@ -90,7 +90,7 @@ class TritonTemplateKernel(TritonKernel):
         }
         triton_meta["configs"] = [config_of(signature)]
         return (
-            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r})\n"
+            f"@template(num_stages={self.num_stages}, num_warps={self.num_warps}, meta={triton_meta!r},filename=__file__)\n"
             + "@triton.jit"
         )
 

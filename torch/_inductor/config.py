@@ -240,6 +240,7 @@ class triton:
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 
+triton.persistent_reductions = False # TODO use a flag
 
 # create a directory containing lots of debug information
 class trace:

@@ -54,14 +54,14 @@ class CachingAutotuner(KernelInterface):
     configs, and does not rely on the Triton JIT.
     """
 
-    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names):
+    def __init__(self, fn, meta, configs, save_cache_hook, mutated_arg_names, filename=None):
         super().__init__()
         self.fn = fn
         self.meta = meta
         self.save_cache_hook = save_cache_hook
         self.mutated_arg_names = mutated_arg_names
         self.configs = configs
-        self.coordesc_tuned = False
+        self.filename = filename
 
         if DEBUG:
             print(f"CachingAutotuner got {len(self.configs)} configs")
@@ -211,7 +211,7 @@ class CachingAutotuner(KernelInterface):
             else:
                 cloned_args.append(arg)
 
-        best_timing = self.bench(launcher, *cloned_args, **kwargs)[0]
+        baseline_timing = best_timing = self.bench(launcher, *cloned_args, **kwargs)[0]
         # TODO should tune YZBLOCK as well.
         tuning_coordinates = ["XBLOCK", "RBLOCK", "num_warps"]
 
@@ -233,6 +233,7 @@ class CachingAutotuner(KernelInterface):
 
         improved = True
         best_launcher = launcher
+        baseline_config = launcher.config
 
         def has_improvement(baseline, test):
             threshold = 0.00001
@@ -278,6 +279,16 @@ class CachingAutotuner(KernelInterface):
                     else:
                         pass
 
+        if best_timing * 5 < baseline_timing:  # imporvement >5x
+            print(f"Improve from {baseline_config} {baseline_timing} -> {best_launcher.config} {best_timing}")
+            print(f"Kernel file name {self.filename}")
+            import pdb; pdb.set_trace()
+            pass
+
+        if self.save_cache_hook:
+            self.save_cache_hook(best_launcher.config, True)
+
+        best_launcher.config.found_by_coordesc = True
         return best_launcher
 
     def autotune_to_one_config(self, *args, **kwargs):
@@ -289,15 +300,17 @@ class CachingAutotuner(KernelInterface):
             self.save_cache_hook(self.launchers[0].config)
 
     def run(self, *args, grid, stream):
+        # if len(self.launchers) == 1 and getattr(self.launchers[0].config, "found_by_coordesc", False):
+        #     print(f"Got coorddesc tuning result from cache")
+
         if len(self.launchers) != 1:
             if len(self.launchers) == 0:
                 self.precompile()
             if len(self.launchers) > 1:
                 self.autotune_to_one_config(*args, grid=grid)
 
-        if not self.coordesc_tuned and config.coordinate_descent_tuning:
+        if not getattr(self.launchers[0].config, "found_by_coordesc", False) and config.coordinate_descent_tuning:
             self.launchers = [self.coordinate_descent_tuning(self.launchers[0], *args, grid=grid)]
-            self.coordesc_tuned = True
 
         (launcher,) = self.launchers
 
@@ -396,8 +409,17 @@ def load_cached_autotuning(
 
     with open(cache_filename, "r") as fd:
         best_config = json.loads(fd.read())
-    if best_config.get("configs_hash") != configs_hash:
+
+    if best_config.pop("configs_hash", None) != configs_hash:
         return None
+
+    if config.coordinate_descent_tuning and best_config.pop("found_by_coordesc", False):
+        num_warps = best_config.pop("num_warps")
+        num_stages = best_config.pop("num_stages")
+        triton_config = Config(best_config, num_warps=num_warps, num_stages=num_stages)
+        # TODO: should we pass a flags around rather than monkey packing?
+        triton_config.found_by_coordesc = True 
+        return triton_config
 
     matching_configs = [
         cfg
@@ -428,17 +450,24 @@ def cached_autotune(
     cache_autotune_result = not config.benchmark_kernel
 
     # on disk caching logic
-    if cache_autotune_result and filename is not None and len(configs) > 1:
+    if cache_autotune_result and filename is not None:
         cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
         best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
         if best_config:
             configs = [best_config]
 
-        def save_cache_hook(cfg):
+        def save_cache_hook(cfg, found_by_coordesc=False):
             with open(cache_filename, "w") as fd:
-                fd.write(json.dumps({**cfg.kwargs, "configs_hash": configs_hash}))
-
+                fd.write(json.dumps({
+                    **cfg.kwargs,
+                    "num_warps": cfg.num_warps,
+                    "num_stages": cfg.num_stages,
+                    "configs_hash": configs_hash,
+                    "found_by_coordesc": found_by_coordesc
+                }))
+            type_str = "coordesc" if found_by_coordesc else "heuristic"
+            print(f"Save {type_str} tuning result to {cache_filename}")
     else:
         save_cache_hook = None
 
@@ -460,6 +489,7 @@ def cached_autotune(
             configs=configs,
             save_cache_hook=save_cache_hook,
             mutated_arg_names=mutated_arg_names,
+            filename=filename,
         )
 
     return decorator
@@ -616,7 +646,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     bs = max(256, min(numel // 128, 1024))
 
     if len(size_hints) == 1:
-        return cached_autotune([triton_config(size_hints, bs)], meta=meta)
+        return cached_autotune([triton_config(size_hints, bs)], meta=meta, filename=filename)
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
@@ -724,7 +754,7 @@ def template(num_stages, num_warps, meta, filename=None):
     Compile a triton template
     """
     return cached_autotune(
-        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
+        [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta, filename=filename,
     )
 
 
