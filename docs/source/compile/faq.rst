@@ -44,7 +44,7 @@ nodes it organizes its gradients and parameters into buckets which
 reduces communication times and allows a node to broadcast a fraction of
 its gradients to other waiting nodes.
 
-Graph breaks in distributed code means you can expect dynamo and its
+Graph breaks in distributed code mean you can expect dynamo and its
 backends to optimize the compute overhead of a distributed program but
 not its communication overhead. Graph-breaks may interfere with
 compilation speedups, if the reduced graph-size robs the compiler of
@@ -378,7 +378,7 @@ Why am I getting OOMs?
 
 Dynamo is still an alpha product so there’s a few sources of OOMs and if
 you’re seeing an OOM try disabling the following configurations in this
-order and then open an issue on Github so we can solve the root problem
+order and then open an issue on GitHub so we can solve the root problem
 1. If you’re using dynamic shapes try disabling them, we’ve disabled
 them by default: ``env TORCHDYNAMO_DYNAMIC_SHAPES=0 python model.py`` 2.
 CUDA graphs with Triton are enabled by default in inductor but removing
