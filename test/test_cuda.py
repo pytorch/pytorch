@@ -5343,6 +5343,12 @@ class TestBlockStateAbsorption(TestCase):
             for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
                 self.checkCheckpointedBlock(before_block, after_block)
 
+    @staticmethod
+    def setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters=None):
+        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
+        storages_deleters = [] if not storages_deleters else [t.untyped_storage()._cdata for t in storages_deleters]
+        torch._C._cuda_setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters)
+
     def checkFunction(self, fn, inputs, pool=None):
         graph, outputs = cudagraphify(fn, inputs, pool=pool)
 
@@ -5352,7 +5358,7 @@ class TestBlockStateAbsorption(TestCase):
         segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
         state = torch._C._cuda_getCheckpointState(device, pool_id)
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+        self.setCheckpointPoolState(device, state, [], [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
@@ -5422,7 +5428,7 @@ class TestBlockStateAbsorption(TestCase):
         graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-        torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+        self.setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
 
         del outputs2
 
@@ -5445,7 +5451,7 @@ class TestBlockStateAbsorption(TestCase):
 
         # graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         # with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-        #     torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [], [])
+        #     self.setCheckpointPoolState(outputs[0].device.index, state, [], [])
 
     def test_tensor_dies_after_checkpoint(self):
 
@@ -5463,7 +5469,7 @@ class TestBlockStateAbsorption(TestCase):
 
         del outputs
 
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+        self.setCheckpointPoolState(device, state, [], [])
 
         self.assertEqual(live_blocks(pool_id), 2)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
@@ -5508,7 +5514,7 @@ class TestBlockStateAbsorption(TestCase):
         for i in range(len(reconstructed_tensors)):
             self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
 
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+        self.setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
 
         self.assertEqual(live_blocks(pool_id), 3)
 
@@ -5535,6 +5541,81 @@ class TestBlockStateAbsorption(TestCase):
 
         inp = torch.rand([1, 3, 255, 255], device="cuda")
         self.checkFunction(m, [inp])
+
+
+    def test_allocate_in_thread_to_pool(self):
+
+        def foo():
+            return torch.rand([4], device="cuda")
+
+        pool = torch.cuda.graph_pool_handle()
+        graph, outputs = cudagraphify(foo, [], pool=pool)
+        device = outputs[0].device.index
+        del outputs
+
+        @contextlib.contextmanager
+        def _use_cuda_memory_pool_manager(device, mem_pool):
+            """
+            Context manager to use cuda graph pool for new allocations. If you use this manager
+            all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
+            existing_graph should already have been used in a capture, and the mem_pool must already exist.
+            """
+            torch.cuda.synchronize()
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            stream_context = torch.cuda.stream(stream)
+            stream_context.__enter__()
+            torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
+            try:
+                yield
+            finally:
+                torch._C._cuda_endAllocateCurrentStreamToPool(device)
+                torch._C._cuda_releasePool(device, mem_pool)
+                stream_context.__exit__(None, None, None)
+
+
+        segments = get_cudagraph_segments(pool)
+        self.assertEqual(len(get_cudagraph_segments(pool)), 1)
+
+        def use_pool():
+            def alloc_three():
+                a = int8_cuda(LARGE_BUFFER)
+                b = int8_cuda(LARGE_BUFFER)
+                c = a + b
+
+            with _use_cuda_memory_pool_manager(device, pool):
+                # three allocations
+                for _ in range(10):
+                    alloc_three()
+
+            # three more allocations not in pool
+            alloc_three()
+
+
+        def no_pool():
+            # two allocations
+            for _ in range(10):
+                a = int8_cuda(LARGE_BUFFER)
+                b = int8_cuda(LARGE_BUFFER)
+                del a, b
+
+        graph_thread = threading.Thread(target=use_pool)
+        no_graph_thread = threading.Thread(target=no_pool)
+        graph_thread.start()
+        no_graph_thread.start()
+
+        graph_thread.join()
+        no_graph_thread.join()
+
+        self.assertEqual(len(get_cudagraph_segments(pool)), 4)
+
+        del graph
+
+        torch.cuda.synchronize()
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self.assertEqual(len(get_cudagraph_segments(pool)), 0)
 
 
 instantiate_parametrized_tests(TestCuda)

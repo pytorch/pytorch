@@ -9,7 +9,6 @@ import io
 import os
 from typing import Any, Callable, Mapping, Sequence, Tuple, Type, Union
 
-import onnx.reference
 import onnxruntime
 import pytorch_test_common
 
@@ -56,17 +55,6 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
         kwargs.pop(k)
 
     return verification.verify(*args, options=options, **kwargs)
-
-
-def run_onnx_reference_runtime(
-    onnx_model: Union[str, io.BytesIO],
-    pytorch_inputs: Tuple[Any, ...],
-    verbose: int = 10,
-) -> Sequence[Any]:
-    session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
-    return session.run(
-        None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
-    )
 
 
 def run_ort(
@@ -210,10 +198,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 flatten=False,
                 ignore_none=False,
             )
-        elif not is_model_script and not self.is_script and not self.is_fx:
-            # Run test on export route of `torch.nn.Module` -> `ONNX`.
-            _run_test(model, tracing_remained_onnx_input_idx)
-
         elif self.is_fx:
             # Run test with FX ONNX Exporter
             input_kwargs = input_kwargs or {}
@@ -229,3 +213,6 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
                 opset_version=self.opset_version,
                 **input_kwargs,
             )
+        elif not is_model_script:
+            # Run test on export route of `torch.nn.Module` -> `ONNX`.
+            _run_test(model, tracing_remained_onnx_input_idx)
