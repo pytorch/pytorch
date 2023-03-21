@@ -623,6 +623,10 @@ class CachingAllocatorConfig {
     return instance().m_garbage_collection_threshold;
   }
 
+  static bool expandable_segments() {
+    return instance().m_expandable_segments;
+  }
+
   // This is used to round-up allocation size to nearest power of 2 divisions.
   // More description below in function roundup_power2_next_division
   // As ane example, if we want 4 divisions between 2's power, this can be done
@@ -662,7 +666,8 @@ class CachingAllocatorConfig {
  private:
   CachingAllocatorConfig()
       : m_max_split_size(std::numeric_limits<size_t>::max()),
-        m_garbage_collection_threshold(0) {
+        m_garbage_collection_threshold(0),
+        m_expandable_segments(true) {
     m_roundup_power2_divisions.assign(Native::kRoundUpPowerOfTwoIntervals, 0);
   }
 
@@ -686,6 +691,7 @@ class CachingAllocatorConfig {
   std::atomic<size_t> m_max_split_size;
   std::vector<size_t> m_roundup_power2_divisions;
   std::atomic<double> m_garbage_collection_threshold;
+  std::atomic<bool> m_expandable_segments;
 };
 
 void CachingAllocatorConfig::lexArgs(
@@ -905,6 +911,14 @@ void CachingAllocatorConfig::parseArgs(const char* env) {
       used_native_specific_option = true;
     } else if (config[i].compare("backend") == 0) {
       i = parseAllocatorConfig(config, i, used_cudaMallocAsync);
+    } else if (config[i] == "expandable_segments") {
+      used_native_specific_option = true;
+      consumeToken(config, ++i, ':');
+      ++i;
+      TORCH_CHECK(
+          i < config.size() && (config[i] == "True" || config[i] == "False"),
+          "Expected a single True/False argument for expandable_segments");
+      m_expandable_segments = (config[i] == "True");
     } else {
       TORCH_CHECK(false, "Unrecognized CachingAllocator option: ", config[i]);
     }
@@ -958,7 +972,6 @@ class DeviceCachingAllocator {
 
   size_t allowed_memory_maximum = 0;
 
-  bool expandable_segments_ = true;
   std::atomic<bool> has_previously_allocated_expandable_segments_ = false;
   std::vector<int> devices_with_peer_access_;
 
@@ -1342,9 +1355,16 @@ class DeviceCachingAllocator {
 
   void* getBaseAllocation(Block* block, size_t* outSize) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
+    Block* last = block;
+    while (last->next) {
+      last = last->next;
+    }
     while (block->prev) {
       block = block->prev;
     }
+    TORCH_CHECK(
+        !last->expandable_segment_,
+        "Tensors allocated with expandable_segments:True cannot be shared between processes. Consider using expandable_segments:False in data loading workers via torch.cuda.memory._set_allocator_settings('expandable_segments:False')");
     void* basePtr = block->ptr;
     if (outSize) {
       size_t size = 0;
@@ -2195,7 +2215,8 @@ class DeviceCachingAllocator {
 
   bool should_split(const Block* block, size_t size) {
     size_t remaining = block->size - size;
-    if (block->pool->is_small || expandable_segments_) {
+    if (block->pool->is_small ||
+        CachingAllocatorConfig::expandable_segments()) {
       return remaining >= kMinBlockSize;
     } else {
       return (size < CachingAllocatorConfig::max_split_size()) &&
@@ -2280,7 +2301,7 @@ class DeviceCachingAllocator {
         CachingAllocatorConfig::garbage_collection_threshold() *
         allowed_memory_maximum);
     // No need to trigger GC yet
-    if (total_allocated_memory <= (int64_t) gc_threshold) {
+    if (total_allocated_memory <= (int64_t)gc_threshold) {
       return;
     }
     const auto target_size = total_allocated_memory - gc_threshold;
@@ -2345,7 +2366,9 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (expandable_segments_ && !p.pool->owner_PrivatePool) {
+    } else if (
+        CachingAllocatorConfig::expandable_segments() &&
+        !p.pool->owner_PrivatePool) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
