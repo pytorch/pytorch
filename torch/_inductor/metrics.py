@@ -10,6 +10,7 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 to_dtype_count = 0
 
+
 # reset all counters
 def reset():
     global generated_kernel_count

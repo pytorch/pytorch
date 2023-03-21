@@ -1666,12 +1666,14 @@ class CppVecKernelChecker(CppVecKernel):
                     break
 
                 # Create and record the context
-                with RecordOptimizationContext(__name__) as node_ctx:
-                    opt_ctx: OptimizationContext = node_ctx.get_opt_ctx()
-                    assert opt_ctx
-                    opt_ctx.dtype = load_dtype
-                    opt_ctx.ops_name = _node.target
-                    opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
+                if OptimizationContext.key in _node.meta:
+                    opt_ctx = _node.meta[OptimizationContext.key]
+                else:
+                    self.opt_ctx = OptimizationContext()
+                opt_ctx.dtype = load_dtype
+                opt_ctx.ops_name = _node.target
+                opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
+                _node.meta[OptimizationContext.key] = opt_ctx                
 
             if _node.target == "to_dtype":
                 dtype = _node.args[-1]
