@@ -188,14 +188,20 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       auto self_alignment = getAlignment(self);
       auto mat1_alignment = getAlignment(mat1);
       auto mat2_alignment = getAlignment(mat2);
-      // due to a heuristic bug, cuBlasLt requires all alignments > 2 or the same ( == 2)
+      // cuBlasLt requires all alignments > 2 or bias == 2, cuBlasLt only has
+      // visibility of the bias pointer/alignment at heuristic time
       // should we err on the side of caution and remove the second dispatch path?
-      bool alignment_ok = (self_alignment > 2 &&
+      bool alignment_ok = (self_alignment > 2 && // should be optimized out, left for clarity
                            mat1_alignment > 2 &&
                            mat2_alignment > 2) ||
-                          (self_alignment == 2 &&
-                           mat1_alignment == 2 &&
-                           mat2_alignment == 2);
+                          self_alignment == 2;
+      // on sm90, 8-byte alignments with float32 are similarily unsupported
+      if (scalar_type == at::ScalarType::Float && !detail::getCUDAHooks().supports8ByteAlignmentFloat32WithCublasLt()) {
+        alignment_ok = alignment_ok && ((self_alignment > 8 &&
+                                mat1_alignment > 8 &&
+                                mat2_alignment > 8) ||
+                               self_alignment == 8);
+      }
 
       useLtInterface = beta.toComplexDouble() == 1.0 && self.dim() == 1 &&
           result.dim() == 2 && self.sizes()[0] == mat2_sizes[1] &&

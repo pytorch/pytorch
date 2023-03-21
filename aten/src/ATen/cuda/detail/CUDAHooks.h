@@ -38,6 +38,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool supportsDilatedConvolutionWithCuDNN() const override;
   bool supportsDepthwiseConvolutionWithCuDNN() const override;
   bool supportsBFloat16ConvolutionWithCuDNNv8() const override;
+  bool supports8ByteAlignmentFloat32WithCublasLt() const override;
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;

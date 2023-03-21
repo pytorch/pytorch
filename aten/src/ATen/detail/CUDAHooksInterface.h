@@ -150,6 +150,10 @@ struct TORCH_API CUDAHooksInterface {
     return false;
   }
 
+  virtual bool supports8ByteAlignmentFloat32WithCublasLt() const {
+    return false;
+  }
+
   virtual long versionCuDNN() const {
     TORCH_CHECK(false, "Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }

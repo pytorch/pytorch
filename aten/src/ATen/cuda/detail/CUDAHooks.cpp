@@ -292,6 +292,14 @@ bool CUDAHooks::supportsBFloat16ConvolutionWithCuDNNv8() const {
 #endif
 }
 
+bool CUDAHooks::supports8ByteAlignmentFloat32WithCublasLt() const {
+  cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+  if (prop->major == 9 && prop->minor == 0) {
+    return false;
+  }
+  return true;
+}
+
 long CUDAHooks::versionCuDNN() const {
 #if AT_CUDNN_ENABLED()
   return CUDNN_VERSION;
