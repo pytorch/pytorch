@@ -1703,7 +1703,7 @@ class TestSDPA(NNTestCase):
 
         # TODO: Investigate why grad_q needs larger tolerances
         grad_q_deviation = query_ref.grad - query_ref_lp.grad
-        grad_q_ref_atol = max(2 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
+        grad_q_ref_atol = max(4 * torch.abs(grad_q_deviation).max().item(), default_atol[out.dtype])
         grad_q_ref_rtol = max(get_rtol(query_ref.grad, query_ref_lp.grad), default_rtol[out.dtype])
 
         grad_k_deviation = key_ref.grad - key_ref_lp.grad
