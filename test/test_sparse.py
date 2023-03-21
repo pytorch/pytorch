@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings
+    parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -4785,8 +4785,7 @@ class TestSparseAny(TestCase):
                 torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
             self.skipTest('NOT IMPL')
         else:
-            r = torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
-            self.assertTrue(r)
+            torch.autograd.gradcheck(mm, (x, y), fast_mode=fast_mode, masked=masked)
 
 
 # e.g., TestSparseUnaryUfuncsCPU and TestSparseUnaryUfuncsCUDA
@@ -4799,7 +4798,7 @@ instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
 
-instantiate_device_type_tests(TestSparseLegacyAndDeprecation, globals(), except_for='meta', only_for="cpu")
+instantiate_parametrized_tests(TestSparseLegacyAndDeprecation)
 
 if __name__ == '__main__':
     run_tests()

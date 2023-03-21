@@ -9,7 +9,7 @@
 import copy
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, parametrize, subtest, instantiate_parametrized_tests,
-    IS_FBCODE, freeze_rng_state,
+    IS_FBCODE, freeze_rng_state, skipIfTorchDynamo,
 )
 import torch
 import torch.nn as nn
@@ -22,6 +22,7 @@ import warnings
 import math
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing import make_tensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 from functools import partial
@@ -2528,8 +2529,8 @@ class TestJvp(TestCase):
         # Should not error
         vmap(vmap(push_jvp, (0, None)))(dummy, x)
 
-
 class TestLinearize(TestCase):
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_basic(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2544,6 +2545,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2558,6 +2560,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_composition(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2576,6 +2579,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2602,6 +2606,7 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @onlyCUDA
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_errors(self):
         dtype = torch.float
         device = torch.device('cpu')
@@ -4024,6 +4029,7 @@ class TestExamplesCorrectness(TestCase):
         self.assertNotEqual(tuple(weight[0] for weight in result_weights),
                             tuple(weight[1] for weight in result_weights))
 
+    @with_tf32_off  # https://github.com/pytorch/pytorch/issues/86798
     @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
     @parametrize('mechanism', ["make_functional", "functional_call"])
     def test_resnet18_per_sample_grads(self, device, mechanism):
