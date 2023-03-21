@@ -1587,10 +1587,7 @@ cc_library(
             "torch/lib/libshm/*.h",
         ],
         exclude = [
-            "torch/csrc/autograd/generated/VariableType.h",
-            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
-            "torch/csrc/autograd/generated/variable_factories.h",
-            "torch/csrc/autograd/generated/Functions.h",
+            "torch/csrc/*/generated/*.h",
         ] + torch_cuda_headers,
     ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [
