@@ -524,7 +524,8 @@ const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTens
 SparseTensor dense_to_sparse(const Tensor& self, c10::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
   if (layout.has_value()) {
     if (blocksize.has_value() && !(*layout == kSparseBsr || *layout == kSparseBsc)) {
-      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout, " conversion does not use specified blocksize");
+      AT_ERROR("to_sparse for ", self.layout(), " to ", *layout,
+               " conversion does not use the specified blocksize ", blocksize.value(), ".");
     }
     if (self.layout() == *layout) {
       return self;
