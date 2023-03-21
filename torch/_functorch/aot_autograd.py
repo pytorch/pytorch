@@ -1232,6 +1232,7 @@ class AOTConfig:
 
     fw_compiler: Callable
     bw_compiler: Callable
+    inference_compiler: Callable
     partition_fn: Callable
     decompositions: Dict[Callable, Callable]
     num_params_buffers: int
@@ -1270,7 +1271,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     context = disable_autocast_manager if disable_amp else nullcontext
 
     with context(), track_graph_compiling(aot_config, "inference"):
-        compiled_fw = aot_config.fw_compiler(fw_module, flat_args)
+        compiled_fw = aot_config.inference_compiler(fw_module, flat_args)
 
     compiled_fn = create_runtime_wrapper(
         compiled_fw,
@@ -2493,7 +2494,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         all_args_list = list(all_args)
                         CompiledFunction.compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
-                                aot_config.bw_compiler, None, None,
+                                aot_config.bw_compiler, None, None, None,
                                 aot_config.decompositions, 0, aot_config.aot_id,
                                 aot_config.keep_inference_input_mutations,
                                 aot_config.dynamic_shapes
@@ -2735,6 +2736,7 @@ def aot_function(
     static_argnums: Optional[Tuple[int]] = None,  # deprecated
     keep_inference_input_mutations: bool = False,
     *,
+    inference_compiler: Optional[Callable] = None,
     # Whether or not to trace with dynamic shapes
     dynamic=False,
 ) -> Callable:
@@ -2795,9 +2797,12 @@ def aot_function(
 
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=fw_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
@@ -2921,6 +2926,7 @@ def aot_module_simplified(
     hasher_type=None,
     static_argnums=None,
     keep_inference_input_mutations=False,
+    inference_compiler: Optional[Callable] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -2986,6 +2992,8 @@ def aot_module_simplified(
     assert static_argnums is None
     if bw_compiler is None:
         bw_compiler = fw_compiler
+    if inference_compiler is None:
+        inference_compiler = fw_compiler
 
     full_args = []
     full_args.extend(params_flat)
@@ -3000,6 +3008,7 @@ def aot_module_simplified(
     aot_config = AOTConfig(
         fw_compiler=fw_compiler,
         bw_compiler=bw_compiler,
+        inference_compiler=inference_compiler,
         partition_fn=partition_fn,
         decompositions=decompositions,
         num_params_buffers=params_len,
