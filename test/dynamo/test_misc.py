@@ -4394,6 +4394,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
+        graph.nn_modules_sources = {}
         # Contrived generation timestamp
         graph.timestamp = 4
         # Contrived guards
