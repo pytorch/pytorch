@@ -25,6 +25,7 @@ from typing import (
     Callable,
     Dict,
     List,
+    NamedTuple,
     Optional,
     Pattern,
     Tuple,
@@ -57,15 +58,11 @@ from trymerge_explainer import (
     get_revert_message,
 )
 
-class JobCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str], classification: Optional[str] = None):
-        self.name = name
-        self.url = url
-        self.status = status
-        self.classification = classification
-
-    def __repr__(self) -> str:
-        return f"JobCheckState([{self.name},{self.url},{self.status},{self.classification}])"
+class JobCheckState(NamedTuple):
+    name: str
+    url: str
+    status: Optional[str]
+    classification: Optional[str]
 
 JobNameToStateDict = Dict[str, JobCheckState]
 
@@ -500,9 +497,10 @@ def add_workflow_conclusions(
                     existing_checkrun = workflow_obj.jobs.get(checkrun_name)
                     if existing_checkrun is None or not is_passing_status(existing_checkrun.status):
                         workflow_obj.jobs[checkrun_name] = JobCheckState(
-                            name=checkrun_name,
-                            status=checkrun_node["conclusion"],
-                            url=checkrun_node["detailsUrl"],
+                            checkrun_name,
+                            checkrun_node["detailsUrl"],
+                            checkrun_node["conclusion"],
+                            None
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -529,7 +527,8 @@ def add_workflow_conclusions(
             res[workflow_name] = JobCheckState(
                 workflow.name,
                 workflow.url,
-                workflow.status
+                workflow.status,
+                None
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -542,6 +541,7 @@ def parse_args() -> Any:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--ignore-current", action="store_true")
     parser.add_argument("--comment-id", type=int)
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
@@ -816,7 +816,7 @@ class GitHubPR:
         if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
             for status in orig_last_commit["status"]["contexts"]:
                 name = status["context"]
-                self.conclusions[name] = JobCheckState(name=name, status=status["state"], url=status["targetUrl"])
+                self.conclusions[name] = JobCheckState(name, status["targetUrl"], status["state"], None)
 
         return self.conclusions
 
@@ -963,13 +963,15 @@ class GitHubPR:
     def merge_into(self, repo: GitRepo, *,
                    skip_mandatory_checks: bool = False,
                    dry_run: bool = False,
-                   comment_id: Optional[int] = None) -> None:
+                   comment_id: Optional[int] = None,
+                   ignore_current_checks: Optional[List[str]] = None) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
             skip_internal_checks=can_skip_internal_checks(self, comment_id),
+            ignore_current_checks=ignore_current_checks,
         )
         additional_merged_prs = self.merge_changes(repo, skip_mandatory_checks, comment_id)
 
@@ -1069,6 +1071,7 @@ def find_matching_merge_rule(
     repo: Optional[GitRepo] = None,
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
+    ignore_current_checks: Optional[List[str]] = None,
 ) -> MergeRule:
     """Returns merge rule matching to this pr or raises an exception.
 
@@ -1100,8 +1103,13 @@ def find_matching_merge_rule(
             f"Failed fetching base git revision for {pr.pr_num}. Skipping additional classifications.\n"
             f"{type(e)}\n{e}"
         )
-    if base_rev is not None:
-        checks = get_classifications(pr.last_commit()['oid'], base_rev, checks, flaky_rules)
+    checks = get_classifications(
+        checks,
+        pr.last_commit()['oid'],
+        base_rev,
+        flaky_rules,
+        ignore_current_checks=ignore_current_checks
+    )
 
     # PRs can fail multiple merge rules, but it only needs to pass one rule to be approved.
     # If it fails all rules, we need to find the rule that it came closest to passing and report
@@ -1255,32 +1263,37 @@ where
 
 
 def get_classifications(
-    head_sha: str,
-    merge_base: str,
     checks: Dict[str, JobCheckState],
-    flaky_rules: List[FlakyRule]
+    head_sha: str,
+    merge_base: Optional[str],
+    flaky_rules: List[FlakyRule],
+    ignore_current_checks: Optional[List[str]],
 ) -> Dict[str, JobCheckState]:
-
-    rockset_results = get_rockset_results(head_sha, merge_base)
     head_sha_jobs: Dict[str, Dict[str, Any]] = {}
     merge_base_jobs: Dict[str, Dict[str, Any]] = {}
 
-    def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
-        if key not in d:
-            d[key] = val
-            return
-        if d[key]["id"] < val["id"]:
-            d[key] = val
+    if merge_base is not None:
+        def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
+            if key not in d:
+                d[key] = val
+                return
+            if d[key]["id"] < val["id"]:
+                d[key] = val
 
-    for rockset_result in rockset_results:
-        name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
-        if rockset_result["head_sha"] == head_sha:
-            insert(head_sha_jobs, name, rockset_result)
-        else:
-            insert(merge_base_jobs, name, rockset_result)
+        rockset_results = get_rockset_results(head_sha, merge_base)
+        for rockset_result in rockset_results:
+            name = f"{rockset_result['workflow_name']} / {rockset_result['name']}"
+            if rockset_result["head_sha"] == head_sha:
+                insert(head_sha_jobs, name, rockset_result)
+            else:
+                insert(merge_base_jobs, name, rockset_result)
 
+    checks_with_classifications = checks.copy()
     for name, check in checks.items():
         if check.status == "SUCCESS":
+            continue
+        if ignore_current_checks is not None and name in ignore_current_checks:
+            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "IGNORE_CURRENT_CHECK")
             continue
         head_sha_job = head_sha_jobs.get(name)
         merge_base_job = merge_base_jobs.get(name)
@@ -1290,10 +1303,10 @@ def get_classifications(
             and head_sha_job["conclusion"] == merge_base_job["conclusion"]
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
-            check.classification = "BROKEN_TRUNK"
+            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "BROKEN_TRUNK")
         elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
-            check.classification = "FLAKY"
-    return checks
+            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "FLAKY")
+    return checks_with_classifications
 
 
 def filter_checks_with_lambda(
@@ -1408,7 +1421,9 @@ def categorize_checks(
         if check_runs[checkname].status is None:
             pending_checks.append((checkname, check_runs[checkname].url))
         elif not is_passing_status(check_runs[checkname].status):
-            if check_runs[checkname].classification in ('BROKEN_TRUNK', 'FLAKY'):
+            if check_runs[checkname].classification == "IGNORE_CURRENT_CHECK":
+                pass
+            elif check_runs[checkname].classification in ('BROKEN_TRUNK', 'FLAKY'):
                 ok_failed_checks.append((checkname, check_runs[checkname].url))
             else:
                 failed_checks.append((checkname, check_runs[checkname].url))
@@ -1432,14 +1447,19 @@ def merge(pr_num: int, repo: GitRepo,
           skip_mandatory_checks: bool = False,
           comment_id: Optional[int] = None,
           timeout_minutes: int = 400,
-          stale_pr_days: int = 3) -> None:
+          stale_pr_days: int = 3,
+          ignore_current: bool = False) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
     print(f"Attempting merge of {initial_commit_sha}")
 
-    explainer = TryMergeExplainer(skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project)
+    explainer = TryMergeExplainer(skip_mandatory_checks, pr.get_labels(), pr.pr_num, org, project, ignore_current)
+
+    # probably a bad name, but this is a list of current checks that should be
+    # ignored and is toggled by the --ignore-current flag
+    ignore_current_checks_info = []
 
     if pr.is_ghstack_pr():
         get_ghstack_prs(repo, pr)  # raises error if out of sync
@@ -1462,7 +1482,22 @@ def merge(pr_num: int, repo: GitRepo,
     if not has_required_labels(pr):
         raise RuntimeError(LABEL_ERR_MSG.lstrip(" #"))
 
-    gh_post_pr_comment(org, project, pr.pr_num, explainer.get_merge_message(), dry_run=dry_run)
+    if ignore_current:
+        checks = pr.get_checkrun_conclusions()
+        pending, failing = categorize_checks(checks, list(checks.keys()))
+        ignore_current_checks_info = failing
+        if len(pending) == 0:
+            raise RuntimeError(
+                "The --ignore-current flag was used but there are no pending checks on this PR.  Please use " +
+                "-f/--force instead."
+            )
+
+    gh_post_pr_comment(
+        org, project, pr.pr_num,
+        explainer.get_merge_message(ignore_current_checks_info),
+        dry_run=dry_run
+    )
+
     if pr.last_pushed_at() is None:
         print(f"Can't get commit {pr.last_commit()['oid']} pushed date. Is it merge commit by chance?")
     elif (datetime.utcnow() - cast(datetime, pr.last_pushed_at())).days > stale_pr_days:
@@ -1474,6 +1509,7 @@ def merge(pr_num: int, repo: GitRepo,
     last_exception = ''
     elapsed_time = 0.0
     flaky_rules = read_flaky_rules()
+    ignore_current_checks = [x[0] for x in ignore_current_checks_info]  # convert to List[str] for convenience
     while elapsed_time < timeout_minutes * 60:
         check_for_sev(org, project, skip_mandatory_checks)
         current_time = time.time()
@@ -1487,7 +1523,7 @@ def merge(pr_num: int, repo: GitRepo,
             failed_rule_message = None
             ignore_flaky_failures = True
             try:
-                find_matching_merge_rule(pr, repo)
+                find_matching_merge_rule(pr, repo, ignore_current_checks=ignore_current_checks)
             except MandatoryChecksMissingError as ex:
                 if ex.rule is not None:
                     ignore_flaky_failures = ex.rule.ignore_flaky_failures
@@ -1496,7 +1532,13 @@ def merge(pr_num: int, repo: GitRepo,
                 failed_rule_message = ex
 
             checks = pr.get_checkrun_conclusions()
-            checks = get_classifications(pr.last_commit()['oid'], pr.get_merge_base(), checks, flaky_rules)
+            checks = get_classifications(
+                checks,
+                pr.last_commit()['oid'],
+                pr.get_merge_base(),
+                flaky_rules,
+                ignore_current_checks=ignore_current_checks
+            )
             pending, failing = categorize_checks(
                 checks,
                 required_checks + [x for x in checks.keys() if x not in required_checks],
@@ -1524,6 +1566,7 @@ def merge(pr_num: int, repo: GitRepo,
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 comment_id=comment_id,
+                ignore_current_checks=ignore_current_checks,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
@@ -1597,7 +1640,8 @@ def main() -> None:
         merge(args.pr_num, repo,
               dry_run=args.dry_run,
               skip_mandatory_checks=args.force,
-              comment_id=args.comment_id)
+              comment_id=args.comment_id,
+              ignore_current=args.ignore_current)
     except Exception as e:
         handle_exception(e)
 
