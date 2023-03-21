@@ -12,6 +12,7 @@
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <torch/library.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -480,6 +481,132 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
 
 template struct PackedConvWeightsOnednn<2>;
 template struct PackedConvWeightsOnednn<3>;
+
+std::tuple<at::Tensor, at::Tensor> prepack_qconv_weight_bias_onednn(
+    at::Tensor weight, // from CPU backend instead of QuantizedCPU
+    at::Tensor weight_scales, // Weight zero points must be 0 for onednn
+    torch::List<int64_t> input_shape,
+    double input_scale,
+    int64_t input_zero_point,
+    c10::optional<at::Tensor> bias,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups) {
+  int kSpatialDim = input_shape.size() - 2;
+  TORCH_CHECK(
+      weight.ndimension() == kSpatialDim + 2,
+      "Weights are expected to have ", kSpatialDim + 2, " dimensions");
+  TORCH_CHECK(
+      stride.size() == (decltype(stride.size()))kSpatialDim,
+      "stride should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+  TORCH_CHECK(
+      padding.size() == (decltype(padding.size()))kSpatialDim,
+      "Specify front/top/left padding only. "
+      "end/bottom/right padding assumed to be equal to front/top/left");
+  TORCH_CHECK(
+      dilation.size() == (decltype(dilation.size()))kSpatialDim,
+      "dilation should contain ", kSpatialDim, " elements for ",
+      kSpatialDim, "D convolution.");
+
+  bool is_1d = (1 == kSpatialDim);
+  auto x_dims = input_shape.vec();
+  if (is_1d) {
+    // N, C, L -> N, C, 1, L
+    x_dims.insert(x_dims.begin() + 2, 1);
+    if (weight.dim() == 3) {
+      weight = weight.unsqueeze(quant_utils::kConv1dSqueezeDim + 2);
+    }
+    stride = quant_utils::MakeArgForConv1d(stride, 1);
+    padding = quant_utils::MakeArgForConv1d(padding, 0);
+    dilation = quant_utils::MakeArgForConv1d(dilation, 1);
+    kSpatialDim += 1;
+  }
+  auto w_dims = weight.sizes().vec();
+  auto strides = stride.vec();
+  auto padding_l = padding.vec();
+  auto padding_r = padding.vec();
+  auto dilates = dilation.vec();
+  auto op_attr = ideep::attr_t();
+
+  double output_scale = 1.0;
+  int64_t output_zero_point = 0;
+  ideep::scale_t weights_scales(weight_scales.numel());
+  if (weight_scales.ndimension() == 0) {
+    // Weight is quant per tensor, then weight_scales will be a scalar Tensor
+    TORCH_CHECK(
+        weight_scales.numel() == 1,
+        "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements.");
+    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
+  } else {
+    // Weight is quant per channel
+    for (int i = 0; i < weight_scales.numel(); ++i) {
+      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
+    }
+  }
+
+  ideep::scale_t bias_scales, op_scales;
+  std::tie(bias_scales, op_scales) = ideep::utils::compute_scales(
+      1.0/input_scale, output_scale, weights_scales);
+  int scale_size = weights_scales.size();
+  op_attr.set_output_scales(ideep::utils::op_scale_mask(scale_size), op_scales);
+  op_attr.set_zero_points(DNNL_ARG_SRC, 0, {(int32_t)input_zero_point});
+  op_attr.set_zero_points(DNNL_ARG_DST, 0, {(int32_t)output_zero_point});
+
+  at::Tensor weight_copy;
+  ideep::tensor::desc w_desc;
+  ideep::dims dims_iohw, dims_giohw;
+  ideep::tag w_tag = ideep::tag::any;
+  const bool with_groups = groups > 1;
+  w_desc = ideep::convolution_forward::expected_weights_desc(
+      w_dims, dnnl::memory::data_type::s8,
+      strides, padding_l, padding_r, dilates, groups,
+      dnnl::algorithm::convolution_direct, dnnl::prop_kind::forward_inference,
+      dnnl::memory::data_type::u8, x_dims, op_attr, /*is_channels_last=*/true);
+  weight_copy = weight.clone();
+  if (with_groups) {
+    w_tag = kSpatialDim == 2 ? ideep::tag::goihw : ideep::tag::goidhw;
+  } else {
+    w_tag = kSpatialDim == 2 ? ideep::tag::oihw : ideep::tag::oidhw;
+  }
+  ideep::dims wei_dims = with_groups ? ideep::utils::group_dims(w_desc.get_dims(), groups)
+                                   : w_desc.get_dims();
+  ideep::tensor wgt = ideep::tensor(
+      ideep::tensor::desc({wei_dims, dnnl::memory::data_type::s8, w_tag}, groups),
+      weight_copy.data_ptr());
+  ideep::tensor exp_wgt;
+  exp_wgt.init(w_desc);
+  exp_wgt.feed_from(wgt, false); // expect wgt to be in [OC IC KH KW] format
+  auto packed_weight = at::native::new_with_itensor_mkldnn(
+      std::move(exp_wgt),
+      optTypeMetaToScalarType(weight.options().dtype_opt()),
+      weight.options().device_opt());
+
+  // Bias
+  const int output_channels = weight.size(0);
+  at::Tensor packed_bias;
+  c10::optional<ideep::tensor> onednn_bias{c10::nullopt};
+  if (bias.has_value()) {
+    at::Tensor bias_val = bias.value();
+    TORCH_CHECK(bias_val.dim() == 1, "bias should be a vector (1D Tensor)");
+    TORCH_CHECK(
+        bias_val.size(0) == output_channels,
+        "bias should have K elements: " + std::to_string(output_channels));
+    auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
+    ideep::tensor onednn_bias;
+    onednn_bias.init(bias_desc, bias.value().data_ptr());
+    ideep::attr_t bias_attr =
+        {ideep::utils::tensor_scale_mask(scale_size, false), bias_scales};
+    auto expected_bias = onednn_bias.reorder_if_differ_in(bias_desc, bias_attr);
+    packed_bias = at::native::new_with_itensor_mkldnn(
+      std::move(expected_bias),
+      optTypeMetaToScalarType(bias_val.options().dtype_opt()),
+      bias_val.options().device_opt());
+  }
+  return std::tie(packed_weight, packed_bias);
+}
+
 #endif // #if AT_MKLDNN_ENABLED()
 
 namespace at {
@@ -670,6 +797,34 @@ class QConv1dPackWeightInt8 final {
         toString(ctx.qEngine()));
   }
 };
+
+class QConvPackWeightBiasCpuTensor final {
+ public:
+  static std::tuple<at::Tensor, at::Tensor> run(
+    at::Tensor weight, // from CPU backend instead of QuantizedCPU
+    at::Tensor weight_scales, // Weight zero points must be 0s for onednn
+    torch::List<int64_t> input_shape,
+    double input_scale,
+    int64_t input_zero_point,
+    c10::optional<at::Tensor> bias,
+    torch::List<int64_t> stride,
+    torch::List<int64_t> padding,
+    torch::List<int64_t> dilation,
+    int64_t groups) {
+#if AT_MKLDNN_ENABLED()
+    return prepack_qconv_weight_bias_onednn(
+        weight, weight_scales, input_shape, input_scale, input_zero_point,
+        bias, stride, padding, dilation, groups);
+#else
+    TORCH_CHECK(false, "Unimplemented as onednn is not available.")
+#endif
+  }
+};
+
+TORCH_LIBRARY_IMPL(quantized, CPU, m) {
+  // Inductor path should dispatch with CPU dispatch Key
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_prepack_cpu_tensor"), TORCH_FN(QConvPackWeightBiasCpuTensor::run));
+}
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // Conv

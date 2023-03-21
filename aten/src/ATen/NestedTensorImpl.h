@@ -30,7 +30,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       at::Tensor nested_stride_tensor,
       std::vector<int64_t>&& offsets);
   // assume contiguous, `nested_stride_tensor` and `offsets`
-  // can be infered from `nested_size_tensor`
+  // can be inferred from `nested_size_tensor`
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
   // This constructor is used creating view tensors from nested tensors
@@ -231,7 +231,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   // nesting scalars
   if (orig_dim == 0) {
     // each scalar must be contiguous
-    // if there is blanck memory between underlying scalars
+    // if there is blank memory between underlying scalars
     for (int64_t i = 0; i < ntensors; i++) {
       if (offsets[i] != i) {
         return false;
@@ -240,7 +240,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
   }
   // nesting tensors
   else {
-    // if any underlying tensor is noncontiguous
+    // if any underlying tensor is non-contiguous
     const int64_t *sizemat_ptr = sizemat.data_ptr<int64_t>(),
                   *stridemat_ptr = stridemat.data_ptr<int64_t>();
     for (int64_t i = 0; i < ntensors; i++) {
@@ -257,7 +257,7 @@ inline bool nested_tensor_impl_is_contiguous(const NestedTensorImpl* nt) {
       sizemat_ptr += orig_dim;
       stridemat_ptr += orig_dim;
     }
-    // if there is blanck memory between underlying tensors
+    // if there is blank memory between underlying tensors
     if (offsets[0] != 0) {
       return false;
     }
