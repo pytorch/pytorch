@@ -111,8 +111,8 @@ if "%USE_CUDA%"=="1" (
   set CMAKE_CUDA_COMPILER_LAUNCHER=%TMP_DIR%/bin/randomtemp.exe;%TMP_DIR%\bin\sccache.exe
 )
 
-:: Debug
-Get-ChildItem Env: | Sort Name
+:: Print all existing environment variable for debugging
+set
 
 python setup.py bdist_wheel
 if errorlevel 1 exit /b

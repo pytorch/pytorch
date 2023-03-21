@@ -50,5 +50,5 @@ set NUMBAPRO_NVVM=%CUDA_PATH%\nvvm\bin\nvvm64_32_0.dll
 
 set PYTHONPATH=%TMP_DIR_WIN%\build;%PYTHONPATH%
 
-:: Debug
-Get-ChildItem Env: | Sort Name
+:: Print all existing environment variable for debugging
+set
