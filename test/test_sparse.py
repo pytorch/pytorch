@@ -143,7 +143,8 @@ class TestSparseLegacyAndDeprecation(TestCase):
             # Check warn-once:
             self.assertEqual(len(cm.warnings), 1)
 
-    def test_gradcheck_check_sparse_nnz(self):
+    @parametrize('fast_mode', (True, False))
+    def test_gradcheck_check_sparse_nnz(self, fast_mode):
         """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
 
         Suggested deprecation steps:
@@ -160,61 +161,43 @@ class TestSparseLegacyAndDeprecation(TestCase):
 
         def test(x, masked_grad, masked, check_sparse_nnz):
             x = x.detach().clone().requires_grad_()
-            r = torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz)
-            self.assertTrue(r)
+            torch.autograd.gradcheck(fn, (x, masked_grad), masked=masked, check_sparse_nnz=check_sparse_nnz, fast_mode=fast_mode)
 
         x = torch.tensor([[0, 2], [3, 4]], dtype=torch.float64).to_sparse()
 
-        # Supported calls:
-        for masked_grad, masked in {(None, True), (False, None), (False, False), (True, True)}:
-            test(x, masked_grad, masked, None)
+        for masked_grad, masked, check_sparse_nnz in itertools.product(*[(True, False, None)] * 3):
+            effective_masked_grad = True if masked_grad is None else masked_grad
+            effective_check_sparse_nnz = False if check_sparse_nnz is None else check_sparse_nnz
+            # For BC, the effective masked depends on the value of specified check_sparse_nnz:
+            effective_masked = (check_sparse_nnz if check_sparse_nnz is not None else False) if masked is None else masked
 
-        # Failing calls:
-        for masked_grad, masked in {(None, None), (None, False), (False, True), (True, None), (True, False)}:
-            with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0"):
-                test(x, masked_grad, masked, None)
-
-        with self.assertWarns(
+            warn_using_check_sparse_nnz = self.assertWarns(
                 UserWarning,
-                msg='Backwards compatibility: check_sparse_nnz will be deprecated in the future. Use masked=False instead.') as cm:
-            # Deprecated calls:
-            test(x, False, None, False)
-            test(x, False, False, False)
+                msg=('Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
+                     f' Use masked={effective_check_sparse_nnz} instead.'))
+            raise_on_non_equal_masked_and_check_sparse_nnz = self.assertRaisesRegex(
+                ValueError,
+                f"Expected specified check_sparse_nnz [(]={effective_check_sparse_nnz}[)]"
+                f" to be equal to masked [(]={effective_masked}[)]")
+            raise_jacobian_mismatch = self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0")
 
-            # Failing calls:
-            for masked_grad, masked in {(None, None), (None, False), (True, None), (True, False)}:
-                with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0"):
-                    test(x, masked_grad, masked, False)
+            def run_test():
+                if effective_masked_grad != effective_masked and not fast_mode:
+                    with raise_jacobian_mismatch:
+                        test(x, masked_grad, masked, check_sparse_nnz)
+                else:
+                    test(x, masked_grad, masked, check_sparse_nnz)
 
-            # Controversial calls
-            for masked_grad, masked in {(None, True), (False, True), (True, True)}:
-                with self.assertRaisesRegex(ValueError,
-                                            r"Expected specified check_sparse_nnz \(=False\) to be equal to masked \(=True\)"):
-                    test(x, masked_grad, masked, False)
-
-        self.assertEqual(len(cm.warnings), 9)
-
-        with self.assertWarns(
-                UserWarning,
-                msg='Backwards compatibility: check_sparse_nnz will be deprecated in the future. Use masked=True instead.') as cm:
-            # Deprecated calls:
-            test(x, None, None, True)
-            test(x, None, True, True)
-            test(x, True, None, True)
-            test(x, True, True, True)
-
-            # Failing calls:
-            for masked_grad, masked in {(False, True), (False, None)}:
-                with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch for output 0 with respect to input 0"):
-                    test(x, masked_grad, masked, True)
-
-            # Controversial calls
-            for masked_grad, masked in {(None, False), (True, False), (False, False)}:
-                with self.assertRaisesRegex(ValueError,
-                                            r"Expected specified check_sparse_nnz \(=True\) to be equal to masked \(=False\)"):
-                    test(x, masked_grad, masked, True)
-
-        self.assertEqual(len(cm.warnings), 9)
+            if masked != check_sparse_nnz and None not in {masked, check_sparse_nnz}:
+                # the specified masked and check_sparse_nnz must match
+                with warn_using_check_sparse_nnz:
+                    with raise_on_non_equal_masked_and_check_sparse_nnz:
+                        test(x, masked_grad, masked, check_sparse_nnz)
+            elif check_sparse_nnz is not None:
+                with warn_using_check_sparse_nnz:
+                    run_test()
+            else:
+                self.assertNotWarn(run_test)
 
 class TestSparseBase(TestCase):
     def run(self, result=None):
@@ -505,7 +488,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            gradcheck(fn, (x,), masked=gradcheck.masked)
+            gradcheck(fn, (x,))
 
         for value_type in [torch.double, torch.cdouble]:
             i = self.index_tensor([
@@ -4814,6 +4797,8 @@ instantiate_device_type_tests(TestSparseMaskedReductions, globals(), except_for=
 instantiate_device_type_tests(TestSparse, globals(), except_for='meta')
 
 instantiate_device_type_tests(TestSparseAny, globals(), except_for='meta')
+
+instantiate_device_type_tests(TestSparseLegacyAndDeprecation, globals(), except_for='meta', only_for="cpu")
 
 if __name__ == '__main__':
     run_tests()

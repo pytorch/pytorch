@@ -1680,8 +1680,7 @@ class TestAutograd(TestCase):
     def test_sparse_mm_backward(self):
         size = (3, 3)
 
-        import itertools
-        mm_test_cases = itertools.product(*(([False, True],) * 4))
+        mm_test_cases = product(*(([False, True],) * 4))
 
         for a_req_grad, a_is_sparse, b_req_grad, b_is_sparse in mm_test_cases:
             # We should only be testing cases with sparse inputs, and at least one
@@ -4675,70 +4674,24 @@ Done""")
         check(fast_mode=True)
         check(fast_mode=False)
 
-    def test_gradcheck_sparse_input(self):
-        def check(fast_mode):
+    @parametrize('layout', (torch.sparse_coo, torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc))
+    def test_gradcheck_input(self, layout):
+        if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+            blocksize = (2, 2)
+            size = (4, 8)
+        else:
+            blocksize = None
+            size = (2, 2)
+
+        def check(fast_mode, masked):
             def fn(sparse):
-                return torch.sparse.sum(sparse)
+                return torch.sum(sparse)
 
-            gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), masked=True,
-                      check_batched_grad=False, fast_mode=fast_mode)
-            gradcheck(fn, torch.rand(10, dtype=torch.double).to_sparse().requires_grad_(True), masked=False,
-                      check_batched_grad=False, fast_mode=fast_mode)
+            gradcheck(fn, torch.rand(size, dtype=torch.double).to_sparse(layout=layout, blocksize=blocksize).requires_grad_(),
+                      masked=masked, check_batched_grad=False, fast_mode=fast_mode)
 
-        check(fast_mode=True)
-        check(fast_mode=False)
-
-    def test_gradcheck_sparse_csr_input(self):
-        def check(fast_mode):
-            def fn(sparse_csr):
-                return torch.clone(sparse_csr).to_dense()
-
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), masked=True,
-                      check_batched_grad=False, fast_mode=fast_mode)
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csr().requires_grad_(True), masked=False,
-                      check_batched_grad=False, fast_mode=fast_mode)
-
-        check(fast_mode=True)
-        check(fast_mode=False)
-
-    def test_gradcheck_sparse_csc_input(self):
-        def check(fast_mode):
-            def fn(sparse_csc):
-                return torch.clone(sparse_csc).to_dense()
-
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), masked=True,
-                      check_batched_grad=False, fast_mode=fast_mode)
-            gradcheck(fn, torch.rand(2, 2, dtype=torch.double).to_sparse_csc().requires_grad_(True), masked=False,
-                      check_batched_grad=False, fast_mode=fast_mode)
-
-        check(fast_mode=True)
-        check(fast_mode=False)
-
-    def test_gradcheck_sparse_bsr_input(self):
-        def check(fast_mode):
-            def fn(sparse_bsr):
-                return torch.clone(sparse_bsr).to_dense()
-
-            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
-                      masked=True, check_batched_grad=False, fast_mode=fast_mode)
-            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsr((2, 2)).requires_grad_(True),
-                      masked=False, check_batched_grad=False, fast_mode=fast_mode)
-
-        check(fast_mode=True)
-        check(fast_mode=False)
-
-    def test_gradcheck_sparse_bsc_input(self):
-        def check(fast_mode):
-            def fn(sparse_bsc):
-                return torch.clone(sparse_bsc).to_dense()
-
-            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
-                      masked=True, check_batched_grad=False, fast_mode=fast_mode)
-            gradcheck(fn, torch.rand(4, 8, dtype=torch.double).to_sparse_bsc((2, 2)).requires_grad_(True),
-                      masked=False, check_batched_grad=False, fast_mode=fast_mode)
-
-        check(fast_mode=True)
-        check(fast_mode=False)
+        for fast_mode, masked in product(*[(True, False)] * 2):
+            check(fast_mode=fast_mode, masked=masked)
 
     def test_gradcheck_nondeterministic(self):
         class NonDetFunc(Function):

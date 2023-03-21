@@ -727,7 +727,7 @@ def _get_analytical_vjps_wrt_specific_output(vjp_fn, sample_output, v) -> List[L
     return vjps
 
 
-def _check_inputs(tupled_inputs, masked) -> bool:
+def _check_inputs(tupled_inputs) -> bool:
     # Make sure that gradients are saved for at least one input
     any_input_requiring_grad = False
     for idx, inp in enumerate(tupled_inputs):
@@ -1438,7 +1438,7 @@ def gradcheck(
     atol: float = 1e-5,
     rtol: float = 1e-3,
     raise_exception: bool = True,
-    check_sparse_nnz: bool = None,
+    check_sparse_nnz: Optional[bool] = None,
     nondet_tol: float = 0.0,
     check_undefined_grad: bool = True,
     check_grad_dtypes: bool = False,
@@ -1447,7 +1447,7 @@ def gradcheck(
     check_forward_ad: bool = False,
     check_backward_ad: bool = True,
     fast_mode: bool = False,
-    masked: bool = None,
+    masked: Optional[bool] = None,
 ) -> bool:
     r"""Check gradients computed via small finite differences against analytical
     gradients w.r.t. tensors in :attr:`inputs` that are of floating point or complex type
@@ -1494,11 +1494,11 @@ def gradcheck(
             the check fails. The exception gives more information about the
             exact nature of the failure. This is helpful when debugging gradchecks.
         check_sparse_nnz (bool, optional): if True, gradcheck allows
-            for SparseTensor input, and for any SparseTensor at input,
-            gradcheck will perform check at nnz positions only.  The
-            check_sparse_nnz argument will be deprecated in the
-            future, use the masked argument instead. If
-            check_sparse_nnz != masked, an exception is raised.
+            for SparseTensor input, and for any SparseTensor inputs,
+            gradcheck will perform its check at nnz positions only.
+            The check_sparse_nnz argument is deprecated, use the
+            masked argument instead. If check_sparse_nnz != masked, an
+            exception is raised.
         nondet_tol (float, optional): tolerance for non-determinism. When running
             identical inputs through the differentiation, the results must either match
             exactly (default, 0.0) or be within this tolerance.
@@ -1529,7 +1529,7 @@ def gradcheck(
             check_sparse_nnz = masked
     else:
         warnings.warn((
-            'Backwards compatibility: check_sparse_nnz will be deprecated in the future.'
+            'Backwards compatibility: check_sparse_nnz is deprecated, it will be removed in a future version of PyTorch.'
             f' Use masked={check_sparse_nnz} instead.'))
         if masked is None:
             masked = check_sparse_nnz
@@ -1557,7 +1557,7 @@ def _gradcheck_helper(func, inputs, eps, atol, rtol, nondet_tol, check_undefined
                       check_grad_dtypes, check_batched_grad, check_batched_forward_grad, check_forward_ad,
                       check_backward_ad, fast_mode, masked):
     tupled_inputs = _as_tuple(inputs)
-    _check_inputs(tupled_inputs, masked)
+    _check_inputs(tupled_inputs)
 
     func_out = func(*tupled_inputs)
     outputs = _differentiable_outputs(func_out)
