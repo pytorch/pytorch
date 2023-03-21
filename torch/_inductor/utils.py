@@ -283,15 +283,13 @@ def get_kernel_metadata(node_schedule):
     for node in inductor_nodes:
         if "original_aten" in node.meta:
             original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node
+                node.name
             )
     metadata = [
-        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
     ]
-    for original_aten, nodes in original_aten_dict.items():
-        metadata.append(
-            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
-        )
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
 
 
