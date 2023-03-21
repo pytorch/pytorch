@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import torch
+from parameterized import parameterized
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import config
@@ -106,7 +107,8 @@ class TestDoBench(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
-    def test_max_autotune_mm_plus_mm(self):
+    @parameterized.expand([[True], [False]])
+    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
@@ -121,7 +123,9 @@ class TestDoBench(TestCase):
         c = torch.randn(m, k).cuda()
         d = torch.randn(k, n).cuda()
 
-        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
+        with config.patch(
+            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
+        ):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
     def test_max_autotune_regular_mm(self):
@@ -135,6 +139,7 @@ class TestDoBench(TestCase):
 
         a = torch.randn(100, 10).cuda()
         b = torch.randn(10, 100).cuda()
+
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm)(a, b)
 

@@ -1,10 +1,13 @@
 import dataclasses
+import queue
+import time
 import warnings
 from typing import Any, Dict, List
 
 import torch
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
+
 from torch._inductor import ir
 from torch._inductor.codecache import PyCodeCache
 
@@ -12,6 +15,93 @@ from .utils import do_bench
 from .virtualized import V
 
 DEBUG = False
+
+DEBUG = False
+EXIT_HANDLER_REGISTERED = False
+
+
+# Used to synchronize between parent and child processes
+class Ping:
+    pass
+
+
+class Pong:
+    pass
+
+
+@dataclasses.dataclass
+class TuningProcess:
+    process: multiprocessing.Process = None
+    request_queue: multiprocessing.Queue = None
+    response_queue: multiprocessing.Queue = None
+
+    @staticmethod
+    def process_main(request_queue, response_queue):
+        print("enter child process main")
+        while True:
+            obj = request_queue.get()
+
+            if obj is None:
+                break  # None is a sentinel for the child to terminate
+            elif isinstance(obj, Ping):
+                response_queue.put(Pong())
+            elif isinstance(obj, BenchmarkRequest):
+                response_queue.put(obj.benchmark())
+            else:
+                raise RuntimeError(f"Invalid request type {type(obj)}")
+
+    def valid(self):
+        return (
+            self.process is not None
+            and self.request_queue is not None
+            and self.response_queue is not None
+        )
+
+    def clear(self):
+        self.process = self.request_queue = self.response_queue = None
+
+    def initialize(self):
+        """
+        Create child process, request/response queues and do the warm up.
+        """
+        if self.valid():
+            return
+
+        # cuda runtime does not work with "fork", use "spawn" to start processes.
+        ctx = multiprocessing.get_context("spawn")
+        self.request_queue = ctx.Queue()
+        self.response_queue = ctx.Queue()
+
+        self.process = ctx.Process(
+            target=self.process_main,
+            args=(
+                self.request_queue,
+                self.response_queue,
+            ),
+        )
+        self.process.start()
+
+        # register the exit handler for the parent process so it will terminate
+        # the child processes
+        global EXIT_HANDLER_REGISTERED
+        if not EXIT_HANDLER_REGISTERED:
+            EXIT_HANDLER_REGISTERED = True
+            import atexit
+
+            atexit.register(lambda: self.terminate())
+
+        # wait for the initialization to be done
+        self.request_queue.put(Ping())
+        resp = self.response_queue.get()
+        assert isinstance(resp, Pong)
+
+    def terminate(self):
+        if self.valid():
+            self.request_queue.put(None)
+            self.process.join()
+
+
+tuning_process = TuningProcess()
 
 
 @dataclasses.dataclass
@@ -110,41 +200,36 @@ class BenchmarkRequest:
         return out
 
 
-def process_main(bmreq: BenchmarkRequest, timings: torch.Tensor):
-    """
-    The main function for the child process.
-    """
-    timings[0] = bmreq.benchmark()
-
-
 def benchmark_in_sub_process(
     choice: "ChoiceCaller",
 ) -> float:
+    """
+    Do benchmarking in subprocess and return the perf number (latency).
+    """
     assert choice.bmreq is not None
+    tuning_process.initialize()
+    assert tuning_process.valid()
 
-    # use a tensor since the mutation to a python list in a sub process
-    # is not synced back to the parent process. While a tensor works well since
-    # they are moved to shared memory.
-    # TODO: can ue a Queue instead.
-    timings = torch.zeros(1, dtype=torch.float32)
+    tuning_process.request_queue.put(choice.bmreq)
 
-    ctx = multiprocessing.get_context("spawn")
-    child = ctx.Process(
-        target=process_main,
-        args=(
-            choice.bmreq,
-            timings,
-        ),
-    )
-    child.start()
-    child.join()
+    while True:
+        try:
+            timing = tuning_process.response_queue.get(timeout=1.0)
+        except queue.Empty:
+            status = tuning_process.process.exitcode
+            if status is None:
+                # child process is still running
+                continue
+            # child process fail
+            assert status != 0
 
-    # child process fail
-    if child.exitcode != 0:
-        warnings.warn(
-            f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
-        )
-        # return a large value to this choice will be ignored
-        return float("inf")
+            warnings.warn(
+                f"Fail to benchmark choice '{choice}'. It will be ignored. Please debug the root cause in case the choice can bring perf gains."  # noqa: B950 line too long
+            )
 
-    return timings[0].item()
+            tuning_process.clear()
+
+            # return INF so this choice will be ignored
+            return float("inf")
+
+        return timing
