@@ -371,7 +371,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> _lstm_mps(const Tenso
   }
 }
 
-std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const Tensor& grad_y,
+std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(const c10::optional<Tensor>& grad_y_opt,
                                                                                const c10::optional<Tensor>& grad_hy_opt,
                                                                                const c10::optional<Tensor>& grad_cy_opt,
                                                                                const Tensor& z_state,
@@ -387,10 +387,20 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
                                                                                bool bidirectional,
                                                                                bool batch_first) {
   using namespace mps;
+  const Tensor& grad_y_r = c10::value_or_else(grad_y_opt, [] { return Tensor(); });
   const Tensor& grad_hy_r = c10::value_or_else(grad_hy_opt, [] { return Tensor(); });
   const Tensor& grad_cy_r = c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
-  auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx[0], input.options());
-  auto grad_cy = grad_cy_r.defined() ? grad_cy_r : at::zeros_like(hx[1], input.options());
+  const auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx[0], input.options());
+  const auto grad_cy = grad_cy_r.defined() ? grad_cy_r : at::zeros_like(hx[1], input.options());
+
+  const auto hidden_size = hx[0].sizes()[2];
+  const auto batch_size = hx[0].sizes()[1];
+  const auto seq_len = input.sizes()[batch_first ? 1 : 0];
+  const auto grad_y = grad_y_r.defined() ? grad_y_r
+                                         : at::zeros({batch_first ? batch_size : seq_len,
+                                                      batch_first ? seq_len : batch_size,
+                                                      hidden_size * (bidirectional ? 2 : 1)},
+                                                     input.options());
 
   std::vector<Tensor> kernel_weights;
   std::vector<Tensor> recurrent_kernel_weights;
@@ -514,8 +524,6 @@ std::tuple<Tensor, std::vector<Tensor>, std::vector<Tensor>> lstm_mps_backward(c
           NSMutableArray<MPSGraphTensor*>* gradBiasArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
           NSMutableArray<MPSGraphTensor*>* gradStateArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
           NSMutableArray<MPSGraphTensor*>* gradCellStateArray = [[NSMutableArray alloc] initWithCapacity:num_layers];
-
-          auto hidden_size = hx[0].sizes()[2];
 
           for (int i = num_layers - 1; i >= 0; i--) {
             MPSGraphTensor* zState = [mpsGraph sliceTensor:zStateTensor dimension:0 start:i length:1 name:nil];

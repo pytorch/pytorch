@@ -468,13 +468,22 @@ class TritonTemplate:
 
 
 class ExternKernelChoice:
-    def __init__(self, kernel, cpp_kernel=None, *, name=None, has_out_variant=True):
+    def __init__(
+        self,
+        kernel,
+        cpp_kernel=None,
+        ordered_kwargs_for_cpp_kernel=(),
+        *,
+        name=None,
+        has_out_variant=True,
+    ):
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
         assert not hasattr(extern_kernels, name), "duplicate extern kernel"
         self.name = name
         self.cpp_kernel = cpp_kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
 
@@ -623,6 +632,7 @@ class ExternKernelCaller(ChoiceCaller):
                 inputs=self.input_nodes,
                 kernel=self.choice.call_name(),
                 cpp_kernel=self.choice.cpp_kernel,
+                ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 kwargs=self.kwargs,
             )
         )
