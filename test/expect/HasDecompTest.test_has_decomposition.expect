@@ -349,6 +349,8 @@ aten::_indices_copy
 aten::_indices_copy.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_int_mm
+aten::_int_mm.out
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result
