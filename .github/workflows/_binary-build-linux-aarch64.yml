@@ -24,7 +24,6 @@ on:
         type: string
         description: Package type
       DOCKER_IMAGE:
-        required: true
         type: string
         description: Docker image to use
         default: quay.io/pypa/manylinux2014_aarch64:latest
