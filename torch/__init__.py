@@ -920,6 +920,151 @@ def is_warn_always_enabled():
     return _C._get_warnAlways()
 
 ################################################################################
+# Define error checking functions
+################################################################################
+
+# These error checking functions must be kept consistent with their C++
+# equivalents. Their C++ equivalents are mentioned where applicable.
+
+def _check_with(error_type, cond, message):
+    if not isinstance(cond, builtins.bool):
+        raise TypeError(f'cond must be a bool, but got {type(cond)}')
+
+    if cond:
+        return
+
+    # error_type must be a subclass of Exception and not subclass of Warning
+    assert issubclass(error_type, Exception) and not issubclass(error_type, Warning)
+
+    if message is None:
+        message_evaluated = (
+            'Expected cond to be True, but got False. (Could this error '
+            'message be improved? If so, please report an enhancement request '
+            'to PyTorch.)')
+
+    else:
+        if not callable(message):
+            raise TypeError('message must be a callable')
+
+        message_evaluated = str(message())
+
+    raise error_type(message_evaluated)
+
+def _check(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``RuntimeError``
+
+    C++ equivalent: ``TORCH_CHECK``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(RuntimeError, cond, message)
+
+def _check_index(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``IndexError``
+
+    C++ equivalent: ``TORCH_CHECK_INDEX``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(IndexError, cond, message)
+
+def _check_value(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``ValueError``
+
+    C++ equivalent: ``TORCH_CHECK_VALUE``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(ValueError, cond, message)
+
+def _check_type(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``TypeError``
+
+    C++ equivalent: ``TORCH_CHECK_TYPE``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(TypeError, cond, message)
+
+def _check_not_implemented(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``NotImplementedError``
+
+    C++ equivalent: ``TORCH_CHECK_NOT_IMPLEMENTED``
+
+    Args:
+        cond (:class:`bool`): If False, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_with(NotImplementedError, cond, message)
+
+def _check_tensor_all_with(error_type, cond, message=None):
+    if not torch.is_tensor(cond):
+        raise TypeError(f'cond must be a tensor, but got {type(cond)}')
+
+    if not cond.dtype == torch.bool:
+        raise TypeError(
+            f'cond tensor must have dtype torch.bool, but got {cond.dtype}')
+
+    _check_with(error_type, cond._is_all_true().item(), message)
+
+# C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
+def _check_tensor_all(cond, message=None):
+    r"""Throws error containing an optional message if the specified condition
+    is False.
+
+    Error type: ``RuntimeError``
+
+    C++ equivalent: ``TORCH_CHECK_TENSOR_ALL``
+
+    Args:
+        cond (:class:`torch.Tensor`): Tensor of dtype ``torch.bool``. If any
+            element is ``False``, throw error
+
+        message (Callable, optional): Callable that returns either a string or
+            an object that has a ``__str__()`` method to be used as the error
+            message. Default: ``None``
+    """
+    _check_tensor_all_with(RuntimeError, cond, message)
+
+################################################################################
 # Define numeric constants
 ################################################################################
 
