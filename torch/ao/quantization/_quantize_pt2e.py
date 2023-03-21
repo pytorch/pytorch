@@ -6,7 +6,7 @@ from .fx import prepare
 from .quantize_fx import _convert_to_reference_decomposed_fx
 from ._pt2e.utils import (
     _fuse_conv_bn_,
-    _rearrange_weight_observer_for_addmm,
+    _rearrange_weight_observer_for_decomposed_linear,
 )
 
 from typing import Tuple, Any, Dict
@@ -42,7 +42,7 @@ def prepare_pt2e(
 
     # TODO: remove hack when we have better support for pattern matching
     # move around the observer for addmm
-    _rearrange_weight_observer_for_addmm(model)
+    _rearrange_weight_observer_for_decomposed_linear(model)
     return model
 
 def convert_pt2e(
