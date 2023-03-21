@@ -20,7 +20,8 @@ TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function);
+    _jvp_fn_t jvp_user_function,
+    const std::unordered_set<at::TensorImpl*>& to_save);
 
 TORCH_API void check_variable_result(
     const at::TensorBase& original,
@@ -130,6 +131,7 @@ struct TORCH_API AutogradContext {
   variable_list get_saved_variables() const;
   const std::unordered_set<at::TensorImpl*>& get_and_bump_dirty() const;
   const std::unordered_set<at::TensorImpl*>& get_non_differentiable() const;
+  std::unordered_set<at::TensorImpl*> get_to_save() const;
 
   /// Expose the Node's `task_should_compute_output` method to the cpp
   /// custom autograd Function as `needs_input_grad`.
@@ -308,7 +310,8 @@ auto Function<T>::apply(Args&&... args)
       node->ctx_.get_and_bump_dirty(),
       to_optional(outputs),
       is_executable ? node : nullptr,
-      jvp_fn);
+      jvp_fn,
+      node->ctx_.get_to_save());
 
   node->output_info_.reserve(wrapped_outputs.size());
   for (auto& output : wrapped_outputs) {
