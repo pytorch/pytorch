@@ -416,13 +416,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
   int64_t num_reduce_dims = dim.size();
   int64_t num_output_dims;
 
-  std::cout << "impl_func_norm_mps" << "input_tensor: " << input_tensor << ", other_tensor: " << other_tensor
-            << ", p: " << p << ", dim: " << dim << ", keepdim: " << keepdim
-            << ", in_dtype: " << in_dtype
-            << ", output_t: " << output_t
-            << ", cdist: " << cdist
-            << ", input_shape: " << input_shape <<std::endl;
-
   // For output shape calculation, assume that keepdim is true
   num_output_dims = num_input_dims;
   NSMutableArray<NSNumber*>* apparent_output_shape = nil;
@@ -444,9 +437,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
     return;
   }
 
-  NSLog(@"apparent_input_shape = %@, apparent_output_shape = %@, axes = %@",
-    apparent_input_shape, apparent_output_shape, axes);
-
   auto stream = at::mps::getCurrentMPSStream();
   @autoreleasepool {
     NSString* ns_key = [[axes valueForKey:@"description"] componentsJoinedByString:@","];
@@ -455,7 +445,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
     string key =
         string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" + keepdim_info;
 
-    std::cout << "key: " << key << std::endl;
     auto cachedGraph = cache_->LookUpAs<MPSBinaryCachedGraph>(key);
 
     if (!cachedGraph) {
@@ -545,7 +534,6 @@ void impl_func_norm_mps(const Tensor& input_tensor,
 
 TORCH_IMPL_FUNC(norm_out_mps)
 (const Tensor& self, const OptionalScalarRef opt_p, IntArrayRef dim, bool keepdim, const Tensor& result) {
-  std::cout << "norm_out_mps" << ", dim: " << dim << ", keepdim: " << keepdim << std::endl;
   impl_func_norm_mps(self, self, opt_p, dim, keepdim, c10::nullopt, result, /*cdist=*/false);
 }
 
@@ -556,7 +544,6 @@ TORCH_IMPL_FUNC(norm_dtype_out_mps)
  bool keepdim,
  ScalarType dtype,
  const Tensor& result) {
-  std::cout << "norm_dtype_out_mps" << ", dim: " << dim << ", keepdim: " << keepdim << std::endl;
   impl_func_norm_mps(self, self, opt_p, dim, keepdim, dtype, result, /*cdist=*/false);
 }
 
