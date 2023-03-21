@@ -236,6 +236,8 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
+      functorch/test_dims \
+      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -935,8 +937,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  test_functorch
 else
   install_torchvision
   install_monkeytype
