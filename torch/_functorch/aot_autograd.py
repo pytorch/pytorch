@@ -1256,7 +1256,7 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     )
 
     with enable_python_dispatcher():
-        fw_module = make_fx(trace_fn, aot_config.decompositions)(*flat_args)
+        fw_module = make_fx(trace_fn, decomposition_table=aot_config.decompositions)(*flat_args)
 
     if not aot_config.keep_inference_input_mutations:
         # As long as we opted to remove input mutations, then
@@ -2252,7 +2252,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     if config.use_functionalize:
         with enable_python_dispatcher():
             flattened_joints, _ = pytree.tree_flatten(joint_inputs)
-            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
+            fx_g = make_fx(joint_forward_backward, decomposition_table=aot_config.decompositions)(
                 *joint_inputs
             )
 
