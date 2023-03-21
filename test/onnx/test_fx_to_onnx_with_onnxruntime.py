@@ -123,7 +123,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
-        self.opset_version = onnx_constants.FX_ONNX_OPSET
         # TODO(titaiwang): change to randn once it's ready
         x = torch.tensor([1.0, 2.0], dtype=torch.float)
 
