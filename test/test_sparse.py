@@ -147,14 +147,11 @@ class TestSparseLegacyAndDeprecation(TestCase):
     def test_gradcheck_check_sparse_nnz(self, fast_mode):
         """Tests for deprecated check_sparse_nnz keyword argument of gradcheck.
 
-        Suggested deprecation steps:
+        Deprecation steps:
         2.1: Specification of check_sparse_nnz triggers a warning.
-        2.2: Specification of check_sparse_nnz triggers a warning and
-             an exception. Update gradcheck and this test accordingly.
-        2.3: Specification of check_sparse_nnz triggers an
+        2.2: Specification of check_sparse_nnz triggers an
              exception. Remove all check_sparse_nnz usages from
              gradcheck and delete this test.
-
         """
         def fn(x, masked_grad):
             return x.to_dense(masked_grad=masked_grad)
@@ -1583,8 +1580,7 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble, torch.bfloat16)
-    @gradcheck_semantics()
-    def test_sparse_addmm(self, device, dtype, coalesced, gradcheck):
+    def test_sparse_addmm(self, device, dtype, coalesced):
         if dtype is torch.bfloat16:
             # RuntimeError: "addmm_sparse_dense" not implemented for 'BFloat16'
             self.skipTest('See https://github.com/pytorch/pytorch/issues/73145')
@@ -1609,7 +1605,7 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D1, D2, beta=beta, alpha=alpha):
                 return torch.sparse.addmm(D1, S, D2, beta=beta, alpha=alpha)
-            gradcheck(fn, (S, D1, D2))
+            gradcheck(fn, (S, D1, D2), masked=True)
 
         test_shape(7, 8, 9, 20, False, None)
         test_shape(7, 8, 9, 20, True, None)
