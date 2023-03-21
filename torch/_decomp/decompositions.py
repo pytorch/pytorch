@@ -1505,7 +1505,7 @@ def _native_batch_norm_legit_no_training(
         momentum,
         eps,
     )
-@register_decomposition(aten.add)
+
 
 @register_decomposition(aten._native_batch_norm_legit.default)
 def _native_batch_norm_legit(
