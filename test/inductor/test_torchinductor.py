@@ -6951,12 +6951,18 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def test_arg(x, y):
                 return torch.cat([x, y], -1).view(-1).view(128).tanh()
 
+            def test_kwarg2(x, y):
+                return torch.cat(tensors=[x, y], dim=0).tanh()
+
+            def test_kwarg3(x, y):
+                return torch.cat(tensors=[x, y], dim=0).view(128).tanh()
+
             trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
             inputs = [
                 torch.randn(8, 8, device="cuda"),
                 torch.randn(8, 8, device="cuda"),
             ]
-            for f in [test_kwarg, test_arg]:
+            for f in [test_kwarg, test_arg, test_kwarg2, test_kwarg3]:
                 traced = trace_func(f, inputs)
                 self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
                 self.assertEqual(count_call_method(traced, "tanh"), 2)
