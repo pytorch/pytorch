@@ -985,7 +985,7 @@
 
 - func: quantized_batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor mean, Tensor var, float eps, float output_scale, int output_zero_point) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_batch_norm
+    QuantizedCPU: batch_norm_quantized_cpu
   autogen: quantized_batch_norm.out
 
 - func: _batch_norm_impl_index(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> (Tensor, Tensor, Tensor, Tensor, int)
@@ -3610,12 +3610,12 @@
 
 - func: quantized_max_pool1d(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_max_pool1d
+    QuantizedCPU: max_pool1d_quantized_cpu
   autogen: quantized_max_pool1d.out
 
 - func: quantized_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   dispatch:
-    QuantizedCPU: quantized_max_pool2d
+    QuantizedCPU: max_pool2d_quantized_cpu
     QuantizedCUDA: quantized_max_pool2d_cudnn
   autogen: quantized_max_pool2d.out
 
