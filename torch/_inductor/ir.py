@@ -908,9 +908,7 @@ class Reduction(Loops):
                 )
         elif split_reduction and dynamo_config.dynamic_shapes:
 
-
             _warn_split_reductions()
-
 
         return TensorBox.create(
             Reduction(
@@ -3849,12 +3847,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            _,
-        ) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
