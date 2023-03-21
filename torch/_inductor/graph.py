@@ -79,13 +79,24 @@ def _warn_complex_not_supported():
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
+    # TODO: these dont always have meta["val"] yet but they should
+    if node.target is operator.getitem:
+        return False
+
     for arg in tree_flatten((node, node.args, node.kwargs))[0]:
         if not isinstance(arg, torch.fx.Node):
             continue
-        dtype = arg.meta["val"].dtype
-        if dtype.is_complex:
-            _warn_complex_not_supported()
-            return True
+
+        if "val" in arg.meta:
+            meta = arg.meta["val"]
+            metas = (meta,) if not isinstance(meta, (list, tuple)) else meta
+        else:
+            raise Exception(f"Unexpected node without meta: {node}")
+
+        for meta in metas:
+            if isinstance(meta, torch._subclasses.FakeTensor) and meta.dtype.is_complex:
+                _warn_complex_not_supported()
+                return True
     return False
 
 
