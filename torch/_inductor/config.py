@@ -60,6 +60,10 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 # enable searching global and local cache regardless of `max_autotune`
 search_autotune_cache = os.environ.get("TORCHINDUCTOR_SEARCH_AUTOTUNE_CACHE") == "1"
 
+
+coordinate_descent_tuning = os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
+coordinate_descent_tuning = 1 # TODO 
+
 # control store vs recompute heuristic
 # For fanouts, rematearialization can lead to exponential blowup. So, have
 # smaller threshold
