@@ -561,9 +561,9 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
