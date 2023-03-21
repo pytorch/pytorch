@@ -245,7 +245,7 @@ class Vectorized<ComplexFlt> {
     // lets permute second so that we can add it getting horizontal sums
     auto first_perm = first.el_swapped(); // 2perm
     auto second_perm = second.el_swapped(); // 2perm
-    // summ
+    // sum
     auto first_ret = first + first_perm; // 2add
     auto second_ret = second + second_perm; // 2 add
     // now lets choose evens
@@ -259,7 +259,7 @@ class Vectorized<ComplexFlt> {
     // lets permute second so that we can add it getting horizontal sums
     auto first_perm = first.el_swapped(); // 2perm
     auto second_perm = second.el_swapped(); // 2perm
-    // summ
+    // sum
     auto first_ret = first - first_perm; // 2sub
     auto second_ret = second - second_perm; // 2 sub
     // now lets choose evens
@@ -619,7 +619,7 @@ class Vectorized<ComplexFlt> {
   DEFINE_MEMBER_OP(operator&, ComplexFlt, vec_and)
   DEFINE_MEMBER_OP(operator|, ComplexFlt, vec_or)
   DEFINE_MEMBER_OP(operator^, ComplexFlt, vec_xor)
-  // elelemtwise helpers
+  // elementwise helpers
   DEFINE_MEMBER_OP(elwise_mult, ComplexFlt, vec_mul)
   DEFINE_MEMBER_OP(elwise_div, ComplexFlt, vec_div)
   DEFINE_MEMBER_OP(elwise_gt, ComplexFlt, vec_cmpgt)

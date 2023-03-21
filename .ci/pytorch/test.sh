@@ -236,6 +236,8 @@ test_dynamo_shard() {
       test_fx \
       test_package \
       test_legacy_vmap \
+      functorch/test_dims \
+      functorch/test_aotdispatch \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
   assert_git_not_dirty
@@ -291,7 +293,7 @@ test_perf_for_dashboard() {
     for backend in eager aot_eager; do
       python "benchmarks/dynamo/$suite.py" \
           --accuracy --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/{$backend}_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+          --output "$TEST_REPORTS_DIR/${backend}_${suite}_${dtype}_training_cuda_accuracy.csv"
     done
 
     # Run accuracy test for inductor with different configs
@@ -300,10 +302,10 @@ test_perf_for_dashboard() {
     backend=inductor
     python "benchmarks/dynamo/$suite.py" \
         --accuracy --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/{$backend}_no_cudagraphs_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
     python "benchmarks/dynamo/$suite.py" \
         --accuracy --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/{$backend}_with_cudagraphs_{$suite}_{$dtype}_training_cuda_accuracy.csv"
+        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_accuracy.csv"
 
     # Run performance test
     # Skip dynamo-eager and aot-eager for performance test
@@ -311,10 +313,10 @@ test_perf_for_dashboard() {
     # TODO: add more configs here, e.g. dynamic-shapes, max-autotune, etc.
     python "benchmarks/dynamo/$suite.py" \
         --performance --backend "$backend" --disable-cudagraphs "$@" \
-        --output "$TEST_REPORTS_DIR/{$backend}_no_cudagraphs_{$suite}_{$dtype}_training_cuda_performance.csv"
+        --output "$TEST_REPORTS_DIR/${backend}_no_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
     python "benchmarks/dynamo/$suite.py" \
         --performance --backend "$backend" "$@" \
-        --output "$TEST_REPORTS_DIR/{$backend}_with_cudagraphs_{$suite}_{$dtype}_training_cuda_performance.csv"
+        --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_training_cuda_performance.csv"
   done
 }
 
@@ -935,8 +937,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-tsan* ]]; then
   test_libtorch || true
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${TEST_CONFIG}" == *functorch* ]]; then
-  test_functorch
 else
   install_torchvision
   install_monkeytype
