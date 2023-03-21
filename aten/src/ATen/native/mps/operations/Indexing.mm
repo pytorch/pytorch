@@ -198,7 +198,6 @@ static Tensor& masked_select_out_mps_impl(Tensor& result, const Tensor& self, co
 }
 
 void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef index_stride) {
-  using namespace mps;
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index.Tensor_out", /*accumulate=*/false);
     dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/true, /*accumulate=*/false);
@@ -206,7 +205,6 @@ void index_kernel_mps(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
 }
 
 void index_put_kernel_mps(TensorIterator& iter, IntArrayRef index_size, IntArrayRef index_stride, bool accumulate) {
-  using namespace mps;
   @autoreleasepool {
     validateInputData(iter, index_size, index_stride, "index_put_impl", accumulate);
     dispatchIndexKernel(iter, index_size, index_stride, /*index_select=*/false, accumulate);
