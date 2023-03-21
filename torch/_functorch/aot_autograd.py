@@ -2999,15 +2999,16 @@ def aot_module_simplified(
     # Next, the input args
     full_args.extend(args)
 
-    # And now their dynamo equivalent, if there
     if hasattr(mod, "graph"):
-        if aot_autograd_arg_pos_to_source is None:
-            aot_autograd_arg_pos_to_source = []
+        # Non dynamo entrypoints can get to here...
         for i, node in enumerate(mod.graph.nodes):
             if node.op == "placeholder":
-                assert hasattr(node, "_dynamo_source")
-                assert isinstance(args[i], torch.Tensor)
-                aot_autograd_arg_pos_to_source.append(node._dynamo_source)
+                if hasattr(node, "_dynamo_source"):
+                    # ... but not here!
+                    if aot_autograd_arg_pos_to_source is None:
+                        aot_autograd_arg_pos_to_source = []
+                    assert isinstance(args[i], torch.Tensor)
+                    aot_autograd_arg_pos_to_source.append(node._dynamo_source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
