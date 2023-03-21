@@ -40,7 +40,7 @@ void set_apparent_shapes(NSMutableArray<NSNumber*>*& apparent_out_shape,
                          int64_t num_reduce_dims,
                          int64_t num_output_dims,
                          IntArrayRef& input_shape,
-                         NSMutableArray<NSNumber*>*& axes) {
+                         NSArray<NSNumber*>* axes) {
   if (num_reduce_dims == 0) {
     /* Output shape becomes a one
      * Input shape becomes flattened
