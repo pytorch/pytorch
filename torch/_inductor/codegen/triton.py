@@ -26,6 +26,7 @@ from ..utils import (
     sympy_product,
     sympy_subs,
     sympy_symbol,
+    unique,
 )
 from ..virtualized import ops, V
 
@@ -1246,6 +1247,7 @@ class TritonKernel(Kernel):
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
                 )
 
+        ninplace_args = len(unique(self.args.inplace_buffers.values()))
         result.writelines(["\n", "\n", "if __name__ == '__main__':"])
         with result.indent():
             result.writeline("from torch._inductor.utils import get_num_bytes")
@@ -1256,7 +1258,9 @@ class TritonKernel(Kernel):
             result.writeline(
                 "ms = do_bench(lambda: call(args), rep=40, fast_flush=True)[0]"
             )
-            result.writeline("num_gb = get_num_bytes(*args) / 1e9")
+            result.writeline(
+                f"num_gb = get_num_bytes(*args, num_in_out_args={ninplace_args}) / 1e9"
+            )
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
             result.writeline(
                 'print(f"{ms:.3f}ms    {num_gb:.3f}GB    {gb_per_s:.2f}GB/s")'
