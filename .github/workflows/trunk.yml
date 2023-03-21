@@ -225,7 +225,8 @@ jobs:
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.7-py3
-      cuda-version: "11.7"
+      # TESTING
+      cuda-version: "11.8"
       sync-tag: win-cuda-build
       test-matrix: |
         { include: [
@@ -244,7 +245,8 @@ jobs:
     needs: win-vs2019-cuda11_7-py3-build
     with:
       build-environment: win-vs2019-cuda11.7-py3
-      cuda-version: "11.7"
+      # TESTING
+      cuda-version: "11.8"
       test-matrix: ${{ needs.win-vs2019-cuda11_7-py3-build.outputs.test-matrix }}
 
   linux-focal-rocm5_4_2-py3_8-build:

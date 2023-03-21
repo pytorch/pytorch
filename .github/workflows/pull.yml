@@ -302,7 +302,8 @@ jobs:
     uses: ./.github/workflows/_win-build.yml
     with:
       build-environment: win-vs2019-cuda11.7-py3
-      cuda-version: "11.7"
+      # TESTING
+      cuda-version: "11.8"
       sync-tag: win-cuda-build
       test-matrix: |
         { include: [
