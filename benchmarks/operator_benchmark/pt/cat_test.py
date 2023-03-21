@@ -7,7 +7,7 @@ from typing import List
 """Microbenchmarks for Cat operator"""
 
 cross_product_configs = {
-    'device': ['cpu', 'cuda'],
+    'device': ['cpu', 'cuda', 'mps'],
 }
 
 # Configs for PT Cat operator

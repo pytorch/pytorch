@@ -13,7 +13,7 @@ unary_ops_configs_short = op_bench.config_list(
         [512, 512],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=['short']
 )
@@ -21,7 +21,7 @@ unary_ops_configs_short = op_bench.config_list(
 unary_ops_configs_long = op_bench.cross_product_configs(
     M=[256, 1024],
     N=[256, 1024],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 

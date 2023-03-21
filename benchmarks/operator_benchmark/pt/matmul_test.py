@@ -12,7 +12,7 @@ mm_short_configs = op_bench.config_list(
         [256, 256, 256, False, True],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=["short"],
 )
@@ -24,7 +24,7 @@ mm_long_configs = op_bench.cross_product_configs(
     K=[64],
     trans_a=[False, True],
     trans_b=[True, False],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=["long"]
 )
 

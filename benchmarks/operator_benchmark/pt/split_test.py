@@ -14,7 +14,7 @@ split_configs_short = op_bench.config_list(
         [512, 512, 2],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=["short"],
 )
@@ -23,7 +23,7 @@ split_configs_long = op_bench.cross_product_configs(
     M=[128, 1024],
     N=[128, 1024],
     parts=[2, 4],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 

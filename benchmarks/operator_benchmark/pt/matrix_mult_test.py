@@ -13,7 +13,7 @@ batch_mm_configs_short = op_bench.config_list(
         [128, 100, 120, 110],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=["short"],
 )

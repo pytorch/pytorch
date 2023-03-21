@@ -11,7 +11,7 @@ add_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dtype': [torch.float, torch.float64],
     },
     tags=['short'],

@@ -14,7 +14,7 @@ stack_configs_static_runtime = op_bench.config_list(
         [(1, 40), 5],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dim': list(range(3))
     },
     tags=['static_runtime'],
@@ -28,7 +28,7 @@ stack_configs_short = op_bench.config_list(
         [(128, 1024,    2), 2],  # noqa: E241
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dim': list(range(4))
     },
     tags=['short'],
@@ -42,7 +42,7 @@ stack_configs_long = op_bench.config_list(
         [(2**10,    2**10,      2), 2],  # noqa: E241
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dim': list(range(4))
     },
     tags=['long'],
@@ -57,7 +57,7 @@ stack_configs_multidim = op_bench.config_list(
         [(2**3+1,   2**5-1, 2**2+1, 2**4-1, 2**5+1), 17],  # noqa: E226,E241
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dim': list(range(6))
     },
     tags=['multidim'],

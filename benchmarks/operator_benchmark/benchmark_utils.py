@@ -12,7 +12,7 @@ This module contains utilities for writing microbenchmark tests.
 
 # Here are the reserved keywords in the benchmark suite
 _reserved_keywords = {"probs", "total_samples", "tags"}
-_supported_devices = {"cpu", "cuda"}
+_supported_devices = {"cpu", "cuda", "mps"}
 
 def shape_to_string(shape):
     return ', '.join([str(x) for x in shape])
@@ -144,13 +144,15 @@ def config_list(**configs):
     ],
     attr_names = ['M', 'N'],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
 
     we will generate [[{'M': 1}, {'N' : 2}, {'device' : 'cpu'}],
                       [{'M': 1}, {'N' : 2}, {'device' : 'cuda'}],
+                      [{'M': 1}, {'N' : 2}, {'device' : 'mps'}],
                       [{'M': 4}, {'N' : 5}, {'device' : 'cpu'}],
                       [{'M': 4}, {'N' : 5}, {'device' : 'cuda'}]]
+                      [{'M': 4}, {'N' : 5}, {'device' : 'mps'}]]
     """
     generated_configs = []
     reserved_names = ['attrs', 'attr_names', 'tags']

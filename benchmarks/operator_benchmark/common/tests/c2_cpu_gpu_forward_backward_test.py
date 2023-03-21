@@ -7,7 +7,7 @@ add_configs = op_bench.cross_product_configs(
     N=[8],
     K=[8],
     tags=["short"],
-    device=["cuda", "cpu"]
+    device=["cuda", "cpu", "mps"]
 )
 
 class AddBenchmark(op_bench.Caffe2BenchmarkBase):

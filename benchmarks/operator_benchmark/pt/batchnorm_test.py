@@ -11,8 +11,8 @@ if torch.backends.cudnn.is_available:
     def cudnn_benchmark_configs(configs):
         result = []
         for config in configs:
-            is_cuda = any('cuda' in attr.values() for attr in config)
-            if is_cuda:
+            is_device = any('cuda' or 'mps' in attr.values() for attr in config)
+            if is_device:
                 result.append((*config, dict(cudnn=True)))
             result.append((*config, dict(cudnn=False)))
         return result
@@ -27,7 +27,7 @@ batchnorm_configs_short = cudnn_benchmark_configs(op_bench.config_list(
         [1, 256, 3136],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'training': [True, False],
     },
     tags=["short"]
@@ -37,7 +37,7 @@ batchnorm_configs_long = cudnn_benchmark_configs(op_bench.cross_product_configs(
     M=[2, 128],
     N=[8192, 2048],
     K=[1],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     training=[True, False],
     tags=["long"]
 ))
@@ -71,7 +71,7 @@ batchnorm1d_configs_short = cudnn_benchmark_configs(op_bench.config_list(
         [3136, 256],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'training': [True, False],
     },
     tags=["short"]
@@ -80,7 +80,7 @@ batchnorm1d_configs_short = cudnn_benchmark_configs(op_bench.config_list(
 batchnorm1d_configs_long = cudnn_benchmark_configs(op_bench.cross_product_configs(
     N=[2, 128],
     C=[8192, 2048],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     training=[True, False],
     tags=["long"]
 ))

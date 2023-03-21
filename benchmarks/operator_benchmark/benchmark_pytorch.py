@@ -123,7 +123,7 @@ class PyTorchOperatorTestCase:
         scripted_op_bench = torch.jit.script(self.op_bench)
         return scripted_op_bench.forward_consume
 
-    def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
+    def run_jit_forward(self, num_runs, print_per_iter=False, device_sync=False):
         """ Run the forward path of an op with JIT mode
         """
         if self._jit_forward_graph is None:
@@ -143,22 +143,27 @@ class PyTorchOperatorTestCase:
                 }
             ))
 
-    def run_forward(self, num_runs, print_per_iter, cuda_sync):
+    def run_forward(self, num_runs, print_per_iter, device_sync):
         """ Run the forward path of an op with eager mode
         """
+        def device_synchronize():
+            if device_sync:
+                if (torch.cuda.is_available()):
+                    torch.cuda.synchronize(torch.cuda.current_device())
+                if (torch.backends.mps.is_available()):
+                    torch.mps.synchronize()
+
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
                 self.output = self.op_bench.forward_impl()
-                if cuda_sync:
-                    torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
+                device_synchronize()
         else:
             for _ in range(num_runs):
                 self.output = self.op_bench.forward_impl()
-            if cuda_sync:
-                torch.cuda.synchronize(torch.cuda.current_device())
+            device_synchronize()
 
     def _output_mean(self):
         """ TODO (mingzhe): it is not necessary to sum up everything by myself,

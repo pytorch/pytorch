@@ -15,7 +15,7 @@ pool_1d_configs_short = op_bench.config_list(
         [3, 1, 8, 256, 256],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=['short']
 )
@@ -26,7 +26,7 @@ pool_1d_configs_long = op_bench.cross_product_configs(
     N=[8, 16],
     C=[3],
     L=[128, 256],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 
@@ -69,7 +69,7 @@ pool_2d_configs_short = op_bench.config_list(
         [[3, 1], [2, 1], 1, 16, 32, 32],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=['short']
 )
@@ -81,7 +81,7 @@ pool_2d_configs_long = op_bench.cross_product_configs(
     C=[32],
     H=[32, 64],
     W=[32, 64],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 

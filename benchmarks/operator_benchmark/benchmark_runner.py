@@ -135,7 +135,7 @@ def parse_args():
 
     parser.add_argument(
         '--device',
-        help='Run tests on the provided architecture (cpu, cuda)',
+        help='Run tests on the provided architecture (cpu, cuda, mps)',
         default='None')
 
     args, _ = parser.parse_known_args()

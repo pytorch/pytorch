@@ -8,7 +8,7 @@ from caffe2.python import core
 """Microbenchmarks for Concat operator. Supports both Caffe2/PyTorch."""
 
 cross_product_configs = {
-    'device': ['cpu', 'cuda'],
+    'device': ['cpu', 'cuda', 'mps'],
     'dtype': ['float'],
     'add_axis': [0],
 }

@@ -22,7 +22,7 @@ remainder_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dtype' : [torch.int32, torch.float, torch.double],
     },
     tags=['short'],
@@ -32,7 +32,7 @@ remainder_long_configs = op_bench.cross_product_configs(
     M=[8, 128],
     N=[32, 64],
     K=[256, 512],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     dtype=[torch.int32, torch.float, torch.double],
     tags=['long']
 )

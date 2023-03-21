@@ -25,6 +25,21 @@ TestConfig(test_name='add_M8_N2_K1', input_config='M: 8, N: 2, K: 1',
 """
 TestConfig = namedtuple("TestConfig", "test_name input_config tag run_backward")
 
+MPS_SKIP_LIST = ['digamma',
+                 'erfc',
+                 'erfc_',
+                 'erfinv',
+                 'hardshrink',
+                 'lgamma',
+                 'logit_',
+                 'cauchy_',
+                 'sign_',
+                 'digamma_',
+                 'random_',
+                 'uniform_',
+                 'Conv3d',
+                 'ConvTranspose3d',
+                 'FractionalMaxPool2d']
 
 BENCHMARK_TESTER = []
 def _register_test(*test_metainfo):
@@ -73,6 +88,12 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
            run_backward: a bool parameter indicating backward path
            op_name_function: a dictionary includes operator name and function
     """
+    def check_mps_skip_list(attr, op):
+        if (('mps' in attr.values()) and (any((op_name_function and (op_name_function['op_name'] == cmd_flag)) or (cmd_flag in str(op)) for cmd_flag in MPS_SKIP_LIST) or
+                                         (('dtype' in attr) and (attr['dtype'] == torch.float64)))):
+            return True
+        return False
+
     for config in configs:
         test_attrs = {}
         tags = None
@@ -87,18 +108,20 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
                 tags = attr["tags"]
                 continue
 
-            # if 'cuda' is specified in input shape but the testing machines doesn't
+            # if 'cuda' / 'mps' is specified in input shape but the testing machines doesn't
             # support, we will skip this input
             if 'cuda' in attr.values():
                 if not torch.cuda.is_available():
                     keep_config = False
                     break
+            if 'mps' in attr.values() and not torch.backends.mps.is_available():
+                keep_config = False
+                break
 
             test_attrs.update(attr)
 
         if not keep_config:
             continue
-
         if tags is None:
             raise ValueError("Missing tags in configs")
         input_config = str(test_attrs)[1:-1].replace('\'', '')
@@ -115,6 +138,9 @@ def _build_test(configs, bench_op, OperatorTestCase, run_backward, op_name_funct
             op_name = op_name_function['op_name']
             init_dict.update({'op_func' : op_name_function['op_func']})
             op.set_module_name(op_name)
+
+        if check_mps_skip_list(test_attrs, op):
+            continue
 
         op._set_backward_test(run_backward)
         op.init(**init_dict)
@@ -251,18 +277,18 @@ class BenchmarkRunner:
     def _launch_forward(self, test_case, iters, print_per_iter):
         """ Use Python's timeit module to measure execution time (unit: second).
         """
-        cuda_sync = 'cuda' in test_case.test_config.test_name
+        device_sync = ('cuda' or 'mps') in test_case.test_config.test_name
         func = test_case.run_forward
         if self.use_jit:
             func = test_case.run_jit_forward
-        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter, cuda_sync), number=1)
+        forward_time = timeit.timeit(functools.partial(func, iters, print_per_iter, device_sync), number=1)
         return forward_time
 
     def _launch_backward(self, test_case, iters, print_per_iter=False):
         """ This function runs forward path of an op to get an output. Then the backward path is executed
         and the execution time is reported
         """
-        test_case.run_forward(num_runs=1, print_per_iter=False, cuda_sync=False)
+        test_case.run_forward(num_runs=1, print_per_iter=False, device_sync=False)
         if test_case.framework == "PyTorch":
             test_case._output_mean()
         backward_time = timeit.timeit(functools.partial(test_case.run_backward, iters,

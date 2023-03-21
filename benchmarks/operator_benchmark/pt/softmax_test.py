@@ -19,7 +19,7 @@ softmax_configs_short = op_bench.config_list(
         [4, 3, 256, 256],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=['short']
 )
@@ -30,7 +30,7 @@ softmax_configs_long = op_bench.cross_product_configs(
     C=[3],
     H=[256, 512],
     W=[256, 512],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 
@@ -62,7 +62,7 @@ softmax_two_dims_configs = op_bench.config_list(
         [1024, 23258, 1]
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=['long']
 )

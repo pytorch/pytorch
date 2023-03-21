@@ -9,14 +9,14 @@ sum_configs = op_bench.cross_product_configs(
     V=[32, 512],  # Length of other dimension
     dim=[0, 1],
     contiguous=[True, False],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['short']
 ) + op_bench.cross_product_configs(
     R=[1024, 8192],
     V=[512, 1024],
     dim=[0, 1],
     contiguous=[True, False],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=['long']
 )
 

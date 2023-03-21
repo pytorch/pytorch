@@ -8,7 +8,7 @@ add_long_configs = op_bench.cross_product_configs(
     M=[8, 128],
     N=[32, 64],
     K=[256, 512],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=["long"]
 )
 
@@ -21,7 +21,7 @@ add_short_configs = op_bench.config_list(
         [64, 64, 128],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=["short"],
 )
@@ -87,7 +87,7 @@ class AddrBenchmark(op_bench.TorchBenchmarkBase):
 addr_configs = op_bench.cross_product_configs(
     M=[8, 256],
     N=[256, 16],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda'], # 'mps' doesn't support double types
     dtype=[torch.double, torch.half],
     tags=["addr"],
 )
@@ -116,7 +116,7 @@ addbmm_configs = op_bench.cross_product_configs(
     M=[8, 256],
     N=[256, 16],
     K=[15, 16],
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     tags=["addbmm"],
 )
 

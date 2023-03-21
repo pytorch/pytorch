@@ -11,7 +11,7 @@ clip_ranges_long_configs = op_bench.cross_product_configs(
     M=[1],
     N=[2],
     MAX_LENGTH=range(1, 100),
-    device=['cpu', 'cuda'],
+    device=['cpu', 'cuda', 'mps'],
     dtype=[torch.int32],
     tags=["long"],
 )
@@ -27,7 +27,7 @@ clip_ranges_short_configs = op_bench.config_list(
     ],
     attr_names=["LENGTH", "M", "N", "MAX_LENGTH", "dtype"],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
     },
     tags=["short"],
 )

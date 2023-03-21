@@ -13,7 +13,7 @@ fill_short_configs = op_bench.config_list(
         [2048],
     ],
     cross_product_configs={
-        'device': ['cpu', 'cuda'],
+        'device': ['cpu', 'cuda', 'mps'],
         'dtype': [torch.int32],
     },
     tags=["short"],
