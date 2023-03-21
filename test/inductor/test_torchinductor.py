@@ -6386,7 +6386,7 @@ if HAS_CPU:
             with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
-                traced = make_fx(bn)(x, y)
+                traced = make_fx(bn)(x)
                 compiled = compile_fx_inner(traced, [x])
                 assert same(bn(x)[0], compiled([x])[0], equal_nan=True, tol=1e-2)
 
