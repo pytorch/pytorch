@@ -9,6 +9,12 @@ __all__ = ['Flatten', 'Unflatten']
 class Flatten(Module):
     r"""
     Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
+    
+    Unlike NumPy’s flatten, which always copies input’s data, this function may return the original object, a view, or copy. 
+    If no dimensions are flattened, then the original object input is returned. 
+    Otherwise, if input can be viewed as the flattened shape, then that view is returned. 
+    Finally, only if the input cannot be viewed as the flattened shape is input’s data copied. 
+    See torch.Tensor.view() for details on when a view will be returned.
 
     Shape:
         - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,'
