@@ -2252,7 +2252,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     if config.use_functionalize:
         with enable_python_dispatcher():
             flattened_joints, _ = pytree.tree_flatten(joint_inputs)
-            fx_g = make_fx(joint_forward_backward, aot_config.decompositions)(
+            fx_g = make_fx(joint_forward_backward, decomposition_table=aot_config.decompositions)(
                 *joint_inputs
             )
 

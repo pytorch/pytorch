@@ -280,6 +280,19 @@ def key_extractor(tensors, key_mask):
     return key_set
 
 
+# Note [Per Dispatch Key Modes]
+# In ordinary eager mode, we have a Python dispatch key that we attach
+# a mode stack to.
+# However - when the PyDispatcher is enabled, we extend this functionality
+# such that every (functionality) dispatch key is allowed to have
+# its own mode stack.
+# This is controlled by passing a `torch._C.DispatchKey` into
+# the mode constructor.
+_mode_stack_per_key: Dict[torch._C.DispatchKey, List] = {}
+
+
+# Per-dispatch-key mode variant.
+# Temporarily pops the top of a given mode stack.
 @contextlib.contextmanager
 def temporarily_pop_mode(mode_stack):
     assert len(mode_stack) > 0
@@ -290,14 +303,12 @@ def temporarily_pop_mode(mode_stack):
         mode_stack.append(top_mode)
 
 
-_mode_stack_per_key: Dict[torch._C.DispatchKey, List] = {}
-
-
 def mode_stack_per_key():
     global _mode_stack_per_key
     return _mode_stack_per_key
 
 
+# Per-dispatch-key mode variant of push_mode().
 def push_mode_for_key(key, mode):
     assert isinstance(key, torch._C.DispatchKey)
     assert isinstance(mode, torch.utils._python_dispatch.TorchDispatchMode)
@@ -306,6 +317,7 @@ def push_mode_for_key(key, mode):
     mode_stack_per_key()[key].append(mode)
 
 
+# Per-dispatch-key mode variant of pop_mode().
 def pop_mode_for_key(key):
     assert isinstance(key, torch._C.DispatchKey)
     assert key in mode_stack_per_key()
