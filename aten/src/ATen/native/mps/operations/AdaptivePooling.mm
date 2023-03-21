@@ -60,7 +60,7 @@ Tensor& adaptive_avg_pool2d_out_mps(const Tensor& input, IntArrayRef output_size
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
 
   if (isizeH >= osizeH) {
     output = at::avg_pool2d(input,
@@ -132,7 +132,7 @@ Tensor adaptive_avg_pool2d_backward_mps(const Tensor& gradOutput, const Tensor& 
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW, true);
 
   auto gradInput = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   if (gradInput.numel() != 0) {
@@ -182,7 +182,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_out_mps)
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
 
   at::max_pool2d_with_indices_out(const_cast<Tensor&>(output),
                                   const_cast<Tensor&>(indices),
@@ -204,7 +204,7 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
   int64_t strideH = 0, strideW = 0;
   int64_t kernel_sizeH = 0, kernel_sizeW = 0;
 
-  set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
+  mps::set_kernel_params(isizeH, isizeW, osizeH, osizeW, strideH, strideW, kernel_sizeH, kernel_sizeW);
 
   at::max_pool2d_with_indices_backward_out(const_cast<Tensor&>(gradInput),
                                            gradOutput,
