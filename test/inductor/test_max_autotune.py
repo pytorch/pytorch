@@ -3,7 +3,6 @@
 import torch
 from torch import multiprocessing as mp
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import instantiate_parametrized_tests, parametrize
 from torch._inductor import config
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout
@@ -11,6 +10,10 @@ from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
