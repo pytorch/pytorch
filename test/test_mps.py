@@ -1466,7 +1466,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(linear_cpu_output.size(), linear_mps_output.size())
 
         if backward_pass:
-            cpu_grad = torch.ones_like(linear_cpu_output)
+            cpu_grad = torch.rand_like(linear_cpu_output)
             grad = cpu_grad.to('mps')
 
             linear_cpu_output.backward(gradient=cpu_grad)
@@ -1474,11 +1474,11 @@ class TestMPS(TestCaseMPS):
 
             self.assertEqual(linear_cpu_input.grad.size(), linear_mps_input.grad.size())
             self.assertEqual(linear_cpu_input.grad, linear_mps_input.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
-            self.assertTrue(torch.autograd.gradgradcheck(mps_linear, linear_mps_input, grad))
+            self.assertTrue(gradgradcheck(mps_linear, linear_mps_input, grad))
 
             self.assertEqual(cpu_linear.weight.grad.size(), mps_linear.weight.grad.size())
             self.assertEqual(cpu_linear.weight.grad, mps_linear.weight.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
-            self.assertTrue(torch.autograd.gradgradcheck(mps_linear, mps_linear.weight, atol=gradgrad_atol, rtol=10.4e-05))
+            self.assertTrue(gradgradcheck(mps_linear, mps_linear.weight, atol=gradgrad_atol, rtol=10.4e-05))
             if bias:
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
