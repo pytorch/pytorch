@@ -34,13 +34,21 @@ def shape_inference_with_fake_tensor(decomposed_module: torch.fx.GraphModule, *a
         )
     }
 
+    # input nodes (plaveholder) can never be skipped in FakeTensorProp,
+    # or made up inputs would be generated in the graph
+    initial_env = {
+        node: node.meta["val"]
+        for node in decomposed_module.graph.nodes
+        if "val" in node.meta and node.op != "placeholder"
+    }
+
     # Shape inference via FakeTensorProp
     with stateless._reparametrize_module(
         decomposed_module, fake_parameters_and_buffers
     ):
-        # Assign output types and shapes to each node.
-        fake_tensor_prop.FakeTensorProp(
-            decomposed_module, fake_tensor_mode, override=False
-        ).propagate(*args)
+        # Assign output types and shapes to each node without meta values.
+        fake_tensor_prop.FakeTensorProp(decomposed_module, fake_tensor_mode).propagate(
+            *args, initial_env=initial_env
+        )
 
     return decomposed_module

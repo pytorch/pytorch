@@ -180,8 +180,9 @@ def _create_op_overload_to_exporter_key_table() -> (
                 table[op_overload] = op_overload_packet._qualified_op_name
     # TODO(justinchuby): is baddbmm different?
     table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
-    # TODO(titaiwang): aten::sym_size doesn't have overload,
-    # but works fine as overloadpacket
+    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+    # overloadpacket for some reasons.
+    # https://github.com/pytorch/pytorch/issues/97201
     table[torch.ops.aten.sym_size] = "aten::sym_size"
     return table
 
@@ -191,11 +192,9 @@ def _create_op_overload_to_exporter_key_table() -> (
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
 
 # FIXME(titaiwang): https://github.com/pytorch/pytorch/pull/96350#discussion_r1137746020
-_BUILTIN_OVERLOAD_TO_EXPORTER_KEY_TABLE = {
+_SYMINT_BUILTIN_TO_EXPORTER_KEY_TABLE = {
     "mul": "aten::mul",
     "add": "aten::add",
-    "sub": "aten::sub",
-    "truediv": "aten::div",
 }
 
 
