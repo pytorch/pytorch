@@ -1089,7 +1089,7 @@ std::vector<ExprHandle> TensorExprKernel::getInputStrides(
         generated_strides++;
       }
     }
-    for (int i = 0; i < rank; i++) {
+    for (int i = 0; i < static_cast<int>(rank); i++) {
       if (stride_input[i] == torch::jit::StrideInput::S_TRAN_CONT &&
           stride_set[i - 1]) {
         inputTensorStrides[i] =
@@ -1500,7 +1500,7 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     //
     // TODO: Check if the tensors with symbolic shapes are contiguous.
     TORCH_CHECK(
-        nInputs_ > symbolic_shape_inputs_.size(),
+        nInputs_ > static_cast<int64_t>(symbolic_shape_inputs_.size()),
         "Symbolic dims not provided as inputs to the graph");
 
     // First, process the symbolic input params and create a new variable for
@@ -1510,7 +1510,9 @@ BlockPtr TensorExprKernel::bindAllInputs() {
     // create for the symbolic input params.
     symbolic_shape_args.reserve(symbolic_shape_inputs_.size());
 
-    for (size_t i = symbolic_shape_inputs_start_pos; i < nInputs_; ++i) {
+    for (size_t i = symbolic_shape_inputs_start_pos;
+         i < static_cast<size_t>(nInputs_);
+         ++i) {
       auto input = graph_->inputs()[i];
       if (input->type()->kind() != TypeKind::IntType) {
         throw std::runtime_error(
@@ -2104,7 +2106,8 @@ void TensorExprKernel::runWithAllocatedOutputs(Stack& stack) const {
       args.emplace_back(&stride_values[idx]);
     }
 
-    TORCH_INTERNAL_ASSERT(nOutputs_ == bufOutputs_.size());
+    TORCH_INTERNAL_ASSERT(
+        nOutputs_ == static_cast<int64_t>(bufOutputs_.size()));
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto& out = stack_outputs[i].toTensor();
       // This has only been tested on CPUs.

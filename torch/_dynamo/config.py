@@ -46,7 +46,7 @@ cache_size_limit = 64
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
 # inputs
-specialize_int = True
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -105,6 +105,12 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Print guards
+print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
+
+# Show a warning for every specialization
+print_specializations = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -200,11 +206,6 @@ allow_rnn = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
-
-# If True, record autograd profiler events for dynamo cache lookups (guards)
-# TODO can we default this to True?
-# and how can we cause registration/deregestration to be sensitive to runtime change of this flag?
-profile_cache_lookup = False
 
 
 def is_fbcode():

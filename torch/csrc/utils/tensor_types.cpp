@@ -70,9 +70,12 @@ std::string type_to_string(const at::DeprecatedTypeProperties& type) {
 
 at::TensorOptions options_from_string(const std::string& str) {
   static std::string cuda_prefix("torch.cuda.");
+  static std::string xpu_prefix("torch.xpu.");
   static c10::once_flag cpu_once;
   static c10::once_flag cuda_once;
+  static c10::once_flag xpu_once;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*> cpu_map;
+  static std::unordered_map<std::string, at::DeprecatedTypeProperties*> xpu_map;
   static std::unordered_map<std::string, at::DeprecatedTypeProperties*>
       cuda_map;
 
@@ -95,6 +98,16 @@ at::TensorOptions options_from_string(const std::string& str) {
       }
     });
     map = &cuda_map;
+  } else if (
+      std::mismatch(xpu_prefix.begin(), xpu_prefix.end(), str.begin()).first ==
+      xpu_prefix.end()) {
+    // torch.xpu. is prefix of str
+    c10::call_once(xpu_once, []() {
+      for (auto type : autograd::VariableType::allXPUTypes()) {
+        xpu_map.emplace(type_to_string(*type), type);
+      }
+    });
+    map = &xpu_map;
   } else {
     c10::call_once(cpu_once, []() {
       for (auto type : autograd::VariableType::allCPUTypes()) {

@@ -34,8 +34,8 @@
 #include <gloo/reduce.h>
 #include <gloo/scatter.h>
 
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/ThreadLocalState.h>
+#include <ATen/native/SparseTensorUtils.h>
 
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
@@ -1985,7 +1985,7 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
     invalidArgument("requires non-empty input tensor list");
   }
 
-  if (output_lists.size() != getSize()) {
+  if (output_lists.size() != static_cast<size_t>(getSize())) {
     invalidArgument("output lists should be equal to world size");
   }
 
@@ -2813,7 +2813,8 @@ void ProcessGroupGloo::monitoredBarrier(
     // some ranks have not responded.
     // Ensure all ranks from 1, ... WORLD_SIZE -1 have been successfully
     // processed.
-    auto rankFailure = (processedRanks.size() != size_ - 1);
+    auto rankFailure =
+        (processedRanks.size() != static_cast<size_t>(size_ - 1));
     if (waitAllRanks && rankFailure) {
       std::vector<int> failedRanks;
       for (const auto i : c10::irange(1, size_)) {
