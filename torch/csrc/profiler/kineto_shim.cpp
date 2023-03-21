@@ -3,6 +3,7 @@
 #include <type_traits>
 
 #ifdef USE_KINETO
+#include <ATen/Context.h>
 #include <libkineto.h>
 #endif
 
@@ -200,15 +201,21 @@ class ExperimentalConfigWrapper {
 };
 } // namespace
 
-void prepareTrace(
-    const bool cpuOnly,
-    const ActivitySet& activities,
-    const torch::profiler::impl::ExperimentalConfig& config) {
+void initializeKineto() {
 #ifdef USE_KINETO
+  const bool cpuOnly = !(at::hasCUDA() || at::hasXPU());
   if (!libkineto::api().isProfilerRegistered()) {
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
+#endif
+}
+
+void prepareTrace(
+    const ActivitySet& activities,
+    const torch::profiler::impl::ExperimentalConfig& config) {
+#ifdef USE_KINETO
+  initializeKineto();
 
   if (!libkineto::api().isProfilerInitialized()) {
     libkineto::api().initProfilerIfRegistered();

@@ -10,7 +10,7 @@ examine their input shapes and stack traces, study device kernel activity and vi
 import os
 
 from torch._C._autograd import _supported_activities, DeviceType, kineto_available
-from torch._C._profiler import _ExperimentalConfig, ProfilerActivity, RecordScope
+from torch._C._profiler import _initialize_kineto, _ExperimentalConfig, ProfilerActivity, RecordScope
 from torch.autograd.profiler import record_function, KinetoStepTracker
 from torch.optim.optimizer import register_optimizer_step_post_hook
 
@@ -44,3 +44,8 @@ def _optimizer_post_hook(optimizer, args, kwargs):
 
 if os.environ.get("KINETO_USE_DAEMON", None):
     _ = register_optimizer_step_post_hook(_optimizer_post_hook)
+
+def _profiler_init():
+    _initialize_kineto()
+
+_profiler_init()
