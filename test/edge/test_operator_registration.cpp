@@ -18,7 +18,8 @@ TEST(OperatorRegistrationTest, Add) {
     for (size_t i = 0; i < 4; i++) {
         kernel_values[i] = &values[i];
     }
-    op(kernel_values);
+    RuntimeContext context{};
+    op(context, kernel_values);
     at::Tensor expected = at::ones({2, 3});
     expected = at::fill(expected, 2);
     ASSERT_TRUE(expected.equal(kernel_values[3]->toTensor()));
@@ -39,7 +40,8 @@ TEST(OperatorRegistrationTest, CustomAdd3) {
     for (size_t i = 0; i < 4; i++) {
         kernel_values[i] = &values[i];
     }
-    op(kernel_values);
+    RuntimeContext context{};
+    op(context, kernel_values);
     at::Tensor expected = at::ones({2, 3});
     expected = at::fill(expected, 3);
     ASSERT_TRUE(expected.equal(kernel_values[3]->toTensor()));

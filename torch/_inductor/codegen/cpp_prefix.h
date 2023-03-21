@@ -38,6 +38,17 @@ float randn_cpu(uint32_t seed, uint32_t offset) {
 template <typename T> struct AsIntegerType { typedef T type; };
 template <> struct AsIntegerType<float> { typedef uint32_t type; };
 template <> struct AsIntegerType<double> { typedef uint64_t type; };
+template <> struct AsIntegerType<bfloat16> { typedef uint16_t type; };
+
+template <typename T>
+inline T fetch_value(volatile T *addr) {
+  return *addr;
+}
+
+template <>
+inline bfloat16 fetch_value<bfloat16>(volatile bfloat16 *addr) {
+  return bfloat16(addr->x);
+}
 
 template <typename T> void atomic_add(volatile T *addr, T offset) {
   typedef typename AsIntegerType<T>::type alt_type;
@@ -51,7 +62,7 @@ template <typename T> void atomic_add(volatile T *addr, T offset) {
 
   std::atomic<alt_type> *atomic_addr = (std::atomic<alt_type> *)addr;
   do {
-    T val = *addr;
+    T val = fetch_value(addr);
     reinterpret_cast<T *>(&expected)[0] = val;
     reinterpret_cast<T *>(&desired)[0] = val + offset;
   } while (!atomic_addr->compare_exchange_weak(expected, desired,
@@ -80,24 +91,48 @@ void flag_to_float(T src, float* dst, int64_t n) {
 }
 
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2)
-template <typename SRC>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC>& src) {
-  assert(
-      at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
+
+inline at::vec::Vectorized<float> load_bf16_as_float(const bfloat16* bf16_buf) {
   at::vec::Vectorized<float> res_vec(0);
-#pragma unroll
-  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
-    res_vec[i] = src[i] ? 0xFFFFFFFF : 0;
-  }
+  at::vec::load_fp32_from_bf16(bf16_buf, res_vec);
   return res_vec;
 }
 
+inline void store_float_as_bf16(
+    bfloat16* bf16_buf,
+    at::vec::Vectorized<float> src_buf) {
+  auto res = at::vec::convert_float_bfloat16(src_buf, src_buf);
+  res.store(bf16_buf, at::vec::Vectorized<float>::size());
+}
+
+template <typename SRC>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<SRC> src) {
+  assert(
+      at::vec::Vectorized<float>::size() == at::vec::Vectorized<SRC>::size());
+  at::vec::Vectorized<float> res_vec(0);
+  __at_align__ float dst_tmp[at::vec::Vectorized<float>::size()];
+  __at_align__ SRC src_tmp[at::vec::Vectorized<SRC>::size()];
+  src.store(src_tmp);
+
+#pragma unroll
+  for (int i = 0; i < at::vec::Vectorized<float>::size(); i++) {
+    dst_tmp[i] = src_tmp[i] ? 0xFFFFFFFF : 0;
+  }
+
+  return res_vec.loadu(dst_tmp);
+}
+
 template <>
-inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int>& src) {
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<int> src) {
 #if defined(CPU_CAPABILITY_AVX2)
-  return at::vec::Vectorized<float>(_mm256_cvtepi32_ps(src));
+  return at::vec::Vectorized<float>(_mm256_castsi256_ps(src));
 #else
-  return at::vec::Vectorized<float>(_mm512_cvtepi32_ps(src));
+  return at::vec::Vectorized<float>(_mm512_castsi512_ps(src));
 #endif
+}
+
+template <>
+inline at::vec::Vectorized<float> to_float_mask(at::vec::Vectorized<float> src) {
+  return src;
 }
 #endif

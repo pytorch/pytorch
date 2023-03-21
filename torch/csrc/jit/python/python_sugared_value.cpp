@@ -1012,7 +1012,7 @@ TypePtr registerNamedTuple(const py::object& obj, const SourceRange& loc) {
       py::module::import("torch._jit_internal").attr("_qualified_name")(obj)));
 
   py::object props = py::module::import("torch._jit_internal")
-                         .attr("_get_named_tuple_properties")(obj);
+                         .attr("_get_named_tuple_properties")(obj, loc);
 
   std::string unqualName;
   std::vector<std::string> field_names;
