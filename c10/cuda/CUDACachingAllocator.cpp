@@ -1392,7 +1392,7 @@ class DeviceCachingAllocator {
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
-      Block* curr_block = alloc_found_block(
+      curr_block = alloc_found_block(
           std::move(params), block_state.size, context, split);
 
       TORCH_CHECK(curr_block->ptr == block_state.ptr);
