@@ -230,8 +230,8 @@ def start_graph():
 def end_graph():
     if len(collected_calls) == 0:
         return
-    overall_time = sum(call[1] for call in collected_calls)
-    overall_gb = sum(call[2] for call in collected_calls)
+    overall_time = sum(call[0] for call in collected_calls)
+    overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
     print(f"SUMMARY ({cur_file})")
     print(
@@ -254,7 +254,14 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         ms = self.bench(launcher, *args, grid=grid)[0]
-        num_gb = get_num_bytes(*args) / 1e9
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in self.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
         gb_per_s = num_gb / (ms / 1e3)
 
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
@@ -512,7 +519,7 @@ def pointwise(size_hints, meta, tile_hint=None, filename=None):
     if len(size_hints) == 2:
         if (
             not config.triton.autotune_pointwise or tile_hint == TileHint.SQUARE
-        ) and not config.max_autotune:
+        ) and not (config.max_autotune or config.max_autotune_pointwise):
             return cached_autotune([triton_config(size_hints, 32, 32)], meta=meta)
         return cached_autotune(
             [
@@ -557,7 +564,7 @@ def reduction(size_hints, reduction_hint=False, meta=None, filename=None):
         tiny_config = triton_config_reduction(
             size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
         )
-        if config.max_autotune:
+        if config.max_autotune or config.max_autotune_pointwise:
             pass  # skip all these cases
         elif reduction_hint == ReductionHint.INNER:
             return cached_autotune([contiguous_config], meta=meta)

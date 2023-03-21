@@ -70,5 +70,23 @@ Tensor NestedTensor_neg(const Tensor& self) {
   return map_nt(self, at::neg);
 }
 
+Tensor& zero_nested_(Tensor& self) {
+  const auto& self_buf = get_nested_tensor_impl(self)->get_buffer();
+  self_buf.fill_(0);
+  return self;
+}
+
+Tensor NestedTensor_silu(const Tensor& self){
+  return map_nt(self, at::silu);
+}
+
+Tensor& NestedTensor_silu_(Tensor& self){
+  auto self_ptr = get_nested_tensor_impl(self);
+  check_numel_equals_buffer_size(self_ptr);
+  auto buffer = self_ptr->get_buffer();
+  at::silu_(buffer);
+  return self;
+}
+
 } // namespace native
 } // namespace at
