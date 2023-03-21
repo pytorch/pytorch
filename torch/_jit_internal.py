@@ -1267,7 +1267,9 @@ def _get_named_tuple_properties(
                 # rcb returns None if it can't find anything.
                 if rcb_type is None:
                     raise ValueError(
-                        f"Unknown type annotation: '{field_type}' in NamedTuple {obj.__name__} at {loc.highlight()}"
+                        f"Unknown type annotation: '{field_type}' in NamedTuple {obj.__name__}."
+                        f" Likely due to partial support for ForwardRef parameters in NamedTuples, see #95858."
+                        f" Issue occurred at {loc.highlight()}"
                     )
                 field_type = rcb_type
             the_type = torch.jit.annotations.ann_to_type(field_type, loc, rcb)

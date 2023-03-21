@@ -2119,6 +2119,7 @@ class TestNamedTuple(JitTestCase):
         actual = fn_s(nt)
         self.assertEqual(expected, actual)
 
+    # see #95858
     @unittest.expectedFailure
     def test_namedtuple_resolution_forwardref(self):
         class TheType(NamedTuple):
