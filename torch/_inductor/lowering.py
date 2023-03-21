@@ -543,7 +543,7 @@ def ceil(x):
     if is_integer_type(x):
         return x
     fn = ops_wrapper("ceil")
-    return make_pointwise(fn)(x)
+    return make_pointwise(fn, override_return_dtype=torch.int64)(x)
 
 
 @register_lowering(aten.floor)
@@ -551,7 +551,7 @@ def floor(x):
     if is_integer_type(x):
         return x
     fn = ops_wrapper("floor")
-    return make_pointwise(fn)(x)
+    return make_pointwise(fn, override_return_dtype=torch.int64)(x)
 
 
 @register_lowering(aten.round)
@@ -559,7 +559,7 @@ def round(x):
     if is_integer_type(x):
         return x
     fn = ops_wrapper("round")
-    return make_pointwise(fn)(x)
+    return make_pointwise(fn, override_return_dtype=torch.int64)(x)
 
 
 @register_lowering(aten.trunc)
@@ -567,7 +567,7 @@ def trunc(x):
     if is_integer_type(x):
         return x
     fn = ops_wrapper("trunc")
-    return make_pointwise(fn)(x)
+    return make_pointwise(fn, override_return_dtype=torch.int64)(x)
 
 
 @register_lowering(aten.expand, type_promotion_kind=None)
