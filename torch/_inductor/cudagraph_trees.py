@@ -1114,14 +1114,14 @@ class CUDAGraphTreeManager:
         self.id_to_mode: Dict[int, CompilationMode] = {}
 
         # forwards that have been invoked without invocation of their corresponding backwards
-        self.called_forwards_on_stack: int = 0
+        self.forwards_with_pending_backwards: int = 0
 
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
         mode = self.id_to_mode[function_id]
         if mode == CompilationMode.FORWARD:
-            self.called_forwards_on_stack += 1
+            self.forwards_with_pending_backwards += 1
         elif mode == CompilationMode.BACKWARD:
-            self.called_forwards_on_stack -= 1
+            self.forwards_with_pending_backwards -= 1
 
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
@@ -1290,7 +1290,7 @@ class CUDAGraphTreeManager:
         return GenerationTracker.generation
 
     def can_start_new_generation(self) -> bool:
-        if self.called_forwards_on_stack != 0:
+        if self.forwards_with_pending_backwards != 0:
             return False
 
         return self.current_gen != self.get_curr_generation()
