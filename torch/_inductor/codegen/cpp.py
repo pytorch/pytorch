@@ -672,11 +672,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def round(x):
-        return f"std::nearbyint({x})"
+        return f"static_cast<int64_t>(std::nearbyint({x}))"
 
     @staticmethod
     def floor(x):
-        return f"std::floor({x})"
+        return f"static_cast<int64_t>(std::floor({x}))"
 
     @staticmethod
     def floordiv(a, b):
@@ -687,11 +687,11 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def ceil(x):
-        return f"std::ceil({x})"
+        return f"static_cast<int64_t>(std::ceil({x}))"
 
     @staticmethod
     def trunc(x):
-        return f"std::trunc({x})"
+        return f"static_cast<int64_t>(std::trunc({x}))"
 
     @staticmethod
     def truncdiv(a, b):
