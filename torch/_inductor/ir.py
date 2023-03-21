@@ -17,6 +17,7 @@ import sympy
 from sympy import Expr, Integer
 
 import torch._dynamo.config as dynamo_config
+import torch._logging
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -900,8 +901,9 @@ class Reduction(Loops):
                     reduction_hint,
                 )
         elif split_reduction and dynamo_config.dynamic_shapes:
-            log.warning(
-                "Could not do split reduction due to dynamic shapes; performance may be worse"
+            torch._logging.warning_once(
+                log,
+                "Could not do split reduction due to dynamic shapes; performance may be worse",
             )
 
         return TensorBox.create(

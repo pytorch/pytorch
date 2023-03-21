@@ -432,9 +432,7 @@ def replay(filename):
     config.replay_record_enabled = False
     with open(filename, "rb") as in_file:
         record = ExecutionRecord.load(in_file)
-    record.globals = {
-        k: v for k, v in itertools.chain(record.globals.items(), globals().items())
-    }
+    record.globals = dict(itertools.chain(record.globals.items(), globals().items()))
 
     try:
         _compile(
