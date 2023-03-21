@@ -39,7 +39,7 @@ def c10_op_ref(maps, rois):
 
 class TestHeatmapMaxKeypointOp(hu.HypothesisTestCase):
     def setUp(self):
-        super(TestHeatmapMaxKeypointOp, self).setUp()
+        super().setUp()
         np.random.seed(0)
 
         # initial coordinates and interpolate HEATMAP_SIZE from it

@@ -2,8 +2,7 @@
 #include <torch/csrc/jit/ir/attributes.h>
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 AttributeValue::Ptr GraphAttr::clone() const {
   return Ptr(new GraphAttr(name, value_->copy()));
@@ -17,5 +16,4 @@ std::unique_ptr<AttributeValue> GraphsAttr::clone() const {
   return Ptr(new GraphsAttr(name, std::move(copy)));
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

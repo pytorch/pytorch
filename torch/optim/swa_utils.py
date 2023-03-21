@@ -100,16 +100,12 @@ class AveragedModel(Module):
         https://arxiv.org/abs/2001.02312
     """
     def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
-        super(AveragedModel, self).__init__()
+        super().__init__()
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
-        if avg_fn is None:
-            def avg_fn(averaged_model_parameter, model_parameter, num_averaged):
-                return averaged_model_parameter + \
-                    (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
         self.use_buffers = use_buffers
 
@@ -131,8 +127,17 @@ class AveragedModel(Module):
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
             else:
-                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model_,
-                                                 self.n_averaged.to(device)))
+                if self.avg_fn is None:
+                    p_swa.detach().copy_(
+                        p_swa.detach()
+                        + (p_model_ - p_swa.detach()) / (self.n_averaged.to(device) + 1)
+                    )
+                else:
+                    p_swa.detach().copy_(
+                        self.avg_fn(
+                            p_swa.detach(), p_model_, self.n_averaged.to(device)
+                        )
+                    )
         if not self.use_buffers:
             # If not apply running averages to the buffers,
             # keep the buffers in sync with the source model.
@@ -254,7 +259,7 @@ class SWALR(LRScheduler):
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}")
         self.anneal_epochs = anneal_epochs
-        super(SWALR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
 
     @staticmethod
     def _format_param(optimizer, swa_lrs):

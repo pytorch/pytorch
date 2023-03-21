@@ -6,6 +6,7 @@
 #include <functional>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -17,7 +18,6 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
-#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/csrc/utils/memory.h>
@@ -119,8 +119,7 @@ Reducer::Reducer(
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
-  TORCH_INTERNAL_ASSERT(
-      params_.size() >= 1, "Expected at least one parameter.");
+  TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
   if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
@@ -310,11 +309,16 @@ void Reducer::initialize_local_used_map() {
 void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
-  // Ensure that the gradient type matches the bucket type.
+  // Ensure that the gradient type matches the bucket type, or mixed precision
+  // type if we are training with mixed precision.
+  auto type = mixed_precision_param_dtype_
+      ? *mixed_precision_param_dtype_
+      : bucket_view.options().dtype().toScalarType();
   REDUCER_CHECK(
-      grad.options().type_equal(bucket_view.options()),
+      grad.options().dtype().toScalarType() == type,
       logger_,
-      c10::str("Expected ", bucket_view.toString(), ", got ", grad.toString()));
+      c10::str(
+          "Expected ", type, ", got ", grad.options().dtype().toScalarType()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
@@ -371,6 +375,9 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
           if (!grad.requires_grad()) {
             // Divides while copying into the bucket view to save one scan over
             // all the input parameters.
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::mul_out",
+                std::vector<c10::IValue>({bucket_view}))
             at::mul_out(bucket_view, grad, wrapped);
           } else {
             // If DDP is running with create_graph=True, gradients require_grad
@@ -385,9 +392,15 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
                 << " DDP to work with higher-order gradients for your use case, "
                 << " please ping https://github.com/pytorch/pytorch/issues/63929";
             auto div_result = at::mul(grad, wrapped);
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::copy_",
+                std::vector<c10::IValue>({bucket_view}))
             bucket_view.copy_(div_result);
           }
         } else {
+          RECORD_FUNCTION(
+              "torch::distributed::reducer::copy_",
+              std::vector<c10::IValue>({bucket_view}))
           bucket_view.copy_(grad);
         }
 
@@ -515,10 +528,19 @@ void Reducer::set_divide_factor() {
       auto results = extractTensors(workHandle->getFuture()->value());
 
       // Guard against the results being empty
-      TORCH_INTERNAL_ASSERT(results.size() > 0);
+      TORCH_INTERNAL_ASSERT(!results.empty());
       at::Tensor& res = results.front();
       div_factor_ = res.item().to<int>();
     }
+  }
+}
+
+// This is called before training and converts the gradients to the dtype they
+// should be reduced in.
+void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+  mixed_precision_param_dtype_ = dtype;
+  for (auto& bucket : buckets_) {
+    bucket.gradients = bucket.gradients.to(dtype);
   }
 }
 
@@ -574,7 +596,7 @@ void Reducer::delay_all_reduce() {
     }
 
     // Each rank prints out all the unused parameters detected
-    if (unused_parameters_.size() > 0) {
+    if (!unused_parameters_.empty()) {
       LOG(INFO) << "[Rank " << process_group_->getRank() << "]: "
                 << "Parameter(s) (in the format of {param_name, index}): "
                 << unused_params_stream.str()
@@ -728,8 +750,7 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ =
-      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
+  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -1016,7 +1037,7 @@ void Reducer::initialize_buckets(
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
     REDUCER_CHECK(
-        bucket_indices[bucket_index].size() > 0,
+        !bucket_indices[bucket_index].empty(),
         logger_,
         "Empty bucket specified.");
 
@@ -1084,6 +1105,12 @@ void Reducer::initialize_buckets(
       }
 
       // Allocate the bucket's flattened `gradients` tensor.
+      // Make gradient type in the reduced precision if mixed precision is
+      // enabled. This ensures that the type is correct when e.g. rebuilding
+      // buckets.
+      if (mixed_precision_param_dtype_) {
+        options = options.dtype(*mixed_precision_param_dtype_);
+      }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
@@ -1181,7 +1208,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
         if (grad.defined() && !grad.is_alias_of(bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
-          // The grad is modefied and needs to be written back.
+          // The grad is modified and needs to be written back.
           return true;
         }
         // The grad is not modified and does not need to be written back.
@@ -1637,7 +1664,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  ops::broadcast(process_group_, indices_tensor_list)->wait();
+  process_group_->broadcast(indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1656,7 +1683,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
+  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -1709,7 +1736,7 @@ bool Reducer::rebuild_buckets() {
   bucket_size_limits.push_back(bucket_bytes_cap_);
   std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
-      (parse_env("DDP_SET_LAST_BUCKET_CAP").compare("1") == 0);
+      (parse_env("DDP_SET_LAST_BUCKET_CAP") == "1");
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
@@ -1804,9 +1831,7 @@ void Reducer::ensure_prior_reduction_finished() {
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
-    TORCH_INTERNAL_ASSERT(unmarked_param_indices.size() > 0);
-    const std::string unmarkedParamIndices =
-        c10::Join(", ", unmarked_param_indices);
+    TORCH_INTERNAL_ASSERT(!unmarked_param_indices.empty());
 
     std::string kBaseErrorMsg =
         "Expected to have finished reduction in the prior iteration before "
@@ -1872,7 +1897,7 @@ void Reducer::ensure_prior_reduction_finished() {
     } else {
       // Retrieve set of parameter names that did not receive gradient.
       auto unmarkedParams = getUnmarkedParamsForIteration();
-      TORCH_INTERNAL_ASSERT(unmarkedParams.size() > 0);
+      TORCH_INTERNAL_ASSERT(!unmarkedParams.empty());
       for (const auto& s : unmarkedParams) {
         LOG(INFO) << "[Rank " << process_group_->getRank() << "] "
                   << "Parameter: " << s
@@ -1988,7 +2013,7 @@ compute_bucket_assignment_by_size(
   TORCH_INTERNAL_ASSERT(
       expect_sparse_gradient.empty() ||
       (tensors.size() == expect_sparse_gradient.size()));
-  TORCH_INTERNAL_ASSERT(tensors.size() > 0);
+  TORCH_INTERNAL_ASSERT(!tensors.empty());
   // Store bucket indices and their sizes together, because we later sort the
   // resulting indices by minimum tensor index and want to keep sizes
   // consistent.
@@ -2124,19 +2149,18 @@ void verify_params_across_processes(
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (C10_UNUSED const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
-      ->wait();
+  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (const auto i : c10::irange(world_size)) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();
     TORCH_CHECK(
-        param_size_for_rank == params.size(),
+        static_cast<size_t>(param_size_for_rank) == params.size(),
         c10::str(
             "DDP expects same model across all ranks, but Rank ",
             process_group->getRank(),
@@ -2173,7 +2197,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  ops::broadcast(process_group, vec)->wait();
+  process_group->broadcast(vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.

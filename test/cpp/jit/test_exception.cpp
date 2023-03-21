@@ -113,7 +113,7 @@ TEST(TestException, TestCustomException) {
   py::exec(R"PY(
   class SimpleValueError(ValueError):
     def __init__(self, message):
-      super(SimpleValueError, self).__init__(message)
+      super().__init__(message)
   )PY");
 
   std::string pythonCode = R"PY(

@@ -42,13 +42,13 @@ struct TORCH_API AccumulateGrad : public Node {
 
   variable_list apply(variable_list&& grads) override;
 
-  static at::Tensor callHooks(const Variable& variable, at::Tensor new_grad) {
-    for (auto& hook : impl::hooks(variable)) {
-      new_grad = (*hook)({new_grad})[0];
-    }
-    return new_grad;
+  std::vector<std::unique_ptr<FunctionPreHook>>& tensor_pre_hooks() noexcept
+      override {
+    // NB: Since the AccumulateGrad Node is only a weak ref from the Tensor,
+    //     it can be destroyed even though the Tensor is still alive (contrary
+    //     to all other Nodes). So we must lazily read the Tensor hooks here.
+    return impl::hooks(variable);
   }
-
   // Given a variable with its current grad as variable_grad, accumulates
   // new_grad into variable_grad if in place accumulation is possible.
   // Otherwise, uses 'update_grad' to update the grad for the variable.
@@ -138,7 +138,7 @@ struct TORCH_API AccumulateGrad : public Node {
         // shallow copy. We need a shallow copy so that modifying the original
         // grad tensor doesn't modify the grad we accumulate.
         // We only skip clone if indices and values themselves are contiguous
-        // for backward compatiblity reasons. Since without this optimization,
+        // for backward compatibility reasons. Since without this optimization,
         // earlier we would clone the entire SparseTensor which cloned indices
         // and values.
         // For details see https://github.com/pytorch/pytorch/issues/34375.

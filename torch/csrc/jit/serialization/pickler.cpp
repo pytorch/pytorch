@@ -10,8 +10,7 @@
 #include <string>
 #include <type_traits>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ::c10::IValue;
 
@@ -126,7 +125,7 @@ void Pickler::pushIValueImpl(const IValue& ivalue) {
   } else if (ivalue.isCapsule()) {
     std::stringstream err;
     err << "Cannot serialize custom bound C++ class";
-    if (memoized_class_types_ && memoized_class_types_->size()) {
+    if (memoized_class_types_ && !memoized_class_types_->empty()) {
       if (auto qualname = memoized_class_types_->back()->name()) {
         err << " " << qualname->qualifiedName();
       }
@@ -426,7 +425,6 @@ void Pickler::pushLiteralTensor(const IValue& ivalue) {
       "torch._utils", quantized ? "_rebuild_qtensor" : "_rebuild_tensor_v2");
 
   push<PickleOpCode>(PickleOpCode::MARK);
-
   pushStorageOfTensor(tensor);
 
   // storage offset
@@ -602,9 +600,9 @@ void Pickler::endTypeTag(const IValue& ivalue) {
   TORCH_INTERNAL_ASSERT(ivalue.isGenericDict() || ivalue.isList());
 
   // Push the dict type
-  TORCH_INTERNAL_ASSERT(ivalue.type());
-
   auto type = ivalue.type();
+  TORCH_INTERNAL_ASSERT(type);
+
   auto annot_str = type->annotation_str(type_printer);
   pushString(annot_str);
 
@@ -788,5 +786,4 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

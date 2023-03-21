@@ -706,6 +706,7 @@ Functions
 .. autofunction:: is_in_onnx_export
 .. autofunction:: enable_log
 .. autofunction:: disable_log
+.. autofunction:: torch.onnx.verification.find_mismatch
 
 Classes
 -------
@@ -716,3 +717,5 @@ Classes
     :template: classtemplate.rst
 
     JitScalarType
+    torch.onnx.verification.GraphInfo
+    torch.onnx.verification.VerificationOptions

@@ -6,8 +6,7 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 void pickle(
     std::function<void(const char* data_start, size_t data_len)> writer,
@@ -151,5 +150,4 @@ IValue unpickle(
       type_parser);
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

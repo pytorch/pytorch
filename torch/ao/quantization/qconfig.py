@@ -402,6 +402,17 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
+_default_fp32_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.float32),
+    weight=PlaceholderObserver.with_args(dtype=torch.float32)
+)
+
+_default_quint8_placeholder_qconfig = QConfig(
+    activation=PlaceholderObserver.with_args(dtype=torch.quint8),
+    # operators using this qconfig doesn't have weights
+    weight=None,
+)
+
 def get_default_qconfig_dict(backend='x86', version=0):
     warnings.warn(
         "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
@@ -422,17 +433,15 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig],
     if qconfig is None:
         return
     is_conv_transpose_mod = (
-        isinstance(mod, torch.nn.ConvTranspose1d) or
-        isinstance(mod, torch.nn.ConvTranspose2d) or
-        isinstance(mod, torch.nn.ConvTranspose3d))
+        isinstance(mod, (torch.nn.ConvTranspose1d, torch.nn.ConvTranspose2d, torch.nn.ConvTranspose3d)))
     if is_conv_transpose_mod:
         if qconfig.weight is None:
             # for now, we assume that any qconfig for ConvTranspose without a weight is valid
             return
         example_observer = qconfig.weight()
         is_per_channel = (
-            isinstance(example_observer, torch.ao.quantization.PerChannelMinMaxObserver) or
-            isinstance(example_observer, torch.ao.quantization.MovingAveragePerChannelMinMaxObserver)
+            isinstance(example_observer, (torch.ao.quantization.PerChannelMinMaxObserver,
+                                          torch.ao.quantization.MovingAveragePerChannelMinMaxObserver))
         )
         assert not is_per_channel, \
             'Per channel weight observer is not supported yet for ConvTranspose{n}d.'

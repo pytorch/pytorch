@@ -8,10 +8,11 @@ import tempfile
 import threading
 import time
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import timedelta
 from itertools import product
 from sys import platform
-from typing import Callable
+from typing import Callable, Dict, Optional
 
 import torch
 import torch.distributed as dist
@@ -75,7 +76,7 @@ def gpus_for_rank(world_size):
     return gpus_for_rank
 
 
-class AbstractTimeoutTest(object):
+class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
         try:
             dist.init_process_group(
@@ -130,7 +131,7 @@ class AbstractTimeoutTest(object):
 
 class Net(nn.Module):
     def __init__(self):
-        super(Net, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False)
         self.fc2 = nn.Linear(10, 50, bias=False)
         self.fc3 = nn.Linear(50, 4, bias=False)
@@ -145,7 +146,7 @@ class Net(nn.Module):
 
 class DoubleGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(DoubleGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[1])
@@ -165,7 +166,7 @@ class DoubleGpuNet(nn.Module):
 
 class QuadraGpuNet(nn.Module):
     def __init__(self, gpus):
-        super(QuadraGpuNet, self).__init__()
+        super().__init__()
         self.fc1 = nn.Linear(2, 10, bias=False).to(gpus[0])
         self.fc2 = nn.Linear(10, 50, bias=False).to(gpus[1])
         self.fc3 = nn.Linear(50, 4, bias=False).to(gpus[2])
@@ -189,7 +190,7 @@ class QuadraGpuNet(nn.Module):
 
 class ConvNet(nn.Module):
     def __init__(self, gpus, layouts, dtypes):
-        super(ConvNet, self).__init__()
+        super().__init__()
         self.dtypes = dtypes
         if isinstance(gpus, list):
             self.layer_gpus = gpus
@@ -241,14 +242,14 @@ class ModuleForDdpCommHook(nn.Module):
 
 class SparseGradientModule(nn.Module):
     def __init__(self):
-        super(SparseGradientModule, self).__init__()
+        super().__init__()
         self.embedding = nn.EmbeddingBag(10, 10, sparse=True)
 
     def forward(self, x):
         return F.softmax(self.embedding(x), dim=1)
 
 
-class CommonDistributedDataParallelTest(object):
+class CommonDistributedDataParallelTest:
     def tearDown(self):
         # DistributedDataParallel test doesn't seem to call FileStore destructor
         # TODO: investigate this test and the test is known to have issues
@@ -906,6 +907,78 @@ class CommonDistributedDataParallelTest(object):
 
         self._test_not_nan(model, x)
 
+    @dataclass
+    class CustomOutput:
+        o1: Optional[torch.Tensor]
+        o2: Dict[str, torch.Tensor]
+
+    class DataclassOutputModule(nn.Module):
+        def __init__(self, skip_o1):
+            super().__init__()
+            self.seq1 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.relu = nn.ReLU()
+            self.seq2 = nn.Sequential(*[nn.Linear(10, 10) for _ in range(3)])
+            self.skip_o1 = skip_o1
+
+        def forward(self, x):
+            o1 = None if self.skip_o1 else self.relu(self.seq1(x))
+            o2 = {
+                "a": self.seq2(x),
+                "b": self.relu(self.seq2(x))
+            }
+            return CommonDistributedDataParallelTest.CustomOutput(o1=o1, o2=o2)
+
+    def _test_dataclass_output(self, skip_o1):
+        net_x = torch.cat(
+            [torch.ones(4, 10) * i for i in range(self.world_size)]
+        ).to(self.rank)
+        ddp_x = torch.ones(4, 10, device=self.rank) * self.rank
+
+        # use manual_seed to make sure local models start with the same values
+        torch.manual_seed(0)
+        net = self.DataclassOutputModule(skip_o1=skip_o1).to(self.rank)
+        ddp = DistributedDataParallel(
+            copy.deepcopy(net),
+            device_ids=[self.rank],
+            find_unused_parameters=True,
+            static_graph=False,
+            process_group=self._get_process_group(),
+        )
+
+        net_out = net(net_x)
+        ddp_out = ddp(ddp_x)
+
+        net_loss = F.mse_loss(
+            net_out.o1 + net_out.o2["a"] + net_out.o2["b"]
+            if not skip_o1
+            else net_out.o2["a"] + net_out.o2["b"],
+            torch.ones_like(net_out.o2["a"], device=self.rank),
+        )
+        ddp_loss = F.mse_loss(
+            ddp_out.o1 + ddp_out.o2["a"] + ddp_out.o2["b"]
+            if not skip_o1
+            else ddp_out.o2["a"] + ddp_out.o2["b"],
+            torch.ones_like(ddp_out.o2["a"], device=self.rank),
+        )
+
+        net_loss.backward()
+        ddp_loss.backward()
+
+        for p1, p2 in zip(net.parameters(), ddp.parameters()):
+            if torch.is_tensor(p1.grad):
+                self.assertTrue(p1.grad.allclose(p2.grad))
+            else:
+                self.assertEqual(p1.grad, p2.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output(self):
+        self._test_dataclass_output(skip_o1=False)
+
+    @skip_if_lt_x_gpu(2)
+    def test_dataclass_output_unused_param(self):
+        self._test_dataclass_output(skip_o1=True)
+
+
 class ComputeBucketAssignmentTest(TestCase):
     def test_single_limit_single_dtype(self):
         tensors = [
@@ -964,7 +1037,7 @@ class ComputeBucketAssignmentTest(TestCase):
         self.assertEqual(per_bucket_size_limits, [200, 200, 400, 400])
 
 
-class AbstractCommTest(object):
+class AbstractCommTest:
     @property
     def op_timeout_sec(self):
         return 1
@@ -1047,7 +1120,7 @@ class AbstractCommTest(object):
         )
         self._test_sequence_num_incremented(
             c10d._get_default_group(),
-            ranks=list(i for i in range(dist.get_world_size())),
+            ranks=list(range(dist.get_world_size())),
         )
 
     def _test_sequence_num_incremented_subgroup(self, backend_name):
@@ -1227,11 +1300,11 @@ class AbstractCommTest(object):
 
 class CommTest(AbstractCommTest, MultiProcessTestCase):
     def setUp(self):
-        super(CommTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CommTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1346,11 +1419,11 @@ class DummyProcessGroup(dist.ProcessGroup):
 
 class PythonProcessGroupExtensionTest(MultiProcessTestCase):
     def setUp(self):
-        super(PythonProcessGroupExtensionTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(PythonProcessGroupExtensionTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
@@ -1370,6 +1443,59 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             dist.Backend._plugins["DUMMY"].creator_fn,
             PythonProcessGroupExtensionTest.create_dummy
         )
+
+    def test_backend_config(self):
+        dist.Backend.register_backend(
+            "dummy",
+            PythonProcessGroupExtensionTest.create_dummy
+        )
+
+        # Ensure backend config can be created with the following arguments
+        backend_config_strings_and_expected_values = [
+            (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
+            (dist.Backend.NCCL, "cpu:nccl,cuda:nccl"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
+            (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
+            (dist.Backend.DUMMY, "cpu:dummy,cuda:dummy"),
+            ("DUMMY", "cpu:dummy,cuda:dummy"),
+            ("dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:dummy", "cpu:dummy,cuda:dummy"),
+            ("cpu:dummy,cuda:nccl", "cpu:dummy,cuda:nccl"),
+            ("cpu:gloo,cuda:dummy", "cpu:gloo,cuda:dummy"),
+            ("cpu:gloo,cuda:nccl", "cpu:gloo,cuda:nccl"),
+            ("cPu:gLoO,cuDa:NcCl", "cpu:gloo,cuda:nccl")
+        ]
+
+        for config_str, expected_value in backend_config_strings_and_expected_values:
+            with self.subTest(config_str):
+                # ensures these configs strings are valid and no ValueError is raised
+                config = dist.BackendConfig(config_str)
+                self.assertEqual(str(config), expected_value)
+
+        # Ensure backend config will raise ValueError with the following arguments
+        invalid_backend_config_strings = [
+            "cpu:gloo,cuda:nccl,",  # trailing comma
+            "cpu:gloo,cuda:nccl,cpu:dummy",  # duplicate device
+        ]
+        for config_str in invalid_backend_config_strings:
+            with self.subTest(config_str):
+                with self.assertRaises(ValueError):
+                    dist.BackendConfig(config_str)
+
+    def test_init_process_group_with_multiple_backends(self):
+        dist.Backend.register_backend("dummy", PythonProcessGroupExtensionTest.create_dummy)
+
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '6789'
+        dist.init_process_group("cpu:dummy,cuda:dummy", rank=self.rank, world_size=self.world_size)
+
+        # test all_gather
+        input_tensor = torch.ones(2, 2) * 7
+        output_tensor_list = [torch.zeros(2, 2) for _ in range(self.world_size)]
+        dist.all_gather(output_tensor_list, input_tensor)
+
+        dist.barrier()
+        dist.destroy_process_group()
 
     class Options:
         def __init__(self):
@@ -1449,15 +1575,55 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
         return 1
 
     def setUp(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(ProcessGroupWithDispatchedCollectivesTests, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
             pass
+
+    def test_init_process_group_optional_backend(self):
+        with tempfile.NamedTemporaryFile() as f:
+            store = dist.FileStore(f.name, self.world_size)
+            # creates both gloo and nccl backend
+            if dist.is_gloo_available() and dist.is_nccl_available():
+                dist.init_process_group(
+                    store=store,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                )
+                dist.destroy_process_group()
+
+    def test_init_process_group_for_all_backends(self):
+        for backend in dist.Backend.backend_list:
+            # skip if the backend is not available on the system
+            if backend == dist.Backend.UNDEFINED:
+                continue
+            elif backend == dist.Backend.MPI:
+                if not dist.is_mpi_available():
+                    continue
+            elif backend == dist.Backend.NCCL:
+                if not dist.is_nccl_available():
+                    continue
+            elif backend == dist.Backend.GLOO:
+                if not dist.is_gloo_available():
+                    continue
+            elif backend == dist.Backend.UCC:
+                if not dist.is_ucc_available():
+                    continue
+
+            with tempfile.NamedTemporaryFile() as f:
+                store = dist.FileStore(f.name, self.world_size)
+                dist.init_process_group(
+                    backend=backend,
+                    rank=self.rank,
+                    world_size=self.world_size,
+                    store=store
+                )
+                dist.destroy_process_group()
 
     def _call_collective_with_varying_tensors(self, backend, collective, *args):
         # call collective with varying tensors to ensure that the tensors are
@@ -1538,11 +1704,11 @@ class ProcessGroupWithDispatchedCollectivesTests(MultiProcessTestCase):
 
 class CompilerTest(MultiProcessTestCase):
     def setUp(self):
-        super(CompilerTest, self).setUp()
+        super().setUp()
         self._spawn_processes()
 
     def tearDown(self):
-        super(CompilerTest, self).tearDown()
+        super().tearDown()
         try:
             os.remove(self.file_name)
         except OSError:

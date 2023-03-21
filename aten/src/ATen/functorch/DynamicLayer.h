@@ -108,11 +108,14 @@ TORCH_API bool isDeadTensorWrapper(const Tensor& tensor);
 TORCH_API std::ostream& operator<<(std::ostream& os, const DynamicLayer& layer);
 TORCH_API std::ostream& operator<<(std::ostream& os, const std::vector<DynamicLayer>& dynamicLayerStack);
 
-// While a functorch transform is active, autograd.Function is disabled
-// by default. The following two APIs are APIs for enabling
-// autograd.Function. These are not user-facing APIs.
-TORCH_API void setAutogradFunctionAllowed(bool allowed);
-TORCH_API bool getAutogradFunctionAllowed();
+// While a functorch transform is active, torch.autograd.function._SingleLevelFunction
+// is disabled by default. The following two APIs are APIs for enabling
+// it. These are not user-facing APIs. We can delete this in the future, but
+// it is useful for debugging when something goes wrong with the
+// autograd.Function <> functorch interaction, which uses _SingleLevelFunction,
+// because it leads to loud errors if something is incorrect.
+TORCH_API void setSingleLevelAutogradFunctionAllowed(bool allowed);
+TORCH_API bool getSingleLevelAutogradFunctionAllowed();
 
 // While a functorch grad transform is active, Tensor.requires_grad_() gets
 // disabled. These two functions are the mechanism to controlling that.

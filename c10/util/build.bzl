@@ -9,7 +9,7 @@ def define_targets(rules):
         deps = [
             ":base",
             "//c10/core:ScalarType",
-            "//c10/macros",
+            "//c10/macros:macros",
         ],
     )
 
@@ -37,7 +37,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             "@fmt",
-            "//c10/macros",
+            "//c10/macros:macros",
         ] + rules.select({
             "//c10:using_gflags": ["@com_github_gflags_gflags//:gflags"],
             "//conditions:default": [],
@@ -57,7 +57,7 @@ def define_targets(rules):
         deps = [
             ":base",
             "//c10/core:ScalarType",
-            "//c10/macros",
+            "//c10/macros:macros",
         ],
     )
 

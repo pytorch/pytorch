@@ -10,7 +10,7 @@ namespace ops {
 
 using namespace api::utils;
 
-static api::ShaderSource get_quantize_per_tensor_shader(
+static api::ShaderInfo get_quantize_per_tensor_shader(
     const c10::ScalarType dtype) {
   switch (dtype) {
     case c10::ScalarType::QUInt8:
@@ -32,7 +32,7 @@ Tensor quantize_per_tensor(
     const double scale,
     const int64_t zero_point,
     const c10::ScalarType dtype) {
-  api::ShaderSource compute_shader = get_quantize_per_tensor_shader(dtype);
+  api::ShaderInfo compute_shader = get_quantize_per_tensor_shader(dtype);
 
   api::Context* const context = api::context();
 

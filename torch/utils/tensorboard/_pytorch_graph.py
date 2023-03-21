@@ -32,7 +32,7 @@ GETATTR_KIND = "prim::GetAttr"
 CLASSTYPE_KIND = "ClassType"
 
 
-class NodeBase(object):
+class NodeBase:
     def __init__(
         self,
         debugName=None,
@@ -64,7 +64,7 @@ class NodeBase(object):
 
 class NodePy(NodeBase):
     def __init__(self, node_cpp, valid_methods):
-        super(NodePy, self).__init__(node_cpp)
+        super().__init__(node_cpp)
         valid_methods = valid_methods[:]
         self.inputs = []
 
@@ -89,7 +89,7 @@ class NodePy(NodeBase):
 
 class NodePyIO(NodePy):
     def __init__(self, node_cpp, input_or_output=None):
-        super(NodePyIO, self).__init__(node_cpp, methods_IO)
+        super().__init__(node_cpp, methods_IO)
         try:
             tensor_size = node_cpp.type().sizes()
         except RuntimeError:
@@ -109,7 +109,7 @@ class NodePyIO(NodePy):
 
 class NodePyOP(NodePy):
     def __init__(self, node_cpp):
-        super(NodePyOP, self).__init__(node_cpp, methods_OP)
+        super().__init__(node_cpp, methods_OP)
         # Replace single quote which causes strange behavior in TensorBoard
         # TODO: See if we can remove this in the future
         self.attributes = str(
@@ -118,7 +118,7 @@ class NodePyOP(NodePy):
         self.kind = node_cpp.kind()
 
 
-class GraphPy(object):
+class GraphPy:
     """Helper class to convert torch.nn.Module to GraphDef proto and visualization
     with TensorBoard.
 

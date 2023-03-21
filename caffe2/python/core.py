@@ -7,9 +7,7 @@
 
 from collections import namedtuple, OrderedDict, defaultdict
 from past.builtins import basestring
-from future.utils import viewitems, viewkeys, viewvalues
 from itertools import chain
-from six import binary_type, string_types, text_type
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import scope, utils, workspace
@@ -202,7 +200,7 @@ def InferOpDeviceAsBlobDevices(op):
 GradientSlice = namedtuple('GradientSlice', ['indices', 'values'])
 
 
-class BlobReference(object):
+class BlobReference:
     """A wrapper around a blob in a net.
 
     BlobReference gives us a way to refer to the network that the blob is
@@ -216,9 +214,9 @@ class BlobReference(object):
         Note that this does not prepends the namescope. If needed, use
         ScopedBlobReference() to prepend the existing namespace.
         """
-        if isinstance(name, string_types):
+        if isinstance(name, str):
             self._name = name
-        elif isinstance(name, binary_type):
+        elif isinstance(name, bytes):
             self._name = name.decode('utf-8')
         else:
             self._name = str(name)
@@ -231,9 +229,9 @@ class BlobReference(object):
         return hash(self._name)
 
     def __eq__(self, other):
-        if isinstance(other, string_types):
+        if isinstance(other, str):
             return self._name == other
-        elif isinstance(other, binary_type):
+        elif isinstance(other, bytes):
             return self._name == other.decode('utf-8')
         elif isinstance(other, BlobReference):
             return self._name == other._name
@@ -250,12 +248,12 @@ class BlobReference(object):
         return 'BlobReference("{}")'.format(self._name)
 
     def __add__(self, other):
-        if not isinstance(other, string_types):
+        if not isinstance(other, str):
             raise RuntimeError('Cannot add BlobReference to a non-string.')
         return BlobReference(self._name + other, self._from_net)
 
     def __radd__(self, other):
-        if not isinstance(other, string_types):
+        if not isinstance(other, str):
             raise RuntimeError('Cannot add a non-string to BlobReference.')
         return BlobReference(other + self._name, self._from_net)
 
@@ -273,7 +271,7 @@ class BlobReference(object):
         network's __getattr__ function.
         """
         inputs = [] if inputs is None else inputs
-        if isinstance(inputs, BlobReference) or isinstance(inputs, string_types):
+        if isinstance(inputs, BlobReference) or isinstance(inputs, str):
             inputs = [inputs]
         # add self to the input list.
         inputs.insert(0, self)
@@ -311,14 +309,14 @@ class BlobReference(object):
             if '_ENGINE_' not in op or '_ENGINE_CUDNN' in op]
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             additional_methods
         )))
 
 
 def ScopedName(name):
     """prefix the name with the current scope."""
-    if isinstance(name, binary_type):
+    if isinstance(name, bytes):
         name = name.decode('ascii')
     return scope.CurrentNameScope() + name
 
@@ -332,7 +330,7 @@ def _RectifyInputOutput(blobs, net=None):
     """A helper function to rectify the input or output of the CreateOperator
     interface.
     """
-    if isinstance(blobs, string_types) or isinstance(blobs, binary_type):
+    if isinstance(blobs, (bytes, str)):
         # If blobs is a single string, prepend scope.CurrentNameScope()
         # and put it as a list.
         # TODO(jiayq): enforce using BlobReference instead of raw strings.
@@ -344,7 +342,7 @@ def _RectifyInputOutput(blobs, net=None):
         # If blob is a list, we go through it and type check.
         rectified = []
         for blob in blobs:
-            if isinstance(blob, string_types) or isinstance(blob, binary_type):
+            if isinstance(blob, (bytes, str)):
                 rectified.append(ScopedBlobReference(blob, net=net))
             elif type(blob) is BlobReference:
                 rectified.append(blob)
@@ -386,11 +384,11 @@ def CreateOperator(
     # Add rectified inputs and outputs
     inputs = _RectifyInputOutput(inputs)
     outputs = _RectifyInputOutput(outputs)
-    operator.input.extend([text_type(i) for i in inputs])
-    operator.output.extend([text_type(o) for o in outputs])
+    operator.input.extend(map(str, inputs))
+    operator.output.extend(map(str, outputs))
     if control_input:
         control_input = _RectifyInputOutput(control_input)
-        operator.control_input.extend([text_type(i) for i in control_input])
+        operator.control_input.extend(map(str, control_input))
     # Set device option:
     # (1) If device_option is explicitly set, use device_option.
     # (2) If not, but scope.CurrentDeviceScope() is set,
@@ -414,7 +412,7 @@ def CreateOperator(
     if arg is not None:
         operator.arg.extend(arg)
     # Add all other arguments
-    for key, value in viewitems(kwargs):
+    for key, value in kwargs.items():
         if value is not None:
             operator.arg.add().CopyFrom(utils.MakeArgument(key, value))
 
@@ -487,7 +485,7 @@ SparseGradGenMeta = namedtuple('SparseGradGenMeta', [
 ])
 
 
-class IR(object):
+class IR:
     """A simple IR class to keep track of all intermediate representations used
     in the gradient computation.
     """
@@ -627,8 +625,8 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
     def AppendSparseGenerators(self, sparse_generators):
         # merge indices and values generators for sparse gradients
-        for name, input_generators in viewitems(sparse_generators):
-            for version, generators in viewitems(input_generators):
+        for name, input_generators in sparse_generators.items():
+            for version, generators in input_generators.items():
                 if len(generators) == 1:
                     # either indices or values are generated (but not both)
                     generator = generators[0]
@@ -668,7 +666,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
             # (2) add outputs to the locally generated blobs
             # If an output corresponds to the gradient of an input, we also
             # record it to gradient_generators
-            locally_generated_blobs.extend([str(s) for s in grad_op.output])
+            locally_generated_blobs.extend(map(str, grad_op.output))
             for i, output in enumerate(grad_op.output):
                 input_index = GetIndexFromGradientList(g_input, output)
                 if input_index is not None:
@@ -995,7 +993,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         input_to_grad = {}
         gradient_ops = []
 
-        for y, g in viewitems(ys):
+        for y, g in ys.items():
             autograd_op = None
             if g is None:
                 autograd_op = CreateOperator(
@@ -1062,7 +1060,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
 
         # Set the gradient frontier with the initialized external
         # gradients.
-        for y in viewkeys(ys):
+        for y in ys.keys():
             self.gradient_frontier[y] = self.frontier[y]
             self.input_usages[str(y)][self.frontier[str(y)]].append(
                 len(self.ssa))
@@ -1094,10 +1092,9 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         # operators ready. For the output map, we will convert everything to
         # BlobReferences for easier handling in python.
         all_input_to_grad_out = {}
-        for key, val in viewitems(all_input_to_grad):
+        for key, val in all_input_to_grad.items():
             if val is not None:
-                if (isinstance(val, string_types) or
-                        isinstance(val, binary_type)):
+                if isinstance(val, (bytes, str)):
                     grad_out = BlobReference(val)
                 else:
                     grad_out = GradientSlice(BlobReference(val[0]),
@@ -1106,7 +1103,7 @@ StopGradient. Op:\n\n{}""".format(op.output[0], str(op)))
         return all_gradient_ops, all_input_to_grad_out
 
 
-class GradientRegistry(object):
+class GradientRegistry:
     """GradientRegistry holds the mapping from operators to their gradients."""
     gradient_registry_ = {}
 
@@ -1311,7 +1308,7 @@ def recurrent_network_op_remap(op, prefix, blob_remap):
     """
 
     def get_remapped_str(blob_str):
-        if isinstance(blob_str, binary_type):
+        if isinstance(blob_str, bytes):
             blob_str = blob_str.decode('utf-8')
         return blob_remap.get(blob_str, blob_str).encode('utf-8')
 
@@ -1412,7 +1409,7 @@ def clone_and_bind_net(net, name, prefix, blob_remap=None, inputs=None,
     ssa, blob_versions = get_ssa(proto)
     undef_blobs = get_undefined_blobs(ssa)
 
-    for blob in viewkeys(blob_versions):
+    for blob in blob_versions.keys():
         if blob in blob_remap:
             continue
         elif blob in undef_blobs:
@@ -1447,7 +1444,7 @@ def _recover_record_by_prefix(names, prefix=''):
         col_blobs=[_get_blob_ref(prefix + name) for name in column_names])
 
 
-class Net(object):
+class Net:
     _net_names_used = set()
     operator_registry_ = {}
 
@@ -1824,7 +1821,7 @@ class Net(object):
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
             assert self.BlobIsDefined(output), "{} is not defined".format(output)
-        input_names = {str(k): str(v) for k, v in viewitems(inputs)}
+        input_names = {str(k): str(v) for k, v in inputs.items()}
         output_names = [str(o) for o in outputs]
         proto = self._net
         blob_versions = {str(i): 0 for i in inputs}
@@ -1836,7 +1833,7 @@ class Net(object):
             'generate the given input.')
 
         sub_ssa = [op for i, op in enumerate(ssa) if i in used_op_ids]
-        undef_blobs = get_undefined_blobs(sub_ssa) - set(viewkeys(input_names))
+        undef_blobs = get_undefined_blobs(sub_ssa) - set(input_names.keys())
         prefix = (name + '/') if name else ''
 
         def remap(blob_name):
@@ -1847,10 +1844,10 @@ class Net(object):
             else:
                 return prefix + blob_name
 
-        blob_mapping = {b: remap(b) for b in viewkeys(blob_versions)}
+        blob_mapping = {b: remap(b) for b in blob_versions.keys()}
         new_net = self.Clone(name, blob_mapping, used_op_ids, remap_funcs)
         new_in = [
-            blob_mapping[i] for i in viewkeys(input_names)] + list(undef_blobs)
+            blob_mapping[i] for i in input_names.keys()] + list(undef_blobs)
         new_out = [blob_mapping[o] for o in output_names]
         del new_net.Proto().external_input[:]
         new_net.Proto().external_input.extend(new_in)
@@ -1984,7 +1981,7 @@ class Net(object):
     def _ExtendOps(self, new_ops):
         self._net.op.extend(new_ops)
         for op in new_ops:
-            self._op_outputs.update([text_type(o) for o in op.output])
+            self._op_outputs.update([str(o) for o in op.output])
 
     def _CheckLookupTables(self):
         '''
@@ -2285,7 +2282,7 @@ class Net(object):
             if '_ENGINE_' not in op]
         return sorted(set(chain(
             dir(type(self)),
-            viewkeys(self.__dict__),
+            self.__dict__.keys(),
             additional_methods
         )))
 
@@ -2366,7 +2363,7 @@ class Net(object):
             grad_output_indices=grad_output_indices,
             grad_input_indices=grad_input_indices,
             *args,
-            **dict(chain(viewitems(kwargs), viewitems(core_kwargs)))
+            **dict(chain(kwargs.items(), core_kwargs.items()))
         )
 
     def is_external_input(self, blob):
@@ -2669,7 +2666,7 @@ def _add_net_to_dict(net_dict, net):
         return True
 
 
-class ExecutionStep(object):
+class ExecutionStep:
     _step_names_used = set()
 
     @staticmethod
@@ -2725,7 +2722,7 @@ class ExecutionStep(object):
             len(self._step.substep) > 0)
 
     def Nets(self):
-        return list(viewvalues(self._net_dict))
+        return list(self._net_dict.values())
 
     def Substeps(self):
         return self._substeps
@@ -2805,7 +2802,7 @@ class ExecutionStep(object):
         """
         return [
             attr
-            for net in viewvalues(self._net_dict)
+            for net in self._net_dict.values()
             for attr in net.get_attributes(name)
         ]
 
@@ -2875,7 +2872,7 @@ def add_nets_in_order(step, net_list):
         net_list.append(proto.report_net)
 
 
-class Plan(object):
+class Plan:
 
     def __init__(self, name_or_step):
         self._plan = caffe2_pb2.PlanDef()
@@ -2902,7 +2899,7 @@ class Plan(object):
                 self._plan.network.add().CopyFrom(net.Proto())
 
     def Nets(self):
-        return list(viewvalues(self._net_dict))
+        return list(self._net_dict.values())
 
     def AddStep(self, step):
         assert isinstance(step, ExecutionStep)
@@ -2926,7 +2923,7 @@ class Plan(object):
         """
         return [
             attr
-            for net in viewvalues(self._net_dict)
+            for net in self._net_dict.values()
             for attr in net.get_attributes(name)
         ]
 

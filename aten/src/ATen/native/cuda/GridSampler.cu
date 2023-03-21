@@ -13,7 +13,7 @@
 #include <c10/macros/Macros.h>
 #include <cmath>
 
-namespace at { namespace native {
+namespace at::native {
 
 using namespace at::cuda::detail;
 
@@ -58,8 +58,8 @@ namespace {
       const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y co-ordinates from grid
-      scalar_t x = grid.data[grid_offset];
-      scalar_t y = grid.data[grid_offset + grid_sCoor];
+      opmath_t x = grid.data[grid_offset];
+      opmath_t y = grid.data[grid_offset + grid_sCoor];
 
       opmath_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
       opmath_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
@@ -194,9 +194,9 @@ namespace {
       const index_t grid_offset = n * grid_sN + d * grid_sD + h * grid_sH + w * grid_sW;
 
       // get the corresponding input x, y, z co-ordinates from grid
-      scalar_t x = grid.data[grid_offset];
-      scalar_t y = grid.data[grid_offset + grid_sCoor];
-      scalar_t z = grid.data[grid_offset + 2 * grid_sCoor];
+      opmath_t x = grid.data[grid_offset];
+      opmath_t y = grid.data[grid_offset + grid_sCoor];
+      opmath_t z = grid.data[grid_offset + 2 * grid_sCoor];
 
       opmath_t ix = grid_sampler_compute_source_index(x, inp_W, padding_mode, align_corners);
       opmath_t iy = grid_sampler_compute_source_index(y, inp_H, padding_mode, align_corners);
@@ -950,4 +950,4 @@ void launch_grid_sampler_3d_backward_kernel(
   }
 }
 
-}}  // namespace at::native
+}  // namespace at::native

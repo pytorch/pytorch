@@ -47,13 +47,16 @@
 #include <llvm/Target/TargetMachine.h>
 #endif
 
-#include <llvm/Transforms/IPO/AlwaysInliner.h>
-#include <llvm/Transforms/IPO/PassManagerBuilder.h>
-#include <llvm/Transforms/Scalar.h>
-
 #if LLVM_VERSION_MAJOR >= 11
 #include <llvm/Support/TypeSize.h>
 #endif
+
+#if LLVM_VERSION_MAJOR < 15
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#endif
+
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Scalar.h>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
@@ -74,9 +77,7 @@ C10_DEFINE_bool(
     false,
     "Use fast (but slightly less accurate) implementations of tanh and sigmoid");
 
-namespace torch {
-namespace jit {
-namespace tensorexpr {
+namespace torch::jit::tensorexpr {
 
 c10::optional<std::string>& LLVMTargetTriple() {
   static c10::optional<std::string> triple = c10::nullopt;
@@ -348,9 +349,7 @@ class LLVMCodeGenImpl : public IRVisitor {
   }
 };
 
-} // namespace tensorexpr
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit::tensorexpr
 
 LLVMCodeGen::~LLVMCodeGen() = default;
 

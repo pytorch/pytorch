@@ -1,77 +1,15 @@
 import torch
 from torch import Tensor
-from .optimizer import Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt, _stack_if_compiling
+from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
+                        _stack_if_compiling, _capturable_doc, _differentiable_doc, _foreach_doc,
+                        _fused_doc, _maximize_doc, _default_to_fused_or_foreach)
 from typing import List, Optional
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 __all__ = ["AdamW", "adamw"]
 
 
 class AdamW(Optimizer):
-    r"""Implements AdamW algorithm.
-
-    .. math::
-       \begin{aligned}
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{input}      : \gamma \text{(lr)}, \: \beta_1, \beta_2
-                \text{(betas)}, \: \theta_0 \text{(params)}, \: f(\theta) \text{(objective)},
-                \: \epsilon \text{ (epsilon)}                                                    \\
-            &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},
-                \: \textit{maximize}                                                             \\
-            &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
-                \text{ ( second moment)}, \: \widehat{v_0}^{max}\leftarrow 0              \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                                 \\
-            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-
-            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
-            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
-            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
-            &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
-            &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
-            &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
-            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
-            &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
-            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
-                \widehat{v_t})                                                                   \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
-            &\hspace{5mm}\textbf{else}                                                           \\
-            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
-                \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
-            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
-       \end{aligned}
-
-    For further details regarding the algorithm we refer to `Decoupled Weight Decay Regularization`_.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay coefficient (default: 1e-2)
-        amsgrad (bool, optional): whether to use the AMSGrad variant of this
-            algorithm from the paper `On the Convergence of Adam and Beyond`_
-            (default: False)
-        maximize (bool, optional): maximize the params based on the objective, instead of
-            minimizing (default: False)
-        foreach (bool, optional): whether foreach implementation of optimizer
-            is used (default: None)
-        capturable (bool, optional): whether this instance is safe to capture in a CUDA graph.
-            Passing True can impair ungraphed performance, so if you don't intend to
-            graph capture this instance, leave it False (default: False)
-
-    .. _Decoupled Weight Decay Regularization:
-        https://arxiv.org/abs/1711.05101
-    .. _On the Convergence of Adam and Beyond:
-        https://openreview.net/forum?id=ryQu7f-RZ
-    """
-
     def __init__(
         self,
         params,
@@ -85,6 +23,7 @@ class AdamW(Optimizer):
         foreach: Optional[bool] = None,
         capturable: bool = False,
         differentiable: bool = False,
+        fused: Optional[bool] = None,
     ):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -106,8 +45,25 @@ class AdamW(Optimizer):
             maximize=maximize,
             capturable=capturable,
             differentiable=differentiable,
+            fused=fused,
         )
-        super(AdamW, self).__init__(params, defaults)
+        super().__init__(params, defaults)
+
+        if fused:
+            if differentiable:
+                raise RuntimeError("`fused` does not support `differentiable`")
+            self._step_supports_amp_scaling = True
+            # TODO(crcrpar): [low prec params & their higher prec copy]
+            # Suppor AMP with FP16/BF16 model params which would need
+            # higher prec copy of params to do update math in higher prec to
+            # alleviate the loss of information.
+            if not all(
+                p.is_cuda and torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be CUDA, floating point Tensor")
+            if foreach:
+                raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -117,6 +73,7 @@ class AdamW(Optimizer):
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
+            group.setdefault("fused", None)
         state_values = list(self.state.values())
         step_is_tensor = (len(state_values) != 0) and torch.is_tensor(
             state_values[0]["step"]
@@ -125,7 +82,17 @@ class AdamW(Optimizer):
             for s in state_values:
                 s["step"] = torch.tensor(float(s["step"]))
 
-    def _init_group(self, group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps):
+    def _init_group(
+        self,
+        group,
+        params_with_grad,
+        grads,
+        amsgrad,
+        exp_avgs,
+        exp_avg_sqs,
+        max_exp_avg_sqs,
+        state_steps,
+    ):
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -140,7 +107,7 @@ class AdamW(Optimizer):
             if len(state) == 0:
                 state["step"] = (
                     torch.zeros((1,), dtype=torch.float, device=p.device)
-                    if self.defaults["capturable"]
+                    if group["capturable"] or group["fused"]
                     else torch.tensor(0.0)
                 )
                 # Exponential moving average of gradient values
@@ -190,7 +157,16 @@ class AdamW(Optimizer):
             amsgrad = group["amsgrad"]
             beta1, beta2 = group["betas"]
 
-            self._init_group(group, params_with_grad, grads, amsgrad, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps)
+            self._init_group(
+                group,
+                params_with_grad,
+                grads,
+                amsgrad,
+                exp_avgs,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+            )
 
             adamw(
                 params_with_grad,
@@ -209,9 +185,80 @@ class AdamW(Optimizer):
                 foreach=group["foreach"],
                 capturable=group["capturable"],
                 differentiable=group["differentiable"],
+                fused=group["fused"],
+                grad_scale=getattr(self, "grad_scale", None),
+                found_inf=getattr(self, "found_inf", None),
             )
 
         return loss
+
+
+AdamW.__doc__ = r"""Implements AdamW algorithm.
+
+    .. math::
+       \begin{aligned}
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{input}      : \gamma \text{(lr)}, \: \beta_1, \beta_2
+                \text{(betas)}, \: \theta_0 \text{(params)}, \: f(\theta) \text{(objective)},
+                \: \epsilon \text{ (epsilon)}                                                    \\
+            &\hspace{13mm}      \lambda \text{(weight decay)},  \: \textit{amsgrad},
+                \: \textit{maximize}                                                             \\
+            &\textbf{initialize} : m_0 \leftarrow 0 \text{ (first moment)}, v_0 \leftarrow 0
+                \text{ ( second moment)}, \: \widehat{v_0}^{max}\leftarrow 0              \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                                 \\
+            &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
+
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})          \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm} \theta_t \leftarrow \theta_{t-1} - \gamma \lambda \theta_{t-1}         \\
+            &\hspace{5mm}m_t           \leftarrow   \beta_1 m_{t-1} + (1 - \beta_1) g_t          \\
+            &\hspace{5mm}v_t           \leftarrow   \beta_2 v_{t-1} + (1-\beta_2) g^2_t          \\
+            &\hspace{5mm}\widehat{m_t} \leftarrow   m_t/\big(1-\beta_1^t \big)                   \\
+            &\hspace{5mm}\widehat{v_t} \leftarrow   v_t/\big(1-\beta_2^t \big)                   \\
+            &\hspace{5mm}\textbf{if} \: amsgrad                                                  \\
+            &\hspace{10mm}\widehat{v_t}^{max} \leftarrow \mathrm{max}(\widehat{v_t}^{max},
+                \widehat{v_t})                                                                   \\
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
+                \big(\sqrt{\widehat{v_t}^{max}} + \epsilon \big)                                 \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}\theta_t \leftarrow \theta_t - \gamma \widehat{m_t}/
+                \big(\sqrt{\widehat{v_t}} + \epsilon \big)                                       \\
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+            &\bf{return} \:  \theta_t                                                     \\[-1.ex]
+            &\rule{110mm}{0.4pt}                                                          \\[-1.ex]
+       \end{aligned}
+
+    For further details regarding the algorithm we refer to `Decoupled Weight Decay Regularization`_.
+    """ + r"""
+    Args:
+        params (iterable): iterable of parameters to optimize or dicts defining
+            parameter groups
+        lr (float, optional): learning rate (default: 1e-3)
+        betas (Tuple[float, float], optional): coefficients used for computing
+            running averages of gradient and its square (default: (0.9, 0.999))
+        eps (float, optional): term added to the denominator to improve
+            numerical stability (default: 1e-8)
+        weight_decay (float, optional): weight decay coefficient (default: 1e-2)
+        amsgrad (bool, optional): whether to use the AMSGrad variant of this
+            algorithm from the paper `On the Convergence of Adam and Beyond`_
+            (default: False)
+        {maximize}
+        {foreach}
+        {capturable}
+        {differentiable}
+        {fused}
+    .. _Decoupled Weight Decay Regularization:
+        https://arxiv.org/abs/1711.05101
+    .. _On the Convergence of Adam and Beyond:
+        https://openreview.net/forum?id=ryQu7f-RZ
+
+    """.format(maximize=_maximize_doc,
+               foreach=_foreach_doc,
+               fused=_fused_doc,
+               capturable=_capturable_doc,
+               differentiable=_differentiable_doc)
 
 
 def adamw(
@@ -223,9 +270,12 @@ def adamw(
     state_steps: List[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: bool = None,
+    foreach: Optional[bool] = None,
     capturable: bool = False,
     differentiable: bool = False,
+    fused: Optional[bool] = None,
+    grad_scale: Optional[Tensor] = None,
+    found_inf: Optional[Tensor] = None,
     *,
     amsgrad: bool,
     beta1: float,
@@ -245,14 +295,25 @@ def adamw(
             "API has changed, `state_steps` argument must contain a list of singleton tensors"
         )
 
+    # Respect when the user inputs False/True for foreach or fused. We only want to change
+    # the default when neither have been user-specified. Note that we default to foreach
+    # and pass False to use_fused. This is not a mistake--we want to give the fused impl
+    # bake-in time before making it the default, even if it is typically faster.
+    if fused is None and foreach is None:
+        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+    if fused is None:
+        fused = False
     if foreach is None:
-        # Placeholder for more complex foreach logic to be added when value is not set
         foreach = False
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
+    if fused and torch.jit.is_scripting():
+        raise RuntimeError("torch.jit.script not supported with fused optimizers")
 
-    if foreach and not torch.jit.is_scripting():
+    if fused and not torch.jit.is_scripting():
+        func = _fused_adamw
+    elif foreach and not torch.jit.is_scripting():
         func = _multi_tensor_adamw
     else:
         func = _single_tensor_adamw
@@ -273,6 +334,8 @@ def adamw(
         maximize=maximize,
         capturable=capturable,
         differentiable=differentiable,
+        grad_scale=grad_scale,
+        found_inf=found_inf,
     )
 
 
@@ -283,6 +346,8 @@ def _single_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
     beta1: float,
@@ -294,6 +359,8 @@ def _single_tensor_adamw(
     capturable: bool,
     differentiable: bool,
 ):
+
+    assert grad_scale is None and found_inf is None
 
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
@@ -382,6 +449,8 @@ def _multi_tensor_adamw(
     exp_avg_sqs: List[Tensor],
     max_exp_avg_sqs: List[Tensor],
     state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
     *,
     amsgrad: bool,
     beta1: float,
@@ -401,92 +470,163 @@ def _multi_tensor_adamw(
             p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
         ), "If capturable=True, params and state_steps must be CUDA tensors."
 
-    if maximize:
-        grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
-
     assert not differentiable, "_foreach ops don't support autograd"
 
-    grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in grads]
-    exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avgs]
-    exp_avg_sqs = [
-        torch.view_as_real(x) if torch.is_complex(x) else x for x in exp_avg_sqs
-    ]
-    params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in params]
+    assert grad_scale is None and found_inf is None
 
-    # update steps
-    torch._foreach_add_(state_steps, 1)
+    grouped_tensors = _group_tensors_by_device_and_dtype([
+        params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    for (device_params, device_grads, device_exp_avgs, device_exp_avg_sqs,
+         device_max_exp_avg_sqs, device_state_steps) in grouped_tensors.values():
+        if maximize:
+            device_grads = torch._foreach_neg(tuple(device_grads))  # type: ignore[assignment]
 
-    # Perform stepweight decay
-    torch._foreach_mul_(params, 1 - lr * weight_decay)
 
-    # Decay the first and second moment running average coefficient
-    torch._foreach_mul_(exp_avgs, beta1)
-    torch._foreach_add_(exp_avgs, grads, alpha=1 - beta1)
+        device_grads = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_grads]
+        device_exp_avgs = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avgs]
+        device_exp_avg_sqs = [
+            torch.view_as_real(x) if torch.is_complex(x) else x for x in device_exp_avg_sqs
+        ]
+        device_params = [torch.view_as_real(x) if torch.is_complex(x) else x for x in device_params]
 
-    torch._foreach_mul_(exp_avg_sqs, beta2)
-    torch._foreach_addcmul_(exp_avg_sqs, grads, grads, 1 - beta2)
+        # update steps
+        torch._foreach_add_(device_state_steps, 1)
 
-    if capturable:
-        # TODO: use foreach_pow if/when foreach_pow is added
-        bias_correction1 = [torch.pow(beta1, step) for step in state_steps]
-        bias_correction2 = [torch.pow(beta2, step) for step in state_steps]
-        # foreach_sub doesn't allow a scalar as the first arg
-        torch._foreach_sub_(bias_correction1, 1)
-        torch._foreach_sub_(bias_correction2, 1)
-        torch._foreach_neg_(bias_correction1)
-        torch._foreach_neg_(bias_correction2)
+        # Perform stepweight decay
+        torch._foreach_mul_(device_params, 1 - lr * weight_decay)
 
-        # foreach_div doesn't allow a scalar as the first arg
-        step_size = torch._foreach_div(bias_correction1, lr)
-        torch._foreach_reciprocal_(step_size)
-        torch._foreach_neg_(step_size)
+        # Decay the first and second moment running average coefficient
+        torch._foreach_mul_(device_exp_avgs, beta1)
+        torch._foreach_add_(device_exp_avgs, device_grads, alpha=1 - beta1)
 
-        bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+        torch._foreach_mul_(device_exp_avg_sqs, beta2)
+        torch._foreach_addcmul_(device_exp_avg_sqs, device_grads, device_grads, 1 - beta2)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
+        if capturable:
+            bias_correction1 = torch._foreach_pow(beta1, device_state_steps)
+            bias_correction2 = torch._foreach_pow(beta2, device_state_steps)
+            # foreach_sub doesn't allow a scalar as the first arg
+            torch._foreach_sub_(bias_correction1, 1)
+            torch._foreach_sub_(bias_correction2, 1)
+            torch._foreach_neg_(bias_correction1)
+            torch._foreach_neg_(bias_correction2)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
-            # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
-            torch._foreach_div_(
-                max_exp_avg_sq_sqrt,
-                torch._foreach_mul(bias_correction2_sqrt, step_size),
-            )
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            # foreach_div doesn't allow a scalar as the first arg
+            step_size = torch._foreach_div(bias_correction1, lr)
+            torch._foreach_reciprocal_(step_size)
+            torch._foreach_neg_(step_size)
+
+            bias_correction2_sqrt = torch._foreach_sqrt(bias_correction2)
+
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
+
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                # Folds in (admittedly ugly) 1-elem step_size math here to avoid extra param-set-sized read+write
+                # (can't fold it into addcdiv_ below because addcdiv_ requires value is a Number, not a Tensor)
+                torch._foreach_div_(
+                    max_exp_avg_sq_sqrt,
+                    torch._foreach_mul(bias_correction2_sqrt, step_size),
+                )
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps_over_step_size)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(
+                    exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size)
+                )
+                eps_over_step_size = torch._foreach_div(step_size, eps)
+                torch._foreach_reciprocal_(eps_over_step_size)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom)
         else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(
-                exp_avg_sq_sqrt, torch._foreach_mul(bias_correction2_sqrt, step_size)
-            )
-            eps_over_step_size = torch._foreach_div(step_size, eps)
-            torch._foreach_reciprocal_(eps_over_step_size)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps_over_step_size)
+            bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
+            bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom)
-    else:
-        bias_correction1 = [1 - beta1 ** _get_value(step) for step in state_steps]
-        bias_correction2 = [1 - beta2 ** _get_value(step) for step in state_steps]
+            step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
-        step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
+            bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
 
-        bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
+            if amsgrad:
+                # Maintains the maximum of all 2nd moment running avg. till now
+                torch._foreach_maximum_(device_max_exp_avg_sqs, device_exp_avg_sqs)
 
-        if amsgrad:
-            # Maintains the maximum of all 2nd moment running avg. till now
-            torch._foreach_maximum_(max_exp_avg_sqs, exp_avg_sqs)
+                # Use the max. for normalizing running avg. of gradient
+                max_exp_avg_sq_sqrt = torch._foreach_sqrt(device_max_exp_avg_sqs)
+                torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
+            else:
+                exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
+                denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
 
-            # Use the max. for normalizing running avg. of gradient
-            max_exp_avg_sq_sqrt = torch._foreach_sqrt(max_exp_avg_sqs)
-            torch._foreach_div_(max_exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(max_exp_avg_sq_sqrt, eps)
-        else:
-            exp_avg_sq_sqrt = torch._foreach_sqrt(exp_avg_sqs)
-            torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
-            denom = torch._foreach_add(exp_avg_sq_sqrt, eps)
+            torch._foreach_addcdiv_(device_params, device_exp_avgs, denom, step_size)
 
-        torch._foreach_addcdiv_(params, exp_avgs, denom, step_size)
+
+def _fused_adamw(
+    params: List[Tensor],
+    grads: List[Tensor],
+    exp_avgs: List[Tensor],
+    exp_avg_sqs: List[Tensor],
+    max_exp_avg_sqs: List[Tensor],
+    state_steps: List[Tensor],
+    grad_scale: Optional[Tensor],
+    found_inf: Optional[Tensor],
+    *,
+    amsgrad: bool,
+    beta1: float,
+    beta2: float,
+    lr: float,
+    weight_decay: float,
+    eps: float,
+    maximize: bool,
+    capturable: bool,  # Needed for consistency.
+    differentiable: bool,
+) -> None:
+    if differentiable:
+        raise RuntimeError("_fused_adamw is not differentiable")
+    grad_scale_dict = {grad_scale.device: grad_scale} if grad_scale is not None else None
+    found_inf_dict = {found_inf.device: found_inf} if found_inf is not None else None
+    grouped_tensors = _group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps])
+    for (device, dtype) in grouped_tensors:
+        (
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+        ) = grouped_tensors[(device, dtype)]
+        device_grad_scale, device_found_inf = None, None
+        if grad_scale is not None:
+            if device not in grad_scale_dict:
+                grad_scale_dict[device] = grad_scale.to(device, non_blocking=True)
+            device_grad_scale = grad_scale_dict[device]
+        if found_inf is not None:
+            if found_inf not in found_inf_dict:
+                found_inf_dict[device] = found_inf.to(device, non_blocking=True)
+            device_found_inf = found_inf_dict[device]
+        torch._foreach_add_(device_state_steps, 1)
+        torch._fused_adamw_(
+            device_params,
+            device_grads,
+            device_exp_avgs,
+            device_exp_avg_sqs,
+            device_max_exp_avg_sqs,
+            device_state_steps,
+            amsgrad=amsgrad,
+            lr=lr,
+            beta1=beta1,
+            beta2=beta2,
+            weight_decay=weight_decay,
+            eps=eps,
+            maximize=maximize,
+            grad_scale=device_grad_scale,
+            found_inf=device_found_inf,
+        )
+        if device_found_inf is not None:
+            torch._foreach_sub_(device_state_steps, [device_found_inf] * len(device_state_steps))

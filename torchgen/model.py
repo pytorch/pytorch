@@ -32,6 +32,7 @@ from torchgen.utils import assert_never, NamespaceHelper, OrderedSet
 #   and you're expected to populate information once during
 #   construction.
 
+
 # Represent a source location; used for better error reporting
 @dataclass(frozen=True)
 class Location:
@@ -62,6 +63,7 @@ AUTOGRAD_KEYS = ["AutogradNestedTensor"] + [
 ]
 
 FRAGMENT_NAMESPACES = {"quantized", "quantized_decomposed"}
+
 
 # This doesn't have to be in sync with the header, it only needs to contain
 # entries that we actually use in the codegen or want pyi entries for
@@ -241,6 +243,7 @@ dispatch_keys = [
     DispatchKey.NestedTensorMeta,
     DispatchKey.ZeroTensor,
 ]
+
 
 # Dispatch keys that "support all backends".  These codegen slightly differently
 # then backend specific keys.
@@ -638,6 +641,7 @@ class NativeFunction:
         raw_dispatch = e.pop("dispatch", None)
         assert raw_dispatch is None or isinstance(raw_dispatch, dict), e
         dispatch: Dict[DispatchKey, BackendMetadata] = {}
+        num_dispatch_keys: int = 0
         if raw_dispatch is not None:
             assert not manual_kernel_registration, (
                 "cannot specify both manual_kernel_registration and dispatch; with "
@@ -650,16 +654,18 @@ class NativeFunction:
                 assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
+                    num_dispatch_keys += 1
+
                     if ignore_keys and dispatch_key in ignore_keys:
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
-                    # We only allow at most 2 levels of namespace for kernels.
+                    # We only allow at most 3 levels of namespace for kernels.
                     # We will append "native" to a custom kernel namespace.
                     namespace_helper = NamespaceHelper.from_namespaced_entity(
-                        v, max_level=2
+                        v, max_level=3
                     )
                     kernel_namespace = namespace_helper.get_cpp_namespace(default="at")
                     # Why is 'structured' included? External backends (e.g.
@@ -677,7 +683,12 @@ class NativeFunction:
                     ):
                         redundant_composite_implicit_autograd = True
 
-            assert not (len(dispatch) == 1 and redundant_composite_implicit_autograd), (
+            # We count the number of dispatch keys which have not been ignored to prevent a dispatch table
+            # in which all backend keys are ignored but necessarily kept, remaining compositeimplicit,
+            # from being treated as redundant.
+            assert not (
+                num_dispatch_keys == 1 and redundant_composite_implicit_autograd
+            ), (
                 "unnecessary dispatch table for this function; just delete the dispatch "
                 "key entirely"
             )
@@ -687,6 +698,7 @@ class NativeFunction:
                 structured_delegate
                 or dispatch.keys() != {DispatchKey.CompositeImplicitAutograd}
                 or dispatch[DispatchKey.CompositeImplicitAutograd].supports_symint()
+                or num_dispatch_keys != 1
             ), (
                 f"unexpected name for singleton CompositeImplicitAutograd dispatch entry: expected {cpp.name(func)} "
                 f"but got {dispatch[DispatchKey.CompositeImplicitAutograd]}.  Rename your implementation to the expected "
@@ -1058,7 +1070,7 @@ class NativeFunctionsGroup:
         for f in self.functions():
             expected_generated_fns.update(str(op) for op in f.autogen)
         expected_generated_fns_str = ", ".join(
-            str(x) for x in sorted(list(expected_generated_fns))
+            str(x) for x in sorted(expected_generated_fns)
         )
         if len(expected_generated_fns) == 0 and len(generated_fns) > 0:
             raise RuntimeError(
@@ -1642,6 +1654,7 @@ class FunctionSchema:
 
 
 # Here is the rest of the data model, described more briefly.
+
 
 # Simplified version for what actually shows up in built-ins.
 # Look at alias_info.h for expanded syntax.  If you need the structure,
@@ -2359,6 +2372,7 @@ AUGMENTED_ASSIGNMENT_NAMES = [
     "xor",
     "or",
 ]
+
 
 # A BaseOperatorName is what we think of the operator name, without
 # the overload name.  Unusually, we don't represent this as just a

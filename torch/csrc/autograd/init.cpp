@@ -10,6 +10,7 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/autograd/VariableTypeUtils.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/grad_mode.h>
@@ -25,6 +26,7 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/utils.h>
 #include <torch/csrc/utils/disable_torch_function.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
@@ -32,6 +34,7 @@
 
 #include <set>
 #include <unordered_set>
+#include <utility>
 
 namespace {
 
@@ -54,19 +57,31 @@ struct MultithreadingEnabled {
   bool old_;
 };
 
+struct ViewReplayEnabled {
+  ViewReplayEnabled(bool enabled)
+      : old_(c10::AutogradState::get_tls_state().get_view_replay_enabled()) {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(enabled);
+  }
+  ~ViewReplayEnabled() {
+    c10::AutogradState::get_tls_state().set_view_replay_enabled(old_);
+  }
+  bool old_;
+};
+
 struct DisableAutocast {
   c10::impl::ExcludeDispatchKeyGuard guard_{c10::autocast_dispatch_keyset};
 };
 
 struct EnableTorchFunction {
   EnableTorchFunction()
-      : old_(at::impl::PythonTorchFunctionTLS::is_disabled()) {
-    at::impl::PythonTorchFunctionTLS::set_disabled(false);
+      : old_(at::impl::PythonTorchFunctionTLS::get_disabled_state()) {
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(
+        at::impl::TorchFunctionDisabledState::ENABLED);
   }
   ~EnableTorchFunction() {
-    at::impl::PythonTorchFunctionTLS::set_disabled(old_);
+    at::impl::PythonTorchFunctionTLS::set_disabled_state(old_);
   }
-  bool old_;
+  at::impl::TorchFunctionDisabledState old_;
 };
 
 struct EnablePythonDispatcher {
@@ -284,8 +299,17 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::getNumGPUs() > 0) {
       activities.insert(ActivityType::CUDA);
     }
+#elif defined(USE_KINETO)
+    if (at::hasXPU()) {
+      activities.insert(ActivityType::XPU);
+    }
 #endif
     return activities;
+  });
+
+  m.def("_unsafe_set_version_counter", [](at::Tensor t, int64_t i) {
+    auto vc = torch::autograd::impl::version_counter(t);
+    vc.set_version(i);
   });
 
   m.def("_enable_profiler_legacy", enableProfilerLegacy);
@@ -356,8 +380,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   py::class_<DisableFuncTorch>(_C_m, "_DisableFuncTorch").def(py::init<>());
   py::class_<MultithreadingEnabled>(_C_m, "_MultithreadingEnabled")
       .def(py::init<bool>());
-  py::class_<DisableAutocast>(_C_m, "_DisableAutocast").def(py::init<>());
-  py::class_<torch::autograd::SavedVariable>(m, "SavedTensor")
+  py::class_<DisableAutocast>(std::move(_C_m), "_DisableAutocast")
+      .def(py::init<>());
+  py::class_<ViewReplayEnabled>(_C_m, "_ViewReplayEnabled")
+      .def(py::init<bool>());
+  py::class_<torch::autograd::SavedVariable>(std::move(m), "SavedTensor")
       .def(py::init([]() -> torch::autograd::SavedVariable {
         TORCH_CHECK(
             false,
@@ -510,30 +537,6 @@ static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
     throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
   at::autocast::set_autocast_cache_enabled(arg == Py_True);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* is_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (torch::autograd::isAutogradFunctionExtensionEnabled()) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* set_autograd_function_extension_enabled(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
-  torch::autograd::setAutogradFunctionExtensionEnabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -765,6 +768,15 @@ static PyObject* len_torch_dispatch_stack(
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
+  HANDLE_TH_ERRORS
+  THPUtils_assert(
+      THPVariable_Check(tensor), "increment_version expect a Tensor as input");
+  torch::autograd::increment_version((THPVariable_Unpack(tensor)));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled", set_grad_enabled, METH_O, nullptr},
@@ -798,14 +810,7 @@ static PyMethodDef methods[] = { // NOLINT
      METH_NOARGS,
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
-    {"_set_autograd_function_extension_enabled",
-     set_autograd_function_extension_enabled,
-     METH_O,
-     nullptr},
-    {"_is_autograd_function_extension_enabled",
-     is_autograd_function_extension_enabled,
-     METH_NOARGS,
-     nullptr},
+    {"_increment_version", THPModule_increment_version, METH_O, nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

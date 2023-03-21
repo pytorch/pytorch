@@ -20,7 +20,7 @@ class Conv1d(nnq.Conv1d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv1d` and :class:`~torch.nn.quantized.dynamic.Conv1d` and
+    :class:`~torch.nn.Conv1d` and :class:`~torch.ao.nn.quantized.dynamic.Conv1d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -67,7 +67,7 @@ class Conv1d(nnq.Conv1d):
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
-        super(Conv1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, **factory_kwargs)
 
@@ -91,7 +91,7 @@ class Conv2d(nnq.Conv2d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv2d` and :class:`~torch.nn.quantized.dynamic.Conv2d` and
+    :class:`~torch.nn.Conv2d` and :class:`~torch.ao.nn.quantized.dynamic.Conv2d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -132,7 +132,7 @@ class Conv2d(nnq.Conv2d):
         padding = _pair(padding)
         dilation = _pair(dilation)
 
-        super(Conv2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             groups, bias, padding_mode, **factory_kwargs)
 
@@ -156,7 +156,7 @@ class Conv3d(nnq.Conv3d):
     r"""A dynamically quantized conv module with floating point tensors as inputs and outputs.
 
     For details on input arguments, parameters, and implementation see
-    :class:`~torch.nn.Conv3d` and :class:`~torch.nn.quantized.dynamic.Conv3d` and
+    :class:`~torch.nn.Conv3d` and :class:`~torch.ao.nn.quantized.dynamic.Conv3d` and
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -197,7 +197,7 @@ class Conv3d(nnq.Conv3d):
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
-        super(Conv3d, self)._init(
+        super()._init(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias, padding_mode, **factory_kwargs)
 
@@ -223,7 +223,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose1d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv1d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv1d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -262,7 +262,7 @@ class ConvTranspose1d(nnq.ConvTranspose1d):
             )
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose1d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
@@ -284,7 +284,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose2d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv2d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv2d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -323,7 +323,7 @@ class ConvTranspose2d(nnq.ConvTranspose2d):
             )
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose2d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 
@@ -345,7 +345,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
     For details on input arguments, parameters, and implementation see
     :class:`~torch.nn.ConvTranspose3d`.
 
-    For special notes, please, see :class:`~torch.nn.quantized.dynamic.Conv3d`
+    For special notes, please, see :class:`~torch.ao.nn.quantized.dynamic.Conv3d`
 
     Attributes:
         weight (Tensor):     packed tensor derived from the learnable weight
@@ -384,7 +384,7 @@ class ConvTranspose3d(nnq.ConvTranspose3d):
             )
         )
         factory_kwargs = {'device': device, 'dtype': dtype}
-        super(ConvTranspose3d, self).__init__(
+        super().__init__(
             in_channels, out_channels, kernel_size, stride, padding, output_padding,
             groups, bias, dilation, padding_mode, **factory_kwargs)
 

@@ -1,3 +1,4 @@
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
@@ -12,13 +13,22 @@ int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
 
+_AllocationMetadata::_AllocationMetadata()
+    : size(0), device_idx(-1), stream(0) {}
+
+_AllocationMetadata::_AllocationMetadata(
+    size_t size,
+    int device_idx,
+    cudaStream_t stream)
+    : size(size), device_idx(device_idx), stream(stream) {}
+
 // This is a fast API to just register allocators
 // based on function pointers (ie. external .so libraries)
 // This avoids having to link against libtorch for C++ based custom allocators
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, cudaStream_t)> free_fn)
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
     : alloc_fn_(alloc_fn), free_fn_(free_fn) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
@@ -29,10 +39,10 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       memory_fraction_fn_(other.memory_fraction_fn_),
       base_alloc_fn_(other.base_alloc_fn_),
       record_stream_fn_(other.record_stream_fn_),
-      capture_begin_fn_(other.capture_begin_fn_),
-      capture_about_to_end_fn_(other.capture_about_to_end_fn_),
-      capture_ended_fn_(other.capture_ended_fn_),
-      capture_destroy_fn_(other.capture_destroy_fn_) {}
+      begin_allocate_stream_to_pool_fn_(
+          other.begin_allocate_stream_to_pool_fn_),
+      end_allocate_stream_to_pool_fn_(other.end_allocate_stream_to_pool_fn_),
+      relase_pool_fn_(other.relase_pool_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
   init_fn_ = init_fn;
@@ -57,25 +67,20 @@ void CUDAPluggableAllocator::set_record_stream_fn(
   record_stream_fn_ = record_stream_fn;
 }
 
-void CUDAPluggableAllocator::set_capture_begin_fn(
-    std::function<void(int, c10::cuda::CaptureId_t, c10::cuda::MempoolId_t)>
+void CUDAPluggableAllocator::set_begin_allocate_stream_to_pool(
+    std::function<void(int, cudaStream_t, c10::cuda::MempoolId_t)>
         capture_begin_fn) {
-  capture_begin_fn_ = capture_begin_fn;
+  begin_allocate_stream_to_pool_fn_ = capture_begin_fn;
 }
 
-void CUDAPluggableAllocator::set_capture_about_to_end_fn(
-    std::function<void(int, c10::cuda::CaptureId_t)> capture_about_to_end_fn) {
-  capture_about_to_end_fn_ = capture_about_to_end_fn;
+void CUDAPluggableAllocator::set_end_allocate_stream_to_pool_fn(
+    std::function<void(int, cudaStream_t)> capture_about_to_end_fn) {
+  end_allocate_stream_to_pool_fn_ = capture_about_to_end_fn;
 }
 
-void CUDAPluggableAllocator::set_capture_ended_fn(
-    std::function<void(int, c10::cuda::CaptureId_t)> capture_ended_fn) {
-  capture_ended_fn_ = capture_ended_fn;
-}
-
-void CUDAPluggableAllocator::set_capture_destroy_fn(
+void CUDAPluggableAllocator::set_release_pool(
     std::function<void(int, c10::cuda::MempoolId_t)> capture_destroy_fn) {
-  capture_destroy_fn_ = capture_destroy_fn;
+  relase_pool_fn_ = capture_destroy_fn;
 }
 
 void* CUDAPluggableAllocator::malloc(
@@ -85,7 +90,7 @@ void* CUDAPluggableAllocator::malloc(
   void* r = alloc_fn_(size, device, stream);
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
-    allocation_metadata_.emplace(r, std::make_pair(size, stream));
+    allocation_metadata_.emplace(r, _AllocationMetadata(size, device, stream));
   }
   return r;
 }
@@ -122,18 +127,20 @@ void* CUDAPluggableAllocator::raw_alloc_with_stream(
 
 void CUDAPluggableAllocator::raw_delete(void* ptr) {
   cudaStream_t stream;
+  int device_idx;
   size_t size;
   {
     const std::lock_guard<std::mutex> lock(allocator_mutex_);
     TORCH_CHECK(
         allocation_metadata_.count(ptr),
         "Trying to free a pointer not allocated here");
-    auto pair = allocation_metadata_[ptr];
-    size = pair.first;
-    stream = pair.second;
+    _AllocationMetadata& metadata = allocation_metadata_[ptr];
+    size = metadata.size;
+    device_idx = metadata.device_idx;
+    stream = metadata.stream;
     allocation_metadata_.erase(ptr);
   }
-  free_fn_(ptr, size, stream);
+  free_fn_(ptr, size, device_idx, stream);
 }
 
 void CUDAPluggableAllocator::init(int device_count) {
@@ -220,36 +227,28 @@ std::shared_ptr<void> CUDAPluggableAllocator::getIpcDevPtr(std::string handle) {
 }
 
 // CUDAGraph interactions
-void CUDAPluggableAllocator::notifyCaptureBegin(
+void CUDAPluggableAllocator::beginAllocateStreamToPool(
     int device,
-    c10::cuda::CaptureId_t graph_id,
+    cudaStream_t stream,
     c10::cuda::MempoolId_t mempool_id) {
-  if (capture_begin_fn_) {
-    capture_begin_fn_(device, graph_id, mempool_id);
+  if (begin_allocate_stream_to_pool_fn_) {
+    begin_allocate_stream_to_pool_fn_(device, stream, mempool_id);
   }
 }
 
-void CUDAPluggableAllocator::notifyCaptureAboutToEnd(
+void CUDAPluggableAllocator::endAllocateStreamToPool(
     int device,
-    c10::cuda::CaptureId_t graph_id) {
-  if (capture_about_to_end_fn_) {
-    capture_about_to_end_fn_(device, graph_id);
+    cudaStream_t stream) {
+  if (end_allocate_stream_to_pool_fn_) {
+    end_allocate_stream_to_pool_fn_(device, stream);
   }
 }
 
-void CUDAPluggableAllocator::notifyCaptureEnded(
-    int device,
-    c10::cuda::CaptureId_t graph_id) {
-  if (capture_ended_fn_) {
-    capture_ended_fn_(device, graph_id);
-  }
-}
-
-void CUDAPluggableAllocator::notifyCaptureDestroy(
+void CUDAPluggableAllocator::releasePool(
     int device,
     c10::cuda::MempoolId_t mempool_id) {
-  if (capture_destroy_fn_) {
-    capture_destroy_fn_(device, mempool_id);
+  if (relase_pool_fn_) {
+    relase_pool_fn_(device, mempool_id);
   }
 }
 
@@ -269,6 +268,26 @@ void CUDAPluggableAllocator::attachOutOfMemoryObserver(
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support attachOutOfMemoryObserver. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState>
+CUDAPluggableAllocator::getCheckpointState(
+    int device,
+    at::cuda::MempoolId_t id) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support getCheckpointState. "
+      "If you need it, please file an issue describing your use case.");
+}
+
+c10::cuda::CUDACachingAllocator::CheckpointDelta CUDAPluggableAllocator::
+    setCheckpointPoolState(
+        int device,
+        std::shared_ptr<c10::cuda::CUDACachingAllocator::AllocatorState> pps) {
+  TORCH_CHECK(
+      false,
+      "CUDAPluggableAllocator does not yet support setCheckpointPoolState. "
       "If you need it, please file an issue describing your use case.");
 }
 
@@ -292,7 +311,7 @@ getCurrentAllocator() {
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, cudaStream_t)> free_fn) {
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
       new CUDAPluggableAllocator(alloc_fn, free_fn));
   allocator->init(device_count);

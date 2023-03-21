@@ -1,88 +1,30 @@
+import warnings
 from collections import defaultdict
-from enum import IntEnum
+from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
+
+import torch.utils.data.datapipes.iter.sharding
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import IterDataPipe, DataChunk
+from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
-from typing import Any, Callable, DefaultDict, Dict, Iterator, List, Optional, Sized, Tuple, TypeVar
 
 __all__ = [
     "BatcherIterDataPipe",
     "GrouperIterDataPipe",
-    "ShardingFilterIterDataPipe",
-    "SHARDING_PRIORITIES",
     "UnBatcherIterDataPipe",
 ]
 
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 
+def __getattr__(name: str):
+    if name in ["SHARDING_PRIORITIES", "ShardingFilterIterDataPipe"]:
+        warnings.warn(f"`{name}` from `torch.utils.data.datapipes.iter.grouping` is going to be removed in PyTorch 2.1"
+                      f"Please use `{name}` from the `torch.utils.data.datapipes.iter.sharding`",
+                      category=FutureWarning, stacklevel=2)
 
-class SHARDING_PRIORITIES(IntEnum):
-    DEFAULT = 1
-    DISTRIBUTED = 2
-    MULTIPROCESSING = 3
+        return getattr(torch.utils.data.datapipes.iter.sharding, name)
 
-
-@functional_datapipe('sharding_filter')
-class ShardingFilterIterDataPipe(IterDataPipe):
-    r"""
-    Wrapper that allows DataPipe to be sharded (functional name: ``sharding_filter``). After ``apply_sharding`` is
-    called, each instance of the DataPipe (on different workers) will have every `n`-th element of the
-    original DataPipe, where `n` equals to the number of instances.
-
-    Args:
-        source_datapipe: Iterable DataPipe that will be sharded
-    """
-
-    def __init__(self, source_datapipe: IterDataPipe, sharding_group_filter=None):
-        self.source_datapipe = source_datapipe
-        self.sharding_group_filter = sharding_group_filter
-        self.groups: Dict[int, Tuple[int, int]] = {}
-        self.num_of_instances = 1
-        self.instance_id = 0
-        self._update_num_of_instances()
-
-    def is_shardable(self):
-        return True
-
-    def apply_sharding(self, num_of_instances, instance_id, sharding_group=SHARDING_PRIORITIES.DEFAULT):
-        if instance_id >= num_of_instances:
-            raise ValueError(f"instance_id({instance_id}) should be smaller than num_of_instances({num_of_instances})")
-        if sharding_group == SHARDING_PRIORITIES.DEFAULT:
-            if len(self.groups) and SHARDING_PRIORITIES.DEFAULT not in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')
-        else:
-            if SHARDING_PRIORITIES.DEFAULT in self.groups:
-                raise Exception('ShardingFilter cannot mix DEFAULT and non DEFAULT groups')
-        self.groups[sharding_group] = (num_of_instances, instance_id)
-        self._update_num_of_instances()
-
-    def _update_num_of_instances(self):
-        sorted_sharding_groups = []
-        for key in sorted(self.groups.keys()):
-            if self.sharding_group_filter is None or key == self.sharding_group_filter:
-                sorted_sharding_groups.append(self.groups[key])
-
-        sorted_sharding_groups.reverse()
-
-        self.num_of_instances = 1
-        self.instance_id = 0
-
-        for group_num_of_instances, group_instance_id in sorted_sharding_groups:
-            self.instance_id += self.num_of_instances * group_instance_id
-            self.num_of_instances *= group_num_of_instances
-
-    def __iter__(self):
-        for i, item in enumerate(self.source_datapipe):
-            if i % self.num_of_instances == self.instance_id:
-                yield item
-
-    def __len__(self):
-        if isinstance(self.source_datapipe, Sized):
-            return len(self.source_datapipe) // self.num_of_instances +\
-                (1 if (self.instance_id < len(self.source_datapipe) % self.num_of_instances) else 0)
-        raise TypeError("{} instance doesn't have valid length".format(type(self).__name__))
-
+    raise AttributeError(f"module {__name__} has no attribute {name}")
 
 @functional_datapipe('batch')
 class BatcherIterDataPipe(IterDataPipe[DataChunk]):
@@ -182,7 +124,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         if unbatch_level < -1:
             raise ValueError("unbatch_level must be -1 or >= 0")
         if unbatch_level == -1:
-            if isinstance(element, list) or isinstance(element, DataChunk):
+            if isinstance(element, (list, DataChunk)):
                 for item in element:
                     for i in self._dive(item, unbatch_level=-1):
                         yield i
@@ -191,7 +133,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         elif unbatch_level == 0:
             yield element
         else:
-            if isinstance(element, list) or isinstance(element, DataChunk):
+            if isinstance(element, (list, DataChunk)):
                 for item in element:
                     for i in self._dive(item, unbatch_level=unbatch_level - 1):
                         yield i
@@ -216,6 +158,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     Args:
         datapipe: Iterable datapipe to be grouped
         group_key_fn: Function used to generate group key from the data of the source datapipe
+        keep_key: Option to yield the matching key along with the items in a tuple,
+            resulting in `(key, [items])` otherwise returning [items]
         buffer_size: The size of buffer for ungrouped data
         group_size: The max size of each group, a batch is yielded as soon as it reaches this size
         guaranteed_group_size: The guaranteed minimum group size to be yielded in case the buffer is full
@@ -243,8 +187,9 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
     """
     def __init__(self,
                  datapipe: IterDataPipe[T_co],
-                 group_key_fn: Callable,
+                 group_key_fn: Callable[[T_co], Any],
                  *,
+                 keep_key: bool = False,
                  buffer_size: int = 10000,
                  group_size: Optional[int] = None,
                  guaranteed_group_size: Optional[int] = None,
@@ -253,6 +198,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.datapipe = datapipe
         self.group_key_fn = group_key_fn
 
+        self.keep_key = keep_key
         self.max_buffer_size = buffer_size
         self.buffer_elements: DefaultDict[Any, List] = defaultdict(list)
         self.curr_buffer_size = 0
@@ -295,19 +241,21 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.curr_buffer_size += 1
 
             if self.group_size is not None and self.group_size == len(self.buffer_elements[key]):
-                yield self.wrapper_class(self.buffer_elements[key])
+                result: DataChunk[Any] = self.wrapper_class(self.buffer_elements[key])
+                yield (key, result) if self.keep_key else result
                 self.curr_buffer_size -= len(self.buffer_elements[key])
                 del self.buffer_elements[key]
 
             if self.curr_buffer_size == self.max_buffer_size:
                 result_to_yield = self._remove_biggest_key()
                 if result_to_yield is not None:
-                    yield self.wrapper_class(result_to_yield)
+                    result = self.wrapper_class(result_to_yield)
+                    yield (key, result) if self.keep_key else result
 
         for key in tuple(self.buffer_elements.keys()):
-            res = self.buffer_elements.pop(key)
-            self.curr_buffer_size -= len(res)
-            yield self.wrapper_class(res)
+            result = self.wrapper_class(self.buffer_elements.pop(key))
+            self.curr_buffer_size -= len(result)
+            yield (key, result) if self.keep_key else result
 
     def reset(self) -> None:
         self.curr_buffer_size = 0
@@ -317,6 +265,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         state = (
             self.datapipe,
             self.group_key_fn,
+            self.keep_key,
             self.max_buffer_size,
             self.group_size,
             self.guaranteed_group_size,
@@ -333,6 +282,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         (
             self.datapipe,
             self.group_key_fn,
+            self.keep_key,
             self.max_buffer_size,
             self.group_size,
             self.guaranteed_group_size,

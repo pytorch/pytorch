@@ -29,8 +29,7 @@ namespace flatbuffers = flatbuffers_fbsource;
 #include <torch/csrc/jit/serialization/mobile_bytecode_generated.h> // NOLINT
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using flatbuffers::FlatBufferBuilder;
 using mobile::serialization::CreateArg;
@@ -236,7 +235,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<mobile::serialization::Operator>>
       operator_vector;
   operator_vector.reserve(code.op_names_.size());
-  for (int i = 0; i < code.op_names_.size(); ++i) {
+  for (const auto i : c10::irange(code.op_names_.size())) {
     const auto& opname = code.op_names_[i];
     const int op_size = code.operator_input_sizes_[i];
     operator_vector.push_back(CreateOperator(
@@ -831,5 +830,4 @@ bool register_flatbuffer_serializer() {
   return true;
 }
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
