@@ -1244,10 +1244,10 @@ class TestQuantizeFx(QuantizationTestCase):
         class ConvTranspose1d(torch.nn.Module):
             def __init__(self, *args):
                 super().__init__()
-                self.conv = torch.nn.ConvTranspose1d(*args)
+                self.deconv = torch.nn.ConvTranspose1d(*args)
 
             def forward(self, x):
-                return self.conv(x)
+                return self.deconv(x)
 
         conv_transpose1d_input = torch.rand(1, 3, 224)
         conv_transpose1d_module_args = (3, 3, 3)
@@ -1255,10 +1255,10 @@ class TestQuantizeFx(QuantizationTestCase):
         class ConvTranspose2d(torch.nn.Module):
             def __init__(self, *args):
                 super().__init__()
-                self.conv = torch.nn.ConvTranspose2d(*args)
+                self.deconv = torch.nn.ConvTranspose2d(*args)
 
             def forward(self, x):
-                return self.conv(x)
+                return self.deconv(x)
 
         conv_transpose2d_input = torch.rand(1, 3, 224, 224)
         conv_transpose2d_module_args = (3, 3, 3)
@@ -1266,10 +1266,10 @@ class TestQuantizeFx(QuantizationTestCase):
         class ConvTranspose3d(torch.nn.Module):
             def __init__(self, *args):
                 super().__init__()
-                self.conv = torch.nn.ConvTranspose3d(*args)
+                self.deconv = torch.nn.ConvTranspose3d(*args)
 
             def forward(self, x):
-                return self.conv(x)
+                return self.deconv(x)
 
         conv_transpose3d_input = torch.rand(1, 3, 32, 224, 224)
         conv_transpose3d_module_args = (3, 3, 3)
@@ -1349,28 +1349,28 @@ class TestQuantizeFx(QuantizationTestCase):
             qr = result_dict["quantized_reference"]
 
             def checkWeightQParams(model):
-                for module_name in ("linear", "conv"):
-                    if hasattr(model, module_name):
-                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
-                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
-                        self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
-                        self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_qscheme"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_scale"))
+                    self.assertTrue(hasattr(qr.get_submodule(module_name), "weight_zero_point"))
+                    self.assertTrue("Reference" in qr.get_submodule(module_name)._get_name())
 
             def checkSerDeser(model, is_dynamic):
-                for module_name in ("linear", "conv"):
-                    if hasattr(model, module_name):
-                        # make sure seralization works
-                        state_dict = copy.deepcopy(model.state_dict())
-                        all_keys = _get_keys(module_name, is_dynamic)
-                        for key in all_keys:
-                            self.assertTrue(key in state_dict)
-                        # check load_state_dict restores states
-                        module = getattr(model, module_name)
-                        prev_scale = module.weight_scale
-                        module.weight_scale = None
-                        model.load_state_dict(state_dict)
-                        module = getattr(model, module_name)
-                        self.assertTrue(torch.equal(prev_scale, module.weight_scale))
+                module_name = "deconv"
+                if hasattr(model, module_name):
+                    # make sure seralization works
+                    state_dict = copy.deepcopy(model.state_dict())
+                    all_keys = _get_keys(module_name, is_dynamic)
+                    for key in all_keys:
+                        self.assertTrue(key in state_dict)
+                    # check load_state_dict restores states
+                    module = getattr(model, module_name)
+                    prev_scale = module.weight_scale
+                    module.weight_scale = None
+                    model.load_state_dict(state_dict)
+                    module = getattr(model, module_name)
+                    self.assertTrue(torch.equal(prev_scale, module.weight_scale))
 
 
             checkWeightQParams(qr)
