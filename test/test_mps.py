@@ -1946,6 +1946,10 @@ class TestMPS(TestCaseMPS):
         c = torch.tensor([[1, 2, 3], [-1, 1, 4]], dtype=torch.float, device="mps")
         c_cpu = torch.tensor([[1, 2, 3], [-1, 1, 4]] , dtype=torch.float, device="cpu")
 
+        res = torch.norm(c, dim=[])
+        res_cpu = torch.norm(c_cpu, dim=[])
+        self.assertEqual(res, res_cpu)
+
         res = torch.norm(c, dim=0)
         res_cpu = torch.norm(c_cpu, dim=0)
         self.assertEqual(res, res_cpu)
