@@ -249,15 +249,15 @@ class TensorVariable(VariableTracker):
         if name == "stride" and self.stride is not None:
             constant_result = ConstantVariable(self.stride, **options)
         elif name == "size" and self.size is not None:
+            sizes = [variables.ConstantVariable(x) for x in self.size]
+            constant_result = SizeVariable(sizes, **options)
+
             if "dim" in kwargs:
-                dim = kwargs.pop("dim").as_python_constant()
-                assert -len(self.size) <= dim and dim < len(
-                    self.size
-                ), f"Dimension out of range (expected to be in range of [{-len(self.size)}, {len(self.size) - 1}], but got {dim})"
-                constant_result = variables.ConstantVariable(self.size[dim])
-            else:
-                sizes = [variables.ConstantVariable(x) for x in self.size]
-                constant_result = SizeVariable(sizes, **options)
+                dim = kwargs.pop("dim")
+                constant_result = constant_result.call_method(
+                    tx, "__getitem__", [dim], {}
+                )
+
         elif name == "size" and self.size is None and config.dynamic_shapes:
             return wrap_fx_proxy(
                 tx,
