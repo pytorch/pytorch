@@ -78,9 +78,13 @@ void set_axes(NSMutableArray<NSNumber*>*& axes,
               int64_t num_reduce_dims,
               OptionalIntArrayRef opt_dim,
               int64_t num_input_dims) {
-  if (num_reduce_dims == 0) {
-    axes = [NSMutableArray<NSNumber*> arrayWithCapacity:1];
-    axes[0] = @0;
+  if (!opt_dim.has_value() || num_reduce_dims == 0) {
+    // To match the CPU implementation, when dim={} or null,
+    // performs an all-reduce
+    axes = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
+    for (const auto i : c10::irange(num_input_dims)) {
+      axes[i] = @(i);
+    }
   } else {
     TORCH_INTERNAL_ASSERT(opt_dim.has_value());
     IntArrayRef dim = opt_dim.value();
