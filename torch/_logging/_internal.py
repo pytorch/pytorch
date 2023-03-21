@@ -261,7 +261,10 @@ def _invalid_settings_err_msg(settings):
             log_registry.log_alias_to_log_qname.keys(), log_registry.artifact_names
         )
     )
-    msg = f"Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, registered log names or registered artifact names.\nCurrently registered names: {entities}"
+    msg = (
+        f"Invalid log settings: {settings}, must be a comma separated list of fully qualified module names, "
+        f"registered log names or registered artifact names.\nCurrently registered names: {entities}"
+    )
     return msg
 
 
