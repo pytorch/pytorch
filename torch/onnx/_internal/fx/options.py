@@ -28,7 +28,7 @@ class ExportOptions:
     opset_version: int = _constants.ONNX_DEFAULT_OPSET
     use_binary_format: bool = True
     op_level_debug: bool = False
-    dynamic_axes: bool = False
+    dynamic_axes: bool = True
     decomposition_table: Dict[torch._ops.OpOverload, Callable] = dataclasses.field(
         default_factory=lambda: function_dispatcher._ONNX_FRIENDLY_DECOMPOSITION_TABLE
     )

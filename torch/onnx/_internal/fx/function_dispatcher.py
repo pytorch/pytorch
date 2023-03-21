@@ -181,8 +181,6 @@ def _create_op_overload_to_exporter_key_table() -> (
 
                 table[op_overload] = op_overload_packet._qualified_op_name
     # NOTE: Below are not in torch.ops.aten/torch.ops.prim
-    # TODO(justinchuby): is baddbmm different?
-    table[torch.ops.aten.baddbmm.default] = "aten::baddbmm"
     # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
     # overloadpacket for some reasons.
     # https://github.com/pytorch/pytorch/issues/97201
@@ -193,11 +191,12 @@ def _create_op_overload_to_exporter_key_table() -> (
 # Dictionary that maps torch.ops.aten.* to exporter look up key; e.g.,
 # _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[torch.add.Tensor] is "aten::add".
 _OP_OVERLOAD_TO_EXPORTER_KEY_TABLE = _create_op_overload_to_exporter_key_table()
-
 _BUILTIN_TO_EXPORTER_KEY_TABLE = {
     operator.getitem: "getitem",
     operator.mul: "aten::mul",
     operator.add: "aten::add",
+    operator.pow: "aten::pow",
+    operator.sub: "aten::sub",
 }
 
 

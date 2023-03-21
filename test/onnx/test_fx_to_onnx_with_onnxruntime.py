@@ -17,7 +17,6 @@ import onnxruntime  # type: ignore[import]
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.onnx._internal import diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
 from torch.utils import _pytree as pytree
@@ -62,6 +61,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         *input_args,
         opset_version=opset_version,
         use_binary_format=True,
+        dynamic_axes=True,
         **input_kwargs,
     )
 
@@ -210,8 +210,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
+        # FIXME(titaiwang): SegFault when symbolic tracing is used
+        # https://github.com/microsoft/onnx-script/issues/523
         onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-            model, use_binary_format=True, opset_version=self.opset_version, **inputs
+            model,
+            use_binary_format=True,
+            opset_version=self.opset_version,
+            dynamic_axes=False,
+            **inputs,
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
@@ -227,6 +233,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         create_model: Callable,
         create_args: Callable,
         create_pytorch_only_kwargs: Callable,
+        dynamic_axes: bool = True,
     ):
         """Test helper for large-scale exporter.
 
@@ -235,6 +242,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model: A function that creates a model. It should always create the same model.
             create_args: A function that creates random input arguments for the model.
             create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+            dynamic_axes: Whether to export the model with dynamic axes. This would set
+                the shape of input and nodes all to dynamic by following symbolic fx graph.
+                op_level_debug is not supported when dynamic axes is on.
 
         This test contains several steps.
 
@@ -261,16 +271,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # The file will be loaded via .load_state_dict(...)
             torch.save(model.state_dict(), tmp_file.name)
 
-            ftm = FakeTensorMode(
-                allow_non_fake_inputs=True, allow_fallback_kernels=False
-            )
             ctx = fx_onnx.FxToOnnxContext()
-
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
             #  2. Convert nn.Module into ONNX model without initializers.
             #  3. Record the file paths to find real initializers.
-            with ftm, ctx:
+            with ctx:
                 # Toy model with parameters and buffers as FakeTensor's.
                 fake_model = create_model()
                 fake_model.load_state_dict(torch.load(tmp_file.name))
@@ -283,6 +289,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     use_binary_format=False,
                     opset_version=self.opset_version,
+                    dynamic_axes=dynamic_axes,
                 )
 
             # Tasks done by the following block.
@@ -349,7 +356,11 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return {}
 
         self._test_large_scale_exporter(
-            "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
+            "toy_mlp1",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+            dynamic_axes=True,
         )
 
     def test_large_scale_exporter_with_tiny_gpt2(self):
@@ -368,8 +379,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {"return_dict": False}
 
+        # FIXME(titaiwang): SegFault when symbolic tracing is used
+        # https://github.com/microsoft/onnx-script/issues/523
         self._test_large_scale_exporter(
-            "tiny_gpt2", create_model, create_args, create_pytorch_only_extra_kwargs
+            "tiny_gpt2",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+            dynamic_axes=False,
         )
 
 

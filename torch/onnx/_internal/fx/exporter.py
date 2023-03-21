@@ -35,18 +35,11 @@ def _export(
     # Make sure the feed-in "module" is stateless.
     # Ensure placeholder targets match the original module's signature since
     # We don't want to map forward(x, y, z) to forward(arg0, arg1, arg2).
+    # Symbolic output of the i-th node can be accessed via
+    # decomposed_module.graph.nodes[i].meta["val"]
     decomposed_module = passes.decompose(
         module, export_options.decomposition_table, export_options.dynamic_axes, *args
     )
-    # TODO(titaiwang): in fake mode we have seen fx.nodes without node.meta["val"]
-    # Do we need this in symbolic mode?
-    if not export_options.dynamic_axes:
-        # Run FakeTensorProp on decomposed_module.
-        # Symbolic output of the i-th node can be accessed via
-        # decomposed_module.graph.nodes[i].meta["val"]
-        decomposed_module = passes.shape_inference_with_fake_tensor(
-            decomposed_module, *args
-        )
     # We want to pass list of ints and floats to TorchScript graph correctly
     # in _export_fx_to_ts, so we must disable FakeTensorMode. Otherwise, graph may
     # receive FakeTensor and results runtime error. In addition, TorchScript-based
@@ -72,7 +65,7 @@ def export(
     use_binary_format: bool = True,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     op_level_debug: bool = False,
-    dynamic_axes: bool = False,
+    dynamic_axes: bool = True,
 ) -> Union["onnx.ModelProto", bytes]:
     # args will be converted to symbolic tensor. Let's copy to avoid side effects.
     args = copy.deepcopy(args)
@@ -105,7 +98,7 @@ def export_after_normalizing_args_and_kwargs(
     use_binary_format: bool = True,
     opset_version: int = _constants.ONNX_DEFAULT_OPSET,
     op_level_debug: bool = False,
-    dynamic_axes: bool = False,
+    dynamic_axes: bool = True,
     **kwargs,
 ) -> Union["onnx.ModelProto", bytes]:
     """Export an nn.Module or a callable to ONNX.

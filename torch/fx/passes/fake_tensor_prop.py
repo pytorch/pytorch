@@ -1,6 +1,4 @@
-from __future__ import annotations
-
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import torch.fx
 from torch.fx import Node
@@ -34,7 +32,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         n.meta['val'] = result
         return result
 
-    def propagate(self, *args, initial_env: Optional[Dict[str, Any]] = None):
+    def propagate(self, *args):
         with self._mode:
             fake_args = [self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
-            return super().run(*fake_args, initial_env=initial_env)
+            return super().run(*fake_args)
