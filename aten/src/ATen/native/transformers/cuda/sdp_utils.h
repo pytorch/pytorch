@@ -492,10 +492,11 @@ inline bool check_gpu_sm75_or_greater(sdp_params params, bool debug) {
   auto dprops = at::cuda::getCurrentDeviceProperties();
   bool is_sm75 = dprops->major == 7 && dprops->minor == 5;
   bool is_sm8x = dprops->major == 8 && dprops->minor >= 0;
-  if (!(is_sm8x || is_sm75)) {
+  bool is_sm90 = dprops->major == 9 && dprops->minor == 0;
+  if (!(is_sm90 || is_sm8x || is_sm75)) {
     if (debug) {
       TORCH_WARN(
-        "Flash attention only supports sm75 and sm8x gpu architectures. Attempting to run on a sm ",
+        "Flash attention only supports {sm75, sm8x, sm90} gpu architectures. Attempting to run on a sm ",
         dprops->major,
         ".",
         dprops->minor,

@@ -51,7 +51,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     input_args,
     rtol: float = 1e-3,
     atol: float = 1e-7,
-    opset_version: int = 17,
+    opset_version: int = 18,
     **input_kwargs,
 ):
     # Feed args and kwargs into exporter.
@@ -94,7 +94,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         self.diag_ctx = diagnostics.engine.create_diagnostic_context(
             "test_fx_export", version=torch.__version__
         )
-        self.opset_version = 17
+        self.opset_version = 18
 
     def tearDown(self):
         diagnostics.engine.dump(
@@ -185,7 +185,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
     # test single op with no kwargs
     def test_sigmoid_add(self):
-        self.opset_version = 17
         # TODO(titaiwang): change to randn once it's ready
         x = torch.tensor([1.0, 2.0], dtype=torch.float)
 

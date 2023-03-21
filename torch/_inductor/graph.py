@@ -9,6 +9,7 @@ from typing import Dict, List, Optional, Set
 import sympy
 
 import torch
+import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
@@ -47,6 +48,7 @@ from .utils import (
 from .virtualized import V
 
 log = logging.getLogger(__name__)
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
 def supported_dtype_of_cpp_wrapper(dtype):
@@ -130,6 +132,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
         self.graph_outputs: Optional[List[ir.IRNode]] = None
         self.device_types: Set[str] = set()
+        self.device_idxs: Set[int] = set()
         self.buffers: List[ir.ComputedBuffer] = []
         self.constants: Dict[str, torch.Tensor] = {}
         self.removed_buffers: Set[str] = set()
@@ -319,6 +322,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
+        if example.device.type == "cuda":
+            self.device_idxs.add(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -487,7 +492,6 @@ class GraphLowering(torch.fx.Interpreter):
                             torch.ops.aten.convolution.default,
                             torch.ops.aten.convolution_backward.default,
                             torch.ops.aten.mm.default,
-                            torch.ops.aten._int_mm.default,
                         ]
                         if torch._C.has_mkldnn:
                             need_fixed_layout += [
@@ -619,14 +623,16 @@ class GraphLowering(torch.fx.Interpreter):
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code = self.codegen()
+        code, linemap = self.codegen()
         if config.debug:
             print(code)
 
-        mod = PyCodeCache.load(code)
+        mod = PyCodeCache.load(code, linemap=linemap)
         for name, value in self.constants.items():
             setattr(mod, name, value)
 
+        log.debug(f"Output code written to: {mod.__file__}")
+        output_code_log.debug(f"Output code: \n{code}")
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
         V.debug.output_code(mod.__file__)
