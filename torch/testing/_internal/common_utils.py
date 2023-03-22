@@ -1168,6 +1168,18 @@ class DeterministicGuard:
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
 
+class AlwaysWarnTypedStorageRemoval:
+    def __init__(self, always_warn):
+        assert isinstance(always_warn, bool)
+        self.always_warn = always_warn
+
+    def __enter__(self):
+        self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
+
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
 # we are not exposing it to the core because sync debug mode is
