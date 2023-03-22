@@ -53,7 +53,9 @@ void _process_forward_mode_AD(
     const optional_variable_list& outputs,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    _jvp_fn_t jvp_user_function) {
+    _jvp_fn_t jvp_user_function,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>&
+        inverse_alias_map) {
   // TODO handle multiple levels here
   uint64_t level = 0;
 
@@ -134,8 +136,14 @@ void _process_forward_mode_AD(
     const auto& out =
         outputs[i].has_value() ? outputs[i].value() : at::Tensor();
     auto out_tensor_impl = raw_outputs[i].value().unsafeGetTensorImpl();
+    bool marked_non_differentiable =
+        non_differentiable.count(out_tensor_impl) == 0;
+    if (inverse_alias_map.count(out_tensor_impl) > 0) {
+      marked_non_differentiable |=
+          non_differentiable.count(inverse_alias_map.at(out_tensor_impl)) > 0;
+    }
     bool is_differentiable =
-        (non_differentiable.count(out_tensor_impl) == 0 &&
+        (!marked_non_differentiable &&
          isDifferentiableType(raw_outputs[i].value().scalar_type()));
     const auto& out_grad = forward_grads[i];
     if (!out.defined() || !is_differentiable) {
@@ -152,6 +160,10 @@ void _process_forward_mode_AD(
     TORCH_INTERNAL_ASSERT(raw_outputs[i].has_value());
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
+    if (inverse_alias_map.count(out_tensor_impl) > 0) {
+      is_modified |=
+          dirty_inputs.count(inverse_alias_map.at(out_tensor_impl)) > 0;
+    }
 
     if (is_modified) {
       TORCH_CHECK(
@@ -273,7 +285,10 @@ optional_variable_list _process_backward_mode_ad(
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
-    const std::shared_ptr<Node>& cdata) {
+    const std::shared_ptr<Node>& cdata,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>&
+        inverse_alias_map) {
   int num_outputs = raw_outputs.size();
 
   // Sets the grad_fn and output_nr of an output Variable.
@@ -367,8 +382,17 @@ optional_variable_list _process_backward_mode_ad(
     auto out_tensor_impl = var.unsafeGetTensorImpl();
     bool is_input = inputs_mapping.count(out_tensor_impl) > 0;
     bool is_modified = dirty_inputs.count(out_tensor_impl) > 0;
-    bool is_differentiable = cdata &&
-        non_differentiable.count(out_tensor_impl) == 0 &&
+    if (inverse_alias_map.count(out_tensor_impl) > 0) {
+      is_modified |=
+          dirty_inputs.count(inverse_alias_map.at(out_tensor_impl)) > 0;
+    }
+    bool marked_non_differentiable =
+        non_differentiable.count(out_tensor_impl) > 0;
+    if (inverse_alias_map.count(out_tensor_impl) > 0) {
+      marked_non_differentiable |=
+          non_differentiable.count(inverse_alias_map.at(out_tensor_impl)) > 0;
+    }
+    bool is_differentiable = cdata && !marked_non_differentiable &&
         isDifferentiableType(var.scalar_type());
 
     if (cdata) {
@@ -413,7 +437,7 @@ optional_variable_list _process_backward_mode_ad(
   // valid.
   for (auto& dirty_input : dirty_inputs) {
     TORCH_CHECK(
-        outputs_impl.count(dirty_input) > 0,
+        outputs_impl.count(dirty_input) > 0 || alias_map.count(dirty_input) > 0,
         "Some elements marked as dirty during the forward method were not returned as output. The"
         " inputs that are modified inplace must all be outputs of the Function.");
   }
@@ -427,7 +451,10 @@ optional_variable_list _wrap_outputs(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    _jvp_fn_t jvp_user_function) {
+    _jvp_fn_t jvp_user_function,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>&
+        inverse_alias_map) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
@@ -435,7 +462,13 @@ optional_variable_list _wrap_outputs(
   }
 
   auto outputs = _process_backward_mode_ad(
-      inputs_mapping, non_differentiable, dirty_inputs, raw_outputs, cdata);
+      inputs_mapping,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      alias_map,
+      inverse_alias_map);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
@@ -446,7 +479,8 @@ optional_variable_list _wrap_outputs(
       outputs,
       non_differentiable,
       dirty_inputs,
-      std::move(jvp_user_function));
+      std::move(jvp_user_function),
+      inverse_alias_map);
 
   return outputs;
 }

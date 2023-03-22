@@ -407,6 +407,84 @@ class TestAutograd(TestCase):
 
         gradcheck(foo, (t1, t2, t3))
 
+    def test_custom_function_raises_if_input_returned_as_is_and_saved(self):
+        for save_inputs, mark_dirty in product(*([(True, False)] * 2)):
+            class Func(torch.autograd.Function):
+                @staticmethod
+                def forward(x):
+                    return x ** 3, x
+
+                @staticmethod
+                def setup_context(ctx, inputs, outputs):
+                    alias = outputs[1]
+                    orig = inputs[0]
+                    self.assertTrue(alias._base is orig)
+                    if mark_dirty:
+                        ctx.mark_dirty(orig)
+
+                    if save_inputs:
+                        ctx.save_for_backward(orig)
+                    else:
+                        ctx.save_for_backward(alias)
+
+                @staticmethod
+                def backward(ctx, grad_output, grad_x):
+                    pass
+
+            a = torch.tensor(1., requires_grad=True).clone()
+
+            if save_inputs or mark_dirty:
+                _unused, b = Func.apply(a)
+                if mark_dirty:
+                    self.assertTrue(a is b)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
+                    Func.apply(a)
+
+    def test_custom_function_mark_dirty_on_aliased_output(self):
+        for mark_inputs in (True, False):
+            class Func(torch.autograd.Function):
+                @staticmethod
+                def forward(x):
+                    return x ** 3, x
+
+                @staticmethod
+                def setup_context(ctx, inputs, outputs):
+                    if mark_inputs:
+                        ctx.mark_dirty(inputs[0])
+                    else:
+                        ctx.mark_dirty(outputs[1])
+
+                @staticmethod
+                def backward(ctx, grad_output, grad_x):
+                    pass
+
+            a = torch.tensor(1., requires_grad=True).clone()
+            _unused, b = Func.apply(a)
+            self.assertTrue(a is b)
+
+    def test_custom_function_non_mark_differentiable_on_aliased_output(self):
+        for mark_inputs in (True, False):
+            class Func(torch.autograd.Function):
+                @staticmethod
+                def forward(x):
+                    return x ** 3, x
+
+                @staticmethod
+                def setup_context(ctx, inputs, outputs):
+                    if mark_inputs:
+                        ctx.mark_non_differentiable(inputs[0])
+                    else:
+                        ctx.mark_non_differentiable(outputs[1])
+
+                @staticmethod
+                def backward(ctx, grad_output, grad_x):
+                    pass
+
+            a = torch.tensor(1., requires_grad=True)
+            _unused, b = Func.apply(a)
+            self.assertFalse(b.requires_grad)
+
     def test_custom_function_no_tensors(self):
         class MyFunction(Function):
 

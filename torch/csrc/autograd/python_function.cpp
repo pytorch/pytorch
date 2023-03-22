@@ -366,7 +366,11 @@ static void _wrap_outputs(
     const variable_list& input_vars,
     PyObject* raw_output,
     PyObject* outputs,
-    bool is_executable) {
+    bool is_executable,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>&
+        inverse_alias_map,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs) {
   auto cdata_if_executable = is_executable ? cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -375,7 +379,6 @@ static void _wrap_outputs(
   }
 
   auto non_differentiable = _parse_non_differentiable(self);
-  auto dirty_inputs = _mark_dirty(self);
 
   std::vector<c10::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
@@ -462,7 +465,9 @@ static void _wrap_outputs(
       dirty_inputs,
       raw_output_vars,
       cdata_if_executable,
-      std::move(jvp_user_function));
+      std::move(jvp_user_function),
+      alias_map,
+      inverse_alias_map);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -482,10 +487,84 @@ static void _wrap_outputs(
   }
 }
 
+PyObject* maybe_alias_output(
+    PyObject* inputs,
+    PyObject* output,
+    std::unordered_set<at::TensorImpl*>& aliased_outputs,
+    std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    std::unordered_map<at::TensorImpl*, at::TensorImpl*>& inverse_alias_map) {
+  // Populate a set of TensorImpls of the inputs
+  std::unordered_set<at::TensorImpl*> input_impls{};
+  auto num_args = PyTuple_GET_SIZE(inputs);
+  for (Py_ssize_t i = 0; i < num_args; ++i) {
+    PyObject* item = PyTuple_GET_ITEM(inputs, i);
+    if (THPVariable_Check(item)) {
+      at::Tensor tensor = THPVariable_Unpack(item);
+      input_impls.insert(tensor.unsafeGetTensorImpl());
+    }
+  }
+
+  // If the output is Tuple, return a new Tuple
+  if (PyTuple_Check(output)) {
+    Py_ssize_t tuple_size = PyTuple_Size(output);
+    THPObjectPtr new_tuple(PyTuple_New(tuple_size));
+    if (!new_tuple) {
+      return nullptr;
+    }
+    for (Py_ssize_t i = 0; i < tuple_size; ++i) {
+      PyObject* item = PyTuple_GET_ITEM(output, i);
+      if (THPVariable_Check(item)) {
+        at::Tensor tensor = THPVariable_Unpack(item);
+        if (input_impls.count(tensor.unsafeGetTensorImpl()) > 0) {
+          at::Tensor marked_tensor;
+          {
+            // TODO:
+            at::AutoFwGradMode fw_grad_mode(true);
+            AutoGradMode grad_mode(true);
+            marked_tensor = tensor.alias();
+          }
+          aliased_outputs.insert(marked_tensor.unsafeGetTensorImpl());
+          alias_map[marked_tensor.unsafeGetTensorImpl()] =
+              tensor.unsafeGetTensorImpl();
+          inverse_alias_map[tensor.unsafeGetTensorImpl()] =
+              marked_tensor.unsafeGetTensorImpl();
+          PyTuple_SET_ITEM(new_tuple.get(), i, THPVariable_Wrap(marked_tensor));
+        } else {
+          Py_INCREF(item);
+          PyTuple_SET_ITEM(new_tuple.get(), i, item);
+        }
+      } else {
+        Py_INCREF(item);
+        PyTuple_SET_ITEM(new_tuple.get(), i, item);
+      }
+    }
+    return new_tuple.release();
+  } else if (THPVariable_Check(output)) {
+    at::Tensor tensor = THPVariable_Unpack(output);
+    if (input_impls.count(tensor.unsafeGetTensorImpl()) > 0) {
+      at::Tensor marked_tensor = tensor.alias();
+      aliased_outputs.insert(marked_tensor.unsafeGetTensorImpl());
+      return THPVariable_Wrap(marked_tensor);
+    } else {
+      // incref so the returned object is always used to initialize a
+      // THPObjectPtr
+      Py_INCREF(output);
+      return output;
+    }
+  } else {
+    // incref so the returned object is always used to initialize a THPObjectPtr
+    Py_INCREF(output);
+    return output;
+  }
+}
+
 // Save any variables that requested by to_save
 static void _save_variables(
     const std::shared_ptr<PyNode>& cdata_ptr,
-    THPFunction* self) {
+    THPFunction* self,
+    const std::unordered_set<at::TensorImpl*>& aliased_outputs_impl,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs) {
   if (!self->to_save)
     return;
 
@@ -504,6 +583,20 @@ static void _save_variables(
       continue;
     } else if (THPVariable_Check(obj)) {
       const auto& tensor = THPVariable_Unpack(obj);
+      auto impl = tensor.unsafeGetTensorImpl();
+      bool is_aliased = aliased_outputs_impl.count(impl) > 0;
+      TORCH_CHECK(
+          !is_aliased || dirty_inputs.count(alias_map.at(impl)) > 0,
+          "A input that has been returned as-is is being saved for backward inside "
+          "`setup_context` via the `output` parameter. This is not supported. "
+          "To preserve the behavior of saving for backward inside `forward`, update "
+          "your setup_context function to save the corresponding input instead. "
+          "(e.g., if your function returned its first argument as its only output: "
+          "`ctx.save_for_backward(output)` -> `ctx.save_for_backward(inputs[0])`.) "
+          "With that fix, your saved tensor would have the original grad_fn of the "
+          "input. But, if you'd like to return an input as-is AND have the saved "
+          "tensor to have the grad_fn of the autograd Function you should return a "
+          "view of the input, and save that for backward instead.");
       bool is_output = tensor.grad_fn().get() == cdata_ptr.get();
       self->saved_variables.emplace_back(tensor, is_output);
     } else {
@@ -757,7 +850,12 @@ PyObject* process_outputs(
     PyObject* inputs,
     THPObjectPtr&& raw_output,
     bool is_executable,
-    torch::jit::Node* node) {
+    torch::jit::Node* node,
+    const std::unordered_set<at::TensorImpl*>& aliased_outputs_impl,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>& alias_map,
+    const std::unordered_map<at::TensorImpl*, at::TensorImpl*>&
+        inverse_alias_map,
+    const std::unordered_set<at::TensorImpl*>& dirty_inputs) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -779,7 +877,15 @@ PyObject* process_outputs(
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(
-      cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable);
+      cdata,
+      grad_fn,
+      unpacked.input_vars,
+      raw_output,
+      outputs,
+      is_executable,
+      alias_map,
+      inverse_alias_map,
+      dirty_inputs);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -787,7 +893,8 @@ PyObject* process_outputs(
   // wrapping as the outputs must have their grad_fn/fw_grad properly set before
   // we save them.
   if (is_executable) {
-    _save_variables(cdata, grad_fn);
+    _save_variables(
+        cdata, grad_fn, aliased_outputs_impl, alias_map, dirty_inputs);
   } else {
     // Remove unnecessary attributes
     Py_XDECREF(grad_fn->to_save);
@@ -959,6 +1066,9 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
     return nullptr;
   }
   auto overridden_setup_context = cls_setup_context.get() != orig_setup_context;
+  std::unordered_set<at::TensorImpl*> aliased_outputs_impl{};
+  std::unordered_map<at::TensorImpl*, at::TensorImpl*> alias_map{};
+  std::unordered_map<at::TensorImpl*, at::TensorImpl*> inverse_alias_map{};
 
   auto num_args = PyTuple_GET_SIZE(inputs);
 
@@ -976,9 +1086,27 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       if (!output) {
         return nullptr;
       }
+      // When an input is returned as-is as an output and saved for backward in
+      // setup_context but the ctx.save_for_backward API is called on a tensor
+      // accessed through "output" rather than "input" that may cause the
+      // functorch higher-order graph to flow through the outputs rather than
+      // the inputs. To keep functorch and non-functorch consistent, we'd like
+      // to produce an error in the case someone does this.
+      //
+      // In order to do this, we need a way to distinguish tensors that are
+      // passed to setup_context based on whether they are accessed through
+      // "output" or "inputs" even if inputs are returned as-is as outputs: For
+      // the outputs that were inputs returned as-is, we replace them with their
+      // alias before passing them to setup_context.
+      //
+      // This aliasing is purely to distinguish tensors in "inputs" and output"
+      // for the purpose calling setup_context. Aliased tensors are discarded
+      // after forward completes.
+      THPObjectPtr output_maybe_aliased(maybe_alias_output(
+          inputs, output, aliased_outputs_impl, alias_map, inverse_alias_map));
       // signature is setup_context(ctx, inputs, output)
-      auto ctx_input_output_tuple =
-          make_ctx_input_output_tuple(ctx, unpacked_input, output);
+      auto ctx_input_output_tuple = make_ctx_input_output_tuple(
+          ctx, unpacked_input, output_maybe_aliased);
       if (!ctx_input_output_tuple) {
         return nullptr;
       }
@@ -1002,6 +1130,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       return nullptr;
   }
 
+  auto dirty_inputs = _mark_dirty(ctx);
+
   return process_outputs(
       cls,
       cdata,
@@ -1010,7 +1140,11 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       inputs,
       std::move(output),
       is_executable,
-      node);
+      node,
+      aliased_outputs_impl,
+      alias_map,
+      inverse_alias_map,
+      dirty_inputs);
   END_HANDLE_TH_ERRORS
 }
 
