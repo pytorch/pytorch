@@ -6405,6 +6405,23 @@ if HAS_CPU:
                         - metrics.generated_cpp_vec_kernel_count
                     ) == 0
 
+        def test_skip_cpp_codegen(self):
+            with config.patch({"disable_cpp_codegen": True}):
+
+                def foo(x, y):
+                    return x + y + 30
+
+                foo_opt = torch.compile()(foo)
+
+                inps = torch.ones([20]), torch.rand([20])
+
+                self.assertEqual(
+                    foo_opt(*inps),
+                    foo(*inps),
+                )
+
+                self.assertEqual(0, metrics.generated_kernel_count)
+
         def test_redundant_to_node_elimination_bf16(self):
             def fn(x, y):
                 res = x + y

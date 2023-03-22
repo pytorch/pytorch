@@ -79,25 +79,31 @@ def _warn_complex_not_supported():
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
-    # TODO: these dont always have meta["val"] yet but they should
-    if node.target is operator.getitem:
-        return False
+    def check_skip_condition(node, check_cpu):
+        if not isinstance(node, torch.fx.Node):
+            return False
 
-    for arg in tree_flatten((node, node.args, node.kwargs))[0]:
-        if not isinstance(arg, torch.fx.Node):
-            continue
+        if "val" not in node.meta:
+            return False
 
-        if "val" in arg.meta:
-            meta = arg.meta["val"]
-            metas = (meta,) if not isinstance(meta, (list, tuple)) else meta
-        else:
-            raise Exception(f"Unexpected node without meta: {node}")
+        for meta in tree_flatten(node.meta["val"])[0]:
+            if not isinstance(meta, torch._subclasses.FakeTensor):
+                continue
+            if check_cpu and meta.is_cpu and config.disable_cpp_codegen:
+                return True
 
-        for meta in metas:
-            if isinstance(meta, torch._subclasses.FakeTensor) and meta.dtype.is_complex:
+            if meta.dtype.is_complex:
                 _warn_complex_not_supported()
                 return True
-    return False
+
+        return False
+
+    # only skip codegen if there is a cpu output, not input
+    for arg in tree_flatten((node.args, node.kwargs))[0]:
+        if check_skip_condition(arg, check_cpu=False):
+            return True
+
+    return check_skip_condition(node, check_cpu=True)
 
 
 def is_magic_method(op):
@@ -560,6 +566,10 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
+    def check_cpp_codegen_disabled(self):
+        if config.disable_cpp_codegen:
+            self.disable_cpp_wrapper("cpp codegen disabled")
+
     def check_platform(self):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
@@ -585,6 +595,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.disable_cpp_wrapper("Constants")
 
     def check_cpp_wrapper(self):
+        self.check_cpp_codegen_disabled()
         self.check_platform()
         self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
