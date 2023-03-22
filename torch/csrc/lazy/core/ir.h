@@ -69,6 +69,7 @@ using OpList = c10::ArrayRef<Value>;
 
 hash_t OperandHashes(
     const OpList& operands,
+    const c10::ArrayRef<Shape>& shapes,
     const hash_t& seed,
     bool bakeInSizes);
 // A node in the graph. Nodes for operations which require extra data to be
