@@ -101,7 +101,7 @@ class KernelFormatterHandler:
         self.var_counter = itertools.count()
 
     @staticmethod
-    def ir_to_string(ir_fn, index, rindex=None, max_lines=None):
+    def ir_to_string(ir_fn, index, rindex=None):
         from .ir import FlexibleLayout
 
         args = [index, rindex] if rindex is not None else [index]
@@ -111,16 +111,20 @@ class KernelFormatterHandler:
         with formatter.output.indent(-1):
             formatter.output.writeline(f"def inner_fn({', '.join(names)}):")
         for name, arg in zip(names, args):
-            lhs = ", ".join(
-                [str("_" if isinstance(v, (int, sympy.Integer)) else v) for v in arg]
-            )
-            formatter.output.writeline(f"{lhs} = {name}")
+            if arg:
+                lhs = ", ".join(
+                    [
+                        str("_" if isinstance(v, (int, sympy.Integer)) else v)
+                        for v in arg
+                    ]
+                )
+                formatter.output.writeline(f"{lhs} = {name}")
 
         with V.set_ops_handler(formatter), patch.object(
             FlexibleLayout, "allow_indexing", True
         ):
             result = ir_fn(*args)
-            return formatter.getvalue(result, max_lines=max_lines)
+            return formatter.getvalue(result)
 
     def __getattr__(self, name):
         def inner(*args, **kwargs):
@@ -134,9 +138,9 @@ class KernelFormatterHandler:
 
         return inner
 
-    def getvalue(self, result, max_lines=None):
+    def getvalue(self, result):
         self.output.writeline(f"return {result}")
-        return self.output.getvalue(max_lines=max_lines)
+        return self.output.getvalue()
 
 
 class WrapperHandler:

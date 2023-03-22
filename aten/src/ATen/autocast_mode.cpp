@@ -54,6 +54,14 @@ void set_xla_enabled(bool new_enabled) {
   c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
 }
 
+bool is_privateuseone_enabled() {
+  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
+}
+
+void set_privateuseone_enabled(bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+}
+
 namespace {
 // Imitate Apex and cache some of the casts to streamline parameter reuse.
 // Our heuristic is to cache lower_precision_fp casts of fp32 model weights (see cached_cast below).
@@ -99,6 +107,9 @@ thread_local bool cache_enabled = true;
 
 // autocast_gpu_dtype is the lower_precision_fp used by AutocastGPU.
 thread_local at::ScalarType autocast_gpu_dtype = at::kHalf;
+
+// autocast_privateuseone_dtype is the lower_precision_fp used by AutocastPrivateUse1.
+thread_local at::ScalarType autocast_privateuseone_dtype = at::kHalf;
 }
 
 void clear_cache() {
@@ -134,6 +145,10 @@ at::ScalarType get_autocast_xla_dtype() {
   return autocast_xla_dtype;
 }
 
+at::ScalarType get_autocast_privateuseone_dtype() {
+  return autocast_privateuseone_dtype;
+}
+
 void set_autocast_cpu_dtype(at::ScalarType dtype) {
   TORCH_CHECK(
       dtype == at::kBFloat16,
@@ -155,6 +170,10 @@ void set_autocast_hpu_dtype(at::ScalarType dtype) {
 
 void set_autocast_xla_dtype(at::ScalarType dtype) {
   autocast_xla_dtype = dtype;
+}
+
+void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
+  autocast_privateuseone_dtype = dtype;
 }
 
 bool is_autocast_cache_enabled() {

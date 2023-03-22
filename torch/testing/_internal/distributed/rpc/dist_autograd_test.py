@@ -13,7 +13,7 @@ import torch.testing._internal.dist_utils
 from torch.autograd import Function
 from torch.autograd.function import once_differentiable
 from torch.distributed.rpc import RRef
-from torch.testing._internal.common_utils import IS_MACOS, sandcastle_skip_if
+from torch.testing._internal.common_utils import IS_MACOS, skip_but_pass_in_sandcastle_if
 from torch.testing._internal.dist_utils import (
     dist_init,
     initialize_pg,
@@ -1704,7 +1704,7 @@ class DistAutogradTest(CommonDistAutogradTest):
                 dist_autograd.backward(context_id, [val.sum()])
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -1901,7 +1901,7 @@ class DistAutogradTest(CommonDistAutogradTest):
     _backward_done = False
 
     @dist_init(clean_shutdown=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )

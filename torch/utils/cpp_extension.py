@@ -214,7 +214,7 @@ CUDNN_HOME = os.environ.get('CUDNN_HOME') or os.environ.get('CUDNN_PATH')
 # it the below pattern.
 BUILT_FROM_SOURCE_VERSION_PATTERN = re.compile(r'\d+\.\d+\.\d+\w+\+\w+')
 
-COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/EHsc']
+COMMON_MSVC_FLAGS = ['/MD', '/wd4819', '/wd4251', '/wd4244', '/wd4267', '/wd4275', '/wd4018', '/wd4190', '/wd4624', '/wd4067', '/wd4068', '/EHsc']
 
 MSVC_IGNORE_CUDAFE_WARNINGS = [
     'base_class_has_different_dll_interface',
@@ -552,7 +552,7 @@ class BuildExtension(build_ext):
             _ccbin = os.getenv("CC")
             if (
                 _ccbin is not None
-                and not any([flag.startswith('-ccbin') or flag.startswith('--compiler-bindir') for flag in cflags])
+                and not any([flag.startswith(('-ccbin', '--compiler-bindir')) for flag in cflags])
             ):
                 cflags.extend(['-ccbin', _ccbin])
 
@@ -2112,10 +2112,13 @@ def _write_ninja_file(path,
     config = ['ninja_required_version = 1.3']
     config.append(f'cxx = {compiler}')
     if with_cuda or cuda_dlink_post_cflags:
-        if IS_HIP_EXTENSION:
-            nvcc = _join_rocm_home('bin', 'hipcc')
+        if "PYTORCH_NVCC" in os.environ:
+            nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
         else:
-            nvcc = _join_cuda_home('bin', 'nvcc')
+            if IS_HIP_EXTENSION:
+                nvcc = _join_rocm_home('bin', 'hipcc')
+            else:
+                nvcc = _join_cuda_home('bin', 'nvcc')
         config.append(f'nvcc = {nvcc}')
 
     if IS_HIP_EXTENSION:

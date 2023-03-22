@@ -657,6 +657,7 @@ def script_module_to_buffer(script_module):
     return module_buffer
 
 
+# TODO(qihqi): This param is not setup correctly.
 @unittest.skipIf(
     not ENABLE_FLATBUFFER, "Need to enable flatbuffer to run the below tests"
 )
