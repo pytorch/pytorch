@@ -1907,12 +1907,13 @@ class CommonTemplate:
                 res = self.linear(res)
                 return res
 
-        with torch.no_grad():
-            m = M(224, 224).bfloat16().eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(224, 224, dtype=torch.bfloat16)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
+        if has_bf16_support():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
 
     @slow()
     def test_conv2d_unary(self):
@@ -2101,6 +2102,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
