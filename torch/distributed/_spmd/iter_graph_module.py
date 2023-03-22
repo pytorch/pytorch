@@ -9,6 +9,7 @@ from torch import fx
 from torch.fx.graph import PythonCode
 from torch.fx.node import Argument
 from torch.utils._pytree import tree_flatten, tree_map
+from torch.profiler import record_function
 
 
 logger: logging.Logger = logging.getLogger("IterGraphModule")
@@ -546,23 +547,29 @@ class IterGraphModule(nn.Module):
             # No cross-iteration optimization is done. Simply call the
             # GraphModule.
             output = gm(*args, **kwargs)
-        logger.info(f"The output information: size={len(output)}, type={type(output)}")
+        logger.debug(f"The output information: size={len(output)}, type={type(output)}")
         return output
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         self._iter += 1
         if self._iter == 1:
-            self.print_all_graphs()
-            logger.warning("Using the setup graph")
+            logger.info("Using the setup graph")
             gm = self.setup_gm
+            profiler_string = "## IterGraphModule: Setup Graph ##"
         elif self._iter == self._max_iters:
-            logger.warning("Using the cleanup graph")
+            logger.info("Using the cleanup graph")
             gm = self.cleanup_gm
+            profiler_string = "## IterGraphModule: Cleanup Graph ##"
         else:
-            logger.warning("Using the main graph")
             gm = self.main_gm
+            if self._iter == 2:
+                logger.info("Using the main graph")
+                profiler_string = "## IterGraphModule -- Maybe Compiling ##"
+            else:
+                profiler_string = "## IterGraphModule ##"
 
-        return self._run(gm, *args, **kwargs)
+        with record_function(profiler_string):
+            return self._run(gm, *args, **kwargs)
 
     @property
     def graph(self) -> IterGraph:

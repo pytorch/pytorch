@@ -24,6 +24,9 @@ If your changes are user facing and intended to be a part of release notes, plea
 
 If not, please add the `topic: not user facing` label.
 
+To add a label, you can comment to pytorchbot, for example
+`@pytorchbot label "topic: not user facing"`
+
 For more information, see
 https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.
 """
