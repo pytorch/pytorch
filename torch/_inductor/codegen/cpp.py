@@ -215,8 +215,7 @@ class OptimizationContext:
     is_store_fp32_as_bf16: bool = False
     # do not  need type cast for
     # for mem copy only node bf16 load -> bf16 store,
-    is_directly_load_bf16: bool = False
-    is_directly_store_bf16: bool = False
+    is_bf16_mem_copy: bool = False
 
     dtype: torch.dtype = torch.float
     ops_name: str = ""
@@ -471,7 +470,7 @@ class CppVecOverrides(OpOverrides):
         assert opt_ctx
         assert opt_ctx.dtype in [torch.int32, torch.float32, torch.bfloat16]
         if dtype in [torch.bfloat16]:
-            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_directly_load_bf16
+            assert opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy
         proposed_dtype = opt_ctx.dtype
         if val == float("inf"):
             assert proposed_dtype == torch.float
@@ -1156,7 +1155,7 @@ class CppVecKernel(CppKernel):
             if opt_ctx.is_load_bf16_as_fp32:
                 line = f"load_bf16_as_float({var_expr})"
             else:
-                assert opt_ctx.is_directly_load_bf16
+                assert opt_ctx.is_bf16_mem_copy
                 line = f"at::vec::Vectorized<bfloat16>::loadu({var_expr}, {self.tiling_factor})"
         elif is_broadcast:
             line = f"at::vec::Vectorized<float>({var_expr})"
@@ -1179,7 +1178,7 @@ class CppVecKernel(CppKernel):
             if opt_ctx.is_store_fp32_as_bf16:
                 line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
             else:
-                assert opt_ctx.is_directly_store_bf16
+                assert opt_ctx.is_bf16_mem_copy
                 line = (
                     f"{value}.store({var} + {cexpr(new_index)}, {self.tiling_factor});"
                 )
@@ -1559,7 +1558,7 @@ class CppVecKernelChecker(CppVecKernel):
                 opt_ctx.is_load_bf16_as_fp32 = self.can_load_bf16_as_fp32(
                     node_ctx.get_fx_node()
                 )
-                if not (opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_directly_load_bf16):
+                if not (opt_ctx.is_load_bf16_as_fp32 or opt_ctx.is_bf16_mem_copy):
                     self.simd_vec = False
                     return var
 
@@ -1587,7 +1586,7 @@ class CppVecKernelChecker(CppVecKernel):
                     name, value_node
                 )
                 if not opt_ctx.is_store_fp32_as_bf16:
-                    return opt_ctx.is_directly_store_bf16
+                    return opt_ctx.is_bf16_mem_copy
 
             assert "buf" in name
             index = self.rename_indexing(index)
@@ -1673,7 +1672,7 @@ class CppVecKernelChecker(CppVecKernel):
                 opt_ctx.dtype = load_dtype
                 opt_ctx.ops_name = _node.target
                 opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
-                _node.meta[OptimizationContext.key] = opt_ctx                
+                _node.meta[OptimizationContext.key] = opt_ctx
 
             if _node.target == "to_dtype":
                 dtype = _node.args[-1]
@@ -1783,7 +1782,7 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.is_load_bf16_as_fp32 = True
                             opt_ctx.dtype = torch.float
                         else:
-                            self.simd_vec = opt_ctx.is_directly_load_bf16
+                            self.simd_vec = opt_ctx.is_bf16_mem_copy
 
                     return val
 
@@ -2012,38 +2011,34 @@ class CppKernelProxy(CppKernel):
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
-            def only_used_by_store(node: torch.fx.Node):
-                if len(node.users) > 1:
-                    return False
-                for user in node.users:
-                    _only_used_by_store = user.target == "store"
-                    opt_ctx = OptimizationContext()
-                    opt_ctx.is_directly_load_bf16 = _only_used_by_store
-                    node.meta[OptimizationContext.key] = opt_ctx
-                    return _only_used_by_store
-
-            def can_directly_store(node: torch.fx.Node):
-                store_buf = node.args[1]
-                store_node = node.args[3]
-                store_dtype = V.graph.get_dtype(store_buf)
-                load_dtype = (
-                    V.graph.get_dtype(store_node.args[1])
-                    if store_node.target == "load"
-                    else store_node.args[-1]
-                )
-                if only_used_by_store(store_node) and store_dtype == load_dtype:
-                    opt_ctx = OptimizationContext()
-                    opt_ctx.is_directly_store_bf16 = True
-                    node.meta[OptimizationContext.key] = opt_ctx
-                    return True
+            def is_bf16_mem_copy(node: torch.fx.Node):
+                if node.target in ["load", "constant"]:
+                    bf16_mem_copy = all(
+                        usr.target == "store"
+                        and V.graph.get_dtype(usr.args[1]) == torch.bfloat16
+                        for usr in node.users
+                    )
+                    if bf16_mem_copy:
+                        opt_ctx = OptimizationContext()
+                        opt_ctx.is_bf16_mem_copy = bf16_mem_copy
+                        node.meta[OptimizationContext.key] = opt_ctx
+                    return bf16_mem_copy
+                elif node.target is ["store"]:
+                    stored_node = node.args[3]
+                    bf16_mem_copy = is_bf16_mem_copy(stored_node)
                 else:
-                    return False
+                    bf16_mem_copy = False
+                if bf16_mem_copy:
+                    opt_ctx = OptimizationContext()
+                    opt_ctx.is_bf16_mem_copy = bf16_mem_copy
+                    node.meta[OptimizationContext.key] = opt_ctx
+                return bf16_mem_copy
 
             for node in sub_graph.nodes:
                 _node: torch.fx.Node = node
                 if _node.target in ["load", "constant"]:
                     assert len(_node.args) == 3
-                    if only_used_by_store(node):
+                    if is_bf16_mem_copy(node):
                         continue
                     ops = _node.args[0]
                     # If the node is constant, the last arg is dtype
@@ -2063,7 +2058,7 @@ class CppKernelProxy(CppKernel):
                             to_type_node.args = to_type_node_args
                             metrics.to_dtype_count += 1
                 elif _node.target == "store":
-                    if can_directly_store(_node):
+                    if is_bf16_mem_copy(_node):
                         continue
                     ops, store_var, _, value_var, _ = _node.args
                     store_dtype = V.graph.get_dtype(store_var)
