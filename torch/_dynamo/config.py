@@ -9,27 +9,23 @@ from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
 
-# log level (levels print what it says + all levels listed below it)
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
+
+# Note (mlazos): This is deprecated and will be removed very soon
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
-
-# log compiled function + graphs at level INFO
-output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
 verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -46,7 +42,7 @@ cache_size_limit = 64
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
 # inputs
-specialize_int = True
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -59,6 +55,9 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
+# Here for bw compat, will be removed (mlazos)
+# see above notes for log_level on how to configure the new logging system
+output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -105,6 +104,12 @@ rewrite_assert_with_torch_assert = True
 
 # Show a warning on every graph break
 print_graph_breaks = False
+
+# Print guards
+print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
+
+# Show a warning for every specialization
+print_specializations = False
 
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
@@ -200,11 +205,6 @@ allow_rnn = False
 
 # root folder of the project
 base_dir = dirname(dirname(dirname(abspath(__file__))))
-
-# If True, record autograd profiler events for dynamo cache lookups (guards)
-# TODO can we default this to True?
-# and how can we cause registration/deregestration to be sensitive to runtime change of this flag?
-profile_cache_lookup = False
 
 
 def is_fbcode():

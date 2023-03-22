@@ -2008,6 +2008,9 @@ class TestMPS(TestCaseMPS):
             helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
             helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/96113
+        torch.nn.LayerNorm((16,), elementwise_affine=True).to("mps")(torch.randn(1, 2, 16).to("mps", dtype=torch.float16))
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
@@ -5720,6 +5723,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReflectionPad3d)
         # verify if a change in shape of padding would cause problems with graph caching
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ReplicationPad3d)
+        # case where input_d == pad_front/back for ReplicationPad3d
+        helper((3, 4, 5, 6, 7), (1, 2, 3, 4, 5, 6), nn.ReplicationPad3d)
         # Constant Pad 3D
         helper((2, 4, 6, 8, 4), (1, 3, 3, 5, 3, 4), nn.ConstantPad3d)
         # input size < pad size
@@ -6472,6 +6477,8 @@ class TestNLLLoss(TestCaseMPS):
         helper((1,), (0,))
         # input.numel() == 0
         helper((0,), (0,))
+        # none of dims that needs to be flipped
+        helper((1, 3), [0])
 
     # Test index select
     def test_index_select(self):
@@ -6830,7 +6837,7 @@ class TestNLLLoss(TestCaseMPS):
 
             self.assertEqual(result, cpu_result)
 
-        for dtype in [torch.float32, torch.int32, torch.int64]:
+        for dtype in [torch.bool, torch.float16, torch.float32, torch.uint8, torch.int16, torch.int32, torch.int64]:
             helper(2, 2, dtype)
             helper(2, 3, dtype)
             helper(0, 2, dtype)
@@ -9873,12 +9880,18 @@ class TestRNNMPS(TestCaseMPS):
         self.assertEqual(cpu_hn, hn)
         self.assertEqual(cpu_cn, cn)
 
-        def get_backward_results(rnn, device, inp, hx, cx):
+        def get_backward_results(rnn, device, inp, hx, cx, output_grad_presented=True, states_grad_presented=True):
             rnn = rnn.to(device)
             inp, hx, cx = inp.to(device), hx.to(device), cx.to(device)
 
-            output, _ = rnn(inp, (hx, cx))
-            f = 3 * output.sum() + (hx * cx).sum()
+            output, (hx_out, cx_out) = rnn(inp, (hx, cx))
+            assert output_grad_presented or states_grad_presented, "At least some outputs must be used"
+
+            f = 0
+            if output_grad_presented:
+                f = f + 3 * output.sum()
+            if states_grad_presented:
+                f = f + (hx_out * cx_out).sum()
 
             param_names, params = zip(*rnn.named_parameters())
             param_grads = zip(param_names, torch.autograd.grad(f, params, retain_graph=True))
@@ -9887,18 +9900,25 @@ class TestRNNMPS(TestCaseMPS):
             return output, param_grads, input_grad, hx_grad, cx_grad
 
         if backward:
-            cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad =\
-                get_backward_results(rnn, "cpu", input, hx, cx)
-            mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad =\
-                get_backward_results(rnn, device, input, hx, cx)
+            grad_cases = [
+                dict(output_grad_presented=True, states_grad_presented=True),
+                dict(output_grad_presented=False, states_grad_presented=True),
+                dict(output_grad_presented=True, states_grad_presented=False),
+            ]
 
-            self.assertEqual(cpu_hx_grad, mps_hx_grad)
-            self.assertEqual(cpu_cx_grad, mps_cx_grad)
-            self.assertEqual(cpu_output, mps_output)
-            self.assertEqual(cpu_input_grad, mps_input_grad)
-            for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
-                self.assertEqual(cpu_weight_grad, mps_weight_grad,
-                                 f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
+            for grad_case in grad_cases:
+                cpu_output, cpu_weights_grad, cpu_input_grad, cpu_hx_grad, cpu_cx_grad =\
+                    get_backward_results(rnn, "cpu", input, hx, cx, **grad_case)
+                mps_output, mps_weights_grad, mps_input_grad, mps_hx_grad, mps_cx_grad =\
+                    get_backward_results(rnn, device, input, hx, cx, **grad_case)
+
+                self.assertEqual(cpu_hx_grad, mps_hx_grad)
+                self.assertEqual(cpu_cx_grad, mps_cx_grad)
+                self.assertEqual(cpu_output, mps_output)
+                self.assertEqual(cpu_input_grad, mps_input_grad)
+                for (cpu_name, cpu_weight_grad), (mps_name, mps_weight_grad) in zip(cpu_weights_grad, mps_weights_grad):
+                    self.assertEqual(cpu_weight_grad, mps_weight_grad,
+                                     f"mismatch in cpu:{cpu_name} vs mps:{mps_name}, layers: {num_layers}")
 
     LSTM_TEST_CASES = [
         dict(),  # default
@@ -9912,12 +9932,12 @@ class TestRNNMPS(TestCaseMPS):
     ]
 
     def test_lstm_forward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, **test_options)
 
     def test_lstm_backward(self, device="mps", dtype=torch.float32):
-        for num_layers in [1] if product_version < 13.0 else [1, 2, 5]:
+        for num_layers in [1, 2, 5]:
             for test_options in self.LSTM_TEST_CASES:
                 self._lstm_helper(num_layers=num_layers, dtype=dtype, device=device, backward=True, **test_options)
 

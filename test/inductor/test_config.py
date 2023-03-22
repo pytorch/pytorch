@@ -177,6 +177,21 @@ class TestInductorConfig(TestCase):
         # only warn once
         a(torch.randn(10))
 
+    def test_api_options(self):
+        reduce_overhead_opts = torch._inductor.list_mode_options("reduce-overhead")
+        self.assertEqual(reduce_overhead_opts["triton.cudagraphs"], True)
+
+        max_autotune_opts = torch._inductor.list_mode_options("max-autotune")
+        self.assertEqual(max_autotune_opts["epilogue_fusion"], True)
+        self.assertEqual(max_autotune_opts["max_autotune"], True)
+        self.assertEqual(max_autotune_opts["triton.cudagraphs"], True)
+
+    def test_invalid_backend(self):
+        self.assertRaises(
+            torch._dynamo.exc.InvalidBackend,
+            lambda: torch.compile(dummy_fn, backend="does_not_exist")(torch.randn(10)),
+        )
+
 
 if __name__ == "__main__":
     run_tests()
