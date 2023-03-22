@@ -1,11 +1,9 @@
-import functools
 import logging
 import operator
 import os
 import re
 import sys
 import time
-import warnings
 from typing import Dict, List, Optional, Set
 
 import sympy
@@ -22,7 +20,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
-from torch.utils._pytree import tree_flatten
 
 from .._dynamo import config as dynamo_config
 
@@ -36,7 +33,6 @@ from .exc import (
 from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
 from .lowering import (
     FALLBACK_ALLOW_LIST,
-    fallback_handler,
     layout_constraints,
     lowerings,
     make_fallback,
@@ -69,35 +65,6 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
-
-
-@functools.lru_cache(None)
-def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    )
-
-
-def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
-    # TODO: these dont always have meta["val"] yet but they should
-    if node.target is operator.getitem:
-        return False
-
-    for arg in tree_flatten((node, node.args, node.kwargs))[0]:
-        if not isinstance(arg, torch.fx.Node):
-            continue
-
-        if "val" in arg.meta:
-            meta = arg.meta["val"]
-            metas = (meta,) if not isinstance(meta, (list, tuple)) else meta
-        else:
-            raise Exception(f"Unexpected node without meta: {node}")
-
-        for meta in metas:
-            if isinstance(meta, torch._subclasses.FakeTensor) and meta.dtype.is_complex:
-                _warn_complex_not_supported()
-                return True
-    return False
 
 
 def is_magic_method(op):
@@ -468,11 +435,8 @@ class GraphLowering(torch.fx.Interpreter):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
         with ir.IRNode.current_origins(origins):
-            if n.op == "call_function" and fallback_node_due_to_unsupported_type(n):
-                result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
-                )
-            elif n.op == "call_function" and n.target in layout_constraints:
+            if n.op == "call_function" and n.target in layout_constraints:
+                args, kwargs = self.fetch_args_kwargs_from_env(n)
                 args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
                 result = self.call_function(n.target, args, kwargs)
             elif is_magic_method(n.target):
