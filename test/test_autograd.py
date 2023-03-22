@@ -348,7 +348,7 @@ class TestAutograd(TestCase):
             t3.sum().backward()
 
     def test_custom_function_raises_if_input_returned_as_is_and_saved(self):
-        for save_inputs in (True, False):
+        for save_inputs, mark_dirty in product(*([(True, False)] * 2)):
             class Func(torch.autograd.Function):
                 @staticmethod
                 def forward(x):
@@ -356,20 +356,27 @@ class TestAutograd(TestCase):
 
                 @staticmethod
                 def setup_context(ctx, inputs, outputs):
+                    if mark_dirty:
+                        ctx.mark_dirty(inputs[0])
+
                     if save_inputs:
                         ctx.save_for_backward(inputs[0])
                     else:
-                        cube, x = outputs
-                        ctx.save_for_backward(x)
+                        ctx.save_for_backward(outputs[1])
 
                 @staticmethod
                 def backward(ctx, grad_output, grad_x):
                     pass
 
-            a = torch.tensor(1., requires_grad=True)
-            with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
-                Func.apply(a)
+            a = torch.tensor(1., requires_grad=True).clone()
 
+            if mark_dirty:
+                _unused, b = Func.apply(a)
+                if mark_dirty:
+                    self.assertTrue(a is b)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
+                    Func.apply(a)
 
     def test_custom_function_non_tensor_inputs_outputs(self):
         class MyFunction(Function):
@@ -384,7 +391,7 @@ class TestAutograd(TestCase):
                 # Save scale
                 ctx.scale = scale
                 ctx.save_for_backward(t1, t2, t3)
-                return scale, t4, None, True, t5, "bar", t1.view_as(t1)
+                return scale, t4, None, True, t5, "bar", t1
 
             @staticmethod
             @once_differentiable
@@ -2991,7 +2998,7 @@ class TestAutograd(TestCase):
             @staticmethod
             def forward(ctx, x):
                 ctx.save_for_backward(x)
-                return x.view_as(x)
+                return x
 
             @staticmethod
             def backward(ctx, grad_x):
@@ -4511,7 +4518,7 @@ Done""")
                 @staticmethod
                 def forward(ctx, x):
                     ctx.save_for_backward(x)
-                    return x.view_as(x)
+                    return x
 
                 @staticmethod
                 def backward(ctx, gO):
@@ -6254,7 +6261,7 @@ for shape in [(1,), ()]:
                 def forward(ctx, x):
                     if save:
                         ctx.save_for_backward(x, None)
-                    return x.view_as(x)
+                    return x
 
                 @staticmethod
                 def backward(ctx, g):

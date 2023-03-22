@@ -274,7 +274,7 @@ optional_variable_list _process_backward_mode_ad(
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
-    const std::unordered_set<at::TensorImpl*>& to_save) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   int num_outputs = raw_outputs.size();
 
   // Sets the grad_fn and output_nr of an output Variable.
@@ -283,7 +283,7 @@ optional_variable_list _process_backward_mode_ad(
                          bool is_input,
                          bool is_modified,
                          bool is_differentiable,
-                         bool is_saved) {
+                         bool is_saved_and_setup_context) {
     if (!is_differentiable) {
       if (!var.requires_grad()) {
         if (is_input && !is_modified) {
@@ -341,10 +341,12 @@ optional_variable_list _process_backward_mode_ad(
         impl::rebase_history(var, {cdata, output_nr});
       }
     } else if (is_input) {
-      TORCH_CHECK(!is_saved,
+      TORCH_CHECK(
+          !is_saved_and_setup_context,
           "A input that has been returned as-is as output is being saved for backward. "
-          "This is not supported. You can return a view of the input instead, e.g. with "
-          "x.view_as(x).")
+          "This is not supported if you override setup_context. You should return and "
+          "save a view of the input instead, e.g. with x.view_as(x) or setup ctx inside "
+          "the forward function itself.")
       var = _view_as_self_with_no_grad(var);
       impl::set_gradient_edge(var, {cdata, output_nr});
     } else if (cdata) {
@@ -376,13 +378,20 @@ optional_variable_list _process_backward_mode_ad(
     bool is_differentiable = cdata &&
         non_differentiable.count(out_tensor_impl) == 0 &&
         isDifferentiableType(var.scalar_type());
-    bool is_saved = to_save.count(out_tensor_impl) > 0;
+    bool is_saved_and_setup_context =
+        to_save_if_setup_context.count(out_tensor_impl) > 0;
 
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var);
       AT_ASSERT(i == (int)output_nr);
     }
-    set_history(var, i, is_input, is_modified, is_differentiable, is_saved);
+    set_history(
+        var,
+        i,
+        is_input,
+        is_modified,
+        is_differentiable,
+        is_saved_and_setup_context);
 
     // For deprecation cycle. Can be removed after 1.6. In the case where we
     // detected a view in no grad mode during the forward, only warn the user
@@ -435,7 +444,7 @@ optional_variable_list _wrap_outputs(
     const at::ArrayRef<c10::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     _jvp_fn_t jvp_user_function,
-    const std::unordered_set<at::TensorImpl*>& to_save) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   std::unordered_map<at::TensorImpl*, size_t> inputs_mapping;
   inputs_mapping.reserve(input_vars.size());
   for (const auto i : c10::irange(input_vars.size())) {
@@ -443,7 +452,12 @@ optional_variable_list _wrap_outputs(
   }
 
   auto outputs = _process_backward_mode_ad(
-      inputs_mapping, non_differentiable, dirty_inputs, raw_outputs, cdata, to_save);
+      inputs_mapping,
+      non_differentiable,
+      dirty_inputs,
+      raw_outputs,
+      cdata,
+      to_save_if_setup_context);
 
   // This must happen after the backward processing as we expect the
   // computations happening here to track backward mode gradients.
@@ -554,15 +568,6 @@ void AutogradContext::mark_non_differentiable(const variable_list& outputs) {
 
 void AutogradContext::set_materialize_grads(bool value) {
   materialize_grads_ = value;
-}
-
-std::unordered_set<at::TensorImpl*> AutogradContext::get_to_save()
-    const {
-  std::unordered_set<at::TensorImpl*> to_save_impl{};
-  for (auto& var : to_save_) {
-    to_save_impl.insert(var.unsafeGetTensorImpl());
-  }
-  return to_save_impl;
 }
 
 const std::unordered_set<at::TensorImpl*>& AutogradContext::get_and_bump_dirty()

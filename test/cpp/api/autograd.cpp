@@ -254,7 +254,7 @@ TEST(AutogradAPITests, AnomalyMode) {
   double_backward_produce_nan(true);
 }
 
-TEST(CustomAutogradTest, CustomFunctionRaisesIfReturnInputAsIsAndSavesIt) {
+TEST(CustomAutogradTest, CustomFunctionReturnInputAsIsAndSavesIt) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(
         AutogradContext* ctx,
@@ -273,8 +273,7 @@ TEST(CustomAutogradTest, CustomFunctionRaisesIfReturnInputAsIsAndSavesIt) {
 
   Variable x = torch::randn({5, 5}, torch::requires_grad());
   Variable y = torch::randn({5, 5}, torch::requires_grad());
-  ASSERT_THROWS_WITH(
-      MyFunction::apply(x, y), "A input that has been returned as-is");
+  MyFunction::apply(x, y);
 }
 
 TEST(CustomAutogradTest, CustomFunction) {

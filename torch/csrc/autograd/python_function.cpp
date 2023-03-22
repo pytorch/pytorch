@@ -367,7 +367,7 @@ static void _wrap_outputs(
     PyObject* raw_output,
     PyObject* outputs,
     bool is_executable,
-    const std::unordered_set<at::TensorImpl*>& to_save) {
+    const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context) {
   auto cdata_if_executable = is_executable ? cdata : nullptr;
   Py_ssize_t num_outputs = PyTuple_GET_SIZE(raw_output);
   if (is_executable) {
@@ -464,7 +464,7 @@ static void _wrap_outputs(
       raw_output_vars,
       cdata_if_executable,
       std::move(jvp_user_function),
-      to_save);
+      to_save_if_setup_context);
 
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GetItem(raw_output, i);
@@ -486,8 +486,9 @@ static void _wrap_outputs(
 
 static void _get_tensors_to_save(
     THPFunction* self,
-    std::unordered_set<at::TensorImpl*>& to_save,
-    std::vector<c10::optional<at::Tensor>>& tensors_to_save) {
+    std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
+    std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    bool overridden_setup_context) {
   if (!self->to_save)
     return;
   THPFunction_assert(
@@ -503,7 +504,9 @@ static void _get_tensors_to_save(
       continue;
     } else if (THPVariable_Check(obj)) {
       const auto& tensor = THPVariable_Unpack(obj);
-      to_save.insert(tensor.unsafeGetTensorImpl());
+      if (overridden_setup_context) {
+        to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+      }
       tensors_to_save.push_back(tensor);
     } else {
       throw torch::TypeError(
@@ -775,7 +778,8 @@ PyObject* process_outputs(
     PyObject* inputs,
     THPObjectPtr&& raw_output,
     bool is_executable,
-    torch::jit::Node* node) {
+    torch::jit::Node* node,
+    bool overridden_setup_context) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -795,15 +799,25 @@ PyObject* process_outputs(
     }
   }
 
-  std::unordered_set<at::TensorImpl*> to_save{};
+  std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
   std::vector<c10::optional<at::Tensor>> tensors_to_save{};
   if (is_executable && grad_fn->to_save) {
-    _get_tensors_to_save(grad_fn, to_save, tensors_to_save);
+    _get_tensors_to_save(
+        grad_fn,
+        to_save_if_setup_context,
+        tensors_to_save,
+        overridden_setup_context);
   }
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(
-      cdata, grad_fn, unpacked.input_vars, raw_output, outputs, is_executable, to_save);
+      cdata,
+      grad_fn,
+      unpacked.input_vars,
+      raw_output,
+      outputs,
+      is_executable,
+      to_save_if_setup_context);
   _trace_post_record(
       node, op_obj, unpacked.input_vars, outputs, is_inplace, unpack_output);
 
@@ -1034,7 +1048,8 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
       inputs,
       std::move(output),
       is_executable,
-      node);
+      node,
+      overridden_setup_context);
   END_HANDLE_TH_ERRORS
 }
 
