@@ -155,14 +155,10 @@ void cross_mps_impl(const Tensor& out, const Tensor& input, const Tensor& other,
         }
       }
 
-      id<MTLFunction> kernelDataOffsetsFunction =
-          MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets", nil);
-      id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          [[device newComputePipelineStateWithFunction:kernelDataOffsetsFunction error:&error] autorelease];
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
-                                                             options:0] autorelease];
-      TORCH_CHECK(
-          kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+      id<MTLComputePipelineState> kernelDataOffsetsPSO = MPSDevice::getInstance()->metalIndexingFunction("kernel_index_offsets");
+      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength: numThreads * sizeof(simd_uint3)
+                                                             options: 0] autorelease];
+      TORCH_CHECK(kernelDataOffsetsPSO, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
       [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
       [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
