@@ -24,6 +24,7 @@ from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
     ConstantSource,
+    FSDPNNModuleSource,
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
@@ -715,7 +716,10 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
-        if self.get_source().guard_source().is_nn_module():
+        source = self.get_source()
+        if source.guard_source().is_nn_module() and not isinstance(
+            source, FSDPNNModuleSource
+        ):
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
