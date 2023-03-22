@@ -283,15 +283,13 @@ def get_kernel_metadata(node_schedule):
     for node in inductor_nodes:
         if "original_aten" in node.meta:
             original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node
+                node.name
             )
     metadata = [
-        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
     ]
-    for original_aten, nodes in original_aten_dict.items():
-        metadata.append(
-            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
-        )
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
 
 
@@ -563,9 +561,9 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
