@@ -7,7 +7,26 @@ import torch
 from torch.nn import Module
 from torch.optim.lr_scheduler import LRScheduler
 
-__all__ = ['AveragedModel', 'update_bn', 'SWALR']
+__all__ = ['AveragedModel', 'update_bn', 'SWALR', 'get_ema_multi_avg_fn', 'get_swa_multi_avg_fn']
+
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
+
+
+def get_ema_multi_avg_fn(decay):
+    @torch.no_grad()
+    def ema_update(ema_model_tuple, current_model_tuple, _):
+        torch._foreach_lerp_(ema_model_tuple, current_model_tuple, decay)
+
+    return ema_update
+
+
+def get_swa_multi_avg_fn():
+    @torch.no_grad()
+    def swa_update(ema_model_tuple, current_model_tuple, num_averaged):
+        diffs = torch._foreach_sub(current_model_tuple, ema_model_tuple)
+        torch._foreach_addcdiv_(ema_model_tuple, diffs, [num_averaged + 1] * len(ema_model_tuple))
+
+    return swa_update
 
 
 class AveragedModel(Module):
@@ -30,6 +49,11 @@ class AveragedModel(Module):
             parameters; the function must take in the current value of the
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models already averaged; if None,
+            equally weighted average is used (default: None)
+        multi_avg_fn (function, optional): the averaging function used to update
+            parameters inplace; the function must take in the current values of the
+            :class:`AveragedModel` parameters as a list, the current values of :attr:`model`
+            parameters as a list and the number of models already averaged; if None,
             equally weighted average is used (default: None)
         use_buffers (bool): if ``True``, it will compute running averages for
             both the parameters and the buffers of the model. (default: ``False``)
@@ -99,14 +123,18 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
+    def __init__(self, model, device=None, avg_fn=None, multi_avg_fn=None, use_buffers=False):
         super().__init__()
+        assert avg_fn is None or multi_avg_fn is None, 'Only one of avg_fn and multi_avg_fn should be provided'
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
         self.register_buffer('n_averaged',
                              torch.tensor(0, dtype=torch.long, device=device))
+        if avg_fn is None and multi_avg_fn is None:
+            multi_avg_fn = get_swa_multi_avg_fn()
         self.avg_fn = avg_fn
+        self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
 
     def forward(self, *args, **kwargs):
@@ -121,23 +149,25 @@ class AveragedModel(Module):
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers else model.parameters()
         )
+        self_param_detached = []
+        model_param_detached = []
         for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
+            model_param_detached.append(p_model_)
+            self_param_detached.append(p_swa.detach())
             if self.n_averaged == 0:
                 p_swa.detach().copy_(p_model_)
-            else:
-                if self.avg_fn is None:
-                    p_swa.detach().copy_(
-                        p_swa.detach()
-                        + (p_model_ - p_swa.detach()) / (self.n_averaged.to(device) + 1)
-                    )
-                else:
-                    p_swa.detach().copy_(
-                        self.avg_fn(
-                            p_swa.detach(), p_model_, self.n_averaged.to(device)
-                        )
-                    )
+        if self.n_averaged > 0 and self.avg_fn is not None:
+            for p_swa, p_model in zip(self_param_detached, model_param_detached):
+                p_swa.detach().copy_(self.avg_fn(p_swa.detach(), p_model,
+                                                 self.n_averaged.to(device)))
+        elif self.n_averaged > 0 and self.multi_avg_fn is not None:
+            grouped_self = _group_tensors_by_device_and_dtype([self_param_detached])
+            grouped_model = _group_tensors_by_device_and_dtype([model_param_detached])
+            for device, dtype in grouped_self.keys():
+                self.multi_avg_fn(grouped_self[(device, dtype)][0], grouped_model[(device, dtype)][0], self.n_averaged.to(device))
+
         if not self.use_buffers:
             # If not apply running averages to the buffers,
             # keep the buffers in sync with the source model.
