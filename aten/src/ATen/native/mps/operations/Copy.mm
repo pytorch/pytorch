@@ -35,7 +35,7 @@ size_t compute_strided_size(const at::Tensor& t) {
 }
 
 bool is_strided_contiguous(const at::Tensor& t) {
-  return compute_strided_size(t) == t.numel();
+  return compute_strided_size(t) == static_cast<size_t>(t.numel());
 }
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
@@ -47,11 +47,7 @@ void copy_cast_mps(at::Tensor& dst,
                    bool non_blocking = true) {
   using namespace mps;
 
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
+  using CachedGraph = MPSUnaryCachedGraph;
 
   MPSStream* stream = getCurrentMPSStream();
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
