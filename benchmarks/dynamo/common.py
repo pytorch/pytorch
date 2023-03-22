@@ -240,6 +240,7 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
+    "tf_efficientnet_b0",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -247,10 +248,7 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # torchbench
-    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
     # timm_models
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
 
@@ -2136,6 +2134,15 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
+        if (
+            args.ci
+            and args.accuracy
+            and args.training
+            and args.only in {"dla102", "gernet_l"}
+        ):
+            # Log generated code for flaky tests, to check if there is any codegen difference
+            inductor_config.debug = True
+
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
