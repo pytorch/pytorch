@@ -13,12 +13,13 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
-
 from torch._dynamo import logging as dynamo_logging, utils as dynamo_utils
 from torch._dynamo.utils import fake_mode_from_tensors
 from torch._functorch.aot_autograd import make_boxed_func
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
+
+from torch.fx.passes.shape_prop import ShapeProp
 from .._dynamo.backends.common import aot_autograd
 from ..fx.graph import _PyTreeCodeGen
 from . import config, metrics, overrides, pattern_matcher
@@ -170,6 +171,9 @@ def compile_fx_inner(
         pattern_matcher.fx_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
 
+    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+
+    with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
             gm,
             shape_env=shape_env,

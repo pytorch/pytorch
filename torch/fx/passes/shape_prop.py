@@ -164,9 +164,16 @@ class ShapeProp(torch.fx.Interpreter):
             else:
                 return obj
 
+        def extract_val(obj):
+            if isinstance(obj, torch._subclasses.FakeTensor):
+                return obj.detach()
+            else:
+                return None
+
         meta = map_aggregate(result, extract_tensor_meta)
         if found_tensor:
             n.meta['tensor_meta'] = meta
+            n.meta["val"] = map_aggregate(result, extract_val)
 
         n.meta['type'] = type(result)
         return result
