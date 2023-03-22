@@ -213,11 +213,11 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_pos_a: int
-    input_pos_b: int
+    input_source_a: "Source"
+    input_source_b: "Source"
 
     def __post_init__(self):
-        assert self.input_pos_a != self.input_pos_b
+        assert self.input_source_a != self.input_source_b
 
 
 """
