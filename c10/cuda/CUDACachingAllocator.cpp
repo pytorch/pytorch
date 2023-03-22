@@ -243,6 +243,11 @@ struct Block {
     }                                                 \
   } while (0)
 
+#if !defined(USE_ROCM) && !defined(USE_BAZEL)
+#define EXPANDABLE_SEGMENTS_SUPPORTED
+#endif
+
+#ifdef EXPANDABLE_SEGMENTS_SUPPORTED
 struct ExpandableSegment {
   ExpandableSegment(
       int device,
@@ -379,6 +384,33 @@ struct ExpandableSegment {
   std::vector<CUmemGenericAllocationHandle> handles_;
   std::vector<int> peers_;
 };
+#else
+struct ExpandableSegment {
+  ExpandableSegment(
+      int device,
+      cudaStream_t stream,
+      size_t size,
+      const std::vector<int>& peers) {
+    TORCH_INTERNAL_ASSERT(false, "expandable segment not supported");
+  }
+  size_t expandSize(size_t requested) {
+    return 0;
+  }
+  size_t trimSize(size_t requested) {
+    return 0;
+  }
+  size_t remainingSize() const {
+    return 0;
+  }
+  void* ptr() const {
+    return nullptr;
+  }
+  size_t size() const {
+    return 0;
+  }
+  void addPeer(int device) {}
+};
+#endif
 
 // BlockState, BlockPoolState, and PrivatePoolState contain the information
 // needed to reconstruct a private pool to a previous state. See note
@@ -624,7 +656,14 @@ class CachingAllocatorConfig {
   }
 
   static bool expandable_segments() {
+#ifndef EXPANDABLE_SEGMENTS_SUPPORTED
+    if (instance().m_expandable_segments) {
+      TORCH_WARN_ONCE("expandable_segments not supported on this platform")
+    }
+    return false;
+#else
     return instance().m_expandable_segments;
+#endif
   }
 
   // This is used to round-up allocation size to nearest power of 2 divisions.
