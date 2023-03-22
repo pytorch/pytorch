@@ -346,7 +346,9 @@ def cudagraphify_impl(model, inputs, static_input_idxs=()):
 
     assert isinstance(inputs, (list, tuple))
     static_inputs = [
-        static_input(x).zero_() if idx not in static_input_idxs else x.detach()
+        static_input(x).copy_(x.detach())
+        if idx not in static_input_idxs
+        else x.detach()
         for idx, x in enumerate(inputs)
     ]
 
