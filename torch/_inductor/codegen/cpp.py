@@ -2018,11 +2018,6 @@ class CppKernelProxy(CppKernel):
                         and V.graph.get_dtype(usr.args[1]) == torch.bfloat16
                         for usr in node.users
                     )
-                    if bf16_mem_copy:
-                        opt_ctx = OptimizationContext()
-                        opt_ctx.is_bf16_mem_copy = bf16_mem_copy
-                        node.meta[OptimizationContext.key] = opt_ctx
-                    return bf16_mem_copy
                 elif node.target is ["store"]:
                     stored_node = node.args[3]
                     bf16_mem_copy = is_bf16_mem_copy(stored_node)
