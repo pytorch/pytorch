@@ -121,7 +121,7 @@ def upload_to_rockset(
     print("Done!")
 
 
-def linter_test_function():
+def linter_test_function_changed():
     print("Hello world")
 
 def upload_to_s3(
