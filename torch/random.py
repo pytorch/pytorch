@@ -43,6 +43,8 @@ def manual_seed(seed) -> torch._C.Generator:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
+    _seed_custom_device(seed)
+
     return default_generator.manual_seed(seed)
 
 
@@ -60,7 +62,35 @@ def seed() -> int:
     if not torch.mps._is_in_bad_fork():
         torch.mps.manual_seed(seed)
 
+    _seed_custom_device(seed)
+
     return seed
+
+
+def _seed_custom_device(seed) -> None:
+    r"""Sets the seed to generate random numbers for custom device.
+
+    Args:
+        seed (int): The desired seed.
+
+    Note: Only used for the custom device to set the seed, and you must
+    have to register a custom backend module with `torch._register_device_module("foo", BackendModule)`.
+    BackendModule needs to have the following API's:
+    (1) _is_in_bad_fork() -> bool
+        Return `True` if now it is in bad_fork, else it will return `False`
+
+    (2) manual_seed_all(seed: int) -> None
+        Sets the seed for generating random numbers for your devices.
+    """
+    seed = int(seed)
+    custom_backend_name = torch._C._get_privateuse1_backend_name()
+    if hasattr(torch, custom_backend_name):
+        custom_device_mod = getattr(torch, custom_backend_name)
+        _bad_fork_name = "_is_in_bad_fork"
+        _seed_all_name = "manual_seed_all"
+        if hasattr(custom_device_mod, _bad_fork_name) and hasattr(custom_device_mod, _seed_all_name):
+            if not getattr(custom_device_mod, _bad_fork_name)():
+                getattr(custom_device_mod, _seed_all_name)(seed)
 
 
 def initial_seed() -> int:
