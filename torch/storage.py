@@ -3,16 +3,21 @@ import io
 import torch
 from ._utils import _type, _cuda
 from torch.types import Storage
-from typing import Any, TypeVar, Type, Union, cast
+from typing import Any, TypeVar, Type, Union, cast, Dict as _Dict
 import copy
 import collections
 from functools import lru_cache
 import warnings
+import threading
+import functools
 try:
     import numpy as np
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
+
+_share_memory_lock = threading.Lock()
+_share_memory_map: _Dict[int, threading.RLock] = {}
 
 T = TypeVar('T', bound='Union[_StorageBase, TypedStorage]')
 class _StorageBase:
@@ -200,6 +205,11 @@ class _StorageBase:
         storages, which do not need to be moved for sharing across processes.
         Storages in shared memory cannot be resized.
 
+        Note that to mitigate issues like https://github.com/pytorch/pytorch/issues/95606
+        it is thread safe to call this function from multiple threads on the same object.
+        It is NOT thread safe though to call any other function on self without proper
+        synchronization. Please see :doc:`/notes/multiprocessing` for more details.
+
         Returns: self
         """
         from torch.multiprocessing import get_sharing_strategy
@@ -227,6 +237,40 @@ class _StorageBase:
         return self
 
 
+def _share_memory_lock_protected(fn):
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        to_free = None
+        to_wait = None
+        with _share_memory_lock:
+            key = self._cdata
+            if key in _share_memory_map:
+                to_wait = _share_memory_map[key]
+            else:
+                _share_memory_map[key] = threading.RLock()
+                _share_memory_map[key].acquire()
+                to_free = key
+
+        # If we're already in the process of sharing the storage, wait
+        # for it to be done.
+        if to_wait is not None:
+            with to_wait:
+                pass
+
+        try:
+            return fn(self, *args, **kwargs)
+        finally:
+            # If we acquired the storage lock here and we're done working on it
+            # we can now release it and free the entry.
+            if to_free is not None:
+                # Ensure that the cdata from the storage didn't change and only
+                # the data_ptr did.
+                assert self._cdata == to_free
+                with _share_memory_lock:
+                    _share_memory_map[to_free].release()
+                    del _share_memory_map[to_free]
+    return wrapper
+
 class UntypedStorage(torch._C.StorageBase, _StorageBase):
     def __getitem__(self, *args, **kwargs):
         if self.device.type == 'meta':
@@ -236,6 +280,18 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
     @property
     def is_cuda(self):
         return self.device.type == 'cuda'
+
+    @_share_memory_lock_protected
+    def share_memory_(self, *args, **kwargs):
+        return super().share_memory_(*args, **kwargs)
+
+    @_share_memory_lock_protected
+    def _share_fd_cpu_(self, *args, **kwargs):
+        return super()._share_fd_cpu_(*args, **kwargs)
+
+    @_share_memory_lock_protected
+    def _share_filename_cpu_(self, *args, **kwargs):
+        return super()._share_filename_cpu_(*args, **kwargs)
 
 def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
