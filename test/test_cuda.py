@@ -4230,7 +4230,9 @@ exit(2)
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params = [
+                torch.randn((i + 5, i + 5), device="cuda") for i in range(2)
+            ] + [torch.randn((), device="cuda")]
             params_control = [p.clone().requires_grad_() for p in params]
             params_graphed = [p.clone().requires_grad_() for p in params]
 
@@ -5343,6 +5345,12 @@ class TestBlockStateAbsorption(TestCase):
             for before_block, after_block in zip(before_segment["blocks"], after_segment["blocks"]):
                 self.checkCheckpointedBlock(before_block, after_block)
 
+    @staticmethod
+    def setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters=None):
+        stale_storages_ptr = [t.untyped_storage()._cdata for t in stale_storages_ptr]
+        storages_deleters = [] if not storages_deleters else [t.untyped_storage()._cdata for t in storages_deleters]
+        torch._C._cuda_setCheckpointPoolState(device, state, stale_storages_ptr, storages_deleters)
+
     def checkFunction(self, fn, inputs, pool=None):
         graph, outputs = cudagraphify(fn, inputs, pool=pool)
 
@@ -5352,7 +5360,7 @@ class TestBlockStateAbsorption(TestCase):
         segments_before_checkpoint = get_cudagraph_segments(pool_id)
 
         state = torch._C._cuda_getCheckpointState(device, pool_id)
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+        self.setCheckpointPoolState(device, state, [], [])
 
         self.checkCheckpointedState(segments_before_checkpoint, get_cudagraph_segments(pool_id))
 
@@ -5422,7 +5430,7 @@ class TestBlockStateAbsorption(TestCase):
         graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
 
 
-        torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
+        self.setCheckpointPoolState(outputs[0].device.index, state, outputs2, [])
 
         del outputs2
 
@@ -5445,7 +5453,7 @@ class TestBlockStateAbsorption(TestCase):
 
         # graph2, outputs2 = cudagraphify(foo2, [], pool=graph.pool())
         # with self.assertRaisesRegex(Exception, "being manually freed must be passed"):
-        #     torch._C._cuda_setCheckpointPoolState(outputs[0].device.index, state, [], [])
+        #     self.setCheckpointPoolState(outputs[0].device.index, state, [], [])
 
     def test_tensor_dies_after_checkpoint(self):
 
@@ -5463,7 +5471,7 @@ class TestBlockStateAbsorption(TestCase):
 
         del outputs
 
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [])
+        self.setCheckpointPoolState(device, state, [], [])
 
         self.assertEqual(live_blocks(pool_id), 2)
         torch._C._cuda_cudaCachingAllocator_raw_delete(output_data_ptrs[0])
@@ -5508,7 +5516,7 @@ class TestBlockStateAbsorption(TestCase):
         for i in range(len(reconstructed_tensors)):
             self.assertTrue(reconstructed_tensors[i].mean(dtype=torch.float) == 3)
 
-        torch._C._cuda_setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
+        self.setCheckpointPoolState(device, state, [], [reconstructed_tensors[0], reconstructed_tensors[1]])
 
         self.assertEqual(live_blocks(pool_id), 3)
 

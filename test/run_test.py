@@ -163,7 +163,6 @@ TESTS = TESTS + ['doctests']
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
 WINDOWS_BLOCKLIST = [
-    "test_ops_jit",  # TODO: Broken on Windows https://github.com/pytorch/pytorch/issues/96858
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
     "distributed/rpc/test_tensorpipe_agent",
@@ -280,6 +279,8 @@ CI_SERIAL_LIST = [
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     '_nvfuser/test_torchscript',  # OOM on test_issue_1785
+    'test_schema_check',  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
+    'functorch/test_memory_efficient_fusion',   # Cause CUDA OOM on ROCm
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -912,8 +913,8 @@ def parse_args():
         action="store_true",
         help=(
             "If this flag is present, we will only run functorch tests. "
-            "If this flag is not present, we will not run any functorch tests. "
-            "This requires functorch to already be installed."
+            "If this flag is not present, we will run all tests "
+            "(including functorch tests)."
         )
     )
     parser.add_argument(
@@ -1147,11 +1148,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
-    else:
-        # Exclude all functorch tests otherwise
-        options.exclude.extend(FUNCTORCH_TESTS)
 
     if options.mps:
         selected_tests = ['test_mps', 'test_metal']

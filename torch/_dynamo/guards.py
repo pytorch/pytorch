@@ -507,9 +507,8 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
-            static, reason = tensor_always_has_static_shape(
-                value, guard.source, is_tensor=True
-            )
+            assert guard.source is not None
+            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
@@ -699,19 +698,9 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
-                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
-                assert (
-                    pos_b >= 0 and pos_a >= 0
-                ), "Deduped args out of bounds, cannot be negative"
-
-                assert self.output_graph.graphargs[
-                    pos_a
-                ].is_tensor, "Deduped arg must be a tensor"
-                assert self.output_graph.graphargs[
-                    pos_b
-                ].is_tensor, "Deduped arg must be a tensor"
-                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                source_a = guard.input_source_a
+                source_b = guard.input_source_b
+                code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
@@ -767,13 +756,23 @@ def ___make_guard_fn({','.join(closure_vars.keys())}):
         return id(obj)
 
 
+stashed_first_fail_reason = None
+
+
 def guard_fail_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    index: int,
+    last: bool,
 ) -> None:
     """
     called whenever a guard fails.
     """
-    if not guard_fn.guard_fail_fn and not last:
+    first = index == 0
+    global stashed_first_fail_reason
+    # Don't waste time computing the fail reason for guards we aren't going to report out.
+    if not guard_fn.guard_fail_fn and not (first or last):
         return
     scope = {rename_implicit(k): v for k, v in f_locals.items()}
     scope.update(guard_fn.closure_vars)
@@ -788,6 +787,22 @@ def guard_fail_hook(
         elif isinstance(fail_reason, bool) and not fail_reason:
             reason = part
             break
+
+    if first:
+        stashed_first_fail_reason = reason
+
+    if not last:
+        return
+
+    # Technically, we're failing our last guard, which is our oldest guard due to the
+    # eval_frame.c logic that moves newest frames to head, but for logging purposes
+    # it's more useful to see the 'first' failure (if we never got a hit) since it's
+    # likely not yet been logged as a failure reason in a case of repeating failures.
+    assert stashed_first_fail_reason
+    guard_failures[orig_code_map[code]].append(stashed_first_fail_reason)
+    stashed_first_fail_reason = None
+
+    # TODO should we GuardFail our stashed_first_fail_reason too?
     try:
         if guard_fn.guard_fail_fn is not None:
             guard_fn.guard_fail_fn(
@@ -799,12 +814,13 @@ def guard_fail_hook(
             exc_info=True,
         )
 
-    if last:
-        guard_failures[orig_code_map[code]].append(reason)
-
 
 def guard_error_hook(
-    guard_fn: GuardFn, code: types.CodeType, f_locals: Dict[str, object], last: bool
+    guard_fn: GuardFn,
+    code: types.CodeType,
+    f_locals: Dict[str, object],
+    index: int,
+    last: bool,
 ):
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
