@@ -24,7 +24,7 @@ inline c10::optional<Device> device_of(const Tensor& t) {
 }
 
 inline c10::optional<Device> device_of(const c10::optional<Tensor>& t) {
-  return t.has_value() ? device_of(t.value()) : nullopt;
+  return t.has_value() ? device_of(t.value()) : c10::nullopt;
 }
 
 /// Return the Device of a TensorList, if the list is non-empty and

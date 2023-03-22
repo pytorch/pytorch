@@ -275,22 +275,28 @@ class GuardBuilder(GuardBuilderBase):
             self._produce_guard_code(guard, code)
             return
 
-        # Add type check to prevent equality check between tensor and non-tensor.
         code = list()
+
+        # If matching equality against list/tuple, we must also check that
+        # the internal types match.  (TODO: what about nested lists?)
         if istype(val, (list, tuple)):
+            # NB: LIST_LENGTH takes care of the outer __check_type_id test
             self.LIST_LENGTH(guard)
 
             for idx, elem in enumerate(val):
                 code.append(
                     f"___check_type_id({ref}[{idx}], {self.id_ref(type(elem))})"
                 )
-
-        elif not istype(val, torch.Size):
+        else:
+            # Add type check to prevent equality check between tensor and non-tensor.
             code.append(f"___check_type_id({ref}, {self.id_ref(t)})")
 
         if istype(val, torch.Size):
             val = tuple(val)
 
+        # TODO: It feels like it would be better to just implement our own
+        # equality test in C that handles all of the necessary type checking
+        # and NaN tests
         code.append(f"{ref} == {val!r}")
         self._produce_guard_code(guard, code)
 
@@ -501,9 +507,8 @@ class GuardBuilder(GuardBuilderBase):
             # as an empty set is a safe degeneration - that is, a strictly static tensor is always valid for a frame
             # compiled with that same
             # tensor + more onerous user directives.
-            static, reason = tensor_always_has_static_shape(
-                value, guard.source, is_tensor=True
-            )
+            assert guard.source is not None
+            static, reason = tensor_always_has_static_shape(value, is_tensor=True)
             if not static:
                 if hasattr(value, "_dynamo_dynamic_indices"):
                     code.append(
@@ -693,19 +698,9 @@ class CheckFunctionManager:
         )
         for guard in aotautograd_guards:
             if isinstance(guard, DuplicateInputs):
-                pos_a = self.output_graph.pos_to_arg[guard.input_pos_a]
-                pos_b = self.output_graph.pos_to_arg[guard.input_pos_b]
-                assert (
-                    pos_b >= 0 and pos_a >= 0
-                ), "Deduped args out of bounds, cannot be negative"
-
-                assert self.output_graph.graphargs[
-                    pos_a
-                ].is_tensor, "Deduped arg must be a tensor"
-                assert self.output_graph.graphargs[
-                    pos_b
-                ].is_tensor, "Deduped arg must be a tensor"
-                code_part = f"{self.output_graph.graphargs[pos_a].source.name()} is {self.output_graph.graphargs[pos_b].source.name()}"  # noqa: B950
+                source_a = guard.input_source_a
+                source_b = guard.input_source_b
+                code_part = f"{source_a.name()} is {source_b.name()}"
                 code_parts.append(code_part)
                 verbose_code_parts.append(code_part)
             else:
