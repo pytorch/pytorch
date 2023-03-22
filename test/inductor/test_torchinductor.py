@@ -10,7 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
-from typing import Any, Callable
+from typing import Callable
 from unittest.mock import patch
 
 import numpy as np
@@ -30,7 +30,6 @@ from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import all_types
@@ -71,15 +70,6 @@ from torch._inductor.compile_fx import (
     complex_memory_overlap,
 )
 from torch._inductor.ir import ModularIndexing
-from torch._inductor.overrides import (
-    linear_permute_fusion,
-    linear_transpose,
-    permute_linear_fusion,
-    permute_matmul_fusion,
-    sink_cat_after_pointwise,
-    transpose_linear,
-    transpose_matmul,
-)
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import has_torchvision_roi_align, timed
 from torch.fx.experimental.symbolic_shapes import FloorDiv
@@ -170,34 +160,6 @@ def requires_decomp(fn):
         return maybe_test
 
     return wrap_test
-
-
-PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
-
-
-def chain_passes(*passes: PassFunc) -> PassFunc:
-    def parent_pass(module: torch.fx.GraphModule, input: Any) -> torch.fx.GraphModule:
-        for pass_ in passes:
-            if isinstance(module, torch.fx.GraphModule):
-                ShapeProp(module).propagate(*input)
-            module = pass_(module)
-        return module
-
-    return parent_pass
-
-
-def count_call(module: torch.fx.GraphModule, op: str, target_op: Any) -> int:
-    return sum(
-        [1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes]
-    )
-
-
-def count_call_function(module: torch.fx.GraphModule, target_op: Any) -> int:
-    return count_call(module, "call_function", target_op)
-
-
-def count_call_method(module: torch.fx.GraphModule, target_op: Any) -> int:
-    return count_call(module, "call_method", target_op)
 
 
 class TestCase(TorchTestCase):
@@ -1945,12 +1907,13 @@ class CommonTemplate:
                 res = self.linear(res)
                 return res
 
-        with torch.no_grad():
-            m = M(224, 224).bfloat16().eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(224, 224, dtype=torch.bfloat16)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
+        if has_bf16_support():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
 
     @slow()
     def test_conv2d_unary(self):
@@ -2139,6 +2102,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
@@ -4474,6 +4445,21 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put4(self):
+        # a, b[0] are not broadcastable
+        # https://github.com/pytorch/pytorch/issues/97104
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c)
+
+        self.common(
+            fn,
+            [
+                torch.rand([8, 2]),
+                torch.rand([8]) > 0.5,
+                torch.rand([]),
+            ],
+        )
+
     def test_index_put_as_masked_fill(self):
         def fn(a, b, c, d):
             a = a.clone()
@@ -5756,8 +5742,8 @@ class CommonTemplate:
             ["test_mm_views", True],
             [
                 "test_profiler_mark_wrapper_call",
-                False,
-            ],  # TODO: fallback to default wrapper for now
+                True,
+            ],
             ["test_reduction1", True],  # Reduction
             ["test_relu", True],  # multiple inputs
             ["test_silu", True],  # single input, single output
@@ -6167,15 +6153,17 @@ if HAS_CPU:
                 value = torch.randn((2, 17), dtype=dtype)
                 mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    opt_fn(value, mask)
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            opt_fn = torch._dynamo.optimize("inductor")(fn)
+                            opt_fn(value, mask)
 
-                    real_out = fn(value, mask)
-                    compiled_out = opt_fn(value, mask)
-                    assert same(real_out, compiled_out, equal_nan=True)
-                    assert metrics.generated_cpp_vec_kernel_count >= 1
+                            real_out = fn(value, mask)
+                            compiled_out = opt_fn(value, mask)
+                            assert same(real_out, compiled_out, equal_nan=True)
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
@@ -6271,12 +6259,16 @@ if HAS_CPU:
                 tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    traced = make_fx(fn)(x)
-                    compiled = compile_fx_inner(traced, [x])
-                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol)
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            traced = make_fx(fn)(x)
+                            compiled = compile_fx_inner(traced, [x])
+                            assert same(
+                                fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol
+                            )
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6431,14 +6423,19 @@ if HAS_CPU:
             x = torch.randn((2, 9), dtype=torch.bfloat16)
             y = torch.randn((2, 9), dtype=torch.bfloat16)
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x, y)
-                compiled = compile_fx_inner(traced, [x, y])
-                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
-                if codecache.valid_vec_isa_list():
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+            for torch_compile_debug in [True, False]:
+                with config.patch(
+                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
+                ):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x, y)
+                    compiled = compile_fx_inner(traced, [x, y])
+                    assert same(
+                        fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2
+                    )
+                    if codecache.valid_vec_isa_list():
+                        assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6980,53 +6977,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 fn, (torch.randn(2, 3, 10, 5, 6, device="cuda")[:, :, 2::2, :, :],)
             )
 
-        def test_sink_cat_after_pointwise(self):
-            def test_kwarg(x, y):
-                return torch.cat([x, y], dim=-1).view(-1).view(128).tanh()
-
-            def test_arg(x, y):
-                return torch.cat([x, y], -1).view(-1).view(128).tanh()
-
-            trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
-            inputs = [
-                torch.randn(8, 8, device="cuda"),
-                torch.randn(8, 8, device="cuda"),
-            ]
-            for f in [test_kwarg, test_arg]:
-                traced = trace_func(f, inputs)
-                self.assertTrue(torch.allclose(f(*inputs), traced(*inputs)))
-                self.assertEqual(count_call_method(traced, "tanh"), 2)
-
-        def test_linear_permute_fusion(self):
-            class TestModule(torch.nn.Module):
-                def __init__(self, k: int, n: int, has_bias: bool):
-                    super().__init__()
-                    self.weight = torch.nn.Parameter(torch.randn(n, k))
-                    self.has_bias = has_bias
-                    if has_bias:
-                        self.bias = torch.nn.Parameter(torch.randn(n))
-
-                def forward(self, input: torch.Tensor):
-                    if self.has_bias:
-                        a0 = torch.nn.functional.linear(input, self.weight, self.bias)
-                    else:
-                        a0 = torch.nn.functional.linear(input, self.weight)
-                    b0 = a0.permute(0, 2, 1)
-                    return b0
-
-            m, k, n = 16, 8, 4
-            trace_func = chain_passes(torch.fx.symbolic_trace, linear_permute_fusion)
-            for has_bias in [True, False]:
-                module = TestModule(k, n, has_bias).eval()
-                input = torch.randn(6, m, k)
-                traced = trace_func(module, [input])
-                num_linear = count_call_function(traced, torch.nn.functional.linear)
-                num_linear_transpose = count_call_function(traced, linear_transpose)
-                self.assertEqual(num_linear, 0)
-                self.assertEqual(num_linear_transpose, 1)
-
-                self.assertTrue(torch.allclose(module(input), traced(input)))
-
         @config.patch(permute_fusion=True)
         def test_permute_fusion(self):
             class Repro(torch.nn.Module):
@@ -7087,61 +7037,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 (x, y, z),
                 check_lowp=False,
             )
-
-        def test_permute_linear_fusion(self):
-            class TestModule(torch.nn.Module):
-                def __init__(self, k: int, n: int, has_bias: bool):
-                    super().__init__()
-                    self.weight = torch.nn.Parameter(torch.randn(n, k))
-                    self.has_bias = has_bias
-                    if has_bias:
-                        self.bias = torch.nn.Parameter(torch.randn(n))
-
-                def forward(self, input: torch.Tensor):
-                    input1 = input.permute(0, 2, 1)
-                    if self.has_bias:
-                        return torch.nn.functional.linear(
-                            input1, self.weight, self.bias
-                        )
-                    return torch.nn.functional.linear(input1, self.weight)
-
-            m, k, n = 16, 8, 4
-
-            trace_func = chain_passes(torch.fx.symbolic_trace, permute_linear_fusion)
-            for has_bias in [True, False]:
-                module = TestModule(k, n, has_bias).eval()
-                input = torch.randn(6, k, m)
-                traced = trace_func(module, [input])
-                num_linear = count_call_function(traced, torch.nn.functional.linear)
-                num_transpose_linear = count_call_function(traced, transpose_linear)
-                self.assertEqual(num_linear, 0)
-                self.assertEqual(num_transpose_linear, 1)
-
-                self.assertTrue(torch.allclose(module(input), traced(input)))
-
-        def test_permute_bmm_fusion(self):
-            class TestModule(torch.nn.Module):
-                def __init__(self, batch: int, k: int, n: int):
-                    super().__init__()
-                    self.other = torch.randn(batch, k, n)
-
-                def forward(self, input: torch.Tensor):
-                    input1 = input.permute(0, 2, 1)
-                    output = torch.bmm(input1, self.other)
-                    return output
-
-            batch, m, k, n = 6, 16, 8, 4
-
-            trace_func = chain_passes(torch.fx.symbolic_trace, permute_matmul_fusion)
-            module = TestModule(batch, k, n).eval()
-            input = torch.randn(batch, k, m)
-            traced = trace_func(module, [input])
-            num_bmm = count_call_function(traced, torch.bmm)
-            num_transpose_matmul = count_call_function(traced, transpose_matmul)
-            self.assertEqual(num_bmm, 0)
-            self.assertEqual(num_transpose_matmul, 1)
-
-            self.assertTrue(torch.allclose(module(input), traced(input)))
 
         def test_memory_history_inductor(self):
             def called_inside_compile(x, w, b):
@@ -7811,9 +7706,9 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/((-1) + (2*foo)))) + (foo*({c}/((-1) + (2*foo))))",
             ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/(bar + ((-1)*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
@@ -7834,13 +7729,12 @@ class ExprPrinterTests(TestCase):
     def test_print_floor(self):
         s1 = sympy.Symbol("s1", integer=False)
         expr = sympy.floor(s1)
-        self.assertEqual(texpr(expr), "tl.libdevice.floor(s1)")
+        self.assertEqual(texpr(expr), "tl.math.floor(s1)")
         self.assertEqual(pexpr(expr), "math.floor(s1)")
 
     def test_print_ceil(self):
         s1 = sympy.Symbol("s1", integer=False)
         expr = sympy.ceiling(s1)
-        self.assertEqual(texpr(expr), "tl.libdevice.ceil(s1)")
         self.assertEqual(pexpr(expr), "math.ceil(s1)")
 
 
