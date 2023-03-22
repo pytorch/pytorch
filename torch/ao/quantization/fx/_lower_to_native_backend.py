@@ -791,12 +791,21 @@ def _lower_static_weighted_ref_functional(
         else:
             raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
-            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
+            # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
+            # They are not needed for compute op (i.e., quantized::linear)
+            kwargs = func_node.kwargs
+            # F.linear uses 'bias' key for bias while qlinear_prepack uses 'B' for bias
+            if func_node.target == F.linear and 'bias' in kwargs:
+                kwargs = kwargs.copy()
+                kwargs['B'] = kwargs['bias']
+                del kwargs['bias']
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), kwargs)
 
         # Step 2: Replace reference pattern with the corresponding quantized op
         (q_func, q_relu_func) = STATIC_LOWER_FUNCTIONAL_MAP[func_node.target]  # type: ignore[index]
         func_node.target = q_relu_func if relu_node is not None else q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        func_node.kwargs = {}
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
         output_zp_node.append(func_node)
