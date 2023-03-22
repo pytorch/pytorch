@@ -1,9 +1,9 @@
 //  Copyright © 2022 Apple Inc.
 
 #pragma once
+#include <c10/core/Allocator.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-#include <ATen/ATen.h>
 
 
 #ifdef __OBJC__
@@ -26,6 +26,14 @@ using namespace std;
 
 namespace at {
 namespace mps {
+
+// Helper enum to check if a MPSGraph op is supported in a given macOS version
+enum class MacOSVersion : uint32_t {
+  MACOS_VER_13_0_PLUS = 0,
+  MACOS_VER_13_1_PLUS,
+  MACOS_VER_13_2_PLUS,
+  MACOS_VER_13_3_PLUS,
+};
 
 //-----------------------------------------------------------------
 //  MPSDevice
@@ -56,7 +64,7 @@ class TORCH_API MPSDevice {
   /**
    * Returns whether running on Ventura or newer
    */
-  bool isMacOS13Plus() const;
+  bool isMacOS13Plus(MacOSVersion version) const;
 
   MTLFunction_t metalIndexingFunction(const std::string &kernel, MTLFunctionConstantValues_t constantValues);
 
@@ -65,14 +73,13 @@ class TORCH_API MPSDevice {
  private:
   static MPSDevice* _device;
   MTLDevice_t _mtl_device;
-  bool _macos13plus;
   MTLLibrary_t _mtl_indexing_library;
   MPSDevice();
 };
 
 TORCH_API bool is_available();
-TORCH_API bool is_macos_13_or_newer();
-
+TORCH_API bool is_macos_13_or_newer(MacOSVersion version = MacOSVersion::MACOS_VER_13_0_PLUS);
+TORCH_API void device_synchronize();
 TORCH_API at::Allocator* GetMPSAllocator(bool useSharedAllocator = false);
 
 } // namespace mps

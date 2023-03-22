@@ -24,6 +24,10 @@ namespace c10 {
 // make sure you update PrivateUse3Bit.  (But you shouldn't: private use
 // keys should have higher precedence than all built-in keys)
 
+// If you add a new (non-privateuse) backend here,
+// make sure to add an Autograd<Backend> fallthrough kernel
+// in aten/src/ATen/core/VariableFallbackKernel.cpp
+
 #define C10_FORALL_BACKEND_COMPONENTS(_, extra) \
   _(CPU, extra)                                 \
   _(CUDA, extra)                                \
@@ -352,6 +356,7 @@ enum class DispatchKey : uint16_t {
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
+  AutocastPrivateUse1,
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ WRAPPERS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
   // There are a number of alternative modes which may want to handle before

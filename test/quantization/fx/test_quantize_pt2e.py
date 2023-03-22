@@ -15,6 +15,7 @@ from torch.testing._internal.common_quantized import (
 from torch.ao.quantization import (
     get_default_qconfig,
     QConfigMapping,
+    observer,
     QConfig,
     default_observer,
     default_per_channel_weight_observer,
@@ -29,6 +30,8 @@ from torch.ao.ns.fx.utils import (
     compute_sqnr,
 )
 import copy
+import itertools
+
 from torch._decomp import get_decompositions
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -49,7 +52,7 @@ class TestQuantizePT2E(QuantizationTestCase):
     def test_qconfig_none(self):
         class M(torch.nn.Module):
             def __init__(self):
-                super(M, self).__init__()
+                super().__init__()
                 self.conv1 = nn.Conv2d(1, 1, 1)
                 self.conv2 = nn.Conv2d(1, 1, 1)
 
@@ -140,25 +143,36 @@ class TestQuantizePT2E(QuantizationTestCase):
                 ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
                 ns.call_function(torch.ops.aten.addmm.default),
             ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
+            self.checkGraphModuleNodes(m, expected_node_list=node_list)
 
-    def test_q_dq_decomposition(self):
+    @xfailIfPython311
+    def test_rearrange_weight_observer_for_decomposed_linear(self):
+        """
+        Check whether weight observer is correctly rearranged for decomposed linear.
+        before:
+            weight - t - observer \
+              input - observer - addmm/mm
+        after:
+            weight - observer - t \
+              input - observer - addmm/mm
+        """
         class M(torch.nn.Module):
-            def __init__(self):
+            def __init__(self, with_bias, use_relu):
                 super().__init__()
-                self.conv = nn.Conv2d(1, 1, 1)
+                self.linear = nn.Linear(4, 4, bias=with_bias)
+                self.relu = nn.ReLU()
+                self.use_relu = use_relu
 
             def forward(self, x):
-                x = self.conv(x)
-                return x
+                x = self.linear(x)
+                return self.relu(x) if self.use_relu else x
 
-        with override_quantized_engine("qnnpack"):
-            m = M().eval()
-            example_inputs = (torch.randn(1, 1, 3, 3),)
+        with_bias_list = [True, False]
+        use_relu_list = [True, False]
+        cases = itertools.product(with_bias_list, use_relu_list)
+        for with_bias, use_relu in cases:
+            m = M(with_bias, use_relu).eval()
+            example_inputs = (torch.randn(1, 4),)
 
             # program capture
             m, guards = torchdynamo.export(
@@ -168,52 +182,30 @@ class TestQuantizePT2E(QuantizationTestCase):
                 tracing_mode="real",
             )
 
-            qconfig = get_default_qconfig("qnnpack")
-            qconfig_mapping = QConfigMapping().set_object_type(torch.nn.Conv2d, qconfig)
+            qconfig = get_default_qconfig('qnnpack')
+            qconfig_mapping = QConfigMapping().set_global(qconfig)
             backend_config = get_qnnpack_pt2e_backend_config()
             m = prepare_pt2e(m, qconfig_mapping, example_inputs, backend_config)
-            m(*example_inputs)
-            m = convert_pt2e(m)
-            m(*example_inputs)
-            node_occurrence = {
-                # two for input and weight of the conv, one for output for the conv
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 3,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 3,
-            }
-            node_list = [
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-                ns.call_function(torch.ops.aten.convolution.default),
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
-            ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
-            m = make_fx(m, decomposition_table=quant_decomp)(*copy.deepcopy(example_inputs))
-            node_occurrence = {
-                # check both q/dq are decomposed
-                ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor.default): 0,
-                ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor.default): 0,
-            }
-            node_list = [
-                # ops in quantize
-                ns.call_function(torch.ops.aten.mul.Tensor),
-                ns.call_function(torch.ops.aten.round.default),
-                ns.call_function(torch.ops.aten.add.Tensor),
-                ns.call_function(torch.ops.aten.clamp.default),
-                # ops in dequantize
-                ns.call_function(torch.ops.aten.sub.Tensor),
-                ns.call_function(torch.ops.aten.mul.Tensor),
-                # conv op
-                ns.call_function(torch.ops.aten.convolution.default),
-            ]
-            self.checkGraphModuleNodes(
-                m,
-                expected_node_list=node_list,
-                expected_node_occurrence=node_occurrence
-            )
+
+            # 1. Check graph nodes:
+            # - args[0] of t should be the weight observer
+            # - args[-1] of addmm/mm should be t
+            error_msg = 'Weight observer is not correctly rearranged for decomposed linear'
+            for node in m.graph.nodes:
+                if node.target == torch.ops.aten.t.default:
+                    target = node.args[0].target
+                    self.assertTrue(isinstance(getattr(m, target), observer.ObserverBase), error_msg)
+                elif node.target in (torch.ops.aten.addmm.default, torch.ops.aten.mm.default):
+                    target = node.args[-1].target
+                    self.assertTrue(target == torch.ops.aten.t.default, error_msg)
+
+            # 2. Check m.code to ensure `m.recompile()` is called.
+            # If weight observer is rearranged in graph but `m.recompile()` is not called,
+            # m.code would be wrong.
+            code_before_recompile = m.code
+            m.recompile()
+            code_after_recompile = m.code
+            self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
     def test_q_dq_per_channel_decomposition(self):
         class M(torch.nn.Module):

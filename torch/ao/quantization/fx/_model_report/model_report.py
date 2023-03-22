@@ -120,7 +120,7 @@ class ModelReport:
 
         # keep the reports private so they can't be modified
         self._desired_report_detectors = desired_report_detectors
-        self._desired_detector_names = set([detector.get_detector_name() for detector in desired_report_detectors])
+        self._desired_detector_names = {detector.get_detector_name() for detector in desired_report_detectors}
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
@@ -129,7 +129,7 @@ class ModelReport:
 
         # initialize each report to have empty set of observers of interest
         for desired_report in self._desired_detector_names:
-            self._detector_name_to_observer_fqns[desired_report] = set([])
+            self._detector_name_to_observer_fqns[desired_report] = set()
 
         # flags to ensure that we can only prepare and remove observers once
         self._prepared_flag = False
@@ -287,7 +287,7 @@ class ModelReport:
         if remove_inserted_observers:
             self._removed_observers = True
             # get the set of all Observers inserted by this instance of ModelReport
-            all_observers_of_interest: Set[str] = set([])
+            all_observers_of_interest: Set[str] = set()
             for desired_report in self._detector_name_to_observer_fqns:
                 observers_of_interest = self._detector_name_to_observer_fqns[desired_report]
                 all_observers_of_interest.update(observers_of_interest)

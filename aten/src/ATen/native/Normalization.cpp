@@ -43,6 +43,7 @@
 #include <ATen/ops/native_batch_norm_backward.h>
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
+#include <ATen/ops/_native_batch_norm_legit.h>
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>
@@ -136,8 +137,10 @@ std::tuple<Tensor,Tensor,Tensor> batch_norm_cpu_transform_input_template(
 
   // inference contiguous path
   if (all_contiguous) {
-    batch_norm_cpu_stub(kCPU, output, input, weight, bias,
-        save_mean, save_invstd, running_mean, running_var, train, eps);
+    if (input.numel() != 0) {
+      batch_norm_cpu_stub(kCPU, output, input, weight, bias,
+          save_mean, save_invstd, running_mean, running_var, train, eps);
+    }
     return std::make_tuple(output, save_mean, save_invstd);
   }
 
@@ -799,6 +802,11 @@ std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_stats_cpu(
     const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     bool train, double momentum, double eps) {
   return batch_norm_cpu(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
+}
+std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_no_training(
+    const Tensor& self, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    const Tensor& running_mean, const Tensor& running_var, double momentum, double eps) {
+  return at::_native_batch_norm_legit(self, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*train=*/false, momentum, eps);
 }
 
 

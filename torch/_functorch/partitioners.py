@@ -1,4 +1,5 @@
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
+from torch.fx.experimental.symbolic_shapes import hint_int, magic_methods, method_to_operator
 import torch
 import torch.fx as fx
 import operator
@@ -15,6 +16,10 @@ import functools
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
 
+
+def is_symint_node(node):
+    assert hasattr(node, 'meta'), "All nodes traced with proxy_tensor should have meta"
+    return "val" in node.meta and isinstance(node.meta['val'], torch.SymInt)
 
 
 class InvalidNodeBase:
@@ -67,6 +72,7 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
+            assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -202,12 +208,12 @@ def _prod(x):
 
 def _tensor_nbytes(numel, dtype):
     sizes = {
-        torch.float: 4,
+        torch.complex64: 8,
+        torch.complex128: 16,
         torch.float16: 2,
         torch.bfloat16: 2,
         torch.float32: 4,
         torch.float64: 8,
-        torch.int: 4,
         torch.int8: 1,
         torch.int16: 2,
         torch.int32: 4,
@@ -221,21 +227,17 @@ def _tensor_nbytes(numel, dtype):
     return numel * sizes[dtype]
 
 def _size_of(node: fx.Node) -> int:
-    def to_size_hint(s):
-        if isinstance(s, torch.SymInt):
-            py_s = s.node
-            return py_s.shape_env.size_hint(py_s.expr)
-        assert isinstance(s, int)
-        return s
-
     if 'val' in node.meta:
         val = node.meta['val']
         if isinstance(val, py_sym_types):
-            return 1
+            if isinstance(val, torch.SymInt):
+                return 1
+            else:
+                return 999999
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(to_size_hint(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(_tensor_nbytes(hint_int(n.numel()), n.dtype) for n in val if isinstance(n, torch.Tensor))
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(to_size_hint(val.numel()), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel()), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
@@ -338,7 +340,8 @@ def min_cut_rematerialization_partition(
                     required_bw_nodes.add(user)
 
         primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
-        fwd_outputs, _ = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+        fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+        required_bw_nodes.update(o for o in bwd_outputs if o is not None)
         forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, primal_inputs, fwd_outputs)
         required_fw_nodes = {name_to_node[node.name] for node in forward_only_graph.nodes
                              if node.op != 'output'}
@@ -385,6 +388,15 @@ def min_cut_rematerialization_partition(
 
     default_recomputable_ops += pointwise_ops()
 
+    default_recomputable_ops += [
+        aten.zeros_like,
+    ]
+
+    default_recomputable_ops += [
+        method_to_operator(m)
+        for m in magic_methods
+    ]
+
     recomputable_ops = set(recomputable_ops) if recomputable_ops is not None else set(default_recomputable_ops)
 
     random_ops = [aten.native_dropout, aten.rand_like, aten.randn_like]
@@ -394,19 +406,19 @@ def min_cut_rematerialization_partition(
 
     fusible_ops = recomputable_ops | set(random_ops)
     if AOT_PARTITIONER_DEBUG:
-        joint_module_ops = set(
+        joint_module_ops = {
             str(node.target._overloadpacket)
             for node in joint_module.graph.nodes
             if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-        )
-        ops_ignored = joint_module_ops - set([str(i) for i in recomputable_ops])
+        }
+        ops_ignored = joint_module_ops - {str(i) for i in recomputable_ops}
         print("Ops banned from rematerialization: ", ops_ignored)
         print()
 
     AGGRESSIVE_RECOMPUTATION = False
 
     def is_materialized_backwards(node):
-        cur_nodes = set([node])
+        cur_nodes = {node}
         while len(cur_nodes) > 0:
             cur = cur_nodes.pop()
             for user in cur.users:
@@ -493,8 +505,10 @@ def min_cut_rematerialization_partition(
         # Checks if a node is actually a tuple. Can be simplified to just an isisinstance check if we always use faketensors.
         is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
                               ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
-        if is_sym_node(node):
+        if is_symint_node(node):
             weight = 1
+        elif is_sym_node(node):
+            weight = math.inf
         elif is_non_tensor_node:
             weight = math.inf
         else:
@@ -505,7 +519,13 @@ def min_cut_rematerialization_partition(
         for user in node.users:
             nx_graph.add_edge(node.name + "_out", user.name + "_in", capacity=math.inf)
 
-    cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+    try:
+        cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
+    except Exception:
+        print('Failed to compute min-cut on following graph:')
+        print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        raise
+
     reachable, non_reachable = partition
     cutset = set()
     for u, nbrs in ((n, nx_graph[n]) for n in reachable):
@@ -528,8 +548,8 @@ def min_cut_rematerialization_partition(
         joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
     if AOT_PARTITIONER_DEBUG:
         print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
-        fw_module_nodes = set([node.name for node in fw_module.graph.nodes if node.op == 'call_function'])
-        bw_module_nodes = set([node.name for node in bw_module.graph.nodes if node.op == 'call_function'])
+        fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
+        bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
         remat_nodes = fw_module_nodes & bw_module_nodes
 
         counts = defaultdict(int)

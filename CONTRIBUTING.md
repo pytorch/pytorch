@@ -389,7 +389,7 @@ ghstack submit
 of very low signal to reviewers.
 
 ## Merging your Change
-If you know the right people or team that should approve your PR (and you have the required permisssions to do so), add them to the Reviewers list.
+If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.
 
 If not, leave the Reviewers section empty. Our triage squad will review your PR, add a module label, and assign it to the appropriate reviewer in a couple business days.  The reviewer will then look at your PR and respond.
 

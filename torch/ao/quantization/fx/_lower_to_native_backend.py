@@ -10,7 +10,7 @@ import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.quantized.reference as nnqr
 from torch.ao.nn.quantized.modules.utils import WeightedQuantizedModule
-from .graph_module import QuantizedGraphModule
+from torch.fx import GraphModule
 from .utils import (
     collect_producer_nodes,
     get_linear_prepack_op_for_dtype,
@@ -140,11 +140,14 @@ def is_copy_node(node, modules):
 
 def is_general_tensor_shape_node(node, modules):
     func_list = [
+        torch.narrow,
         torch.transpose,
         torch.repeat_interleave,
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
+        torch.nn.functional.pixel_shuffle,
+        torch.nn.functional.pixel_unshuffle,
     ]
     method_list = [
         "contiguous",
@@ -346,10 +349,29 @@ QBIN_RELU_OP_MAPPING: Dict[Union[Callable, str], Callable] = {
     torch.mul: torch.ops.quantized.mul_relu,
 }
 
+def _save_packed_weight(self, destination, prefix, keep_vars):
+    for attr_name in dir(self):
+        if "_packed_weight" in attr_name and \
+           isinstance(getattr(self, attr_name), torch._C.ScriptObject):  # type: ignore[attr-defined]
+            packed_weight = getattr(self, attr_name)
+            destination[prefix + attr_name] = packed_weight
+
+def _load_packed_weight(self, state_dict, prefix, local_metadata, strict,
+                        missing_keys, unexpected_keys, error_msgs):
+    attrs_to_pop = []
+    for attr_name in state_dict:
+        if attr_name.startswith("_packed_weight") and isinstance(state_dict[attr_name], torch._C.ScriptObject):  # type: ignore[attr-defined] # noqa: B950
+            setattr(self, attr_name, state_dict[attr_name])
+            attrs_to_pop.append(attr_name)
+
+    # pop the packed param attributesn
+    for attr_name in attrs_to_pop:
+        state_dict.pop(attr_name)
+
 def fold_weight(
-    quantized: QuantizedGraphModule,
+    quantized_model: GraphModule,
     node_name_to_scope: Dict[str, Tuple[str, type]]
-) -> QuantizedGraphModule:
+) -> GraphModule:
     """
     Trace back from the weight node util we hit getattr, reconstruct the
     graph module with the traced nodes and run the graph module to pack the
@@ -359,7 +381,7 @@ def fold_weight(
     # map from folded node name to the prepacked weight name
     folded_nodes = {}
     # get packed weights
-    for node in quantized.graph.nodes:
+    for node in quantized_model.graph.nodes:
         if node.op == 'call_function' and node.target in WEIGHT_PREPACK_OPS:
             nodes_to_fold = collect_producer_nodes(node)
             if nodes_to_fold is not None:
@@ -367,7 +389,7 @@ def fold_weight(
                     folded_nodes[node_to_fold.name] = node
 
                 prepacking_module = graph_module_from_producer_nodes(
-                    quantized, nodes_to_fold)
+                    quantized_model, nodes_to_fold)
                 packed_weight = prepacking_module()
                 packed_weights[node.name] = packed_weight
 
@@ -377,10 +399,8 @@ def fold_weight(
 
     def load_arg(a):
         return map_arg(a, lambda node: env[node.name])
-    quantized_root = quantized
-    quantized_graph = quantized.graph
 
-    for node in quantized_graph.nodes:
+    for node in quantized_model.graph.nodes:
         prepack_node = folded_nodes.get(node.name, None)
         if prepack_node is node:
             packed_weight = packed_weights[node.name]
@@ -389,8 +409,8 @@ def fold_weight(
             module_path, _ = node_name_to_scope[op_node.name]
             get_new_packed_weight_name = \
                 get_new_attr_name_with_prefix(module_path + '_packed_weight_')
-            packed_weight_name = get_new_packed_weight_name(quantized_root)
-            setattr(quantized_root, packed_weight_name, packed_weight)
+            packed_weight_name = get_new_packed_weight_name(quantized_model)
+            setattr(quantized_model, packed_weight_name, packed_weight)
             # replace prepack node with a getattr node
             env[node.name] = folded_graph.create_node(
                 'get_attr', packed_weight_name, (), {})
@@ -400,7 +420,11 @@ def fold_weight(
         else:
             # copy other nodes
             env[node.name] = folded_graph.node_copy(node, load_arg)
-    return QuantizedGraphModule(quantized_root, folded_graph, quantized_root.preserved_attr_names)
+
+    quantized_model = GraphModule(quantized_model, folded_graph)
+    quantized_model._register_state_dict_hook(_save_packed_weight)
+    quantized_model._register_load_state_dict_pre_hook(_load_packed_weight, with_module=True)
+    return quantized_model
 
 def _get_module(node: Node, modules: Dict[str, nn.Module]) -> Optional[nn.Module]:
     """
@@ -542,7 +566,7 @@ def _match_static_pattern_with_two_inputs(
     return (q_node, ref_node)
 
 def _lower_static_weighted_ref_module(
-        model: QuantizedGraphModule,
+        model: GraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and find dequantize - ref module - quantize patterns
@@ -592,7 +616,7 @@ def _lower_static_weighted_ref_module(
         model.graph.erase_node(zero_point_node)
 
 def _lower_static_weighted_ref_module_with_two_inputs(
-        model: QuantizedGraphModule,
+        model: GraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and find patterns
@@ -651,7 +675,7 @@ def _lower_static_weighted_ref_module_with_two_inputs(
         model.graph.erase_node(scale_node)
         model.graph.erase_node(zero_point_node)
 
-def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
+def _lower_dynamic_weighted_ref_module(model: GraphModule):
     """
     Traverse the graph and find quantize_per_tensor_dynamic - dequantize - ref_module patterns
     and replace them with the dynamically quantized version of the ref module.
@@ -696,7 +720,7 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
         setattr(named_modules[parent_name], module_name, q_module)
         ref_node.replace_input_with(dq_node, input_dynamic_q_node.args[0])
 
-def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
+def _lower_weight_only_weighted_ref_module(model: GraphModule):
     """
     Traverse the graph and find ref_module patterns
     and replace them with the weight only quantized version of the ref module.
@@ -722,7 +746,7 @@ def _lower_weight_only_weighted_ref_module(model: QuantizedGraphModule):
         setattr(named_modules[parent_name], module_name, q_module)
 
 def _lower_static_weighted_ref_functional(
-        model: QuantizedGraphModule,
+        model: GraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their quantized versions.
@@ -767,12 +791,21 @@ def _lower_static_weighted_ref_functional(
         else:
             raise ValueError("Lowering is not supported for op '%s'" % func_node.target)
         with model.graph.inserting_before(output_scale_node):
-            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
+            # kwargs of the func node are needed for prepack op (i.e., quantized::linear_prepack)
+            # They are not needed for compute op (i.e., quantized::linear)
+            kwargs = func_node.kwargs
+            # F.linear uses 'bias' key for bias while qlinear_prepack uses 'B' for bias
+            if func_node.target == F.linear and 'bias' in kwargs:
+                kwargs = kwargs.copy()
+                kwargs['B'] = kwargs['bias']
+                del kwargs['bias']
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), kwargs)
 
         # Step 2: Replace reference pattern with the corresponding quantized op
         (q_func, q_relu_func) = STATIC_LOWER_FUNCTIONAL_MAP[func_node.target]  # type: ignore[index]
         func_node.target = q_relu_func if relu_node is not None else q_func
         func_node.args = (input_dq_node.args[0], packed_weight, output_scale_node, output_zp_node)
+        func_node.kwargs = {}
         q_node.replace_all_uses_with(func_node)
         # Move func_node after output_zp_node in the graph
         output_zp_node.append(func_node)
@@ -783,7 +816,7 @@ def _lower_static_weighted_ref_functional(
             model.graph.erase_node(relu_node)
 
 def _lower_dynamic_weighted_ref_functional(
-        model: QuantizedGraphModule,
+        model: GraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     """
     Traverse the graph and replace functional reference patterns with their dynamically
@@ -886,7 +919,7 @@ def _lower_dynamic_weighted_ref_functional(
             model.graph.erase_node(relu_node)
 
 def _lower_quantized_binary_op(
-        model: QuantizedGraphModule,
+        model: GraphModule,
         qconfig_map: Dict[str, QConfigAny]):
     binary_ops_to_lower: List[Callable] = [operator.add, torch.add, operator.mul, torch.mul, torch.matmul]
     modules = dict(model.named_modules(remove_duplicate=False))
@@ -936,7 +969,7 @@ def _lower_quantized_binary_op(
             model.graph.erase_node(relu_node)
         model.graph.erase_node(bop_node)
 
-def special_pattern_replacement(model: QuantizedGraphModule):
+def special_pattern_replacement(model: GraphModule):
     modules = dict(model.named_modules(remove_duplicate=False))
     for n in model.graph.nodes:
         q_node = n
@@ -968,7 +1001,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             continue
         assert len(ref_node.args) > 0 or len(ref_node.kwargs) > 0
         dq_node_or_nodes = ref_node.args[0] if len(ref_node.args) > 0 else list(ref_node.kwargs.values())[0]
-        assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
+        assert isinstance(dq_node_or_nodes, (Node, tuple, list))
         is_dequantize = False
         if isinstance(dq_node_or_nodes, Node):
             is_dequantize = dq_node_or_nodes.op == 'call_method' and \
@@ -1044,7 +1077,7 @@ def special_pattern_replacement(model: QuantizedGraphModule):
 
     return model
 
-def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
+def _lower_getattr_tensor_metadta_op(model: GraphModule):
     """ Modified the graph of the model inplace, to skip extra dequantize op before
     the general tensor shape ops when possible
     """
@@ -1058,7 +1091,7 @@ def _lower_getattr_tensor_metadta_op(model: QuantizedGraphModule):
             args[0] = n.args[0].args[0]
             n.args = tuple(args)
 
-def _lower_get_tensor_info_op(model: QuantizedGraphModule):
+def _lower_get_tensor_info_op(model: GraphModule):
     """ Modified the graph of the model inplace, to skip extra dequantize op before
     the general tensor shape ops when possible
     """
@@ -1074,10 +1107,10 @@ def _lower_get_tensor_info_op(model: QuantizedGraphModule):
         n.args = tuple(args)
 
 def _lower_to_native_backend(
-    model: QuantizedGraphModule,
+    model: GraphModule,
     qconfig_map: Dict[str, QConfigAny],
     node_name_to_scope: Dict[str, Tuple[str, type]]
-) -> QuantizedGraphModule:
+) -> GraphModule:
     """ Lower a quantized reference model (with reference quantized operator patterns)
     to the native backend in PyTorch (fbgemm/qnnpack), both backends shares the same
     operator signature so they can be lowered with the same function

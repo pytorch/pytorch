@@ -162,40 +162,6 @@ TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
-# Tests need to be run with pytest.
-USE_PYTEST_LIST = [
-    "distributed/pipeline/sync/skip/test_api",
-    "distributed/pipeline/sync/skip/test_gpipe",
-    "distributed/pipeline/sync/skip/test_inspect_skip_layout",
-    "distributed/pipeline/sync/skip/test_leak",
-    "distributed/pipeline/sync/skip/test_portal",
-    "distributed/pipeline/sync/skip/test_stash_pop",
-    "distributed/pipeline/sync/skip/test_tracker",
-    "distributed/pipeline/sync/skip/test_verify_skippables",
-    "distributed/pipeline/sync/test_balance",
-    "distributed/pipeline/sync/test_bugs",
-    "distributed/pipeline/sync/test_checkpoint",
-    "distributed/pipeline/sync/test_copy",
-    "distributed/pipeline/sync/test_deferred_batch_norm",
-    "distributed/pipeline/sync/test_dependency",
-    "distributed/pipeline/sync/test_inplace",
-    "distributed/pipeline/sync/test_microbatch",
-    "distributed/pipeline/sync/test_phony",
-    "distributed/pipeline/sync/test_pipe",
-    "distributed/pipeline/sync/test_pipeline",
-    "distributed/pipeline/sync/test_stream",
-    "distributed/pipeline/sync/test_transparency",
-    "distributed/pipeline/sync/test_worker",
-    "distributions/test_constraints",
-    "distributions/test_transforms",
-    "distributions/test_utils",
-    "test_typing",
-    "distributed/elastic/events/lib_test",
-    "distributed/elastic/agent/server/test/api_test",
-    "test_deploy",
-    "distributed/test_c10d_error_logger.py"
-]
-
 WINDOWS_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
@@ -230,7 +196,6 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -239,13 +204,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
 ] + FSDP_TEST
 
 ROCM_BLOCKLIST = [
@@ -257,7 +219,6 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/checkpoint/test_file_system_checkpoint"
     "distributed/_shard/sharding_spec/test_sharding_spec",
     "distributed/_shard/sharding_plan/test_sharding_plan",
-    "distributed/_shard/sharded_tensor/test_megatron_prototype",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
     "distributed/_shard/sharded_tensor/ops/test_chunk",
@@ -266,13 +227,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_linear",
     "distributed/_shard/sharded_tensor/ops/test_math_ops",
     "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
     "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
-    "distributed/_shard/test_partial_tensor",
-    "distributed/_shard/test_replicated_tensor",
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -319,6 +277,10 @@ CI_SERIAL_LIST = [
     'functorch/test_vmap',  # OOM
     'test_fx',  # gets SIGKILL
     'test_dataloader',  # frequently hangs for ROCm
+    'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
+    '_nvfuser/test_torchscript',  # OOM on test_issue_1785
+    'test_schema_check',  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
+    'functorch/test_memory_efficient_fusion',   # Cause CUDA OOM on ROCm
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -429,18 +391,11 @@ def print_to_stderr(message):
     print(message, file=sys.stderr)
 
 
-def get_executable_command(options, allow_pytest, disable_coverage=False):
+def get_executable_command(options, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
         executable = [sys.executable, "-bb"]
-    if options.pytest:
-        if allow_pytest:
-            executable += ["-m", "pytest"]
-        else:
-            print_to_stderr(
-                "Pytest cannot be used for this test. Falling back to unittest."
-            )
     return executable
 
 
@@ -466,18 +421,22 @@ def run_test(
 
     # If using pytest, replace -f with equivalent -x
     if options.pytest:
+        unittest_args.extend(get_pytest_args(options))
         unittest_args = [arg if arg != "-f" else "-x" for arg in unittest_args]
-    elif IS_CI:
+    if IS_CI:
         ci_args = ["--import-slow-tests", "--import-disabled-tests"]
         if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+    if test_module in PYTEST_SKIP_RETRIES:
+        if not options.pytest:
+            raise RuntimeError("A test running without pytest cannot skip retries using "
+                               "the PYTEST_SKIP_RETRIES set.")
+        unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
-    executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args
-    )
+    executable = get_executable_command(options)
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -681,6 +640,7 @@ def run_doctests(test_module, test_directory, options):
     import pathlib
     pkgpath = pathlib.Path(torch.__file__).parent
 
+    exclude_module_list = []
     enabled = {
         # TODO: expose these options to the user
         # For now disable all feature-conditional tests
@@ -695,6 +655,7 @@ def run_doctests(test_module, test_directory, options):
         'autograd_profiler': 0,
         'cpp_ext': 0,
         'monitor': 0,
+        "onnx": "auto",
     }
 
     # Resolve "auto" based on a test to determine if the feature is available.
@@ -718,6 +679,17 @@ def run_doctests(test_module, test_directory, options):
         else:
             enabled['qengine'] = True
 
+    if enabled["onnx"] == "auto":
+        try:
+            import onnx  # NOQA
+            import onnxscript  # NOQA
+            import onnxruntime  # NOQA
+        except ImportError:
+            exclude_module_list.append("torch.onnx._internal.fx.*")
+            enabled["onnx"] = False
+        else:
+            enabled["onnx"] = True
+
     # Set doctest environment variables
     if enabled['cuda']:
         os.environ['TORCH_DOCTEST_CUDA'] = '1'
@@ -740,6 +712,9 @@ def run_doctests(test_module, test_directory, options):
     if enabled['monitor']:
         os.environ['TORCH_DOCTEST_MONITOR'] = '1'
 
+    if enabled["onnx"]:
+        os.environ['TORCH_DOCTEST_ONNX'] = '1'
+
     if 0:
         # TODO: could try to enable some of these
         os.environ['TORCH_DOCTEST_QUANTIZED_DYNAMIC'] = '1'
@@ -747,7 +722,6 @@ def run_doctests(test_module, test_directory, options):
         os.environ['TORCH_DOCTEST_AUTOGRAD'] = '1'
         os.environ['TORCH_DOCTEST_HUB'] = '1'
         os.environ['TORCH_DOCTEST_DATALOADER'] = '1'
-        os.environ['TORCH_DOCTEST_ONNX'] = '1'
         os.environ['TORCH_DOCTEST_FUTURES'] = '1'
 
     pkgpath = os.path.dirname(torch.__file__)
@@ -765,7 +739,8 @@ def run_doctests(test_module, test_directory, options):
     xdoctest_verbose = max(1, options.verbose)
     run_summary = xdoctest.runner.doctest_module(
         os.fspath(pkgpath), config=xdoctest_config, verbose=xdoctest_verbose,
-        command=options.xdoctest_command, argv=[])
+        command=options.xdoctest_command, argv=[],
+        exclude=exclude_module_list)
     result = 1 if run_summary.get('n_failed', 0) else 0
     return result
 
@@ -794,7 +769,7 @@ def print_log_file(test: str, file_path: str, failed: bool) -> None:
         print_to_stderr("")
 
 
-def run_test_ops(test_module, test_directory, options):
+def get_pytest_args(options):
     if os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1":
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
@@ -807,23 +782,17 @@ def run_test_ops(test_module, test_directory, options):
         # failure
         rerun_options = ["-x", "--reruns=2"]
 
-    default_unittest_args = [
+    pytest_args = [
         "--use-pytest",
         "-vv",
-        "-rfEX"
+        "-rfEX",
+        "-p", "no:xdist",
     ]
-    default_unittest_args.extend(rerun_options)
+    pytest_args.extend(rerun_options)
+    return pytest_args
 
-    if 'slow-gradcheck' in os.getenv("BUILD_ENVIRONMENT", ""):
-        extra_unittest_args = default_unittest_args.copy()
-        # there are a lot of tests that take up a lot of space in slowgrad check, so don't bother parallelizing
-        # it's also on periodic so we don't care about TTS as much
-        return run_test(
-            test_module,
-            test_directory,
-            copy.deepcopy(options),
-            extra_unittest_args=extra_unittest_args,
-        )
+def run_test_ops(test_module, test_directory, options):
+    default_unittest_args = get_pytest_args(options)
 
     return_codes = []
     os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
@@ -900,13 +869,18 @@ CUSTOM_HANDLERS = {
 }
 
 
+PYTEST_SKIP_RETRIES = {
+    'test_public_bindings'
+}
+
+
 def parse_test_module(test):
     return test.split(".")[0]
 
 
 class TestChoices(list):
     def __init__(self, *args, **kwargs):
-        super(TestChoices, self).__init__(args[0])
+        super().__init__(args[0])
 
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
@@ -939,8 +913,8 @@ def parse_args():
         action="store_true",
         help=(
             "If this flag is present, we will only run functorch tests. "
-            "If this flag is not present, we will not run any functorch tests. "
-            "This requires functorch to already be installed."
+            "If this flag is not present, we will run all tests "
+            "(including functorch tests)."
         )
     )
     parser.add_argument(
@@ -1071,6 +1045,19 @@ def parse_args():
             "Use 'all' to execute all doctests or specify a specific "
             "doctest to run")
     )
+
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--dynamo",
+        action="store_true",
+        help="Run tests with TorchDynamo+EagerBackend turned on",
+    )
+    group.add_argument(
+        "--inductor",
+        action="store_true",
+        help="Run tests with TorchInductor turned on",
+    )
+
     return parser.parse_args()
 
 
@@ -1135,6 +1122,10 @@ def must_serial(file: str) -> bool:
     )
 
 
+def can_run_in_pytest(test):
+    return os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0'
+
+
 def get_selected_tests(options):
     selected_tests = options.include
 
@@ -1157,11 +1148,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
-    else:
-        # Exclude all functorch tests otherwise
-        options.exclude.extend(FUNCTORCH_TESTS)
 
     if options.mps:
         selected_tests = ['test_mps', 'test_metal']
@@ -1314,6 +1303,11 @@ def main():
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 
+    if options.dynamo:
+        os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
+    elif options.inductor:
+        os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
+
     failure_messages = []
 
     # parallel = in parallel with other files
@@ -1340,7 +1334,7 @@ def main():
         os.environ['PARALLEL_TESTING'] = '1'
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             pool.apply_async(run_test_module, args=(test, test_directory, options_clone), callback=success_callback)
         pool.close()
@@ -1358,7 +1352,7 @@ def main():
 
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
-            if test in USE_PYTEST_LIST:
+            if can_run_in_pytest(test):
                 options_clone.pytest = True
             err_message = run_test_module(test, test_directory, options_clone)
             if err_message is None:
