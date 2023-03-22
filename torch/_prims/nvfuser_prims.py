@@ -143,7 +143,12 @@ _nvfuser_unary_ops = {
 
 def _assert_nvfuser_op_exists(fname: str):
     try:
-        from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
+        try:
+            from nvfuser import (  # type: ignore[import, attr-defined]
+                FusionDefinition as fd,
+            )
+        except ImportError:
+            from nvfuser._C import FusionDefinition as fd  # type: ignore[import]
 
         assert getattr(fd.Operators, fname)
     except ImportError:
@@ -218,7 +223,6 @@ _nvfuser_impls["{fname}"] = _{fname}_nvfuser
 def _native_batch_norm_nvfuser(
     fd, input, weight, bias, running_mean, running_var, training, momentum, eps
 ):
-
     """
     if weight is None:
         weight = fd.define_null_tensor()
@@ -276,7 +280,10 @@ def _view_nvfuser(
     a_shape,
     new_shape,
 ):
-    return fd.ops.view(a, a_shape, new_shape)
+    try:
+        return fd.ops.view(a, a_shape, new_shape)
+    except AttributeError:
+        return fd.ops.reshape(a, a_shape, new_shape)
 
 
 def _sum_nvfuser(
@@ -285,7 +292,10 @@ def _sum_nvfuser(
     dims: DimsSequenceType,
 ):
     keep_dims = False
-    from nvfuser._C import DataType  # type: ignore[import]
+    try:
+        from nvfuser import DataType  # type: ignore[import, attr-defined]
+    except ImportError:
+        from nvfuser._C import DataType  # type: ignore[import]
 
     output_dtype = DataType.Null
     return fd.ops.sum(a, dims, keep_dims, output_dtype)
@@ -296,7 +306,7 @@ def _var_nvfuser(
     a: TensorLikeType,
     dims: DimsSequenceType,
     *,
-    correction: int,
+    correction: float,
 ):
     keep_dims = False
     return fd.ops.var(a, dims, correction, keep_dims)
@@ -309,7 +319,7 @@ def _var_mean_nvfuser(
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
-    correction: int,
+    correction: float,
 ):
     # Unbiased arg shouldn't be set when this function is called
     assert unbiased is None
@@ -554,7 +564,6 @@ def register_native_batch_norm():
         momentum: float,
         eps: float,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-
         if torch._prims_common.is_complex_dtype(input.dtype):
             raise NotImplementedError("Complex tensors are not supported")
 
@@ -670,7 +679,7 @@ def register_var_mean():
 
     # This signature tries to combine several overloads of the torch.var_mean function into one overload.
     nvprim.define(
-        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, int? correction=None)"
+        f"{name}(Tensor inp, int[1]? dim=None, bool? unbiased=None, bool keepdim=False, *, float? correction=None)"
         + " -> (Tensor, Tensor)"
     )
 

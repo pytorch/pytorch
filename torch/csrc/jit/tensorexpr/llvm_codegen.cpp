@@ -47,13 +47,16 @@
 #include <llvm/Target/TargetMachine.h>
 #endif
 
-#include <llvm/Transforms/IPO/AlwaysInliner.h>
-#include <llvm/Transforms/IPO/PassManagerBuilder.h>
-#include <llvm/Transforms/Scalar.h>
-
 #if LLVM_VERSION_MAJOR >= 11
 #include <llvm/Support/TypeSize.h>
 #endif
+
+#if LLVM_VERSION_MAJOR < 15
+#include <llvm/Transforms/IPO/PassManagerBuilder.h>
+#endif
+
+#include <llvm/Transforms/IPO/AlwaysInliner.h>
+#include <llvm/Transforms/Scalar.h>
 
 #include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>

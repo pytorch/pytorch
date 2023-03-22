@@ -40,8 +40,8 @@ ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 COPY requirements-ci.txt /opt/conda/requirements-ci.txt
 COPY ./common/install_conda.sh install_conda.sh
-RUN bash ./install_conda.sh && rm install_conda.sh
-RUN rm /opt/conda/requirements-ci.txt
+COPY ./common/common_utils.sh common_utils.sh
+RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -134,13 +134,24 @@ ENV OPENSSL_ROOT_DIR /opt/openssl
 ENV OPENSSL_DIR /opt/openssl
 RUN rm install_openssl.sh
 
+ARG TRITON
+# Install triton, this needs to be done before sccache because the latter will
+# try to reach out to S3, which docker build runners don't have access
+COPY ./common/install_triton.sh install_triton.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ci_commit_pins/triton.txt triton.txt
+RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
+RUN rm install_triton.sh common_utils.sh triton.txt
+
+ARG ONNX
+# Install ONNX dependencies
+COPY ./common/install_onnx.sh ./common/common_utils.sh ./
+RUN if [ -n "${ONNX}" ]; then bash ./install_onnx.sh; fi
+RUN rm install_onnx.sh common_utils.sh
+
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-# See https://github.com/pytorch/pytorch/issues/82174
-# TODO(sdym@fb.com):
-# check if this is needed after full off Xenial migration
-ENV CARGO_NET_GIT_FETCH_WITH_CLI true
 RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Add jni.h for java host build

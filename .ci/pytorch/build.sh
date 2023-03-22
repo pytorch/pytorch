@@ -191,16 +191,19 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e
 
   get_bazel
+  install_sccache_nvcc_for_bazel
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
   BAZEL_MEM_LIMIT="--local_ram_resources=HOST_RAM*.8"
   BAZEL_CPU_LIMIT="--local_cpu_resources=HOST_CPUS-1"
 
-  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
-  # Build torch, the Python module, and tests for CPU-only
-  tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
-
+  if [[ "$CUDA_VERSION" == "cpu" ]]; then
+    # Build torch, the Python module, and tests for CPU-only
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" --config=cpu-only :torch :_C.so :all_tests
+  else
+    tools/bazel build --config=no-tty "${BAZEL_MEM_LIMIT}" "${BAZEL_CPU_LIMIT}" //...
+  fi
 else
   # check that setup.py would fail with bad arguments
   echo "The next three invocations are expected to fail with invalid command error messages."
@@ -292,6 +295,13 @@ else
   else
     # Test no-Python build
     echo "Building libtorch"
+
+    # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
+    # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
+    # 16 CPUs
+    MAX_JOBS=$(nproc --ignore=4)
+    export MAX_JOBS
+
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
     BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py

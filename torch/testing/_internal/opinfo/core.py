@@ -615,6 +615,7 @@ class AliasInfo:
 #   the great majority of PyTorch's (public) operators.
 #
 
+
 # Classes and methods for the operator database
 @dataclass
 class OpInfo:
@@ -1549,6 +1550,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 
 # The following functions and classes are for testing elementwise binary operators.
 
+
 # Returns a generator of pairs of contiguous tensors on the requested device
 #   and with the requested dtype.
 #
@@ -1997,7 +1999,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
-
         self._original_binary_ufunc_args = locals().copy()
 
         # Elementwise binary operations perform the equivalent of test_numpy_refs
@@ -2011,7 +2012,7 @@ class BinaryUfuncInfo(OpInfo):
             ),
         )
         kwargs["skips"] = kwargs.get("skips", tuple()) + common_skips
-        super(BinaryUfuncInfo, self).__init__(
+        super().__init__(
             name,
             sample_inputs_func=sample_inputs_func,
             reference_inputs_func=reference_inputs_func,
@@ -2144,7 +2145,6 @@ def _filter_unary_elementwise_tensor(a, *, op):
 
 
 def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
-
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (
@@ -2491,7 +2491,6 @@ class SpectralFuncInfo(OpInfo):
         decorators=None,
         **kwargs,
     ):
-
         self._original_spectral_func_args = dict(locals()).copy()
         self._original_spectral_func_args.update(kwargs)
 
@@ -2530,7 +2529,7 @@ class ShapeFuncInfo(OpInfo):
         sample_inputs_func=None,
         **kwargs,
     ):
-        super(ShapeFuncInfo, self).__init__(
+        super().__init__(
             name,
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
@@ -2583,6 +2582,7 @@ class ForeachFuncInfo(OpInfo):
         supports_alpha_param=False,
         sample_inputs_func=sample_inputs_foreach,
         supports_autograd=False,
+        supports_scalar_self_arg=False,
         **kwargs,
     ):
         super().__init__(
@@ -2594,6 +2594,7 @@ class ForeachFuncInfo(OpInfo):
             supports_autograd=supports_autograd,
             **kwargs,
         )
+        self.supports_scalar_self_arg = supports_scalar_self_arg
 
         (
             foreach_method,
@@ -2711,5 +2712,5 @@ def clone_sample(sample, **kwargs):
     return SampleInput(
         clone_tensor(sample.input),
         args=tuple(map(clone_tensor, sample.args)),
-        kwargs=dict(((k, clone_tensor(v)) for k, v in sample_kwargs.items())),
+        kwargs={k: clone_tensor(v) for k, v in sample_kwargs.items()},
     )

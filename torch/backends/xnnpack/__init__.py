@@ -11,7 +11,7 @@ class _XNNPACKEnabled:
 
 class XNNPACKEngine(types.ModuleType):
     def __init__(self, m, name):
-        super(XNNPACKEngine, self).__init__(name)
+        super().__init__(name)
         self.m = m
 
     def __getattr__(self, attr):
