@@ -61,8 +61,8 @@ def supported_dtype_of_cpp_wrapper(dtype):
         torch.int8,
         torch.uint8,
         torch.bool,
+        torch.bfloat16,
         # torch.float16, # TODO: implement this
-        # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
 
@@ -528,10 +528,6 @@ class GraphLowering(torch.fx.Interpreter):
         if sys.platform != "linux":
             self.disable_cpp_wrapper("platform not linux")
 
-    def check_profiler_mark_wrapper_call(self):
-        if config.profiler_mark_wrapper_call:
-            self.disable_cpp_wrapper("profiler not supported")
-
     def check_device_for_cpp_buffer(self):
         if len(self.device_types) == 1:
             device = self.device_types.pop()
@@ -550,7 +546,6 @@ class GraphLowering(torch.fx.Interpreter):
 
     def check_cpp_wrapper(self):
         self.check_platform()
-        self.check_profiler_mark_wrapper_call()
         self.check_device_for_cpp_buffer()
         self.check_input_for_cpp_buffer()
         self.check_constant_for_cpp_buffer()
