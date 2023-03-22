@@ -48,7 +48,7 @@ from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
 counters = collections.defaultdict(collections.Counter)
-troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
+troubleshooting_url = "https://pytorch.org/docs/master/compile/troubleshooting.html"
 
 log = logging.getLogger(__name__)
 
