@@ -218,6 +218,7 @@ Tensor& _compressed_row_strided_addmm_out(
 }
 
 namespace cpu {
+#if !AT_USE_MKL_SPARSE()
 template<typename scalar_t>
 void addmv_sparse_csr(
         const scalar_t* mat_values,
@@ -266,6 +267,8 @@ void addmv_sparse_bsr(
           }
         });
 }
+#endif // !AT_USE_MKL_SPARSE()
+
 /*
   Computes a sparse matrix-dense vector product defined as
   y <- alpha*op(A)*x + beta*y
