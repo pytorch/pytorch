@@ -10,7 +10,7 @@ import functools
 import gc
 import inspect
 import itertools
-import logging.config
+import logging
 import math
 import operator
 import os
@@ -23,7 +23,10 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple, Union
+
+import torch._logging
+from . import config
 
 try:
     import numpy as np
@@ -42,8 +45,6 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
-
-from . import config, logging as torchdynamo_logging
 
 counters = collections.defaultdict(collections.Counter)
 troubleshooting_url = "https://pytorch.org/docs/master/dynamo/troubleshooting.html"
@@ -91,6 +92,7 @@ def dynamo_profiled(func):
 frame_phase_timing = collections.OrderedDict()
 
 curr_frame = 0
+
 
 # Note: Called for you by dynamo - you almost never ever want to invoke this yourself.
 def increment_frame():
@@ -196,7 +198,6 @@ def compile_times(repr="str", aggregate=False):
     """
 
     def fmt_fn(values, item_fn=lambda x: x):
-
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -255,21 +256,38 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def init_logging():
-    torchdynamo_logging.init_logging(
-        config.log_level, log_file_name=config.log_file_name
-    )
+def setup_compile_debug():
+    compile_debug = bool(os.environ.get("TORCH_COMPILE_DEBUG", False))
+    exitstack = contextlib.ExitStack()
+
+    if compile_debug:
+        torch._logging.set_logs(
+            dynamo=logging.DEBUG,
+            aot=logging.DEBUG,
+            inductor=logging.DEBUG,
+            output_code=True,  # this is off by default
+        )
+
+        debug_file_handler = add_file_handler()
+        exitstack.callback(lambda: log.removeHandler(debug_file_handler))
+
+    return exitstack
+
+
+def reset_graph_break_dup_checker():
     graph_break_dup_warning_checker.reset()
 
 
-def format_graph_tabular(graph):
-    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in graph.nodes]
-    return tabulate(node_specs, headers=["opcode", "name", "target", "args", "kwargs"])
+def add_file_handler():
+    log_path = os.path.join(get_debug_dir(), "torchdynamo")
+    if not os.path.exists(log_path):
+        os.makedirs(log_path)
 
-
-def format_bytecode(prefix, name, filename, line_no, code):
-    return f"{prefix} {name} {filename}\
- line {line_no} \n{dis.Bytecode(code).dis()}\n "
+    log_file = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file.setLevel(logging.DEBUG)
+    logger = logging.getLogger("torch._dynamo")
+    logger.addHandler(log_file)
+    return log_file
 
 
 def gen_record_file_name(exc, code):
@@ -933,7 +951,7 @@ def same(
                 ):
                     # In the presence of noise, noise might dominate our error
                     # metric for smaller tensors.
-                    # Similary, for 1x1 kenerls, there seems to be high noise with amp.
+                    # Similary, for 1x1 kernels, there seems to be high noise with amp.
                     multiplier = 3.0
 
                 passes_test = res_error <= (multiplier * ref_error + tol / 10.0)
@@ -954,14 +972,16 @@ def same(
     elif isinstance(ref, float):
         r = math.isclose(ref, res, rel_tol=tol, abs_tol=tol)
         if not r:
-            log.error("Accuracy failed (float): {ref} != {res} (within tol={tol})")
+            log.error(f"Accuracy failed (float): {ref} != {res} (within tol={tol})")
         return r
     elif is_numpy_int_type(ref) or is_numpy_float_type(ref):
-        if relax_numpy_equality:
+        if relax_numpy_equality and not (
+            is_numpy_int_type(res) or is_numpy_float_type(res)
+        ):
             ref = ref.item()
         r = (type(ref) is type(res)) and (ref == res)
         if not r:
-            log.error("Accuracy failed (numpy): {ref} != {res}")
+            log.error(f"Accuracy failed (numpy): {ref} != {res}")
         return r
     elif is_numpy_ndarray(ref):
         return (type(ref) is type(res)) and (ref == res).all()
@@ -1009,7 +1029,6 @@ def disable_cache_limit():
     try:
         yield
     finally:
-        pass
         config.cache_size_limit = prior
 
 
@@ -1295,6 +1314,13 @@ def ifdyn(count1, count2):
         return count2
 
 
+def ifunspec(count1, count2):
+    if torch._dynamo.config.dynamic_shapes and not torch._dynamo.config.specialize_int:
+        return count1
+    else:
+        return count2
+
+
 def import_submodule(mod: types.ModuleType):
     """
     Ensure all the files in a given submodule are imported
@@ -1325,3 +1351,72 @@ def get_custom_getattr(value: Any):
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
+
+
+class TensorStaticReason(enum.Enum):
+    PARAMETER = 2
+    CONFIG_NOT_DYN = 3
+    NOT_TENSOR = 4
+
+
+def tensor_static_reason_to_message(reason: TensorStaticReason):
+    if reason == TensorStaticReason.PARAMETER:
+        return "mark_dynamic on parameter, parameters are always static today."
+    if reason == TensorStaticReason.CONFIG_NOT_DYN:
+        return "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+    if reason == TensorStaticReason.NOT_TENSOR:
+        return "mark_dynamic on a non tensor, how did this happen?"
+    raise AssertionError(f"Illegal reason {reason}")
+
+
+def tensor_always_has_static_shape(
+    tensor: Union[torch.Tensor, Any], is_tensor: bool
+) -> Tuple[bool, TensorStaticReason]:
+    """
+    Given a tensor, source, and is_tensor flag, determine if a shape should be static.
+
+    Args:
+    tensor - the real tensor to evaluate, parameters force a static shape.
+    is_tensor - internal dynamo check, esentially "is_tensor": target_cls is TensorVariable,
+    tensors not in a TensorVariable for whatever reason are forced static.
+
+    Returns a tuple, where the first element is the bool of whether or not this tensor should have a static shape.
+    The second element is a TensorStaticReason, useful for passing to tensor_static_reason_to_message if needed.
+    """
+    if type(tensor) is torch.nn.Parameter:
+        return True, TensorStaticReason.PARAMETER
+    if config.dynamic_shapes is False:
+        return True, TensorStaticReason.CONFIG_NOT_DYN
+    if not is_tensor:
+        return True, TensorStaticReason.NOT_TENSOR
+    return False, None
+
+
+def format_graph_code(name, gm):
+    return _format_graph_code(
+        name, gm.forward.__code__.co_filename, gm.print_readable(print_output=False)
+    )
+
+
+def _format_graph_code(name, filename, graph_str):
+    return f"TRACED GRAPH\n {name} {filename} {graph_str}\n"
+
+
+def format_graph_tabular(fn_name, gm):
+    try:
+        from tabulate import tabulate  # TODO: Check that this is installed
+    except ImportError:
+        return (
+            "Tabulate module missing, please install tabulate to log the graph in tabular format, logging code instead:\n"
+            + format_graph_code(fn_name, gm)
+        )
+
+    node_specs = [[n.op, n.name, n.target, n.args, n.kwargs] for n in gm.graph.nodes]
+    graph_str = tabulate(
+        node_specs, headers=["opcode", "name", "target", "args", "kwargs"]
+    )
+    return _format_graph_code(fn_name, gm.forward.__code__.co_filename, graph_str)
+
+
+def format_bytecode(prefix, name, filename, line_no, code):
+    return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"

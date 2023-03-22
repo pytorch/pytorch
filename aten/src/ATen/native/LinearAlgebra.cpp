@@ -1557,7 +1557,8 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
                 r += s2[k] * m1[k][j];
               }
             } else {
-              r *= beta;
+              // For beta == 0, the r's value will be ignored, especially for nan value.
+              r = beta == scalar_t(0) ? scalar_t(0) : beta * r;
               for (const auto k : c10::irange(ks)) {
                 r += alpha * s2[k] * m1[k][j];
               }
@@ -1940,9 +1941,6 @@ Tensor _matmul_impl(
         return at::_unsafe_view(t1_folded.mv(*t2), output_shape);
       }
     } else {
-      // See the !has_out branch for an explanation
-      TORCH_INTERNAL_ASSERT(!(transpose && t2_is_matrix));
-
       // Resize output into the correct shape
       at::native::resize_output(out, output_shape);
 

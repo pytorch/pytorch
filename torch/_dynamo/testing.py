@@ -282,6 +282,7 @@ def make_test_cls_with_patches(cls, cls_prefix, fn_suffix, *patches):
         pass
 
     DummyTestClass.__name__ = f"{cls_prefix}{cls.__name__}"
+    DummyTestClass.__qualname__ = DummyTestClass.__name__
 
     for name in dir(cls):
         if name.startswith("test_"):

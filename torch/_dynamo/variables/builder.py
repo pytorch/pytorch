@@ -25,10 +25,8 @@ from ..source import (
     AttrSource,
     ConstantSource,
     GetItemSource,
-    GlobalSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -43,11 +41,12 @@ from ..utils import (
     is_namedtuple,
     is_numpy_int_type,
     is_typing,
-    istensor,
     istype,
     np,
     odict_values,
     preserve_rng_state,
+    tensor_always_has_static_shape,
+    tensor_static_reason_to_message,
     tuple_iterator,
     tuple_iterator_getitem,
     tuple_iterator_len,
@@ -124,11 +123,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -175,32 +169,16 @@ class VariableBuilder:
     @staticmethod
     @functools.lru_cache(None)
     def _common_constants():
-        return set(range(17)).union(
-            {
-                20,
-                30,
-                40,
-                32,
-                64,
-                96,
-                128,
-                144,
-                240,
-                256,
-                672,
-                1024,
-                2048,
-                4096,
-                0.1,
-                0.01,
-                0.001,
-                0.5,
-                0.05,
-                800,
-                1.873536229133606,
-                4.135166556742356,  # Work around for vision_maskrcnn where torch.clamp can't be on different devices
-            }
-        )
+        return {
+            # We zero-one specialize shapes, so specialize these constants
+            # too
+            0,
+            1,
+            # NB: There used to be more constants here, but honestly it was
+            # pretty confusing.  Note we specialize floats by default, and
+            # DON'T specialize ints by default.  This all only matters with
+            # dynamic_shapes
+        }
 
     @staticmethod
     def list_type(value):
@@ -229,20 +207,105 @@ class VariableBuilder:
             return None
         return {source.make_guard(guard) for guard in guards}
 
-    def _wrap(self, value):
+    @classmethod
+    @functools.lru_cache(None)
+    def _type_dispatch(cls):
+        # NB: Careful not to close over self to avoid ref cycle from lru_cache
+        entries = [
+            (
+                (torch.Tensor, torch.nn.Parameter, torch._subclasses.FakeTensor),
+                cls.wrap_tensor,
+            ),
+            ((torch.SymInt, torch.SymFloat), cls.wrap_sym),
+            ((tuple, list, odict_values), cls.wrap_listlike),
+            (tuple_iterator, cls.wrap_tuple_iterator),
+            ((slice, range), cls.wrap_slice_range),
+            (
+                (
+                    int,
+                    float,
+                    bool,
+                    type(None),
+                    str,
+                    torch.Size,
+                    torch.device,
+                    torch.dtype,
+                ),
+                cls.wrap_literal,
+            ),
+        ]
+
+        result = {}
+        for ts, fn in entries:
+            for t in ts if isinstance(ts, tuple) else (ts,):
+                assert t not in result
+                result[t] = fn
+
+        return result
+
+    @classmethod
+    @functools.lru_cache(None)
+    def _id_dispatch(cls):
         from ..comptime import comptime
 
+        entries = [
+            (
+                inspect.signature,
+                lambda self, value: LambdaVariable(
+                    InspectSignatureVariable.create,
+                    source=self.source,
+                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                ),
+            ),
+            (comptime, lambda self, value: ComptimeVariable()),
+            (
+                dataclasses.fields,
+                lambda self, value: LambdaVariable(
+                    _dataclasses_fields_lambda,
+                    source=self.source,
+                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                ),
+            ),
+            (
+                tensor_dunder_fns,
+                lambda self, value: TorchVariable(
+                    value,
+                    source=self.source,
+                    guards=self.make_guards(GuardBuilder.FUNCTION_MATCH),
+                ),
+            ),
+        ]
+
+        result = {}
+        for ts, fn in entries:
+            for t in ts if isinstance(ts, (tuple, list)) else (ts,):
+                assert t not in result
+                result[id(t)] = fn
+
+        return result
+
+    def _wrap(self, value):
         make_guards = self.make_guards
-        if istype(value, (torch.SymInt, torch.SymFloat)):
-            return self.wrap_sym(value)
-        if istensor(value):
+
+        # Handle exact type() match
+        type_dispatch = self._type_dispatch().get(type(value))
+        if type_dispatch is not None:
+            return type_dispatch(self, value)
+
+        # Handle exact id() match
+        id_dispatch = self._id_dispatch().get(id(value))
+        if id_dispatch is not None:
+            return id_dispatch(self, value)
+
+        # Note - There are some nested values where types mismatch!
+        # We want to get those out and wrap those.
+        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+
+        # Everything else (NB: order matters!)
+        if istype(value, config.traceable_tensor_subclasses):
             return self.wrap_tensor(value)
-        elif istype(value, (tuple, list, odict_values)) or is_namedtuple(value):
+        elif is_namedtuple(value):
             return self.wrap_listlike(value)
-        elif istype(value, tuple_iterator):
-            return self.wrap_tuple_iterator(value)
-        elif istype(value, (slice, range)):
-            return self.wrap_slice_range(value)
         elif istype(
             value, (dict, collections.defaultdict, collections.OrderedDict)
         ) and all(
@@ -293,9 +356,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_dict(self.source, value, result)
         elif isinstance(value, torch.nn.Module):
             return self.wrap_module(value)
-        elif ConstantVariable.is_literal(value) or istype(
-            value, (torch.Size, torch.device, torch.dtype)
-        ):
+        elif ConstantVariable.is_literal(value):  # non-atomic literals
             return self.wrap_literal(value)
         elif istype(value, frozenset) and (
             all(is_allowed(x) or ConstantVariable.is_literal(x) for x in value)
@@ -332,20 +393,6 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.ID_MATCH),
             )
-        elif value is inspect.signature:
-            return LambdaVariable(
-                InspectSignatureVariable.create,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
-        elif value is comptime:
-            return ComptimeVariable()
-        elif value is dataclasses.fields:
-            return LambdaVariable(
-                _dataclasses_fields_lambda,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
-            )
         elif is_numpy(value):
             return NumpyVariable(
                 value,
@@ -355,12 +402,6 @@ class VariableBuilder:
                     if callable(value)
                     else GuardBuilder.TYPE_MATCH
                 ),
-            )
-        elif value in tensor_dunder_fns:
-            return TorchVariable(
-                value,
-                source=self.source,
-                guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
         elif (
             istype(value, (type, types.FunctionType))
@@ -372,6 +413,7 @@ class VariableBuilder:
                 source=self.source,
                 guards=make_guards(GuardBuilder.FUNCTION_MATCH),
             )
+        # NB: These can't be put in type_dispatch, they have to run later
         elif istype(value, (types.FunctionType, torch.jit.ScriptFunction)):
             return UserFunctionVariable(
                 value,
@@ -624,17 +666,26 @@ class VariableBuilder:
             )
 
     def wrap_literal(self, value):
-        if type(value) in (int, float) and not config.specialize_int_float:
-            # unspecializing int/float by default, but still
+        unspec = not config.specialize_int and config.dynamic_shapes
+        if unspec and type(value) is torch.Size:
+            return SizeVariable(
+                [
+                    VariableBuilder(self.tx, GetItemSource(self.get_source(), i))(v)
+                    for i, v in enumerate(value)
+                ],
+                guards=self.make_guards(GuardBuilder.LIST_LENGTH),
+            )
+        elif unspec and type(value) is int:
+            # unspecializing int by default, but still
             # specialize for the following conditions
             if (
                 value in self._common_constants()
-                or isinstance(self.source, GlobalSource)
-                or isinstance(self.source, GetItemSource)
-                or (
-                    isinstance(self.source, AttrSource)
-                    and isinstance(self.source.base, GlobalSource)
-                )
+                # Assume integers from global variables want to be specialized
+                or not self.source.guard_source().is_local()
+                # Assume that integers that came from NN modules want to be
+                # specialized (as we don't expect users to be changing the
+                # NN modules on the fly)
+                or self.source.guard_source().is_nn_module()
             ):
                 return ConstantVariable(
                     value=value,
@@ -734,6 +785,10 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
         else:
+            # NB: We do not do float.  For motivation, see
+            # https://docs.google.com/document/d/1INSCdYu1PxXcr43HrD82OudeEuS-qxQe1yZmLg2wy6A/edit
+            # but the general idea is that we generate kernels that can
+            # take unspecialized floats and use them in sizevar computation
             if (
                 config.dynamic_shapes
                 and isinstance(value, int)
@@ -746,9 +801,7 @@ class VariableBuilder:
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source)
                 )
-                # TODO: Do float
             else:
-                # TODO: Eliminate this case entirely
                 wrapped_value = torch.tensor(value)
             if not isinstance(self.get_source(), RandomValueSource):
                 guards = {self.get_source().make_guard(GuardBuilder.TYPE_MATCH, True)}
@@ -772,6 +825,14 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
+                    raise AssertionError(
+                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
+                            wrapped_value, self.get_source()
+                        )
+                    )
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
@@ -780,7 +841,7 @@ class VariableBuilder:
                     GraphArg(
                         self.get_source(),
                         wrapped_value,
-                        True,
+                        isinstance(wrapped_value, torch.Tensor),
                         fake_tensor_value,
                         is_tensor=False,
                     )
@@ -995,6 +1056,14 @@ class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
 
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake == other.fake and self.source.name() == other.source.name()
+        return False
+
 
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
@@ -1002,12 +1071,9 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes = (
-            source is None
-            or type(e) is torch.nn.Parameter
-            or config.dynamic_shapes is False
-            or not is_tensor
-        )
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
+
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
@@ -1018,9 +1084,7 @@ def wrap_to_fake_tensor_and_record(
         )
         if hasattr(e, "_dynamo_dynamic_indices"):
             fake_e._dynamo_dynamic_indices = e._dynamo_dynamic_indices
-            assert (
-                config.dynamic_shapes
-            ), "mark_dynamic usage with dynamic_shapes=False is not yet supported"
+            assert not static_shapes, tensor_static_reason_to_message(reason)
         if is_tensor:
             tx.output.tracked_fakes.append(TrackedFake(fake_e, source))
         return fake_e

@@ -56,8 +56,10 @@ class SourceChangeWarning(Warning):
 @contextmanager
 def mkdtemp():
     path = tempfile.mkdtemp()
-    yield path
-    shutil.rmtree(path)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 _package_registry = []

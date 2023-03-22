@@ -1198,7 +1198,12 @@ def _try_get_dispatched_fn(fn):
     return boolean_dispatched.get(fn)
 
 
-def _get_named_tuple_properties(obj):
+def _get_named_tuple_properties(
+    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None
+):
+    if loc is None:
+        loc = fake_range()
+
     assert issubclass(obj, tuple) and hasattr(obj, "_fields")
     if hasattr(obj, "_field_defaults"):
         defaults = [
@@ -1220,9 +1225,7 @@ def _get_named_tuple_properties(obj):
     annotations = []
     for field in obj._fields:
         if field in obj_annotations:
-            the_type = torch.jit.annotations.ann_to_type(
-                obj_annotations[field], fake_range()
-            )
+            the_type = torch.jit.annotations.ann_to_type(obj_annotations[field], loc)
             annotations.append(the_type)
         else:
             annotations.append(torch._C.TensorType.getInferred())
@@ -1240,8 +1243,10 @@ def _create_named_tuple(
 def _disable_emit_hooks():
     hooks = torch._C._jit_get_emit_hooks()
     torch._C._jit_set_emit_hooks(None, None)
-    yield
-    torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
+    try:
+        yield
+    finally:
+        torch._C._jit_set_emit_hooks(hooks[0], hooks[1])
 
 
 def _disable_emit_hooks_decorator(_DecoratorContextManager) -> None:  # noqa: F811

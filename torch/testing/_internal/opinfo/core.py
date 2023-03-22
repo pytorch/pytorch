@@ -615,6 +615,7 @@ class AliasInfo:
 #   the great majority of PyTorch's (public) operators.
 #
 
+
 # Classes and methods for the operator database
 @dataclass
 class OpInfo:
@@ -1549,6 +1550,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 
 # The following functions and classes are for testing elementwise binary operators.
 
+
 # Returns a generator of pairs of contiguous tensors on the requested device
 #   and with the requested dtype.
 #
@@ -1997,7 +1999,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
-
         self._original_binary_ufunc_args = locals().copy()
 
         # Elementwise binary operations perform the equivalent of test_numpy_refs
@@ -2144,7 +2145,6 @@ def _filter_unary_elementwise_tensor(a, *, op):
 
 
 def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
-
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (
@@ -2491,7 +2491,6 @@ class SpectralFuncInfo(OpInfo):
         decorators=None,
         **kwargs,
     ):
-
         self._original_spectral_func_args = dict(locals()).copy()
         self._original_spectral_func_args.update(kwargs)
 
