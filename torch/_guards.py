@@ -1,7 +1,9 @@
 import contextlib
+
 import dataclasses
 import enum
 import logging
+import traceback
 import weakref
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
@@ -211,11 +213,11 @@ input_pos_a and input_pos_b are input positions we have deduped.
 
 @dataclasses.dataclass
 class DuplicateInputs(GuardEnvExpr):
-    input_pos_a: int
-    input_pos_b: int
+    input_source_a: "Source"
+    input_source_b: "Source"
 
     def __post_init__(self):
-        assert self.input_pos_a != self.input_pos_b
+        assert self.input_source_a != self.input_source_b
 
 
 """
@@ -327,6 +329,7 @@ class TracingContext:
         self.guards_context = GuardsContext()
         self.fake_mode = fake_mode
         self.frame_summary_stack = []
+        self.loc_in_frame = None
 
     @staticmethod
     @contextlib.contextmanager
@@ -340,6 +343,19 @@ class TracingContext:
             yield
         finally:
             tc.frame_summary_stack.pop()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def current_loc(filename, lineno, frame_name):
+        tc = TracingContext.get()
+        assert (
+            tc is not None
+        ), "Loc context manager must be called within an ongoing trace."
+        tc.loc_in_frame = traceback.FrameSummary(filename, lineno, frame_name)
+        try:
+            yield
+        finally:
+            tc.loc_in_frame = None
 
 
 """
