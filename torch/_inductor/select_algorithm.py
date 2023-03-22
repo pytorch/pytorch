@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 # correctness checks struggle with fp16/tf32
 VERIFY = False  # dict(atol=1, rtol=0.05)
 PRINT_AUTOTUNE = True
+DEBUG = False
 
 
 class KernelNamespace:
@@ -682,6 +683,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 raise AssertionError(f"Incorrect result from choice {choice}\n\n{e}")
             return timing
 
+        if config.autotune_in_subproc:
+            from .autotune_process import tuning_process
+
+            # do the optional warmup
+            tuning_process.initialize()
+            assert tuning_process.valid()
+
         autotune_start_ts = time.time()
         timings = self.lookup(
             choices,
@@ -723,7 +731,12 @@ class AlgorithmSelectorCache(PersistentCache):
             choices[0].benchmark(*example_inputs_extern, out=out_extern)
             expected = out_extern.clone()
 
+        if DEBUG:
+            print(f"{len(choices)} tuning requests:")
+
         def benchmark_in_current_process(choice):
+            if DEBUG:
+                start_ts = time.time()
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -744,9 +757,16 @@ class AlgorithmSelectorCache(PersistentCache):
 
             from . import autotune_process
 
-            return autotune_process.benchmark_in_sub_process(
+            if DEBUG:
+                start_ts = time.time()
+
+            out = autotune_process.benchmark_in_sub_process(
                 choice,
             )
+            if DEBUG:
+                elapse = time.time() - start_ts
+                print(f"MultiProcessTuning {choice}: {elapse}")
+            return out
 
         benchmark = (
             benchmark_in_sub_process

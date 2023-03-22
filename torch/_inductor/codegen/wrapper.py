@@ -704,6 +704,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             #include <dlfcn.h>
             #include <assert.h>
 
+            typedef at::BFloat16 bfloat16;
+
             template <typename KernelFunc>
             KernelFunc load_cpp_kernel(const char* so_filename) {
                 KernelFunc kernel_cpp;
@@ -720,10 +722,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         inputs_len = len(V.graph.graph_inputs.keys())
         output_refs = self.get_output_refs()
         if output_refs:
-            if len(output_refs) == 1:
-                output_types = "at::Tensor"
-            else:
-                output_types = "std::vector<at::Tensor>"
+            output_types = "std::vector<at::Tensor>"
         else:
             output_types = "void"
 
@@ -785,17 +784,12 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if output_refs:
-            if len(output_refs) == 1:
-                self.wrapper_call.writeline(
-                    f"return {output_refs[0]};{self.return_end_str()}"
-                )
-            else:
-                self.wrapper_call.writeline(
-                    "return std::vector<at::Tensor>({"
-                    + ", ".join(output_refs)
-                    + "});"
-                    + self.return_end_str()
-                )
+            self.wrapper_call.writeline(
+                "return std::vector<at::Tensor>({"
+                + ", ".join(output_refs)
+                + "});"
+                + self.return_end_str()
+            )
         else:
             self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
