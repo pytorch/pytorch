@@ -125,7 +125,13 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             return [root.num_descendants() for root in self.get_roots()]
 
         def cudagraphify_impl(self, *args, **kwargs):
-            return tree_cudagraphify_impl(*args, **kwargs, device_index=self.device_idx)
+            return tree_cudagraphify_impl(
+                *args,
+                **kwargs,
+                device_index=self.device_idx,
+                is_backward=False,
+                is_inference=True,
+            )
 
         @staticmethod
         def run_twc(fn, *args, **kwargs):
@@ -517,7 +523,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 inp = torch.rand([20, 20], device="cuda:1")
 
-                foo_cg = tree_cudagraphify_impl(foo, [inp], (), device_index=1)
+                foo_cg = tree_cudagraphify_impl(
+                    foo, [inp], (), device_index=1, is_backward=False, is_inference=True
+                )
                 self.assertEqual(foo_cg([inp]), foo([inp]))
 
                 self.assertTrue(self.get_manager(device_index=0) is None)
@@ -525,6 +533,34 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             test()
             self.assertTrue(self.get_manager(device_index=1) is None)
+
+        def test_forward_generation(self):
+            def foo(x):
+                return x * x * x
+
+            def foo2(x):
+                return x * 12
+
+            foo_opt = torch._dynamo.optimize()(foo)
+            foo2_opt = torch._dynamo.optimize()(foo2)
+            ones = torch.ones([4, 4], device="cuda", requires_grad=True)
+
+            out = foo_opt(ones)
+            out2 = foo2_opt(out)
+
+            self.assertEqual(all_live_block_count(), 2)
+
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 2)
+
+            out2.sum().backward()
+
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
+
+            del out
+            del out2
+
+            out = foo_opt(ones.detach())
+            self.assertEqual(self.get_manager().forwards_with_pending_backwards, 0)
 
 
 if __name__ == "__main__":
