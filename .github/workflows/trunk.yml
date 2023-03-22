@@ -260,6 +260,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
         ]}
+
   linux-focal-rocm5_4_2-py3_8-test:
     name: linux-focal-rocm5.4.2-py3.8
     uses: ./.github/workflows/_rocm-test.yml
