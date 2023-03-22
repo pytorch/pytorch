@@ -1436,6 +1436,9 @@ class DistributedDataParallel(Module, Joinable):
                 self._delay_grad_buffer.zero_()
 
     def _pre_forward(self):
+        if self._delay_all_reduce_all_params:
+            return
+
         if torch.is_grad_enabled() and self.require_backward_grad_sync:
             assert self.logger is not None
             self.logger.set_runtime_stats_and_log()
@@ -1470,6 +1473,10 @@ class DistributedDataParallel(Module, Joinable):
             self._check_global_requires_backward_grad_sync(is_joined_rank=False)
 
     def _post_forward(self, output):
+        if self._delay_all_reduce_all_params:
+            self._clear_grad_buffer()
+            return
+
         # sync params according to location (before/after forward) user
         # specified as part of hook, if hook was specified.
         if self._check_sync_bufs_post_fwd():
@@ -1537,13 +1544,12 @@ class DistributedDataParallel(Module, Joinable):
 
     def forward(self, *inputs, **kwargs):
         with torch.autograd.profiler.record_function("DistributedDataParallel.forward"):
-            if self._delay_all_reduce_all_params:
-                output = self.module.forward(*inputs, **kwargs)
-                self._clear_grad_buffer()
-                return output
-
             self._pre_forward()
-            output = self._run_ddp_forward(*inputs, **kwargs)
+            output = (
+                self.module.forward(*inputs, **kwargs)
+                if self._delay_all_reduce_all_params
+                else self._run_ddp_forward(*inputs, **kwargs)
+            )
             return self._post_forward(output)
 
     def scatter(self, inputs, kwargs, device_ids):
@@ -2119,7 +2125,10 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook"] and (
+        if hook.__name__ in [
+            "bf16_compress_hook",
+            "bf16_compress_wrapper_hook",
+        ] and (
             (torch.version.cuda is None and torch.version.hip is None)
             or (
                 torch.version.cuda is not None
