@@ -39,7 +39,7 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     if isinstance(inputs, torch.Tensor):
         inputs = [inputs] * len(modules)
     else:
-        assert len(modules) == len(inputs), f'The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}'
+        assert len(modules) == len(inputs), f'modules length {len(modules)} is not equal to the inputs length {len(inputs)}'
     
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
