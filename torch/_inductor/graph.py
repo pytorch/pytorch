@@ -61,8 +61,8 @@ def supported_dtype_of_cpp_wrapper(dtype):
         torch.int8,
         torch.uint8,
         torch.bool,
+        torch.bfloat16,
         # torch.float16, # TODO: implement this
-        # torch.bfloat16, # TODO: implement this
     }
     return dtype in supported_dtype
 
