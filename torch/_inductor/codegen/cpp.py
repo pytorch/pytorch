@@ -1668,7 +1668,7 @@ class CppVecKernelChecker(CppVecKernel):
                 if OptimizationContext.key in _node.meta:
                     opt_ctx = _node.meta[OptimizationContext.key]
                 else:
-                    self.opt_ctx = OptimizationContext()
+                    opt_ctx = OptimizationContext()
                 opt_ctx.dtype = load_dtype
                 opt_ctx.ops_name = _node.target
                 opt_ctx.is_load_bf16_as_fp32 = True if is_bf16_as_fp32 else False
