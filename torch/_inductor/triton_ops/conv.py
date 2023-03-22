@@ -129,7 +129,6 @@ if has_triton():
         # allocate accumulator
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
         for crs in range(0, CRS, BLOCK_K):
-
             # ------ matrix multiplication ------
             acc += tl.dot(matrix_x, matrix_w)
             # ------ update ptrs ------
@@ -306,7 +305,6 @@ if has_triton():
         # allocate accumulator
         acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
         for crs in range(0, CRS, BLOCK_K):
-
             # ------ matrix multiplication ------
             acc += tl.dot(matrix_x, matrix_w)
             # ------ update ptrs ------
