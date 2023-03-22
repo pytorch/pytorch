@@ -1150,18 +1150,18 @@ class Scheduler:
 
             return CppScheduling(self)
         else:
-            triton_backend = get_triton_backend(device.type)
-            assert triton_backend
+            _triton_backend = get_triton_backend(device.type)
+            assert _triton_backend
 
             if not has_triton():
-                if triton_backend.compatible_with_triton():
+                if _triton_backend.compatible_with_triton():
                     raise RuntimeError(
                         "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                     )
 
             from .codegen.triton import TritonScheduling
 
-            return TritonScheduling(self, triton_backend)
+            return TritonScheduling(self, _triton_backend)
 
     def get_backend(self, device: torch.device):
         if device not in self.backends:

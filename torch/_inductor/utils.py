@@ -38,15 +38,15 @@ except ImportError:
 
 @functools.lru_cache(None)
 def has_triton():
-    if all(not (triton_backend) for triton_backend in triton_backends):
+    if all(not (_triton_backend) for (_triton_backend) in triton_backends):
         return False
 
     try:
         import triton
 
         compatible_with_triton = all(
-            triton_backend.compatible_with_triton()
-            for triton_backend in triton_backends
+            _triton_backend.compatible_with_triton()
+            for _triton_backend in triton_backends
         )
         return triton is not None and compatible_with_triton
     except ImportError:

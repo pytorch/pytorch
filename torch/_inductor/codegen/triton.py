@@ -639,7 +639,7 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
-        self.triton_backend: TritonBackend = device_backend
+        self._triton_backend: TritonBackend = device_backend
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1216,10 +1216,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with {self.triton_backend.nms()}._DeviceGuard({index}):")
+            result.writeline(f"with {self._triton_backend.nms()}._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
-                    f"{self.triton_backend.nms()}.set_device({index})"
+                    f"{self._triton_backend.nms()}.set_device({index})"
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(tree.numel)
@@ -1230,7 +1230,7 @@ class TritonKernel(Kernel):
 
                 stream_name = f"stream{index}"
                 result.writeline(
-                    f"{stream_name} = get_{self.triton_backend.name()}_stream({index})"
+                    f"{stream_name} = get_{self._triton_backend.name()}_stream({index})"
                 )
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
@@ -1240,10 +1240,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with {self.triton_backend.nms()}._DeviceGuard({index}):")
+            result.writeline(f"with {self._triton_backend.nms()}._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
-                    f"{self.triton_backend.nms()}.set_device({index})"
+                    f"{self._triton_backend.nms()}.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
@@ -1450,9 +1450,9 @@ class TritonKernel(Kernel):
 
 
 class TritonScheduling:
-    def __init__(self, scheduler, triton_backend: TritonBackend):
+    def __init__(self, scheduler, _triton_backend: TritonBackend):
         self.scheduler = scheduler
-        self.triton_backend: TritonBackend = triton_backend
+        self._triton_backend: TritonBackend = _triton_backend
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -1638,7 +1638,7 @@ class TritonScheduling:
             *tiled_groups,
             reduction_hint=reduction_hint_val,
             mutations=mutations,
-            device_backend=self.triton_backend,
+            device_backend=self._triton_backend,
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
@@ -1686,7 +1686,7 @@ class TritonScheduling:
             compile_wrapper.writeline("async_compile.triton('''")
             compile_wrapper.splice(src_code, strip=True)
             compile_wrapper.writeline("'''")
-            compile_wrapper.writeline(f', device="{self.triton_backend.name()}"')
+            compile_wrapper.writeline(f', device="{self._triton_backend.name()}"')
             compile_wrapper.writeline(")")
 
             metadata_comment = f"# kernel path: {kernel_path}"
@@ -1716,7 +1716,7 @@ class TritonScheduling:
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(f"{self.triton_backend.nms()}.synchronize()")
+        V.graph.wrapper_code.writeline(f"{self._triton_backend.nms()}.synchronize()")
 
     @staticmethod
     @functools.lru_cache(32)

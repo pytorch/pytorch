@@ -186,15 +186,15 @@ triton_backends = [_triton_cuda_backend]
 _register_lock = threading.Lock()
 
 
-def register_triton_backend(triton_backend: TritonBackend):
-    assert isinstance(triton_backend, TritonBackend)
+def register_triton_backend(_triton_backend: TritonBackend):
+    assert isinstance(_triton_backend, TritonBackend)
     with _register_lock:
         all_backends = [(hash(backend)) for backend in triton_backends]
-        if hash(triton_backend) not in all_backends:
-            triton_backends.append(triton_backend)
+        if hash(_triton_backend) not in all_backends:
+            triton_backends.append(_triton_backend)
             return True
         else:
-            return triton_backend in triton_backends
+            return _triton_backend in triton_backends
 
 
 @functools.lru_cache(None)

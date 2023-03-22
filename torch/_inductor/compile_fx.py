@@ -242,11 +242,11 @@ def clone_preserve_strides(x):
 
 def align_inputs(model, inputs, static_input_idxs=()):
     def is_aligned(storage_offset, dtype, device_type):
-        triton_backend = get_triton_backend(device_type=device_type)
-        assert triton_backend
+        _triton_backend = get_triton_backend(device_type=device_type)
+        assert _triton_backend
         return (
             storage_offset * get_dtype_size(dtype)
-        ) % triton_backend.mem_alignment() == 0
+        ) % _triton_backend.mem_alignment() == 0
 
     _all_triton_backend_name = all_triton_backend_name()
     check_inputs = [
@@ -267,11 +267,11 @@ def align_inputs(model, inputs, static_input_idxs=()):
 
     def run(new_inputs):
         for i in check_inputs:
-            triton_backend = get_triton_backend(
+            _triton_backend = get_triton_backend(
                 device_type=new_inputs[i].device.type
             )
-            assert triton_backend
-            if new_inputs[i].data_ptr() % triton_backend.mem_alignment():
+            assert _triton_backend
+            if new_inputs[i].data_ptr() % _triton_backend.mem_alignment():
                 new_inputs[i] = clone_preserve_strides(new_inputs[i])
         return model(new_inputs)
 

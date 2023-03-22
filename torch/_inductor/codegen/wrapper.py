@@ -72,10 +72,10 @@ class EnterDeviceContextManagerLine:
         # Note _DeviceGuard has less overhead than device, but only accepts
         # integers
         assert isinstance(self.device, torch.device)
-        triton_backend = get_triton_backend(self.device.type)
-        assert triton_backend
+        _triton_backend = get_triton_backend(self.device.type)
+        assert _triton_backend
         assert self.device.index is not None
-        code.writeline(f"with {triton_backend.nms()}._DeviceGuard({self.device.index}):")
+        code.writeline(f"with {_triton_backend.nms()}._DeviceGuard({self.device.index}):")
 
 
 class ExitDeviceContextManagerLine:
@@ -229,10 +229,10 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.triton_ops.autotune import grid, start_graph, end_graph
                 """
             )
-            for triton_backend in triton_backends:
-                if triton_backend:
+            for _triton_backend in triton_backends:
+                if _triton_backend:
                     self.header.splice(
-                        f"from torch._C import _{triton_backend.name()}_getCurrentRawStream as get_{triton_backend.name()}_stream"
+                        f"from torch._C import _{_triton_backend.name()}_getCurrentRawStream as get_{_triton_backend.name()}_stream"
                     )
 
     def add_meta_once(self, meta):
@@ -282,9 +282,9 @@ class WrapperCodeGen(CodeGen):
             self.codegen_precomputed_sizes(self.prefix)
 
     def write_get_stream(self, device: torch.device):
-        triton_backend = get_triton_backend(device_type=device.type)
+        _triton_backend = get_triton_backend(device_type=device.type)
         name = f"stream{device.index}"
-        self.writeline(f"{name} = get_{triton_backend.name()}_stream({device.index})")
+        self.writeline(f"{name} = get_{_triton_backend.name()}_stream({device.index})")
         return name
 
     def next_kernel_suffix(self):
@@ -352,12 +352,12 @@ class WrapperCodeGen(CodeGen):
                 if isinstance(line, MemoryPlanningLine):
                     line.codegen(self.wrapper_call)
                 elif isinstance(line, EnterDeviceContextManagerLine):
-                    triton_backend = get_triton_backend(line.device.type)
-                    assert triton_backend
+                    _triton_backend = get_triton_backend(line.device.type)
+                    assert _triton_backend
                     line.codegen(self.wrapper_call)
                     device_cm_stack.enter_context(self.wrapper_call.indent())
                     self.wrapper_call.writeline(
-                        f"{triton_backend.nms()}.set_device({line.device.index}) # no-op to ensure context"
+                        f"{_triton_backend.nms()}.set_device({line.device.index}) # no-op to ensure context"
                     )
                 elif isinstance(line, ExitDeviceContextManagerLine):
                     device_cm_stack.close()

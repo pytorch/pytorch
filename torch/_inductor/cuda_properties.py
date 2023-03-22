@@ -15,14 +15,14 @@ from .triton_backend import all_triton_backend_name, triton_backends
 def _properties():
     device_properties = {}
 
-    for triton_backend in triton_backends:
-        if not triton_backend:
+    for _triton_backend in triton_backends:
+        if not _triton_backend:
             continue
 
         try:
-            device_properties[triton_backend.name()] = {
-                i: triton_backend.get_device_properties(i)
-                for i in range(triton_backend.device_count())
+            device_properties[_triton_backend.name()] = {
+                i: _triton_backend.get_device_properties(i)
+                for i in range(_triton_backend.device_count())
             }
         except RuntimeError:
             return {}

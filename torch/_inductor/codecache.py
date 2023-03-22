@@ -83,14 +83,14 @@ class PersistentCache:
         self.local_cache_path = os.path.join(cache_dir(), "local_cache")
         self.global_cache_path = config.global_cache_path
 
-        for triton_backend in triton_backends:
-            if triton_backend and triton_backend.name() == "cuda":
-                device_properties = triton_backend.get_device_properties(
-                    triton_backend.current_device()
+        for _triton_backend in triton_backends:
+            if _triton_backend and _triton_backend.name() == "cuda":
+                device_properties = _triton_backend.get_device_properties(
+                    _triton_backend.current_device()
                 )
                 assert hasattr(device_properties, "name")
                 self.dinfo = device_properties.name
-                self.vinfo = triton_backend.vinfo()
+                self.vinfo = _triton_backend.vinfo()
 
     def get_local_cache(self):
         if not os.path.isfile(self.local_cache_path):
@@ -840,8 +840,8 @@ class AsyncCompile:
         _compile_start()
 
         if config.compile_threads > 1:
-            triton_backend = get_triton_backend(device_type=device)
-            cc = triton_backend.target_version()
+            _triton_backend = get_triton_backend(device_type=device)
+            cc = _triton_backend.target_version()
             future = self.process_pool().submit(
                 _worker_compile, source_code, cc, device
             )
