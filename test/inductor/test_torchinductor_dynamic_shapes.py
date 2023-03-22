@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import importlib
+import math
 import os
 import sys
 import unittest
@@ -8,7 +9,10 @@ from functools import partial
 
 import torch
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
@@ -135,6 +139,30 @@ class TestInductorDynamic(TestCase):
         res = opt(a)
         ref = fn(a)
         self.assertEqual(res, ref)
+
+    @onlyCUDA
+    def test_pad_dynamic(self, device):
+        def get_same_padding(x: int, k: int, s: int, d: int):
+            return max((math.ceil(x / s) - 1) * s + (k - 1) * d + 1 - x, 0)
+
+        def pad_same(x, k, s, d=(1, 1), value=0):
+            ih, iw = x.size()[-2:]
+            pad_h, pad_w = get_same_padding(ih, k[0], s[0], d[0]), get_same_padding(
+                iw, k[1], s[1], d[1]
+            )
+            if pad_h > 0 or pad_w > 0:
+                x = torch.nn.functional.pad(
+                    x,
+                    [pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2],
+                    value=value,
+                )
+            return x
+
+        x = torch.randn(2, 24, 110, 110, device=device)
+        opt = self.compile_fn(pad_same)
+        res = opt(x, (5, 5), (2, 2))
+        ref = pad_same(x, (5, 5), (2, 2))
+        self.assertEqual(res, ref, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
