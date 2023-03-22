@@ -199,7 +199,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
-    export_constraints = None,
+    export_constraints=None,
 ):
     """Fully convert a frame into an FX graph"""
     reset_graph_break_dup_checker()
@@ -275,7 +275,7 @@ def convert_frame_assert(
             compiler_fn,
             one_graph,
             export,
-            export_constriants,
+            export_constraints,
             hooks,
             frame,
         )

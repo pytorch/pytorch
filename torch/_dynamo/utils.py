@@ -43,7 +43,7 @@ import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import DimDynamic, DimConstraint
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -1436,7 +1436,7 @@ def format_bytecode(prefix, name, filename, line_no, code):
 # config as an input, and that seems a little annoying for little
 # gain.
 def dynamic_dims_from_tensor(
-    e: torch.Tensor, constraint_dims: DimList[DimConstraint]
+    e: torch.Tensor, constraint_dims: Optional[DimList[DimConstraint]]
 ) -> DimList[DimDynamic]:
     """
     Infer DimDynamic from DimConstraint.
@@ -1451,17 +1451,20 @@ def dynamic_dims_from_tensor(
     # We suppose we could patch the tests, but that feels like a strange thing to add to
     # what should just be a dynamic shapes test.
     # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
-    assert e.dim() == len(constraint_dims)
+    if constraint_dims is None:
+        constraint_dims = [None] * e.dim()
+    else:
+        assert e.dim() == len(constraint_dims)
     dynamic_dims: DimList[DimDynamic] = []
     for constraint in constraint_dims:
         # NB: Technically this is not necessary as ShapeEnv will take care
         # of this too, but it's more direct to do it this way
         if constraint is not None:
-            dynamic_dims.append(DimDynamismState.DYNAMIC)
+            dynamic_dims.append(DimDynamic.DYNAMIC)
         else:
             if config.assume_static_by_default:
-                dynamic_dims.append(DimDynamismState.STATIC)
+                dynamic_dims.append(DimDynamic.STATIC)
             else:
-                dynamic_dims.append(DimDynamismState.DUCK)
+                dynamic_dims.append(DimDynamic.DUCK)
 
     return dynamic_dims

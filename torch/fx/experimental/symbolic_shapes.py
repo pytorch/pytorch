@@ -1622,8 +1622,7 @@ class ShapeEnv:
         # Expand optional inputs, or verify invariants are upheld
         if constraint_inputs is None:
             constraint_inputs = [
-                [None] * t.dim() if isinstance(t, torch.Tensor) else None
-                for t in placeholders
+                [None] * t.dim() if isinstance(t, torch.Tensor) else None for t in placeholders
             ]
         else:
             assert len(constraint_inputs) == len(placeholders)
@@ -1729,6 +1728,7 @@ class ShapeEnv:
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
+                        breakpoint()
                         symbol_to_constraints[s].append(constraint)
                 else:
                     if constraint is not None:
@@ -1769,7 +1769,7 @@ class ShapeEnv:
             assert isinstance(t, torch.Tensor)
             for i, ss in enumerate(t.size()):
                 property_source = TensorPropertySource(source, TensorProperty.SIZE, i)
-                track_symint(property_source, ss, constraint)
+                track_symint(property_source, ss, constraint[i])
             for i, ss in enumerate(t.stride()):
                 track_symint(TensorPropertySource(source, TensorProperty.STRIDE, i), ss)
             track_symint(TensorPropertySource(source, TensorProperty.STORAGE_OFFSET), t.storage_offset())
@@ -1808,8 +1808,8 @@ class ShapeEnv:
                 # A non-relational constraint on a single sizevar can violate
                 # a constraint
                 if len(g.free_symbols) == 1:
+                    symbol = list(g.free_symbols)[0]
                     source = symbol_to_source[symbol][0]
-                    symbol = next(iter(expr.free_symbols))
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
                         if isinstance(c, StrictMinMaxConstraint):

@@ -1,11 +1,11 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Dict, Optional, List
+from typing import ContextManager, Dict, List, Optional
 
 import torch
 from torch._guards import Source
-from torch.fx.experimental.symbolic_shapes import DimDynamic, DimConstraint
+from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
 

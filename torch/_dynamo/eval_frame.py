@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import functools
 import inspect
 import logging
@@ -577,9 +578,7 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "real",
-    constraints: List[
-        Constraint,
-    ] = None,
+    constraints: List[Constraint,] = None,
     **kwargs,
 ) -> Tuple[torch.fx.GraphModule, Set[_guards.Guard]]:
     """
@@ -864,7 +863,14 @@ def assume_constant_result(fn):
     return fn
 
 
-def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, export_constraints=None, dynamic=False):
+def optimize_assert(
+    backend,
+    *,
+    hooks=Hooks(None, None),
+    export=False,
+    export_constraints=None,
+    dynamic=False,
+):
     """
     The same as `torch._dynamo.optimize(backend, nopython=True)`
     """
@@ -874,7 +880,9 @@ def optimize_assert(backend, *, hooks=Hooks(None, None), export=False, export_co
     backend_ctx_ctor = getattr(backend, "backend_ctx_ctor", null_context)
 
     return _optimize_catch_errors(
-        convert_frame.convert_frame_assert(backend, export=export, export_constraints=export_constraints),
+        convert_frame.convert_frame_assert(
+            backend, export=export, export_constraints=export_constraints
+        ),
         hooks,
         backend_ctx_ctor,
         export=export,

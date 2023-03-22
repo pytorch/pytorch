@@ -801,9 +801,17 @@ class VariableBuilder:
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
             ):
+                from torch.fx.experimental.symbolic_shapes import DimDynamic
+
                 shape_env = self.tx.output.shape_env
                 wrapped_value = shape_env.create_symintnode(
-                    shape_env.create_symbol(value, source=self.source), hint=value
+                    shape_env.create_symbol(
+                        value,
+                        source=self.source,
+                        dynamic_dim=DimDynamic.DUCK,
+                        constraint_dim=None,
+                    ),
+                    hint=value,
                 )
                 self.tx.output.tracked_fakes.append(
                     TrackedFake(wrapped_value, self.source, None)
@@ -1076,12 +1084,11 @@ class TrackedFake:
 def wrap_to_fake_tensor_and_record(
     e, tx, ignore_subclass=False, *, source: Optional[Source], is_tensor: bool
 ):
-    from torch.fx.experimental.symbolic_shapes import DimDynamismState
+    from torch.fx.experimental.symbolic_shapes import DimConstraint
 
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-
         # TODO: iterate through export_constraints to set things up, rather
         # than what we do right now
 
@@ -1093,7 +1100,7 @@ def wrap_to_fake_tensor_and_record(
             assert not static_shapes, tensor_static_reason_to_message(reason)
 
         if not static_shapes:
-            dynamic_dims: Dict[int, DimDynamismState] = dynamic_dims_from_tensor(
+            dynamic_dims: Dict[int, DimConstraint] = dynamic_dims_from_tensor(
                 e, dynamic_ranges
             )
         else:
@@ -1102,7 +1109,6 @@ def wrap_to_fake_tensor_and_record(
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
-                static_shapes=static_shapes,
                 ignore_subclass=ignore_subclass,
                 source=source,
                 dynamic_dims=dynamic_dims,

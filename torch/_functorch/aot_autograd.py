@@ -2652,8 +2652,8 @@ def create_aot_dispatcher_function(
                         idx < aot_config.num_params_buffers
                         and config.static_weight_shapes
                     ):
-                        return fake_mode.from_tensor(x, static_shapes=True)
-                    return fake_mode.from_tensor(x, static_shapes=False)
+                        return fake_mode.from_tensor(x)
+                    return fake_mode.from_tensor(x)
 
                 return [convert(idx, x) for idx, x in enumerate(flat_args)]
             else:
