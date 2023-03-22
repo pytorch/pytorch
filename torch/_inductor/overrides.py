@@ -299,13 +299,22 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
         if user and is_pointwise_unary(user):
             with g.inserting_before(node):
+
+                def cat_args(tensors, dim):
+                    return tensors, dim
+
+                tensors, dim = cat_args(*node.args, **node.kwargs)
                 new_tensors = [
                     g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
-                    for arg in node.args[0]
+                    for arg in tensors
                 ]
-                node.args = (new_tensors,) + node.args[1:]
+                new_cat = g.create_node(
+                    "call_function", torch.cat, args=(new_tensors, dim)
+                )
                 user.replace_all_uses_with(cat_or_view)
+                node.replace_all_uses_with(new_cat)
                 g.erase_node(user)
+                g.erase_node(node)
     g.lint()
     module.recompile()
     return module
@@ -461,7 +470,7 @@ def transpose_matmul(A: torch.Tensor, B: torch.Tensor, Atrans: bool, Btrans: boo
 
 
 philox_rand_like = _prims._make_prim(
-    schema="philox_rand_like(Tensor input, Tensor seed, int offset) -> Tensor",
+    schema="philox_rand_like(Tensor input, Tensor seed, SymInt offset) -> Tensor",
     return_type=_prims.RETURN_TYPE.NEW,
     meta=_philox_rand_like_meta,
     impl_aten=_philox_rand_like,

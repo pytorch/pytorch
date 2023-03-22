@@ -2099,14 +2099,14 @@ class TestSparseCSR(TestCase):
             res_sparse_sparse = fn(y, x)
             res_dense_sparse = fn(y.to_dense(), x)
             res_sparse_dense = fn(y, x.to_dense())
-            expected = fn(y.to_dense(), x.to_dense()).to_sparse_csr()
+            expected = fn(y.to_dense(), x.to_dense())
             self.assertEqual(res_sparse_sparse, expected)
             # TODO: While result of mul(dense, csr) is csr, it is not fully compressed.
             # That means it may contain materialized zeros, since the dense argument
             # is converted according to the sparsity pattern of csr. In the future
             # we might require the result to be fully compressed.
-            self.assertEqual(res_dense_sparse.to_dense(), expected.to_dense())
-            self.assertEqual(res_sparse_dense.to_dense(), expected.to_dense())
+            self.assertEqual(res_dense_sparse, expected)
+            self.assertEqual(res_sparse_dense, expected)
 
             # Grad comparison
             x = self.genSparseCSRTensor(shape, nnz, dtype=dtype, device=device, index_dtype=torch.int32)
@@ -2210,8 +2210,13 @@ class TestSparseCSR(TestCase):
 
                 expected = torch.add(d1, d2, alpha=alpha, out=d3)
                 actual = torch.add(s1, s2, alpha=alpha, out=s3)
+                self.assertEqual(actual.crow_indices().dtype, index_dtype)
+                self.assertEqual(actual.col_indices().dtype, index_dtype)
                 self.assertEqual(actual, expected)
                 self.assertEqual(s3, d3)
+                if s3 is not None:
+                    self.assertEqual(s3.crow_indices().dtype, index_dtype)
+                    self.assertEqual(s3.col_indices().dtype, index_dtype)
 
         for index_dtype in [torch.int32, torch.int64]:
             for m, n in itertools.product([3, 5], [3, 5]):
