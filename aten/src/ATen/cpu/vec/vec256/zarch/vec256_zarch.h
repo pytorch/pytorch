@@ -2212,10 +2212,18 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
   }
 
   Vectorized<T> C10_ALWAYS_INLINE eq(const Vectorized<T>& other) const {
-    return Vectorized<T>{_vec.eq(other._vec)};
+    auto eq = _vec.eq(other._vec);  // compares real and imag individually
+    // If both real numbers and imag numbers are equal, then the complex numbers are equal
+    auto real = eq & vinner_type(real_mask<underline_type>());
+    auto imag = (eq & vinner_type(image_mask<underline_type>())).swapped();
+    return Vectorized<T>{real & imag};
   }
   Vectorized<T> C10_ALWAYS_INLINE ne(const Vectorized<T>& other) const {
-    return Vectorized<T>{_vec.ne(other._vec)};
+    auto ne = _vec.ne(other._vec);  // compares real and imag individually
+    // If either real numbers or imag numbers are not equal, then the complex numbers are not equal
+    auto real = ne & vinner_type(real_mask<underline_type>());
+    auto imag = (ne & vinner_type(image_mask<underline_type>())).swapped();
+    return Vectorized<T>{real | imag};
   }
 
   Vectorized<T> real() const {
