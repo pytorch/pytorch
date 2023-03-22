@@ -357,7 +357,7 @@ if __name__ == "__main__":
     # Separate out the failed test cases. Uploading everying is too data intensive most of the time
     failed_tests_cases = []
     for test_case in test_cases:
-        if "rerun" in test_case or "failure" in test_case:
+        if "rerun" in test_case or "failure" in test_case or "error" in test_case:
             failed_tests_cases.append(test_case)
 
     upload_workflow_stats_to_s3(
