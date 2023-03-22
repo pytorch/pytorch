@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import TestCase, run_tests, skipIfRocm, do_test_dtypes, \
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
-    parametrize, subtest, is_coalesced_indices, suppress_warnings, is_slow_gradcheck_env
+    parametrize, subtest, is_coalesced_indices, suppress_warnings
 from torch.testing._internal.common_cuda import TEST_CUDA, _get_torch_cuda_version
 from numbers import Number
 from typing import Dict, Any
@@ -413,8 +413,6 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_with_gradcheck(self, device, dtype, gradcheck):
-        if not gradcheck.masked and is_slow_gradcheck_env():
-            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
 
         def test_tensor(x, res):
             x.to_dense()  # Tests triple to_dense for memory corruption
@@ -432,7 +430,7 @@ class TestSparse(TestSparseBase):
                 return
 
             def fn(x):
-                return x.to_dense()
+                return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
@@ -550,8 +548,6 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_to_dense_hybrid(self, device, dtype, gradcheck):
-        if not gradcheck.masked and is_slow_gradcheck_env():
-            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
 
         def test_tensor(x, res):
             x.to_dense()  # Tests double to_dense for memory corruption
@@ -561,7 +557,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual(res, self.safeToDense(x))
 
             def fn(x):
-                return x.to_dense()
+                return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
             gradcheck(fn, (x,), check_sparse_nnz=True)
 
@@ -908,8 +904,6 @@ class TestSparse(TestSparseBase):
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupport triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
-        if not gradcheck.masked and is_slow_gradcheck_env():
-            self.skipTest('FIXME: to_dense_backward supports masked semantics only')
         # trivial checks
         s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
         with self.assertRaisesRegex(RuntimeError, "does not match the length"):
@@ -941,7 +935,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True)
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1778,10 +1772,7 @@ class TestSparse(TestSparseBase):
                 self.assertEqual(S_sum.item(), D_sum.item())
 
                 def fn(S):
-                    res = torch.sparse.sum(S)
-                    if res.is_sparse:
-                        res = res.to_dense()
-                    return res
+                    return torch.sparse.sum(S)
                 gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
             else:
                 S_sum = torch.sparse.sum(S, td)
@@ -1790,9 +1781,7 @@ class TestSparse(TestSparseBase):
 
                 def fn(S):
                     res = torch.sparse.sum(S, td)
-                    if res.is_sparse:
-                        res = res.to_dense()
-                    return res
+                    return res.to_dense(masked_grad=True)
                 gradcheck(fn, (S,), check_sparse_nnz=True, masked=True)
 
         nnz = 10
@@ -4012,7 +4001,7 @@ class TestSparseOneOff(TestCase):
 
 def _sparse_to_dense(tensor):
     if tensor.dtype != torch.bool:
-        return tensor.to_dense()
+        return tensor.to_dense(masked_grad=True)
 
     # to_dense uses coalesce which isn't implemented for bool
     return tensor.to(torch.int8).to_dense().to(torch.bool)
@@ -4423,21 +4412,8 @@ class TestSparseAny(TestCase):
                 # TODO: implement batch support in _convert_indices_from_csr_to_coo
                 continue
             t = t.clone().detach().requires_grad_(True)
-            if is_slow_gradcheck_env() and not gradcheck.masked:
-                # TODO: remove this if-block when TODO items below are resolved
-                try:
-                    gradcheck(torch.Tensor.to_dense, t)
-                except RuntimeError as msg:
-                    # TODO: implement non-masked semantics support in to_dense_backward
-                    with self.assertRaisesRegex(RuntimeError, "Jacobian mismatch"):
-                        gradcheck(torch.Tensor.to_dense, t)
-                    self.skipTest('non-masked semantics not supported')
-            r = gradcheck(torch.Tensor.to_dense, t)
+            r = gradcheck(lambda x: torch.Tensor.to_dense(x, masked_grad=gradcheck.masked), t)
             self.assertTrue(r)
-
-        # when the following assert fails, it means that the if-block
-        # above and the assertFalse test below can be safely removed
-        self.assertFalse(is_slow_gradcheck_env() and not gradcheck.masked)
 
     @all_sparse_layouts('from_layout', include_strided=True)
     @all_sparse_layouts('to_layout', include_strided=False)
