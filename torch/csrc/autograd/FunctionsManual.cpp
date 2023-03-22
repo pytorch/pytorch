@@ -394,7 +394,7 @@ std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
   if (grads[1].defined()) {
     grad_self =
         (grad_output.dim() == 1 ? grad_output.unsqueeze(0) : grad_output)
-            .mm(grads[1]);
+            .matmul(grads[1]);
     if (grad_output.dim() == 1) {
       grad_self = grad_self.squeeze(0);
     }
@@ -402,7 +402,7 @@ std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
   if (grads[0].defined()) {
     grad_weight =
         (grad_output.dim() == 1 ? grad_output.unsqueeze(1) : grad_output.mT())
-            .mm(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
+            .matmul(grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0]);
   }
 
   if (grads[0].defined() || grads[1].defined() || grads[2].defined()) {
@@ -415,11 +415,11 @@ std::tuple<Tensor, Tensor, Tensor> linear_double_backward(
   if (grads[0].defined()) {
     grad_grad_output = grad_grad_output +
         (grads[0].dim() == 1 ? grads[0].unsqueeze(0) : grads[0])
-            .mm(weight.mT());
+            .matmul(weight.mT());
   }
   if (grads[1].defined()) {
     grad_grad_output = grad_grad_output +
-        (self.dim() == 1 ? self.unsqueeze(0) : self).mm(grads[1].mT());
+        (self.dim() == 1 ? self.unsqueeze(0) : self).matmul(grads[1].mT());
   }
   if (grads[2].defined()) {
     grad_grad_output = grad_grad_output + grads[2];
