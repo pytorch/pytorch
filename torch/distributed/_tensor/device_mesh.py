@@ -99,7 +99,6 @@ class DeviceMesh:
 
     device_type: str
     mesh: torch.Tensor
-    _local_rng_state: torch.Tensor
 
     def __init__(
         self,
@@ -107,6 +106,7 @@ class DeviceMesh:
         mesh: MeshExprT,
         *,
         _init_process_groups: bool = True,
+        _sync_seed: bool = True,
     ) -> None:
         self.device_type = device_type
         self.mesh = (

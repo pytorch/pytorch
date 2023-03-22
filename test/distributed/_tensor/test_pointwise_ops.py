@@ -24,6 +24,11 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.distributed._tensor.random import (
+    _set_offset,
+    get_rng_state,
+    manual_seed_all,
+)
 
 def no_op():
     return None
@@ -270,87 +275,49 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(expected, dt.to_local())
 
 
-class DistTensorNonDetOpTest(DTensorTestBase):
-    @with_comms
-    def test_uniform_replicate(self):
-        torch.cuda.manual_seed(0)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        placements = [Shard(1)]
-        size = [4, 4]
-        local_tensor = torch.empty(*size, device='cuda')
-        local_tensor.uniform_()
-        print(f"rank={self.rank}:\nexpected tensor={local_tensor}")
-
-        torch.cuda.manual_seed(self.rank)
-        dist_tensor = torch.ones(*size, device='cuda')
-        dist_tensor = distribute_tensor(dist_tensor, device_mesh, placements)
-        dist_tensor.uniform_()
-        #self.assertEqual(local_tensor, dist_tensor.to_local())
-        print(f"rank={self.rank}:\nlocal tensor={dist_tensor.to_local()}")
-
-    @with_comms
-    def test_uniform_shard(self):
-        torch.cuda.manual_seed(self.rank)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        size = [4, 1]
-        local_tensor = torch.empty(*size, device='cuda')
-        dtensor = DTensor.from_local(local_tensor, device_mesh, [Shard(1)])
-        dtensor.uniform_(0, 1)
-        _dtensor = dtensor.redistribute(device_mesh, [Replicate()])
-        if self.rank == 0:
-            print(_dtensor.to_local())
-
-        mask = torch.empty(_dtensor.shape, device='cuda')
-        mask.uniform_(0, 1)
-        print(f"mask tensor on rank {self.rank} is:\n{mask}")
-
-        torch.cuda.manual_seed(self.rank)
-        if self.rank == 0:
-            local_tensor = torch.empty([4, 4], device='cuda')
-            local_tensor.uniform_(0, 1)
-            print(local_tensor.T)
-
+class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
     @skip_unless_torch_gpu
     def test_deterministic_uniform_1d(self):
+        def check_rng_state(seed: int, offset: int, device_mesh: DeviceMesh) -> None:
+            state = get_rng_state(device_mesh)
+            seed_int64 = state[-16:-8].view(torch.int64)
+            offset_int64 = state[-8:].view(torch.int64)
+            self.assertEqual(seed_int64, torch.tensor([seed]))
+            self.assertEqual(offset_int64, torch.tensor([offset]))
+
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         size = [4, 1]
 
-        torch.cuda.manual_seed(1234)
-
+        # initialize rng state
+        manual_seed_all(1234, device_mesh)
+        check_rng_state(1234, 0, device_mesh)
         _tensor = torch.empty(*size, device='cuda')
         dtensor = DTensor.from_local(_tensor, device_mesh, [Shard(1)])
 
         # preprocess rng offset
-        state = torch.cuda.get_rng_state()
-        seed = state[-16:-8]
-        offset = state[-8:]
-        offset_int64 = offset.view(torch.int64)
         global_size = dtensor.numel()
         local_size = dtensor.to_local().numel()
-        offset_int64 += self.rank * local_size
-        torch.cuda.set_rng_state(state)
+        state = get_rng_state(device_mesh)
+        offset = state[-8:].view(torch.int64)[0].item()
+        _set_offset(offset + self.rank * local_size, device_mesh)
+        check_rng_state(1234, self.rank * local_size, device_mesh)
+
         # random op call
         dtensor.uniform_(0, 1)
+
         # postprocess rng offset
-        offset_int64 += global_size - self.rank * local_size
-        torch.cuda.set_rng_state(state)
+        _set_offset(offset + global_size, device_mesh)
+        check_rng_state(1234, global_size, device_mesh)
 
         dtensor = dtensor.redistribute(device_mesh, [Replicate()])
         local_tensor = dtensor.to_local()
-        print(local_tensor)
+
         for shard_num in range(self.world_size):
             if self.rank == shard_num:
                 self.assertEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
             else:
                 self.assertNotEqual(local_tensor[:,shard_num], local_tensor[:,self.rank])
-
-        print(f"rank {self.rank} rng state={torch.cuda.get_rng_state()}")
-        # call dropout
-        if False:  # error: output spec mismatch. need return 2 specs
-            _drop = torch.nn.Dropout(p=0.5)
-            dtensor = _drop(dtensor)
-            print(f"{self.rank}: {dtensor.to_local()}")
 
 
 if __name__ == "__main__":
