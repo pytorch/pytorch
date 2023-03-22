@@ -96,6 +96,7 @@ class TestInductorConfig(TestCase):
             dynamo_config.log_level = old
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    @unittest.skipIf(torch.backends.mps.is_available(), "MPS defaults to aot_eager and ignores configs")
     def test_compile_api(self):
         # these are mostly checking config processing doesn't blow up with exceptions
         x = torch.randn(8)
