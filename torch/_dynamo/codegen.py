@@ -270,7 +270,7 @@ class PyCodegen:
         return [
             self._create_load_const(lambda: None),
             *create_call_function(0, False),
-            *create_instruction("POP_TOP"),
+            create_instruction("POP_TOP"),
         ]
 
     def make_function_with_closure(
