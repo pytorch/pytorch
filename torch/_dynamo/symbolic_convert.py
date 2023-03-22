@@ -706,6 +706,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
+
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
@@ -1471,6 +1474,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(None))
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
+
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
