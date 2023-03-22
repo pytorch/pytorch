@@ -354,7 +354,9 @@ if __name__ == "__main__":
         invoking_file_times,
     )
 
-    # Separate out the failed test cases. Uploading everying is too data intensive most of the time
+    # Separate out the failed test cases. 
+    # Uploading everying is too data intensive most of the time, 
+    # but these will be just a tiny fraction.
     failed_tests_cases = []
     for test_case in test_cases:
         if "rerun" in test_case or "failure" in test_case or "error" in test_case:
