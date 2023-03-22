@@ -15,9 +15,9 @@ import torch
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
-from ..triton_backend import _triton_cuda_backend, TritonBackend
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..triton_backend import _triton_cuda_backend, TritonBackend
 from ..utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
@@ -1216,7 +1216,9 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with {self._triton_backend.nms()}._DeviceGuard({index}):")
+            result.writeline(
+                f"with {self._triton_backend.nms()}._DeviceGuard({index}):"
+            )
             with result.indent():
                 result.writeline(
                     f"{self._triton_backend.nms()}.set_device({index})"
@@ -1240,7 +1242,9 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with {self._triton_backend.nms()}._DeviceGuard({index}):")
+            result.writeline(
+                f"with {self._triton_backend.nms()}._DeviceGuard({index}):"
+            )
             with result.indent():
                 result.writeline(
                     f"{self._triton_backend.nms()}.set_device({index})"

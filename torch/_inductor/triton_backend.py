@@ -180,8 +180,7 @@ class _CUDABackend(TritonBackend):
 
 _triton_cuda_backend = _CUDABackend()
 
-triton_backends = [_triton_cuda_backend]
-
+triton_backends = []
 
 _register_lock = threading.Lock()
 
@@ -195,6 +194,10 @@ def register_triton_backend(_triton_backend: TritonBackend):
             return True
         else:
             return _triton_backend in triton_backends
+
+
+if _triton_cuda_backend:
+    register_triton_backend(_triton_cuda_backend)
 
 
 @functools.lru_cache(None)

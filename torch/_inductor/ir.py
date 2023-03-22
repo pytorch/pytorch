@@ -551,9 +551,7 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
-        _triton_backend: TritonBackend = get_triton_backend(
-            device_type=device.type
-        )
+        _triton_backend: TritonBackend = get_triton_backend(device_type=device.type)
         num_sm = _triton_backend.processor_count(device.index)
         min_elements_per_thread = 32
         max_elements_per_thread = 512

@@ -15,8 +15,8 @@ from torch._dynamo.utils import dynamo_timed
 
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
-from .triton_backend import get_triton_backend
 from .sizevars import SimplifyIndexing
+from .triton_backend import get_triton_backend
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 

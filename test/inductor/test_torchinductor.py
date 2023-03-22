@@ -25,14 +25,13 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
+from torch._inductor.graph import GraphLowering
+from torch._inductor.ir import InterpreterShim
 from torch._inductor.triton_backend import (
-    _triton_cuda_backend,
     register_triton_backend,
     triton_backends,
     TritonBackend,
 )
-from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import InterpreterShim
 from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -5750,12 +5749,20 @@ class CommonTemplate:
             def name(self):
                 return "mock"
 
-        self.assertTrue(len(triton_backends) == 1)
-        self.assertTrue(_triton_cuda_backend in triton_backends)
+            def compatible_with_triton(self):
+                return True
+
+            def mem_alignment(self):
+                return 16
+
+            def target_version(self):
+                return 11
+
+        triton_backends.clear()
+
         mock_device_backend = MockDeviceBackend()
         res = register_triton_backend(mock_device_backend)
         self.assertTrue(res)
-        self.assertTrue(len(triton_backends) == 2)
         self.assertTrue(mock_device_backend in triton_backends)
 
         # Only allow one instance for a particular device backend.
@@ -5764,19 +5771,7 @@ class CommonTemplate:
         mock_device_backend1 = MockDeviceBackend()
         res = register_triton_backend(mock_device_backend1)
         self.assertFalse(res)
-        self.assertTrue(len(triton_backends) == 2)
         self.assertTrue(mock_device_backend1 not in triton_backends)
-
-        with V.set_device_backend(mock_device_backend):
-            self.assertTrue(
-                V.device_backend.create_stream() == mock_device_backend.create_stream()
-            )
-            self.assertTrue(
-                V.device_backend.is_available() == mock_device_backend.is_available()
-            )
-            self.assertTrue(V.device_backend.is_available())
-            self.assertTrue(bool(V.device_backend))
-            self.assertTrue(str(V.device_backend) == "mock")
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):

@@ -75,7 +75,9 @@ class EnterDeviceContextManagerLine:
         _triton_backend = get_triton_backend(self.device.type)
         assert _triton_backend
         assert self.device.index is not None
-        code.writeline(f"with {_triton_backend.nms()}._DeviceGuard({self.device.index}):")
+        code.writeline(
+            f"with {_triton_backend.nms()}._DeviceGuard({self.device.index}):"
+        )
 
 
 class ExitDeviceContextManagerLine:
@@ -294,7 +296,7 @@ class WrapperCodeGen(CodeGen):
         self.writeline(EnterDeviceContextManagerLine(device))
 
     def codegen_device_guard_exit(self, device):
-        self.writeline(ExitDeviceContextManagerLine(device))
+        self.writeline(ExitDeviceContextManagerLine())
 
     def generate_return(self, output_refs):
         if output_refs:

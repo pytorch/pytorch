@@ -26,10 +26,7 @@ from typing import Any, Callable, Dict, List
 import torch
 
 from torch._inductor import config, cuda_properties, exc
-from torch._inductor.triton_backend import (
-    get_triton_backend,
-    triton_backends,
-)
+from torch._inductor.triton_backend import get_triton_backend, triton_backends
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
