@@ -2018,7 +2018,7 @@ class CppKernelProxy(CppKernel):
                         and V.graph.get_dtype(usr.args[1]) == torch.bfloat16
                         for usr in node.users
                     )
-                elif node.target is ["store"]:
+                elif node.target is "store":
                     stored_node = node.args[3]
                     bf16_mem_copy = is_bf16_mem_copy(stored_node)
                 else:
