@@ -40,7 +40,7 @@ def patch_init_py(path: Path, *, version: str) -> None:
     with open(path) as f:
         orig = f.read()
     # Replace version
-    orig = check_and_replace(orig, "__version__ = '2.0.0'", f"__version__ = \"{version}\"")
+    orig = check_and_replace(orig, f"__version__ = '{read_triton_version()}'", f"__version__ = \"{version}\"")
     with open(path, "w") as f:
         f.write(orig)
 
