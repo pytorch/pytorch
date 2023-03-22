@@ -3,6 +3,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/InlineDeviceGuard.h>
 #include <c10/core/impl/InlineStreamGuard.h>
+#include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/impl/CUDAGuardImpl.h>
 
@@ -76,7 +77,7 @@ struct CUDAGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAGuard {
   /// Create an uninitialized OptionalCUDAGuard.
-  explicit OptionalCUDAGuard() : guard_() {}
+  explicit OptionalCUDAGuard() : guard_(c10::cuda::current_device()) {}
 
   /// Set the current CUDA device to the passed Device, if it is not nullopt.
   explicit OptionalCUDAGuard(optional<Device> device_opt)
