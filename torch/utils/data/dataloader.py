@@ -83,13 +83,7 @@ class _DatasetKind:
 class _InfiniteConstantSampler(Sampler):
     r"""Analogous to ``itertools.repeat(None, None)``.
     Used as sampler for :class:`~torch.utils.data.IterableDataset`.
-
-    Args:
-        data_source (Dataset): dataset to sample from
     """
-
-    def __init__(self):
-        super().__init__(None)
 
     def __iter__(self):
         while True:
