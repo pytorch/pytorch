@@ -335,6 +335,9 @@ static PyObject* _custom_eval_frame(
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback);
+static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
+                                        PyFrameObject *frame, int throw_flag) = NULL;
+
 #if PY_VERSION_HEX >= 0x03090000
 static PyObject* custom_eval_frame_shim(
     PyThreadState* tstate,
@@ -357,7 +360,12 @@ inline static PyObject* eval_frame_default(
   if (tstate == NULL) {
     tstate = PyThreadState_GET();
   }
-  return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  if (previous_eval_frame) {
+    return previous_eval_frame(tstate, frame, throw_flag);
+  }
+  else {
+    return _PyEval_EvalFrameDefault(tstate, frame, throw_flag);
+  }
 #else
   return _PyEval_EvalFrameDefault(frame, throw_flag);
 #endif
@@ -367,8 +375,10 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
       &custom_eval_frame_shim) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &custom_eval_frame_shim);
+    DEBUG_CHECK(previous_eval_frame == NULL);
+    previous_eval_frame = _PyInterpreterState_GetEvalFrameFunc(tstate->interp);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         &custom_eval_frame_shim);
   }
 #else
   if (tstate->interp->eval_frame != &custom_eval_frame_shim) {
@@ -381,9 +391,11 @@ inline static void enable_eval_frame_shim(PyThreadState* tstate) {
 inline static void enable_eval_frame_default(PyThreadState* tstate) {
 #if PY_VERSION_HEX >= 0x03090000
   if (_PyInterpreterState_GetEvalFrameFunc(tstate->interp) !=
-      &_PyEval_EvalFrameDefault) {
-    _PyInterpreterState_SetEvalFrameFunc(
-        tstate->interp, &_PyEval_EvalFrameDefault);
+      previous_eval_frame) {
+    DEBUG_CHECK(previous_eval_frame != NULL);
+    _PyInterpreterState_SetEvalFrameFunc(tstate->interp,
+                                         previous_eval_frame);
+    previous_eval_frame = NULL;
   }
 #else
   if (tstate->interp->eval_frame != &_PyEval_EvalFrameDefault) {
