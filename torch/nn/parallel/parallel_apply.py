@@ -26,8 +26,9 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     on each of :attr:`devices`.
 
     Args:
-        modules (Module): modules to be parallelized
-        inputs (tensor): inputs to the modules
+        modules (list of Module): modules to be parallelized
+        inputs (list of tensor or tensor): inputs to the modules
+        kwargs_tup (tuple of dict, optional): keyword arguments for the modules
         devices (list of int or torch.device): CUDA devices
 
     :attr:`modules`, :attr:`inputs`, :attr:`kwargs_tup` (if given), and
@@ -35,7 +36,11 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
     element of :attr:`inputs` can either be a single object as the only argument
     to a module, or a collection of positional arguments.
     """
-    assert len(modules) == len(inputs), f'The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}'
+    if isinstance(inputs, torch.Tensor):
+        inputs = [inputs] * len(modules)
+    else:
+        assert len(modules) == len(inputs), f'The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}'
+    
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:
