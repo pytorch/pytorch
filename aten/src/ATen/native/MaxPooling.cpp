@@ -6,6 +6,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/MaxPooling.h>
 #include <ATen/native/Pool.h>
+#include <ATen/Dispatch.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -148,8 +149,16 @@ Tensor max_pool1d(
       !self.device().is_cpu() ||
       isTensorSubclassLike(self)) {
     // Needs indices for grad and with_indices defines CUDA dispatch
-    return std::get<0>(at::max_pool1d_with_indices(
-        self, kernel_size, stride, padding, dilation, ceil_mode));
+    // Internally branching on requires_grad or not results in fragile behavior for this kernel on edge devices with
+    // dtype selective build. The tracer is built with support for grad, so unless the model owner has taken special
+    // care to export in eval mode this branch will be taken. In production models are almost always run under and
+    // inference guard though so we would take the else branch which eventually has a dtype dispatch based on this
+    // kernel tag. This hack makes the tag appear in the trace regardless of what branch was taken. This path is
+    // already the slow path so any dispatch overhead should be negligible.
+    return AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, self.scalar_type(), "max_pool1d_impl", [&] {
+        return std::get<0>(at::max_pool1d_with_indices(
+            self, kernel_size, stride, padding, dilation, ceil_mode));
+    });
   }
   return max_pool1d_impl(
       self, kernel_size, stride, padding, dilation, ceil_mode);
