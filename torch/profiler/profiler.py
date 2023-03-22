@@ -326,7 +326,8 @@ def tensorboard_trace_handler(dir_name: str, worker_name: Optional[str] = None, 
                 raise RuntimeError("Can't create directory: " + dir_name) from e
         if not worker_name:
             worker_name = "{}_{}".format(socket.gethostname(), str(os.getpid()))
-        file_name = "{}.{}.pt.trace.json".format(worker_name, int(time.time() * 1000))
+        # Use nanosecond here to avoid naming clash when exporting the trace
+        file_name = "{}.{}.pt.trace.json".format(worker_name, time.time_ns())
         if use_gzip:
             file_name = file_name + '.gz'
         prof.export_chrome_trace(os.path.join(dir_name, file_name))
