@@ -2841,6 +2841,54 @@ TEST_F(VulkanAPITest, select_3d_width_large) {
   test_select({100, 3, 144}, 2, 50);
 }
 
+TEST_F(VulkanAPITest, select_4d_batch_small) {
+  test_select({1, 1, 1, 1}, 0, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_batch_medium) {
+  test_select({3, 2, 5, 4}, 0, 1);
+}
+
+TEST_F(VulkanAPITest, select_4d_batch_large) {
+  test_select({30, 8, 12, 17}, 0, 27);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_small) {
+  test_select({1, 1, 1, 1}, 1, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_medium) {
+  test_select({7, 5, 2, 4}, 1, 4);
+}
+
+TEST_F(VulkanAPITest, select_4d_depth_large) {
+  test_select({5, 30, 12, 30}, 1, 23);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_small) {
+  test_select({1, 1, 1, 1}, 2, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_medium) {
+  test_select({3, 5, 4, 2}, 2, 3);
+}
+
+TEST_F(VulkanAPITest, select_4d_height_large) {
+  test_select({5, 8, 50, 50}, 2, 41);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_small) {
+  test_select({1, 1, 1, 1}, 3, 0);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_medium) {
+  test_select({3, 5, 4, 2}, 3, 1);
+}
+
+TEST_F(VulkanAPITest, select_4d_width_large) {
+  test_select({5, 8, 50, 50}, 3, 33);
+}
+
 TEST_F(VulkanAPITest, sigmoid) {
   const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();

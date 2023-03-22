@@ -1557,7 +1557,8 @@ inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, const T
                 r += s2[k] * m1[k][j];
               }
             } else {
-              r *= beta;
+              // For beta == 0, the r's value will be ignored, especially for nan value.
+              r = beta == scalar_t(0) ? scalar_t(0) : beta * r;
               for (const auto k : c10::irange(ks)) {
                 r += alpha * s2[k] * m1[k][j];
               }

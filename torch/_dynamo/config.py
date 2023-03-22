@@ -4,31 +4,28 @@ import tempfile
 from os.path import abspath, dirname
 
 import torch
+
 from . import external_utils
 
 from .logging import get_loggers_level, set_loggers_level
 
-# log level (levels print what it says + all levels listed below it)
-# logging.DEBUG print full traces <-- lowest level + print tracing of every instruction
-# logging.INFO print the steps that dynamo is running and optionally, compiled functions + graphs
-# logging.WARN print warnings (including graph breaks)
-# logging.ERROR print exceptions (and what user code was being processed when it occurred)
+
+# Note (mlazos): This is deprecated and will be removed very soon
+# to configure logging for dynamo, aot, and inductor
+# use the following API in the torch._logging module
+# torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
+# or use the environment variable TORCH_LOGS="dynamo,aot,inductor" (use a prefix + to indicate higher verbosity)
+# see this design doc for more detailed info
+# Design doc: https://docs.google.com/document/d/1ZRfTWKa8eaPq1AxaiHrq4ASTPouzzlPiuquSBEJYwS8/edit#
 log_level = property(
     lambda _: get_loggers_level(), lambda _, lvl: set_loggers_level(lvl)
 )
-
-# log compiled function + graphs at level INFO
-output_code = False
 
 # the name of a file to write the logs to
 log_file_name = None
 
 # Verbose will print full stack traces on warnings and errors
-verbose = False
-
-# If true, traced graph outputs will be outputted as Python GraphModule code.
-# If false, traced graph outputs will be outputted in tabular form.
-output_graph_code = False
+verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 
 # verify the correctness of optimized backend
 verify_correctness = False
@@ -42,8 +39,10 @@ dead_code_elimination = True
 # disable (for a function) when cache reaches this size
 cache_size_limit = 64
 
-# specializing int/float by default
-specialize_int_float = True
+# whether or not to specialize on int inputs.  This only has an effect with
+# dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
+# inputs
+specialize_int = False
 
 # Assume these functions return constants
 constant_functions = {
@@ -56,6 +55,9 @@ constant_functions = {
     torch._utils.is_compiling: True,
 }
 
+# Here for bw compat, will be removed (mlazos)
+# see above notes for log_level on how to configure the new logging system
+output_code = None
 
 # don't specialize on shapes and strides and put shape ops in graph
 dynamic_shapes = os.environ.get("TORCHDYNAMO_DYNAMIC_SHAPES") == "1"
@@ -103,6 +105,12 @@ rewrite_assert_with_torch_assert = True
 # Show a warning on every graph break
 print_graph_breaks = False
 
+# Print guards
+print_guards = os.environ.get("TORCHDYNAMO_PRINT_GUARDS", None) == "1"
+
+# Show a warning for every specialization
+print_specializations = False
+
 # Disable dynamo
 disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 
@@ -138,7 +146,7 @@ repro_after = os.environ.get("TORCHDYNAMO_REPRO_AFTER", None)
 # Compiler compilation debug info
 # 1: Dumps the original graph out to repro.py if compilation fails
 # 2: Dumps a minifier_launcher.py if compilation fails.
-# 3: Always dumps a minifier_laucher.py. Good for segfaults.
+# 3: Always dumps a minifier_launcher.py. Good for segfaults.
 # 4: Dumps a minifier_launcher.py if the accuracy fails.
 repro_level = int(os.environ.get("TORCHDYNAMO_REPRO_LEVEL", 2))
 
@@ -203,7 +211,11 @@ def is_fbcode():
     return not hasattr(torch.version, "git_version")
 
 
-if is_fbcode():
+DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
+
+if DEBUG_DIR_VAR_NAME in os.environ:
+    debug_dir_root = os.path.join(os.environ[DEBUG_DIR_VAR_NAME], "torch_compile_debug")
+elif is_fbcode():
     debug_dir_root = os.path.join(tempfile.gettempdir(), "torch_compile_debug")
 else:
     debug_dir_root = os.path.join(os.getcwd(), "torch_compile_debug")
