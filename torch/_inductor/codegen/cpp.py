@@ -907,7 +907,7 @@ class CppKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        line = f"{var}[static_cast<int>({cexpr(index)})]"
+        line = f"{var}[static_cast<{INDEX_TYPE}>({cexpr(index)})]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         return self.cse.generate(self.loads, line)
@@ -917,7 +917,7 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            line = f"{var}[static_cast<int>({cexpr(index)})] = {value};"
+            line = f"{var}[static_cast<{INDEX_TYPE}>({cexpr(index)})] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
                 line = f"{var}[{cexpr(index)}] += {value};"
