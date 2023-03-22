@@ -333,19 +333,16 @@ class autocast:
                 torch.clear_autocast_cache()
             torch.hpu.set_autocast_hpu_enabled(self.prev)            # type: ignore[attr-defined]
             torch.hpu.set_autocast_hpu_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
-<<<<<<< HEAD
         elif self.device == 'xla':
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
             torch.set_autocast_xla_enabled(self.prev)            # type: ignore[attr-defined]
             torch.set_autocast_xla_dtype(self.prev_fastdtype)    # type: ignore[attr-defined]
-=======
         elif self.device == self.custom_backend_name:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
             getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_enabled')(self._enabled)
             getattr(self.custom_device_mod, f'set_autocast_{self.custom_backend_name}_dtype')(self.fast_dtype)
->>>>>>> b04363ead4b97ad46d819ad7c5643292df8f4fa4
         else:
             if torch.autocast_decrement_nesting() == 0:
                 torch.clear_autocast_cache()
