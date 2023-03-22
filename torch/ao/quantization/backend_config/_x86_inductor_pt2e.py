@@ -38,7 +38,7 @@ def get_conv_configs():
     )
     return conv_configs
 
-def get_inductor_pt2e_backend_config():
+def get_x86_inductor_pt2e_backend_config():
     return (
         BackendConfig("inductor_pytorch_2.0_export")
         .set_backend_pattern_configs(get_conv_configs())

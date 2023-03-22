@@ -22,7 +22,7 @@ from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
 )
 from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_backend_config
-from torch.ao.quantization.backend_config._inductor_pt2e import get_inductor_pt2e_backend_config
+from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_inductor_pt2e_backend_config
 from torch.ao.quantization.backend_config.x86 import get_x86_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx, convert_fx
 from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
@@ -194,6 +194,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
+class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
     @xfailIfPython311
     def test_inductor_backend_config_conv(self):
@@ -227,7 +228,7 @@ class TestQuantizePT2E(QuantizationTestCase):
 
                     qconfig = get_default_qconfig("x86")
                     qconfig_mapping = QConfigMapping().set_global(qconfig)
-                    backend_config = get_inductor_pt2e_backend_config()
+                    backend_config = get_x86_inductor_pt2e_backend_config()
                     prepare_module = prepare_pt2e(export_module, qconfig_mapping, example_inputs, backend_config)
                     prepare_module(*example_inputs)
                     convert_module = convert_pt2e(prepare_module)
