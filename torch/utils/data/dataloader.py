@@ -34,7 +34,6 @@ from . import (
     Dataset,)
 
 from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
-from torch.utils.data.datapipes.iter.sharding import SHARDING_PRIORITIES
 
 from . import _utils
 
