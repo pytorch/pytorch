@@ -40,7 +40,6 @@ def parallel_apply(modules, inputs, kwargs_tup=None, devices=None):
         inputs = [inputs] * len(modules)
     else:
         assert len(modules) == len(inputs), f'modules length {len(modules)} is not equal to the inputs length {len(inputs)}'
-    
     if kwargs_tup is not None:
         assert len(modules) == len(kwargs_tup)
     else:
