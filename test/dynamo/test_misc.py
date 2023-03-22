@@ -2033,9 +2033,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             z = y**3
             return z
 
-        for profiler in (
-            torch.autograd.profiler.profile,
-            torch.profiler.profiler.profile,
+        for profiler, get_events in (
+            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
+            (torch.profiler.profiler.profile, lambda prof: prof.events()),
         ):
             x = torch.randn((2, 2), requires_grad=True)
             ref = fn(x)
@@ -2050,7 +2050,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             events = list(
                 filter(
                     lambda event: event.name == "TorchDynamo Cache Lookup",
-                    prof.function_events,
+                    get_events(prof),
                 )
             )
 
@@ -2067,7 +2067,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             events = list(
                 filter(
                     lambda event: event.name == "TorchDynamo Cache Lookup",
-                    prof.function_events,
+                    get_events(prof),
                 )
             )
 
