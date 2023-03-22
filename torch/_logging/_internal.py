@@ -248,7 +248,7 @@ def configure_artifact_log(log):
 
 # match a comma separated list of loggable names (whitespace allowed after commas)
 def _gen_settings_regex():
-    return re.compile(r"((\+|-)?[\w\.]+,\\s*)*(\+|-)?[\w\.]+?")
+    return re.compile(r"((\+|-)?[\w\.]+,\s*)*(\+|-)?[\w\.]+?")
 
 
 def _validate_settings(settings):
