@@ -2,6 +2,8 @@ import functools
 
 import torch
 
+from .triton_backend import all_triton_backend_name, triton_backends
+
 
 # API to query cuda properties that will work in a triton compile process
 # that cannot use the GPU APIs (due to processing fork() and initialization
@@ -11,15 +13,21 @@ import torch
 
 @functools.lru_cache(None)
 def _properties():
-    if not torch.cuda.is_available():
-        return {}
-    try:
-        return {
-            i: torch.cuda.get_device_properties(i)
-            for i in range(torch.cuda.device_count())
-        }
-    except RuntimeError:
-        return {}
+    device_properties = {}
+
+    for triton_backend in triton_backends:
+        if not triton_backend:
+            continue
+
+        try:
+            device_properties[triton_backend.name()] = {
+                i: triton_backend.get_device_properties(i)
+                for i in range(triton_backend.device_count())
+            }
+        except RuntimeError:
+            return {}
+
+    return device_properties
 
 
 _compile_worker_current_device = None
@@ -37,18 +45,18 @@ def current_device():
 
 
 def _device(device):
-    if device is not None:
-        if isinstance(device, torch.device):
-            assert device.type == "cuda"
-            device = device.index
-        return device
-    return current_device()
+    assert device is not None
+    assert isinstance(device, torch.device)
+    assert device.type in all_triton_backend_name()
+    return device.index
 
 
-def get_device_properties(device=None):
-    return _properties()[_device(device)]
+def get_device_properties(device: torch.device = None):
+    assert device
+    return _properties()[device.type][_device(device)]
 
 
-def get_device_capability(device=None):
+def get_device_capability(device: torch.device):
+    assert device
     p = get_device_properties(device)
     return p.major, p.minor

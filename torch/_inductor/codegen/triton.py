@@ -15,6 +15,7 @@ import torch
 from ..._dynamo import config as dynamo_config
 from .. import config, ir, scheduler
 from ..codecache import get_code_path
+from ..triton_backend import _triton_cuda_backend, TritonBackend
 from ..ir import ReductionHint
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..utils import (
@@ -626,6 +627,7 @@ class TritonKernel(Kernel):
         mutations=None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
+        device_backend=_triton_cuda_backend,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -637,6 +639,7 @@ class TritonKernel(Kernel):
         self.iter_vars_count = itertools.count()
         self.inside_reduction = self.numels[-1] != 1
         self._load_mask = None
+        self.triton_backend: TritonBackend = device_backend
         self.body = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix = IndentedBuffer()
@@ -1213,10 +1216,10 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {self.triton_backend.nms()}._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    f"{self.triton_backend.nms()}.set_device({index})"
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(tree.numel)
@@ -1226,7 +1229,9 @@ class TritonKernel(Kernel):
                         grid.append(expr)
 
                 stream_name = f"stream{index}"
-                result.writeline(f"{stream_name} = get_cuda_stream({index})")
+                result.writeline(
+                    f"{stream_name} = get_{self.triton_backend.name()}_stream({index})"
+                )
                 extra_args_str = ", ".join(map(str, extra_args)) + ", "
                 result.writeline(
                     f"triton_.run(*args, {extra_args_str}grid=grid({', '.join(grid)}), stream={stream_name})"
@@ -1235,10 +1240,10 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(f"with torch.cuda._DeviceGuard({index}):")
+            result.writeline(f"with {self.triton_backend.nms()}._DeviceGuard({index}):")
             with result.indent():
                 result.writeline(
-                    f"torch.cuda.set_device({index})"
+                    f"{self.triton_backend.nms()}.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
@@ -1434,7 +1439,8 @@ class TritonKernel(Kernel):
             if tree.prefix != "r":
                 grid.append(expr)
         call_args = ", ".join(call_args)
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
+
+        stream_name = code.write_get_stream(V.graph.scheduler.current_device)
         code.writeline(
             f"{name}.run({call_args}, grid=grid({', '.join(grid)}), stream={stream_name})"
         )
@@ -1444,8 +1450,9 @@ class TritonKernel(Kernel):
 
 
 class TritonScheduling:
-    def __init__(self, scheduler):
+    def __init__(self, scheduler, triton_backend: TritonBackend):
         self.scheduler = scheduler
+        self.triton_backend: TritonBackend = triton_backend
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -1628,7 +1635,10 @@ class TritonScheduling:
                 mutations.update(node.get_mutations())
 
         with TritonKernel(
-            *tiled_groups, reduction_hint=reduction_hint_val, mutations=mutations
+            *tiled_groups,
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            device_backend=self.triton_backend,
         ) as kernel:
             stack = contextlib.ExitStack()
             for node in node_schedule:
@@ -1675,7 +1685,9 @@ class TritonScheduling:
             compile_wrapper = IndentedBuffer()
             compile_wrapper.writeline("async_compile.triton('''")
             compile_wrapper.splice(src_code, strip=True)
-            compile_wrapper.writeline("''')")
+            compile_wrapper.writeline("'''")
+            compile_wrapper.writeline(f', device="{self.triton_backend.name()}"')
+            compile_wrapper.writeline(")")
 
             metadata_comment = f"# kernel path: {kernel_path}"
             metadata_comment += "\n" + get_kernel_metadata(node_schedule)
@@ -1704,7 +1716,7 @@ class TritonScheduling:
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline("torch.cuda.synchronize()")
+        V.graph.wrapper_code.writeline(f"{self.triton_backend.nms()}.synchronize()")
 
     @staticmethod
     @functools.lru_cache(32)

@@ -25,11 +25,11 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import rand_strided, same
 from torch._inductor.codegen.cpp import CppVecKernelChecker
-from torch._inductor.device_backend import (
-    ALL_DEVICE_BACKENDS,
-    CUDA_BACKEND,
-    DeviceBackend,
-    register_device_backend,
+from torch._inductor.triton_backend import (
+    _triton_cuda_backend,
+    register_triton_backend,
+    triton_backends,
+    TritonBackend,
 )
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import InterpreterShim
@@ -5698,7 +5698,7 @@ class CommonTemplate:
         self.common(fn, [torch.randn(3, 1, 1, 1, 1), 9132])
 
     def test_backend_device(self):
-        class MockDeviceBackend(DeviceBackend):
+        class MockDeviceBackend(TritonBackend):
             def create_stream(self):
                 return "create_stream"
 
@@ -5747,25 +5747,25 @@ class CommonTemplate:
             def _DeviceGuard(self, index):
                 return "_DeviceGuard"
 
-            def backend_name(self):
+            def name(self):
                 return "mock"
 
-        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 1)
-        self.assertTrue(CUDA_BACKEND in ALL_DEVICE_BACKENDS)
+        self.assertTrue(len(triton_backends) == 1)
+        self.assertTrue(_triton_cuda_backend in triton_backends)
         mock_device_backend = MockDeviceBackend()
-        res = register_device_backend(mock_device_backend)
+        res = register_triton_backend(mock_device_backend)
         self.assertTrue(res)
-        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 2)
-        self.assertTrue(mock_device_backend in ALL_DEVICE_BACKENDS)
+        self.assertTrue(len(triton_backends) == 2)
+        self.assertTrue(mock_device_backend in triton_backends)
 
         # Only allow one instance for a particular device backend.
         #  Since mock_device_backend has been registered to ALL_DEVICE_BACKENDS,
         #  the new device backend registration does nothing.
         mock_device_backend1 = MockDeviceBackend()
-        res = register_device_backend(mock_device_backend1)
+        res = register_triton_backend(mock_device_backend1)
         self.assertFalse(res)
-        self.assertTrue(len(ALL_DEVICE_BACKENDS) == 2)
-        self.assertTrue(mock_device_backend1 not in ALL_DEVICE_BACKENDS)
+        self.assertTrue(len(triton_backends) == 2)
+        self.assertTrue(mock_device_backend1 not in triton_backends)
 
         with V.set_device_backend(mock_device_backend):
             self.assertTrue(

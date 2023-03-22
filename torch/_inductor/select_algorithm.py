@@ -287,7 +287,7 @@ class TritonTemplateKernel(TritonKernel):
                 call_args[i] = call_args[i] + ".item()"
         call_args = ", ".join(call_args)
 
-        stream_name = code.write_get_cuda_stream(V.graph.scheduler.current_device.index)
+        stream_name = code.write_get_stream(V.graph.scheduler.current_device)
 
         V.graph.wrapper_code.add_import_once(f"import {self.grid_fn.__module__}")
         meta = V.graph.wrapper_code.add_meta_once(self.meta)

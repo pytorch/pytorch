@@ -26,6 +26,10 @@ from typing import Any, Callable, Dict, List
 import torch
 
 from torch._inductor import config, cuda_properties, exc
+from torch._inductor.triton_backend import (
+    get_triton_backend,
+    triton_backends,
+)
 from torch._inductor.utils import developer_warning
 from torch.hub import _Faketqdm, tqdm
 from torch.utils import cpp_extension
@@ -79,11 +83,14 @@ class PersistentCache:
         self.local_cache_path = os.path.join(cache_dir(), "local_cache")
         self.global_cache_path = config.global_cache_path
 
-        if torch.cuda.is_available():
-            self.dinfo = torch.cuda.get_device_properties(
-                torch.cuda.current_device()
-            ).name
-            self.vinfo = torch.version.cuda
+        for triton_backend in triton_backends:
+            if triton_backend and triton_backend.name() == "cuda":
+                device_properties = triton_backend.get_device_properties(
+                    triton_backend.current_device()
+                )
+                assert hasattr(device_properties, "name")
+                self.dinfo = device_properties.name
+                self.vinfo = triton_backend.vinfo()
 
     def get_local_cache(self):
         if not os.path.isfile(self.local_cache_path):
@@ -829,13 +836,12 @@ class AsyncCompile:
             return list(map(fn, seq))
         return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
 
-    def triton(self, source_code):
+    def triton(self, source_code, device="cuda"):
         _compile_start()
 
         if config.compile_threads > 1:
-            major, minor = torch.cuda.get_device_capability()
-            device = torch.cuda.current_device()
-            cc = major * 10 + minor
+            triton_backend = get_triton_backend(device_type=device)
+            cc = triton_backend.target_version()
             future = self.process_pool().submit(
                 _worker_compile, source_code, cc, device
             )

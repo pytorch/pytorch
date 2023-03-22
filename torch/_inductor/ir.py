@@ -16,6 +16,8 @@ from unittest.mock import patch
 import sympy
 from sympy import Expr, Integer
 
+import torch._dynamo.config as dynamo_config
+
 import torch.fx
 import torch.utils._pytree as pytree
 from torch._prims_common import (
@@ -28,8 +30,8 @@ from torch.fx.experimental.symbolic_shapes import FloorDiv
 
 from . import config, dependencies
 from .codegen.common import index_prevent_reordering
-from .cuda_properties import get_device_properties
 from .dependencies import extract_read_writes, var_builder
+from .triton_backend import get_triton_backend, TritonBackend
 from .utils import (
     argsort,
     cache_on_self,
@@ -549,7 +551,10 @@ class Reduction(Loops):
         reduction_type,
         reduction_numel,
     ):
-        num_sm = get_device_properties(device).multi_processor_count
+        triton_backend: TritonBackend = get_triton_backend(
+            device_type=device.type
+        )
+        num_sm = triton_backend.processor_count(device.index)
         min_elements_per_thread = 32
         max_elements_per_thread = 512
         threads_per_sm = 2048
@@ -863,7 +868,11 @@ class Reduction(Loops):
                 ranges,
             )
 
-        if is_triton(device) and reduction_type not in {"argmax", "argmin"}:
+        split_reduction = is_triton(device) and reduction_type not in {
+            "argmax",
+            "argmin",
+        }
+        if split_reduction and not dynamo_config.dynamic_shapes:
             # triton doesn't support reduce to single element well, so break it up
             hint, split = cls.num_splits(
                 device,
@@ -893,6 +902,10 @@ class Reduction(Loops):
                     split,
                     reduction_hint,
                 )
+        elif split_reduction and dynamo_config.dynamic_shapes:
+            log.warning(
+                "Could not do split reduction due to dynamic shapes; performance may be worse"
+            )
 
         return TensorBox.create(
             Reduction(
@@ -1522,10 +1535,12 @@ class ReinterpretView(BaseView):
         size = V.graph.wrapper_code.codegen_shape_tuple(self.layout.size)
         stride = V.graph.wrapper_code.codegen_shape_tuple(self.layout.stride)
         offset = V.graph.wrapper_code.codegen_sizevar(self.layout.offset)
-        as_strided = V.graph.wrapper_code.as_strided
+        namespace = V.graph.wrapper_code.namespace
         if offset != "0":
-            return f"{as_strided}({self.get_name()}, {size}, {stride}, {offset})"
-        return f"{as_strided}({self.get_name()}, {size}, {stride})"
+            return (
+                f"{namespace}as_strided({self.get_name()}, {size}, {stride}, {offset})"
+            )
+        return f"{namespace}as_strided({self.get_name()}, {size}, {stride})"
 
 
 class SliceView(View):
@@ -3826,12 +3841,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     ):
         kernel = "torch.ops.mkldnn._convolution_transpose_pointwise"
         transposed = True
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            _,
-        ) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
