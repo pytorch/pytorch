@@ -2232,3 +2232,6 @@ class DistributedDataParallel(Module, Joinable):
                 "unused parameters will not change during training loop while calling "
                 "`_set_static_graph`."
             )
+
+    def _remove_autograd_hooks(self):
+        self.reducer._remove_autograd_hooks()
