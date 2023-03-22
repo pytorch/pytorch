@@ -119,6 +119,37 @@ def _disallowed_function_ids():
         if isinstance(obj, type(torch.FloatStorage))
     ]
     remove += storage
+    c10d_collectives = [
+        torch.distributed.all_gather,
+        torch.distributed.all_gather_coalesced,
+        torch.distributed.all_gather_into_tensor,
+        torch.distributed.all_gather_multigpu,
+        torch.distributed.all_gather_object,
+        torch.distributed.all_reduce,
+        torch.distributed.all_reduce_coalesced,
+        torch.distributed.all_reduce_multigpu,
+        torch.distributed.all_to_all,
+        torch.distributed.all_to_all_single,
+        torch.distributed.barrier,
+        torch.distributed.batch_isend_irecv,
+        torch.distributed.broadcast,
+        torch.distributed.broadcast_multigpu,
+        torch.distributed.broadcast_object_list,
+        torch.distributed.gather,
+        torch.distributed.gather_object,
+        torch.distributed.irecv,
+        torch.distributed.isend,
+        torch.distributed.recv,
+        torch.distributed.reduce,
+        torch.distributed.reduce_multigpu,
+        torch.distributed.reduce_scatter,
+        torch.distributed.reduce_scatter_multigpu,
+        torch.distributed.reduce_scatter_tensor,
+        torch.distributed.scatter,
+        torch.distributed.scatter_object_list,
+        torch.distributed.send,
+    ]
+    remove += c10d_collectives
     return {id(x) for x in remove}
 
 

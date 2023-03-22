@@ -339,6 +339,27 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 opt_results = collect_results(opt_model, opt_outputs.logits, opt_loss, inputs_flat)
                 self.assertTrue(same(correct_results, opt_results))
 
+    @skip_if_lt_x_gpu(2)
+    def test_c10d_collectives(self):
+        class FakeModel(nn.Module):
+
+            def __init__(self):
+                super(FakeModel, self).__init__()
+
+            def forward(self, x, y):
+                x += y
+                torch.distributed.all_reduce(x)
+                return x
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            device = torch.device(f"cuda:{self.rank}")
+            model = FakeModel().to(device)
+            model_opt = torch.compile(model)
+            x = torch.rand(10).to(device)
+            y = torch.rand(10).to(device)
+            outputs = model(x, y)
+            outputs_opt = model_opt(x, y)
+            self.assertTrue(same(outputs, outputs_opt))
 
 @requires_nccl()
 class TestSingleProc(DynamoDistributedSingleProcTestCase):
