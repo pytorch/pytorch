@@ -17,6 +17,7 @@ import os
 import pstats
 import re
 import sys
+import textwrap
 import time
 import types
 import typing
@@ -1077,43 +1078,57 @@ class CompileProfiler:
             [format_func_info(code), num_recompiles(code), recompile_reasons(code)]
             for code in gf
         ]
-        rpt = "Torchdynamo Profiler Report\n"
-        if "graph_break" in counters:
-            rpt += "\n"
-            rpt += "The following conditions caused torchdynamo to break out of tracing and fall back to python.\n"
-            rpt += (
-                "You may gain additional insight by passing `nopython=True` to torch._dynamo.optimize, "
-                "to break on the first condition.\n"
-            )
-            graph_breaks = counters["graph_break"]
-            rpt += tabulate(
-                [[msg, graph_breaks[msg]] for msg in graph_breaks],
-                headers=["Graph Break Reason", "Count"],
-            )
 
-        if len(gf):
-            max_recompiles = max([num_recompiles(code) for code in gf])
-            rpt += "\n"
-            rpt += (
-                "These subgraphs were recompiled more than once due to guard failures."
-            )
-            rpt += (
-                "Guard failures indicate some condition assumed to be static by the tracer changed, "
-                "making it unsafe to reuse the compiled program."
-            )
-            rpt += tabulate(
-                summarized_gf,
-                headers=["Function", "Num Recompiles", "Recompile Reasons"],
-            )
-            rpt += "\n"
-            rpt += (
-                f"Set torch._dynamo.config.cache_size_limit to "
-                f"{max_recompiles} to avoid being cache limited.\n"
-            )
-        else:
-            rpt += "No cache-limited recompilations detected.\n"
+        def graph_break_report():
+            if "graph_break" in counters:
+                graph_breaks = counters["graph_break"]
+                return tabulate(
+                    [[msg, graph_breaks[msg]] for msg in graph_breaks],
+                    headers=["Graph Break Reason", "Count"],
+                )
 
-        return rpt
+        def recompilation_report():
+            if len(gf):
+                max_recompiles = max([num_recompiles(code) for code in gf])
+                recomp_table = tabulate(
+                    summarized_gf,
+                    headers=["Function", "Recompiles", "Recompile Reasons"],
+                )
+                return recomp_table + textwrap.dedent(
+                    f"""
+
+                    Set torch._dynamo.config.cache_size_limit to {max_recompiles} to avoid being cache limited.
+                """
+                )
+
+        report = textwrap.dedent(
+            """
+            Torchdynamo Profiler Report
+            ===========================
+
+            Graph Breaks
+            ------------
+            Graph breaks happen when torchdynamo encounters code it can't safely trace.
+            If you want to find out why breaks are happening, check below for each break reason
+            You may gain additional insight by passing `fullgraph=True` to torch.compile,
+            to stop at the first break.
+
+        """
+        )
+        report += graph_break_report() or "No graph breaks detected."
+        report += textwrap.dedent(
+            """
+
+            Recompilation
+            -------------
+            These subgraphs were recompiled more than once due to guard failures
+            Guard failures indicate some condition assumed to be static by the tracer changed,
+            making it unsafe to reuse the compiled program.
+
+        """
+        )
+        report += recompilation_report() or "No recompilation detected.\n"
+        return report
 
 
 # return same dir unless user changes config between calls
