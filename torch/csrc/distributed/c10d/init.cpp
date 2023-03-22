@@ -2134,6 +2134,21 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def_property_readonly(
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
+#ifdef ENABLE_NCCL_RANK_CONFIG
+  py::class_<ncclConfig_t>(processGroupNCCL, "NCCLConfig",
+  R"(
+ncclConfig_t data type for configuring NCCL communicators.
+See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+for details.
+)")
+      .def(py::init<>())
+      .def_readwrite("blocking", &ncclConfig_t::blocking)
+      .def_readwrite("cga_cluster_size", &ncclConfig_t::cgaClusterSize)
+      .def_readwrite("min_ctas", &ncclConfig_t::minCTAs)
+      .def_readwrite("max_ctas", &ncclConfig_t::maxCTAs)
+      .def_readwrite("net_name", &ncclConfig_t::netName);
+#endif
+
   intrusive_ptr_class_<::c10d::ProcessGroupNCCL::Options>(
       processGroupNCCL,
       "Options",
@@ -2147,18 +2162,42 @@ Arguments:
             to prioritize NCCL kernels when there are compute kernels waiting.
             Default is False.
 
+Attributes:
+    config (NCCLConfig): configures NCCL communicators (only avaiable for
+            builds using NCCL 2.17+). This can be used to improve
+            communication-computation overlap for NCCL kernels by tuning
+            available parameters in the config. See
+            https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
+            for details.
+
 Example::
     >>> import torch.distributed as dist
     >>>
     >>> nccl_options = dist.ProcessGroupNCCL.Options(is_high_priority_stream=True)
+    >>> # For builds using NCCL 2.17+, configure communicators
+    >>> nccl_options.config.cga_cluster_size = 2
+    >>> nccl_options.config.max_ctas = 4
+    >>> nccl_options.config.min_ctas = 2
     >>> # initialize a nccl process group with the options just created
     >>> dist.init_process_group("nccl", pg_options=nccl_options)
       )")
       .def(py::init<bool>(), py::arg("is_high_priority_stream") = false)
+#ifdef ENABLE_NCCL_RANK_CONFIG
+      .def_readwrite(
+          "is_high_priority_stream",
+          &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
+      .def_readwrite(
+          "config",
+          &::c10d::ProcessGroupNCCL::Options::config);
+#else
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream);
 #endif
+  processGroupNCCL.def_static(
+      "_group_start", []() { ::c10d::ProcessGroupNCCL::groupStart(); });
+  processGroupNCCL.def_static(
+      "_group_end", []() { ::c10d::ProcessGroupNCCL::groupEnd(); });
 
 #ifdef USE_C10D_MPI
   auto processGroupMPI =

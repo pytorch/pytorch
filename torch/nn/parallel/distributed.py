@@ -749,6 +749,14 @@ class DistributedDataParallel(Module, Joinable):
         else:
             self.process_group = process_group
 
+        if self.process_group.options.backend == "nccl" and torch.cuda.nccl.version() >= (2, 17):
+            # Note: NVIDIA recommends using CGA Cluster Size of 2 when using DDP.
+            default_cga = dist.ProcessGroupNCCL.Options().config.cga_cluster_size
+            default_pg_nccl = self.process_group._get_backend(torch.device("cuda"))
+            current_cga = default_pg_nccl.options.config.cga_cluster_size
+            if current_cga == default_cga:
+                default_pg_nccl.options.config.cga_cluster_size = 2
+
         self.static_graph = False
         self.dim = dim
         self.module = module

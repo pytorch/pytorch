@@ -52,6 +52,12 @@
 #define ENABLE_NCCL_PREMUL_SUM_SUPPORT
 #endif
 
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && defined(NCCL_MINOR) && (NCCL_MINOR >= 17)
+#define ENABLE_NCCL_RANK_CONFIG
+#elif defined(NCCL_MAJOR) && (NCCL_MAJOR >= 3)
+#define ENABLE_NCCL_RANK_CONFIG
+#endif
+
 // Macro to throw on a non-successful NCCL return value.
 #define C10D_NCCL_CHECK(cmd, failureReason)                                                  \
   do {                                                                        \
@@ -194,6 +200,21 @@ class NCCLComm {
     comm->rank_ = rank;
     return comm;
   }
+
+#ifdef ENABLE_NCCL_RANK_CONFIG
+  static std::shared_ptr<NCCLComm> create(
+      int numRanks,
+      int rank,
+      ncclUniqueId commId,
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommInitRankConfig(&(comm->ncclComm_), numRanks, commId, rank, &config), c10::nullopt);
+    comm->ncclId_ = commId;
+    comm->rank_ = rank;
+    return comm;
+  }
+#endif
 
   ncclUniqueId getNcclId() {
     return ncclId_;

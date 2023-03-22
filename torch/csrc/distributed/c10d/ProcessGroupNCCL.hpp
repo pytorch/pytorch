@@ -279,6 +279,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 
     // Schedule NCCL operations on high priority CUDA streams
     bool is_high_priority_stream;
+
+#ifdef ENABLE_NCCL_RANK_CONFIG
+    // Configure ranks
+    ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
+#endif
   };
 
   // If you wish to create multiple process groups, each with a potentially
