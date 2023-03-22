@@ -76,7 +76,6 @@ namespace torch::jit {
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 
-using ResolutionCallback = std::function<py::object(std::string)>;
 using FunctionDefaults = std::unordered_map<std::string, py::object>;
 using ClassMethodDefaults = std::unordered_map<std::string, FunctionDefaults>;
 
@@ -136,7 +135,7 @@ struct PythonResolver : public Resolver {
     }
 
     if (isNamedTupleClass(obj)) {
-      return registerNamedTuple(obj, loc);
+      return registerNamedTuple(obj, loc, rcb_);
     }
 
     auto qualifiedName = c10::QualifiedName(
@@ -157,8 +156,9 @@ struct PythonResolver : public Resolver {
       return nullptr;
     }
 
-    auto annotation_type = py::module::import("torch.jit.annotations")
-                               .attr("try_ann_to_type")(obj, loc);
+    auto annotation_type =
+        py::module::import("torch.jit.annotations")
+            .attr("try_ann_to_type")(obj, loc, py::cpp_function(rcb_));
     if (!annotation_type.is_none()) {
       return py::cast<TypePtr>(annotation_type);
     }

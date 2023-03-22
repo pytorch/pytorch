@@ -2350,18 +2350,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(ValueError, "input sum needs to be 3"):
             opt_fn(*args)
 
-    # TODO (tmanlaibaatar) handle data-dependent fstring in assert statement.
-    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
-    def test_rewrite_assert_with_fstring_msg(self):
-        def f(x):
-            b = x.sin()
-            assert x[0] == 3, f"First dim need to be {x[0]}"
-            return x.cos() + b
-
-        args = (torch.Tensor([3, 4, 5]),)
-        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "generic_jump"):
-            exported, _ = torch._dynamo.export(f, torch.Tensor([3, 4, 5]))
-
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_without_msg(self):
         def f(x):
@@ -2375,6 +2363,25 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(AssertionError, ""):
             exported, _ = torch._dynamo.export(f, torch.Tensor([4, 4, 5]))
+
+    @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
+    def test_rewrite_assert_with_non_string_msg(self):
+        def f(x):
+            b = x.sin()
+            assert x[0] == 2, x.size()
+            return x.cos() + b
+
+        torch._dynamo.utils.counters.clear()
+        args = torch.Tensor([3, 4, 5])
+        opt_f = torch._dynamo.optimize("eager")(f)
+        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+            opt_f(args)
+        self.assertEqual(
+            torch._dynamo.utils.counters["unimplemented"][
+                "assert with non-string message"
+            ],
+            1,
+        )
 
     @torch._dynamo.config.patch("rewrite_assert_with_torch_assert", True)
     def test_rewrite_assert_noop(self):
