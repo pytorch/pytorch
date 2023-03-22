@@ -271,19 +271,13 @@ Tensor logit_mps(const Tensor& self, c10::optional<double> eps) {
 TORCH_IMPL_FUNC(logit_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, c10::optional<double> eps, const Tensor& grad_input) {
   using namespace mps;
+  using CachedGraph = MPSUnaryGradCachedGraph;
 
   // Empty output
   if (grad_input.numel() == 0)
     return;
 
   double eps_ = eps ? eps.value() : -1.0;
-
-  struct CachedGraph : public MPSCachedGraph {
-    CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
-    MPSGraphTensor* gradOutputTensor_ = nil;
-    MPSGraphTensor* inputTensor_ = nil;
-    MPSGraphTensor* outputTensor_ = nil;
-  };
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
 
@@ -334,7 +328,7 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
 
           newCachedGraph->gradOutputTensor_ = gradOutputTensor;
           newCachedGraph->inputTensor_ = inputTensor;
-          newCachedGraph->outputTensor_ = outputTensor;
+          newCachedGraph->gradInputTensor_ = outputTensor;
         }
         return newCachedGraph;
       });
@@ -342,7 +336,7 @@ TORCH_IMPL_FUNC(logit_backward_out_mps)
     }
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input);
-    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->outputTensor_, grad_input);
+    Placeholder gradInputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
 
     // Create dictionary of inputs and outputs
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
