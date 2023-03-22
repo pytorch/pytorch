@@ -346,6 +346,7 @@ def first_real_inst_idx(code):
     for inst in dis.get_instructions(code):
         if inst.opname == "RESUME":
             return inst.offset // 2
+    raise RuntimeError("RESUME instruction not found in code")
 
 
 def catch_errors_wrapper(callback, hooks: Hooks):
