@@ -205,13 +205,11 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     }
     for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
-      scalar_t z = alpha * x[j * incx];
+      opmath_t z = alpha * static_cast<opmath_t>(x[j * incx]);
       for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
-          if (is_low_precision) {
-            sum[i] = 0;
-          } else {
+          if (!is_low_precision) {
             y[i * incy] = 0;
           }
         }
@@ -223,8 +221,14 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
       }
     }
     if (is_low_precision) {
-      for (const auto i : c10::irange(m)) {
-        y[i * incy] = sum[i];
+      if (beta == scalar_t(0)) {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] = sum[i];
+        }
+      } else {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] += sum[i];
+        }
       }
     }
   }

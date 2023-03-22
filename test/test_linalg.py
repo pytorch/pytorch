@@ -7497,16 +7497,18 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         b = torch.ones(1, 300, 1)
         c = torch.ones(1, 1, 1)
         check_correctness(torch.baddbmm, c, a, b)
-        # test mv
+        # test mv/addmv
         for trans in [True, False]:
-            a = torch.rand(1, 300)
+            c = torch.ones(300) * -300
+            a = torch.ones(300, 300)
             if trans:
                 a = a.transpose(0, 1).contiguous().transpose(0, 1)
-            b = torch.rand(300)
+            b = torch.ones(300)
             check_correctness(torch.mv, a, b)
+            check_correctness(torch.addmv, c, a, b)
         # test dot
-        a = torch.rand(300)
-        b = torch.rand(300)
+        a = torch.ones(300)
+        b = torch.ones(300)
         check_correctness(torch.dot, a, b)
 
 instantiate_device_type_tests(TestLinalg, globals())
