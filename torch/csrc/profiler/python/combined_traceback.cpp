@@ -28,7 +28,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     std::vector<CapturedTraceback::PyFrame> frames;
     py::gil_scoped_acquire acquire;
     {
-      std::lock_guard lock(to_free_frames_mutex);
+      std::lock_guard<std::mutex> lock(to_free_frames_mutex);
       for (CapturedTraceback::PyFrame f : to_free_frames) {
         Py_XDECREF(f.code);
       }
@@ -46,7 +46,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
     return frames;
   }
   void release(std::vector<CapturedTraceback::PyFrame>& frames) override {
-    std::lock_guard lock(to_free_frames_mutex);
+    std::lock_guard<std::mutex> lock(to_free_frames_mutex);
     to_free_frames.insert(to_free_frames.end(), frames.begin(), frames.end());
   }
   void appendSymbolized(
