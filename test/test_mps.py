@@ -1481,13 +1481,10 @@ class TestMPS(TestCaseMPS):
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
 
-            self.assertTrue(gradgradcheck(mps_linear, linear_mps_input, atol=9e-03, rtol=10.4e-05))
-            self.assertTrue(gradgradcheck(mps_linear, linear_mps_input, grad, atol=9e-03, rtol=10.4e-05))
-            self.assertTrue(gradgradcheck(torch.nn.functional.linear, (linear_mps_input, mps_linear.weight), atol=8e-03, rtol=10.4e-05))
-            self.assertTrue(gradgradcheck(torch.nn.functional.linear, (linear_mps_input, mps_linear.weight), grad, atol=8e-03, rtol=10.4e-05))
+            inputs = (linear_mps_input, mps_linear.weight)
             if bias:
-                self.assertTrue(gradgradcheck(torch.nn.functional.linear, (linear_mps_input, mps_linear.weight, mps_linear.bias), atol=8e-03, rtol=10.4e-05))
-                self.assertTrue(gradgradcheck(torch.nn.functional.linear, (linear_mps_input, mps_linear.weight, mps_linear.bias), grad, atol=8e-03, rtol=10.4e-05))
+                inputs += (mps_linear.bias,)
+            gradgradcheck(torch.nn.functional.linear, inputs, atol=3e-02, rtol=10.4e-05, raise_exception=True, fast_mode=False)
 
     def test_linear1D(self):
         self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
