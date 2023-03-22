@@ -37,7 +37,7 @@ inplace_buffers = True
 benchmark_harness = True
 
 # fuse pointwise into templates
-epilogue_fusion = False
+epilogue_fusion = True
 
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
@@ -78,9 +78,6 @@ fallback_random = False
 # automatically create fallbacks when encountering an unhandled op
 implicit_fallbacks = True
 
-# do bench to decide best layout, currently only for aten.conv
-tune_layout = False
-
 # fuse even in cases without common reads
 aggressive_fusion = False
 
@@ -90,7 +87,12 @@ max_fusion_size = 64
 # replace small reductions with pointwise, disable with `= 1`
 unroll_reductions_threshold = 8
 
+# Add extra comments to output code (causes compile cache misses)
 comment_origin = False
+
+# Convert 1x1 convs into matmuls
+conv_1x1_as_mm = False
+
 
 benchmark_kernel = os.environ.get("TORCHINDUCTOR_BENCHMARK_KERNEL", "0") == "1"
 
