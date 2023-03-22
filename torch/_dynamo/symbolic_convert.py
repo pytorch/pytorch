@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import dataclasses
 import dis
 import functools
@@ -17,7 +18,7 @@ from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, 
 from unittest.mock import patch
 
 import torch
-from torch._guards import Checkpointable
+from torch._guards import Checkpointable, TracingContext
 
 from . import (
     allowed_functions,
@@ -267,7 +268,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 msg = (
                     "Skipping frame because there is a graph break in a for/while loop"
                 )
-                log.debug(msg)
+                log.info(msg)
                 raise exc.SkipFrame(msg)
 
             self.push(value)
@@ -347,7 +348,7 @@ def break_graph_if_unsupported(*, push):
             except Unsupported as excp:
                 if self.has_backedge() and self.should_compile_partial_graph():
                     msg = "Skipping frame because there is a graph break in a for/while loop"
-                    log.debug(msg)
+                    log.info(msg)
                     raise exc.SkipFrame(msg) from excp
 
                 if not self.should_compile_partial_graph():
@@ -557,7 +558,10 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         try:
             if not hasattr(self, inst.opname):
                 unimplemented(f"missing: {inst.opname}")
-            getattr(self, inst.opname)(inst)
+            with TracingContext.current_loc(
+                self.f_code.co_filename, self.lineno, self.f_code.co_name
+            ):
+                getattr(self, inst.opname)(inst)
 
             return inst.opname != "RETURN_VALUE"
         except BackendCompilerFailed:
@@ -587,30 +591,34 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             [create_jump_absolute(continue_inst)] + self.instructions
         )
 
+    def run_ctx_mgr(self):
+        return contextlib.nullcontext()
+
     def run(self):
-        try:
-            self.output.push_tx(self)
-            while (
-                self.instruction_pointer is not None
-                and not self.output.should_exit
-                and self.step()
-            ):
-                pass
-        except BackendCompilerFailed:
-            raise
-        except Exception as e:
-            if config.replay_record_enabled:
-                e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
-            raise
-        finally:
-            self.output.pop_tx()
-            # Cleanup the outputGraph to delete the held tensors. We perform the
-            # cleanup only for InstructionTranslator and not
-            # InliningInstructionTranslator. The InliningInstructionTranslator
-            # mutates the output object and is restored to original state if
-            # there was an exception.
-            if isinstance(self, InstructionTranslator):
-                self.output.cleanup()
+        with self.run_ctx_mgr():
+            try:
+                self.output.push_tx(self)
+                while (
+                    self.instruction_pointer is not None
+                    and not self.output.should_exit
+                    and self.step()
+                ):
+                    pass
+            except BackendCompilerFailed:
+                raise
+            except Exception as e:
+                if config.replay_record_enabled:
+                    e.exec_record = self.exec_recorder.get_record()  # type: ignore[attr-defined]
+                raise
+            finally:
+                self.output.pop_tx()
+                # Cleanup the outputGraph to delete the held tensors. We perform the
+                # cleanup only for InstructionTranslator and not
+                # InliningInstructionTranslator. The InliningInstructionTranslator
+                # mutates the output object and is restored to original state if
+                # there was an exception.
+                if isinstance(self, InstructionTranslator):
+                    self.output.cleanup()
 
     def push(self, val: Optional[VariableTracker]):
         assert val is None or isinstance(
@@ -833,7 +841,8 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
         self.LOAD_ATTR(inst)
 
     def load_builtin(self, inst):
-        assert inst.argval in self.f_builtins
+        if inst.argval not in self.f_builtins:
+            raise NameError(f"name '{inst.argval}' is not defined")
         val = self.f_builtins[inst.argval]
 
         if callable(val):
@@ -1977,7 +1986,10 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         if code.co_name in ("__setitem__", "__setattr__"):
             unimplemented(f"inline {code.co_name}")
 
-        log.debug(f"INLINING {code} \n {dis.Bytecode(code).dis()} \n")
+        suffix = ""
+        if config.output_code:
+            suffix = f"\n{dis.Bytecode(code).dis()}"
+        log.debug(f"INLINING {code}{suffix}")
 
         tracer: InliningInstructionTranslator
         if is_generator(code):
@@ -2051,6 +2063,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     @property
     def fake_mode(self):
         return self.parent.fake_mode
+
+    def run_ctx_mgr(self):
+        return TracingContext.current_frame(self.parent.frame_summary())
 
     def STORE_DEREF(self, inst):
         if inst.argval in self.closure_cells:

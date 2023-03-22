@@ -355,7 +355,7 @@ class BuiltinVariable(VariableTracker):
             return None
 
         # Return first handler that matches the type checks
-        for ((type1, type2), handler) in handlers[op]:
+        for (type1, type2), handler in handlers[op]:
             if isinstance(a, type1) and isinstance(b, type2):
                 return handler
 
@@ -641,7 +641,6 @@ class BuiltinVariable(VariableTracker):
                 )
                 for i in [a, b]
             ):
-
                 if any([isinstance(val, FakeItemVariable) for val in [a, b]]):
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
@@ -678,7 +677,6 @@ class BuiltinVariable(VariableTracker):
             )
             return SymNodeVariable.create(tx, proxy, None)
         else:
-
             unimplemented(f"unsupported min / max over args {str(a)}, {str(b)}")
 
     call_min = _call_min_max
@@ -770,11 +768,15 @@ class BuiltinVariable(VariableTracker):
         )
 
     @staticmethod
-    def call_dict_helper(tx, user_cls, arg):
+    def call_dict_helper(tx, user_cls, arg, **options):
         if arg is None:
-            return ConstDictVariable({}, user_cls, mutable_local=MutableLocal())
+            return ConstDictVariable(
+                {}, user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         elif isinstance(arg, variables.ConstDictVariable):
-            return arg.clone(user_cls=user_cls, mutable_local=MutableLocal())
+            return arg.clone(
+                user_cls=user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         elif isinstance(
             arg,
             (
@@ -788,7 +790,9 @@ class BuiltinVariable(VariableTracker):
                 k = x.unpack_var_sequence(tx)[0].as_python_constant()
                 v = x.unpack_var_sequence(tx)[1]
                 items.update({k: v})
-            return ConstDictVariable(items, user_cls, mutable_local=MutableLocal())
+            return ConstDictVariable(
+                items, user_cls, mutable_local=MutableLocal()
+            ).add_options(options)
         else:
             raise AssertionError("call_dict_helper with illegal arg")
 

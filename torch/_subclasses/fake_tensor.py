@@ -426,6 +426,8 @@ def nonzero(fake_mode, func, arg):
         raise DynamicOutputShapeException(func)
 
     if arg.nonzero_memo is None:
+        import sys
+
         from torch.fx.experimental.symbolic_shapes import constrain_range
 
         nnz = fake_mode.shape_env.create_unbacked_symint()
@@ -438,9 +440,7 @@ def nonzero(fake_mode, func, arg):
         # disjoint with what can actually occur.  But this is fine:
         # remember, the hypothesis is that if your later code works
         # with N >= 2, it will work with N = 1 and N = 0.
-        lower = 2
-        upper = None
-        constrain_range(nnz, min=lower, max=upper)
+        constrain_range(nnz, min=2, max=sys.maxsize - 1)
 
         arg._nonzero_memo = nnz
         arg._nonzero_memo_vc = arg._version
@@ -1240,8 +1240,8 @@ class FakeTensorMode(TorchDispatchMode):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             # no meta kernel registered, fallback to kernel for the device
-            if not self.allow_fallback_kernels:
-                raise not_implemented_error
+            if has_symbolic_sizes or not self.allow_fallback_kernels:
+                raise
             return run_fallback_kernel(self, func, args, kwargs, not_implemented_error)
 
         return self.wrap_meta_outputs_with_default_device_logic(r, func, args, kwargs)

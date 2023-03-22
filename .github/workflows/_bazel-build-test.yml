@@ -84,6 +84,10 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        if: ${{ inputs.cuda-version != 'cpu' }}
+
       - name: Output disk space left
         run: |
           sudo df -H
@@ -118,7 +122,9 @@ jobs:
           CUDA_VERSION: ${{ inputs.cuda-version }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
+          # shellcheck disable=SC2086
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
@@ -136,7 +142,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .ci/pytorch/build.sh'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/build.sh'
 
       - name: Test
         id: test
@@ -174,7 +180,9 @@ jobs:
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BUILD_ENVIRONMENT \
             -e GITHUB_ACTIONS \
             -e GIT_DEFAULT_BRANCH="$GIT_DEFAULT_BRANCH" \
@@ -198,7 +206,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c 'sudo chown -R jenkins . && sudo chown -R jenkins /dev && .ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
+          docker exec -t "${container_name}" sh -c '.ci/pytorch/test.sh && cp -Lr ./bazel-testlogs ./test/test-reports'
 
       - name: Print remaining test logs
         shell: bash

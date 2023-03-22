@@ -42,6 +42,8 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   export PYTORCH_TESTING_DEVICE_ONLY_FOR="cuda"
 fi
 
+python -m pip install pytest-rerunfailures==10.3
+
 run_tests() {
     # Run nvidia-smi if available
     for path in '/c/Program Files/NVIDIA Corporation/NVSMI/nvidia-smi.exe' /c/Windows/System32/nvidia-smi.exe; do
@@ -51,9 +53,7 @@ run_tests() {
         fi
     done
 
-    if [[ "${TEST_CONFIG}" == *functorch* ]]; then
-        "$SCRIPT_HELPERS_DIR"/install_test_functorch.bat
-    elif [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
