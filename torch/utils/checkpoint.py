@@ -172,7 +172,7 @@ def noop_context_fn():
 def checkpoint(
     function,
     *args,
-    use_reentrant: bool = True,
+    use_reentrant: bool = None,
     context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
     **kwargs
 ):
@@ -271,6 +271,7 @@ def checkpoint(
     Returns:
         Output of running :attr:`function` on :attr:`*args`
     """
+    assert use_reentrant is not None
     # Hack to mix *args with **kwargs in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs and use_reentrant:
@@ -290,7 +291,7 @@ def checkpoint(
         )
 
 
-def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwargs):
+def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwargs):
     r"""A helper function for checkpointing sequential models.
 
     Sequential models execute a list of modules/functions in order
@@ -334,6 +335,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
         >>> model = nn.Sequential(...)
         >>> input_var = checkpoint_sequential(model, chunks, input_var)
     """
+    assert use_reentrant is not None
     # Hack for keyword-only parameter in a python 2.7-compliant way
     preserve = kwargs.pop('preserve_rng_state', True)
     if kwargs:
