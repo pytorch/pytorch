@@ -5510,24 +5510,8 @@ class CommonTemplate:
         ]
         self.common(forward, args)
 
-    def test_bool_return_issue97083(self):
-        def fn():
-            a = torch.tensor([1])
-            a = a[0:1]
-            b = a.squeeze()
-            # NB: graph break is important
-            if a[0] < 1e5:
-                pass
-            a[0] = 2
-            return b
-
-        opt_fn = torch.compile(fn)
-        with torch.no_grad():
-            self.assertEqual(fn().item(), opt_fn().item())
-
-    # When this starts passing, delete the test above
     @unittest.expectedFailure
-    def test_bool_return_issue97083_better(self):
+    def test_bool_return_issue97083(self):
         def fn():
             a = torch.tensor([1])
             a = a[0:1]
