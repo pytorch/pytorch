@@ -280,6 +280,7 @@ CI_SERIAL_LIST = [
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     '_nvfuser/test_torchscript',  # OOM on test_issue_1785
     'test_schema_check',  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
+    'functorch/test_memory_efficient_fusion',   # Cause CUDA OOM on ROCm
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
