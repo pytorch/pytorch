@@ -156,8 +156,8 @@ def _retrieve_or_adapt_input_to_graph_set(
         # so list of sym_ints is concatenated to a tensor before calling ONNX op.
 
         # For example:
-        #    inputs: [2, 4, TensorA, 1, TensorB]
-        #    outputs: Tensor([Tensor(2), Tensor(4), TensorA, Tensor(1), TensorB])
+        #    inputs: [2, 4, fx.Node(SymIntA), 1, fx.Node(SymIntB)]
+        #    outputs: op.Concat([op.Constant(2), op.Constant(4), TorchScriptTensor(A), op.Constant(1), TorchScriptTensor(B)])
 
         # onnx-script auto wraps python number with op.Constants,
         # so we don't need to specifically process them.
@@ -255,8 +255,9 @@ def _wrap_fx_args_as_torch_args(
     complete_args: List[_type_utils.Argument],
     complete_kwargs: Dict[str, _type_utils.Argument],
 ) -> Tuple[tuple, dict]:
-    # Prepare torch format args and kwargs for op-level validation
-    # Use fake tensor to create real tensor to feed in ops
+    """Prepare torch format args and kwargs for op-level validation Use fake tensor to create real tensor to feed in ops"""
+
+    # NOTE: This function only supports FakeTensor with concrete shapes
     torch_args: List[_type_utils.Argument] = []
     for arg in complete_args:
         if isinstance(arg, torch.fx.Node):
@@ -266,12 +267,7 @@ def _wrap_fx_args_as_torch_args(
                 fake_tensor = arg.meta["val"]
                 if isinstance(fake_tensor, list):
                     for meta_value in fake_tensor:
-                        # could be varying size
-                        # use 2 to replace dynamic shape
-                        shape = [
-                            dim if isinstance(dim, int) else 2
-                            for dim in meta_value.shape
-                        ]
+                        shape = meta_value.shape
                         dtype = (
                             meta_value.dtype
                             if meta_value.dtype
@@ -280,11 +276,7 @@ def _wrap_fx_args_as_torch_args(
                         )
                         torch_args.append(torch.randn(meta_value.shape, dtype=dtype))
                 elif isinstance(fake_tensor, torch.Tensor):
-                    # could be varying size
-                    # use 2 to replace dynamic shape
-                    shape = [
-                        dim if isinstance(dim, int) else 2 for dim in fake_tensor.shape
-                    ]
+                    shape = fake_tensor.shape
                     dtype = (
                         fake_tensor.dtype
                         if fake_tensor.dtype
@@ -318,10 +310,20 @@ def _wrap_fx_args_as_onnxscript_args(
     # (1) Complete the arguments with default values.
     complete_args: List[_type_utils.Argument] = []
     complete_kwargs: Dict[str, _type_utils.Argument] = {}
+
+    # TODO(titaiwang): aten::sym_size has overload, but fx graph is using
+    # overloadpacket for some reasons.
+    # https://github.com/pytorch/pytorch/issues/97201
+    # We manually assigned overload for aten::sym_size.
+    if hasattr(node.target, "_schema"):
+        node_schema = node.target._schema
+    else:
+        node_schema = torch.ops.aten.sym_size.int._schema
+
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
     else:
-        for i, expected_arg in enumerate(node.target._schema.arguments):  # type: ignore[union-attr]
+        for i, expected_arg in enumerate(node_schema.arguments):  # type: ignore[union-attr]
             if i < len(node.args):
                 complete_args.append(node.args[i])
             elif expected_arg.name in node.kwargs:
@@ -406,13 +408,22 @@ def _export_fx_node_to_onnxscript(
 
             fx_name_to_onnxscipt_value[node.name] = output
             return
-        if (
+        if node.target == operator.getitem:
+            # __getitem__ on Tensor or Sequence of tensors. Not tuple.
+            exporter_key = "getitem"
+        elif (
             isinstance(node.target, types.BuiltinFunctionType)
-            and node.target in function_dispatcher._BUILTIN_TO_EXPORTER_KEY_TABLE
+            and node.target
+            in function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
         ):
-            # This function expects built-in functions to have name like mul, mul_1, ...
+            if not isinstance(
+                node.meta["val"], (int, float, torch.SymInt, torch.SymFloat)
+            ):
+                raise ValueError(
+                    f"Unsupported builtin function: {node.target}, only int/float/SymInt/SymFloat is supported with built-in ops!"
+                )
             # symbolic fx.graph contains built-in functions to calculate python values.
-            exporter_key = function_dispatcher._BUILTIN_TO_EXPORTER_KEY_TABLE[
+            exporter_key = function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[
                 node.target  # type: ignore[index]
             ]
         elif (
@@ -433,9 +444,8 @@ def _export_fx_node_to_onnxscript(
             # overloadpacket for some reasons.
             # https://github.com/pytorch/pytorch/issues/97201
             # We manually assigned overload for aten::sym_size.
-            node.target = torch.ops.aten.sym_size.int
             exporter_key = function_dispatcher._OP_OVERLOAD_TO_EXPORTER_KEY_TABLE[
-                node.target  # type: ignore[index]
+                torch.ops.aten.sym_size.int
             ]
         else:
             raise RuntimeError(f"Unknown call_function target: {node.target}")

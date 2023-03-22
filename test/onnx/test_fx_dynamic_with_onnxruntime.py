@@ -8,7 +8,7 @@ import inspect
 import io
 import unittest
 import warnings
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -28,14 +28,13 @@ _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable]
 _ONNXModelType = Union["onnx.ModelProto", bytes, str, io.BytesIO]
 _InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
-_InputKwargsType = Mapping[str, Any]
-_OutputsType = Union[Sequence[_NumericType], Sequence]
+_OutputsType = Sequence[_NumericType]
 
 
 @_beartype.beartype
-# TODO(titaiwang): bound.args makes pytorch_inputs hard to annotate
-# maybe annotate it when the exporter API is launched
-def _run_ort(onnx_model: _ONNXModelType, pytorch_inputs: Any) -> _OutputsType:
+def _run_ort(
+    onnx_model: _ONNXModelType, pytorch_inputs: _InputArgsType
+) -> _OutputsType:
     session = onnxruntime.InferenceSession(
         onnx_model, providers=["CPUExecutionProvider"]
     )
@@ -53,9 +52,22 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
     atol: float = 1e-7,
     opset_version: int = 18,
     additional_test_inputs: Optional[Sequence[_InputArgsType]] = None,
-    additional_test_kwargs: Optional[Sequence[_InputKwargsType]] = None,
     **input_kwargs,
 ):
+    """Compare the results of PyTorch model with exported ONNX model
+
+    Args:
+        model (_ModelType): PyTorch model
+        input_args (_InputArgsType): torch input arguments
+        rtol (float, optional): relative tolerance. Defaults to 1e-3.
+        atol (float, optional): absolute tolerance. Defaults to 1e-7.
+        opset_version (int, optional): ONNX opset version. Defaults to 18.
+        additional_test_inputs (Optional[Sequence[_InputArgsType]], optional):
+            Test the models with another dataset, which is designed for dynamic axes
+            testing. Defaults to None.
+
+    """
+
     @_beartype.beartype
     def _try_clone_model(model: _ModelType) -> _ModelType:
         """Used for preserving original model in case forward mutates model states."""
@@ -67,10 +79,10 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
             )
             return model
 
+    @_beartype.beartype
     def compare_pytorch_onnx_with_ort(
         onnx_model: Union["onnx.ModelProto", bytes],
         model_input_args: _InputArgsType,
-        model_input_kwargs,
     ):
         # Inspect the model's signature. It will be used
         # to flatten kwargs.
@@ -82,15 +94,13 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         # Bind args and kwargs to the model's signature to
         # flatten kwargs into positional args since ONNX
         # model cannot be called with kwargs.
-        bound = signature.bind(*model_input_args, **model_input_kwargs)
+        bound = signature.bind(*model_input_args)
         # Fill optional inputs.
         bound.apply_defaults()
         assert not bound.kwargs
 
         pt_cloned_model = _try_clone_model(model)
-        ref_outputs, _ = pytree.tree_flatten(
-            pt_cloned_model(*model_input_args, **model_input_kwargs)
-        )
+        ref_outputs, _ = pytree.tree_flatten(pt_cloned_model(*model_input_args))
         ort_outputs = _run_ort(onnx_model, bound.args)
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(
@@ -105,16 +115,17 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         *input_args,
         opset_version=opset_version,
         use_binary_format=True,
-        dynamic_axes=True,  # export models with dynamic shapes
+        enable_dynamic_axes=True,  # export models with dynamic shapes
         **input_kwargs,
     )
 
-    compare_pytorch_onnx_with_ort(onnx_model, input_args, input_kwargs)
+    compare_pytorch_onnx_with_ort(onnx_model, input_args)
 
-    # TODO(titaiwang): do not support kwargs now
+    # This confirms the exported mode accepts different input shapes
+    # when dynamic shape is enabled.
     if additional_test_inputs:
         for additional_input_args in additional_test_inputs:
-            compare_pytorch_onnx_with_ort(onnx_model, additional_input_args, {})
+            compare_pytorch_onnx_with_ort(onnx_model, additional_input_args)
 
 
 class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
@@ -157,11 +168,11 @@ class TestFxDynamicWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
 
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
-        input_x = torch.randn(3, 4)
-        input_y = torch.randn(3, 4)
+        another_x = torch.randn(3, 4)
+        another_y = torch.randn(3, 4)
 
         _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-            DynamicAdd(), (x, y), additional_test_inputs=[(input_x, input_y)]
+            DynamicAdd(), (x, y), additional_test_inputs=[(another_x, another_y)]
         )
 
     def test_sigmoid_add(self):
