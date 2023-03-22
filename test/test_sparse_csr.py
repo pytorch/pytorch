@@ -1632,7 +1632,6 @@ class TestSparseCSR(TestCase):
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])
     @parametrize("noncontiguous", [True, False])
-    @skipCPUIfNoMklSparse
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_block_addmv(self, device, dtype, index_dtype, block_size, noncontiguous):
@@ -1654,6 +1653,19 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             c = make_tensor((m * block_size,), dtype=dtype, device=device, noncontiguous=noncontiguous)
             self.run_test_block_addmm_addmv(torch.addmv, c, a, b, dtype=dtype, device=device)
+
+    @parametrize("matrix_shape", [(3, 3), (5, 7), (11, 9)])
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @onlyCPU
+    def test_addmv(self, device, dtype, matrix_shape):
+        mat = torch.randn(matrix_shape, dtype=dtype, device=device)
+        mat[mat.real < 0] = 0
+        sparse_mat = mat.to_sparse_csr()
+        mvec = torch.randn((mat.size(1),), dtype=dtype, device=device)
+        avec = torch.randn((mat.size(0),), dtype=torch.float64, device=device)
+        ref_output = torch.addmv(avec, mat, mvec)
+        output = torch.addmv(avec, sparse_mat, mvec)
+        self.assertEqual(ref_output, output)
 
     @parametrize("block_size", [2, 3])
     @parametrize("index_dtype", [torch.int32, torch.int64])

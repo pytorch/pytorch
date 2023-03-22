@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Config.h>
+#include <ATen/mkl/Sparse.h>
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -12,6 +13,11 @@
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/zeros.h>
+#endif
+
+#if !AT_USE_MKL_SPARSE()
+#include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #endif
 
 namespace at {
@@ -212,7 +218,54 @@ Tensor& _compressed_row_strided_addmm_out(
 }
 
 namespace cpu {
+template<typename scalar_t>
+void addmv_sparse_csr(
+        const scalar_t* mat_values,
+        const int64_t* crow_index,
+        const int64_t* col_index,
+        const int64_t rows,
+        const int64_t cols,
+        const scalar_t* vec,
+        const scalar_t alpha,
+        const scalar_t beta,
+        scalar_t* result) {
+        at::parallel_for(0, rows, 0, [&](int64_t rstart, int64_t rend) {
+          for(const auto row: c10::irange(rstart, rend)) {
+            scalar_t acc(0);
+            for(const auto idx: c10::irange(crow_index[row], crow_index[row+1])) {
+              acc += mat_values[idx]*vec[col_index[idx]];
+            }
+            result[row] = acc * alpha + result[row]*beta;
+          }
+        });
+}
 
+template<typename scalar_t>
+void addmv_sparse_bsr(
+        const scalar_t* mat_values,
+        const int64_t* crow_index,
+        const int64_t* col_index,
+        const int64_t rows,
+        const int64_t cols,
+        const int64_t blocksize,
+        const scalar_t* vec,
+        const scalar_t alpha,
+        const scalar_t beta,
+        scalar_t* result) {
+        at::parallel_for(0, rows, 0, [&](int64_t rstart, int64_t rend) {
+          for(const auto row: c10::irange(rstart, rend)) {
+            const auto brow = row / blocksize;
+            const auto rrow = row % blocksize;
+            scalar_t acc(0);
+            for(const auto bidx: c10::irange(crow_index[brow], crow_index[brow+1])) {
+              for(const auto idx: c10::irange(blocksize)) {
+                acc += mat_values[(bidx*blocksize+rrow)*blocksize + idx]*vec[col_index[bidx]*blocksize + idx];
+              }
+            }
+            result[row] = acc * alpha + result[row]*beta;
+          }
+        });
+}
 /*
   Computes a sparse matrix-dense vector product defined as
   y <- alpha*op(A)*x + beta*y
@@ -229,11 +282,33 @@ void addmv_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_MKL_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling addmv on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
+#if !AT_USE_MKL_SPARSE()
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
+        if (mat.layout() == kSparseBsr) {
+        addmv_sparse_bsr(mat.values().data<scalar_t>(),
+                        mat.crow_indices().toType(kLong).data<int64_t>(),
+                        mat.col_indices().toType(kLong).data_ptr<int64_t>(),
+                        mat.size(0),
+                        mat.size(1),
+                        mat.values().size(1),
+                        vec.data<scalar_t>(),
+                        alpha.to<scalar_t>(),
+                        beta.to<scalar_t>(),
+                        result.data<scalar_t>());
+        } else {
+        addmv_sparse_csr(mat.values().data<scalar_t>(),
+                        mat.crow_indices().data<int64_t>(),
+                        mat.col_indices().data_ptr<int64_t>(),
+                        mat.size(0),
+                        mat.size(1),
+                        vec.data<scalar_t>(),
+                        alpha.to<scalar_t>(),
+                        beta.to<scalar_t>(),
+                        result.data<scalar_t>());
+        }
+
+      });
 #else
   sparse::impl::mkl::addmv_out_sparse_csr(mat, vec, beta, alpha, result);
 #endif
