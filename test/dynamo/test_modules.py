@@ -341,6 +341,20 @@ class Children(torch.nn.Module):
         return x
 
 
+class NamedChildren(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(10, 10)
+        self.l2 = torch.nn.ReLU()
+        self.l3 = torch.nn.Linear(10, 10)
+        self.l4 = torch.nn.ReLU()
+
+    def forward(self, x):
+        for _, block in self.named_children():
+            x = block(x)
+        return x
+
+
 class IntArg(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -750,6 +764,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
+    test_named_children = make_test(NamedChildren())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
