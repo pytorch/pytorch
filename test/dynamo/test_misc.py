@@ -2044,41 +2044,46 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             z = y**3
             return z
 
-        x = torch.randn((2, 2), requires_grad=True)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager")
+        for profiler, get_events in (
+            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
+            (torch.profiler.profiler.profile, lambda prof: prof.events()),
+        ):
+            x = torch.randn((2, 2), requires_grad=True)
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="aot_eager")
 
-        # warmup
-        opt_fn(x)
+            # warmup
+            opt_fn(x)
 
-        # whenver we enter the profiler context, hooks are automatically registered
-        with torch.autograd.profiler.profile() as prof:
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            # whenver we enter the profiler context, hooks are automatically registered
+            with profiler() as prof:
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(
-            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
-        )
-
-        with torch.autograd.profiler.profile() as prof:
-            # just make sure the disable functionality works
-            _enable_dynamo_cache_lookup_profiler(False)
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            self.assertTrue(same(ref, res))
+            self.assertTrue(
+                len(events) == 1,
+                "Expected one lookup profiler event for one opt_fn run",
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(len(events) == 0, "Expected disabled profiling")
+            with profiler() as prof:
+                # just make sure the disable functionality works
+                _enable_dynamo_cache_lookup_profiler(False)
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
+            )
+
+            self.assertTrue(same(ref, res))
+            self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
