@@ -831,6 +831,14 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
+                    raise AssertionError(
+                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
+                            wrapped_value, self.get_source()
+                        )
+                    )
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
@@ -1053,6 +1061,14 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
+
+    def __hash__(self) -> int:
+        return hash((self.fake, self.source.name()))
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, TrackedFake):
+            return self.fake == other.fake and self.source.name() == other.source.name()
+        return False
 
 
 def wrap_to_fake_tensor_and_record(

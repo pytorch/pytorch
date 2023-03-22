@@ -46,7 +46,6 @@ def profile_op(
     warmup=25,
     rep=50,
 ):
-
     # allocate inputs, nchw
     x = torch.randn((BATCH, IN_C, IN_H, IN_W), dtype=dtype, device="cuda")
     w = torch.randn(
