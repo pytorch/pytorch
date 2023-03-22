@@ -53,9 +53,7 @@ run_tests() {
         fi
     done
 
-    if [[ "${TEST_CONFIG}" == *functorch* ]]; then
-        "$SCRIPT_HELPERS_DIR"/install_test_functorch.bat
-    elif [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat

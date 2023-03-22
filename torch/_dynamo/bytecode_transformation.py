@@ -13,6 +13,27 @@ from .bytecode_analysis import (
 
 
 @dataclasses.dataclass
+class InstructionExnTabEntry:
+    start: "Instruction"
+    end: "Instruction"
+    target: "Instruction"
+    depth: int
+    lasti: bool
+
+    @staticmethod
+    def short_inst_repr(inst: "Instruction"):
+        return f"Instruction(opname={inst.opname}, offset={inst.offset})"
+
+    def __repr__(self):
+        return (
+            f"InstructionExnTabEntry(start={self.short_inst_repr(self.start)}, "
+            f"end={self.short_inst_repr(self.end)}, "
+            f"target={self.short_inst_repr(self.target)}, "
+            f"depth={self.depth}, lasti={self.lasti}"
+        )
+
+
+@dataclasses.dataclass
 class Instruction:
     """A mutable version of dis.Instruction"""
 
@@ -25,6 +46,7 @@ class Instruction:
     is_jump_target: bool = False
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
+    exn_tab_entry: Optional[InstructionExnTabEntry] = None
 
     def __hash__(self):
         return id(self)
@@ -149,7 +171,8 @@ def create_call_function(nargs, push_null):
     NULL and rotate it to the correct position immediately before making
     the function call.
     push_null should default to True unless you know you are calling a function
-    that you codegen'd with a null already pushed, for example,
+    that you codegen'd with a null already pushed, for example
+    (assume `math` is available in the global scope),
 
     create_load_global("math", True)  # pushes a null
     create_instruction("LOAD_ATTR", argval="sqrt")
@@ -724,7 +747,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
         elif instructions[i].opcode in HAS_FREE:
             check_argval()
             instructions[i].arg = freenames[instructions[i].argval]
-        elif instructions[i].opname == "LOAD_CONST":
+        elif instructions[i].opname in ("LOAD_CONST", "KW_NAMES"):
             check_argval()
             # cannot use a dictionary since consts may not be hashable
             instructions[i].arg = get_const_index(code_options, instructions[i].argval)
@@ -816,7 +839,9 @@ def clean_and_assemble_instructions(
         "co_posonlyargcount"
     }
     if sys.version_info >= (3, 11):
-        code_options["co_exceptiontable"] = assemble_exception_table(exn_tab)
+        code_options["co_exceptiontable"] = assemble_exception_table(
+            compute_exception_table(instructions)
+        )
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
