@@ -350,7 +350,7 @@ void Reducer::check_grad_layout(
 void Reducer::point_grads_to_bucket() {
   for (const auto& bucket : buckets_) {
     bool bucket_zeroed = false;
-    for (int variable_index = 0; variable_index < bucket.variables.size();
+    for (size_t variable_index = 0; variable_index < bucket.variables.size();
          ++variable_index) {
       const auto& bucket_index = variable_locators_[variable_index];
       auto& bucket = buckets_[bucket_index.bucket_index];
