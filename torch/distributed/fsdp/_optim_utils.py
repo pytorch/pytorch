@@ -1546,6 +1546,9 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
         handle = handles[0]
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         for idx, local_fqn in enumerate(handle.flat_param._fqns):
+            is_padding = local_fqn is None
+            if is_padding:
+                continue
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 # TODO: Should this be an `is` check instead of `==`?
