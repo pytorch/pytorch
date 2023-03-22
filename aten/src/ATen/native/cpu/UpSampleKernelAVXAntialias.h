@@ -35,7 +35,7 @@ Like PIL, Pillow is licensed under the open source HPND License
 
 namespace {
 
-static __m128i inline mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+static inline __m128i mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
   int32_t v;
   if (i32_aligned) {
     v = *(const int32_t*)ptr;
@@ -45,8 +45,19 @@ static __m128i inline mm_cvtsi32_si128(const uint8_t* C10_RESTRICT ptr, bool i32
   return _mm_cvtsi32_si128(v);
 }
 
-static __m128i inline mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
+static inline __m128i mm_cvtepu8_epi32(const uint8_t* C10_RESTRICT ptr, bool i32_aligned) {
   return _mm_cvtepu8_epi32(mm_cvtsi32_si128(ptr, i32_aligned));
+}
+
+static inline void _write_endline_rgb_as_uint32(
+    uint8_t* C10_RESTRICT output,
+    uint32_t data
+) {
+  // data is (R G B X), output is (X1 X2 X3 | R1 B1 G1 R2 ...)
+  // Here we explicitly set X as R1
+  uint8_t* data_ptr = reinterpret_cast<uint8_t*>(&data);
+  data_ptr[3] = output[3];
+  std::memcpy(output, data_ptr, 4);
 }
 
 // TODO: We may want to hard-code an unrolled version for the case where
@@ -680,36 +691,20 @@ void ImagingResampleHorizontalConvolution8u4x(
       // it by simply writing 4 bytes from the register to the output. We'll do the following:
       //               v----------|
       // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
-      // First, we store next 4 bytes (R1 G1 B1 R2) in a temporary variable
-      // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | X)
-      // Output = [... R G B | X G1 B1 R2 ...]
-      // Third, we overwrite next 4 bytes of the output (X G1 B1 R2) with stored values (R1 G1 B1 R2)
+      // First, we write R1 value to the 4th byte of (R G B | X) -> (R G B | R1)
+      // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | R1)
       // Output = [... R G B | R1 G1 B1 R2 ...]
 
-      char next0[4];
-      std::memcpy(next0, lineOut0 + out_x_strided + stride, 4);
-      std::memcpy(lineOut0 + out_x_strided, (uint8_t *) &o0, 4);
-      std::memcpy(lineOut0 + out_x_strided + stride, next0, 4);
-
-      char next1[4];
-      std::memcpy(next1, lineOut1 + out_x_strided + stride, 4);
-      std::memcpy(lineOut1 + out_x_strided, (uint8_t *) &o1, 4);
-      std::memcpy(lineOut1 + out_x_strided + stride, next1, 4);
-
-      char next2[4];
-      std::memcpy(next2, lineOut2 + out_x_strided + stride, 4);
-      std::memcpy(lineOut2 + out_x_strided, (uint8_t *) &o2, 4);
-      std::memcpy(lineOut2 + out_x_strided + stride, next2, 4);
+      _write_endline_rgb_as_uint32(lineOut0 + out_x_strided, o0);
+      _write_endline_rgb_as_uint32(lineOut1 + out_x_strided, o1);
+      _write_endline_rgb_as_uint32(lineOut2 + out_x_strided, o2);
 
       if (C10_UNLIKELY(is_last_line)) {
         // When we handle the last line, we can not access the next 4 bytes
         // as they are out of memory bounds.
         std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, num_channels);
       } else {
-        char next3[4];
-        std::memcpy(next3, lineOut3 + out_x_strided + stride, 4);
-        std::memcpy(lineOut3 + out_x_strided, (uint8_t *) &o3, 4);
-        std::memcpy(lineOut3 + out_x_strided + stride, next3, 4);
+        _write_endline_rgb_as_uint32(lineOut3 + out_x_strided, o3);
       }
     } else if (num_channels == 3) {
       // Memcpy 4-bytes is faster than 3-bytes and here
@@ -1036,16 +1031,10 @@ void ImagingResampleHorizontalConvolution8u(
         // it by simply writing 4 bytes from the register to the output. We'll do the following:
         //               v----------|
         // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
-        // First, we store next 4 bytes (R1 G1 B1 R2) in a temporary variable
-        // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | X)
-        // Output = [... R G B | X G1 B1 R2 ...]
-        // Third, we overwrite next 4 bytes of the output (X G1 B1 R2) with stored values (R1 G1 B1 R2)
+        // First, we write R1 value to the 4th byte of (R G B | X) -> (R G B | R1)
+        // Second, we write 4 bytes from the register to the output: (X1 X2 X3 | R1) -> (R G B | R1)
         // Output = [... R G B | R1 G1 B1 R2 ...]
-
-        char next[4];
-        std::memcpy(next, lineOut + out_x_strided + stride, 4);
-        std::memcpy(lineOut + out_x_strided, (uint8_t *) &o, 4);
-        std::memcpy(lineOut + out_x_strided + stride, next, 4);
+        _write_endline_rgb_as_uint32(lineOut + out_x_strided, o);
       }
     } else if (num_channels == 3) {
       // Memcpy 4-bytes is faster than 3-bytes and here
@@ -1109,7 +1098,7 @@ void ImagingResampleVerticalConvolution8u(
       //    r0 g0 b0 a0  r1 g1 b1 a1  r2 g2 b2 a2  r3 g3 b3 a3
       //    r4 g4 b4 a4  r5 g5 b5 a5  r6 g6 b6 a6  r7 g7 b7 a7
       // ]
-      // RGB: Load 8 pixels per line (however we can process only 8 pixels):
+      // RGB: Load 10 pixels per line (however we can process only 8 pixels):
       // source1 = [
       //    r0 g0 b0 r1  g1 b1 r2 g2  b2 r3 g3 b3  r4 g4 b4 r5
       //    r4 g4 b4 r5  g5 b5 r6 g6  b6 r7 g7 b7  r8 g8 b8 r9
