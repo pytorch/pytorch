@@ -378,6 +378,7 @@ def break_graph_if_unsupported(*, push):
             if sys.version_info >= (3, 11) and inst.opname == "CALL":
                 kw_names = self.kw_names.value if self.kw_names is not None else ()
                 if len(kw_names) > 0:
+                    PyCodegen.maybe_upd_consts(self.code_options, kw_names)
                     self.output.add_output_instructions(
                         [create_instruction("KW_NAMES", argval=kw_names)]
                     )
@@ -700,6 +701,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             else:
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
+
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
@@ -1466,6 +1470,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             self.push(ConstantVariable(None))
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
+
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
