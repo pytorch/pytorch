@@ -13,7 +13,13 @@ import torch._logging
 
 import torch.nn
 from torch import fx
-from torch._guards import Checkpointable, Guard, GuardsCheckpointState, TracingContext
+from torch._guards import (
+    Checkpointable,
+    Guard,
+    GuardsCheckpointState,
+    Source,
+    TracingContext,
+)
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
 from . import config, logging as torchdynamo_logging, variables
@@ -32,8 +38,8 @@ from .side_effects import SideEffects
 from .source import (
     ConstantSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
+    ParamBufferSource,
     ShapeEnvSource,
 )
 from .utils import (
@@ -67,6 +73,7 @@ class OutputGraphState(NamedTuple):
     tracked_fakes: List[TrackedFake]
     guard_state: GuardsCheckpointState
     nn_modules: Optional[Dict[str, torch.nn.Module]]
+    param_name_to_source: Optional[Dict[str, Source]]
     side_effects: SideEffects
     timestamp: int
 
@@ -218,6 +225,8 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # should use original graphargs.
         self.orig_graphargs: List[GraphArg] = self.graphargs
         self.nn_modules: Optional[Dict[str, torch.nn.Module]] = dict()
+        # Stores the full fqn of a param or buffer to the relevant source.
+        self.param_name_to_source: Optional[Dict[str, Source]] = dict()
         self.side_effects = SideEffects()
         self.code_options = dict(code_options)
         self.output_instructions: List[Instruction] = []
@@ -239,9 +248,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         self.random_values_var = None
         self.initial_random_state = ()
         self.unspec_variable_map: Dict[str, UnspecializedPythonVariable] = {}
-        # Maps the source arg position to the grapharg position
-        self.pos_to_arg: Dict[int, int] = {}
-
         # Enables creating unique node names by tracking
         # all current placeholder node names
         self.name_to_input: OrderedDict[
@@ -277,12 +283,14 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def copy_graphstate(self) -> OutputGraphState:
         """Create a checkpoint of the current state by copying everything"""
         assert self.nn_modules is not None
+        assert self.param_name_to_source is not None
         guards_graph_state = self.tracing_context.guards_context.copy_graphstate()
         state = OutputGraphState(
             list(self.graphargs),
             list(self.tracked_fakes),
             guards_graph_state,
             dict(self.nn_modules),
+            dict(self.param_name_to_source),
             self.side_effects.clone(),
             self.timestamp,
         )
@@ -296,6 +304,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             self.tracked_fakes,
             guards_state,
             self.nn_modules,
+            self.param_name_to_source,
             self.side_effects,
             self.timestamp,
         ) = state
@@ -316,8 +325,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     def add_grapharg(self, arg: GraphArg):
         curr_pos = len(self.graphargs)
         self.graphargs.append(arg)
-        if isinstance(arg.source, LocalInputSource):
-            self.pos_to_arg[arg.source.pos] = curr_pos
 
     def count_calls(self):
         return count_calls(self.graph)
@@ -396,11 +403,15 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         options["guards"] = set(options.get("guards", []))
         assert "source" in options
         source = options["source"]
+        assert not isinstance(source, ParamBufferSource)
+
         if isinstance(target, torch.Tensor):
             if not is_constant_source(source):
                 options["guards"].add(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
+                assert self.param_name_to_source is not None
+                self.param_name_to_source[module_key] = source
                 return wrap_fx_proxy(
                     self.root_tx,
                     self.create_proxy("get_attr", module_key, tuple(), {}),
@@ -450,7 +461,6 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
             if v is target:
                 # it already exists
                 return wrap_name(k)
-
         # create a new unique name
         name = "_".join(map(str, names))
         # e.g. replace abc.xyz[123].qkv with abc.xyz_123.qkv
@@ -464,6 +474,27 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         for i in itertools.count():
             if name not in self.nn_modules:
                 self.nn_modules[name] = target
+                if isinstance(target, torch.nn.Module):
+
+                    def register_leaf_name(leaf_name):
+                        assert self.param_name_to_source is not None
+                        new_source = ParamBufferSource(source, leaf_name)
+                        new_name = f"{name}.{leaf_name}"
+                        self.param_name_to_source[new_name] = new_source
+
+                    # annoying, but there are cases when we do not have parameters
+                    # see test_nn_moduledict_contains
+                    if hasattr(target, "_parameters"):
+                        for leaf_name, _ in target.named_parameters(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
+                    if hasattr(target, "_buffers"):
+                        for leaf_name, _ in target.named_buffers(
+                            remove_duplicate=False
+                        ):
+                            register_leaf_name(leaf_name)
+
                 return wrap_name(name)
             name = f"{base}_{i}"
 
@@ -633,10 +664,19 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
     @dynamo_timed(phase_name="backend_compile")
     def call_user_compiler(self, gm: fx.GraphModule) -> CompiledFn:
         tot = 0
+        placeholders = []
         for node in gm.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
                 tot += 1
+            if node.op == "placeholder":
+                placeholders.append(node)
         torch._dynamo.utils.increment_op_count(tot)
+        assert len(placeholders) == len(self.graphargs)
+        for pl, arg in zip(placeholders, self.graphargs):
+            pl._dynamo_source = arg.source
+
+        gm._param_name_to_source = self.param_name_to_source
+
         try:
             name = (
                 self.compiler_fn.__name__
@@ -757,6 +797,7 @@ class OutputGraph(fx.Tracer, Checkpointable[OutputGraphState]):
         # Note: generated fx graph will hold a reference to the nn_module,
         # So depending on the backend they may not be released
         self.nn_modules = None
+        self.param_name_to_source = None
 
         # Cleanup graphargs
         for graph_arg in self.graphargs:
