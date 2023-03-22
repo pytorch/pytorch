@@ -30,6 +30,7 @@ from torch.ao.ns.fx.utils import (
 )
 import copy
 import itertools
+from torch._dynamo.eval_frame import is_dynamo_supported
 
 @skipIfNoQNNPACK
 class TestQuantizePT2E(QuantizationTestCase):
@@ -192,6 +193,7 @@ class TestQuantizePT2E(QuantizationTestCase):
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
 
+@skipIfNoQNNPACK
 class TestQuantizePT2EX86Inductor(QuantizationTestCase):
     @skipIfNoX86
     @xfailIfPython311
@@ -207,6 +209,9 @@ class TestQuantizePT2EX86Inductor(QuantizationTestCase):
                 x = self.conv1(x)
                 return self.relu(x) if self.use_relu else x
 
+        if not is_dynamo_supported():
+            # Skip if the platform doesn't support dynamo export
+            return
         use_relu_list = [True, False]
         inplace_relu_list = [True, False]
         with override_quantized_engine("x86"):
