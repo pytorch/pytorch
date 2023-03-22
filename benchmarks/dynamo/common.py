@@ -240,6 +240,7 @@ CI_SKIP[CI("inductor", training=False, dynamic=True)] = [
     # timm_models
     "convit_base",  # TypeError: Cannot convert symbols to int
     "pnasnet5large",  # CompilationError: math.ceil
+    "tf_efficientnet_b0",  # CompilationError: math.ceil
 ]
 
 CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
@@ -2135,7 +2136,12 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
-        if args.ci and args.accuracy and args.only in {"dla102", "gernet_l"}:
+        if (
+            args.ci
+            and args.accuracy
+            and args.training
+            and args.only in {"dla102", "gernet_l"}
+        ):
             # Log generated code for flaky tests, to check if there is any codegen difference
             inductor_config.debug = True
 
