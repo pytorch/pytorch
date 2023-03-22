@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     noncontiguous_like,
     TEST_WITH_ASAN,
     TEST_WITH_UBSAN,
-    skipIfRocm,
     IS_WINDOWS,
     IS_FBCODE,
     first_sample,
