@@ -157,7 +157,7 @@ static inline void NCCL_CHECK_NONBLOCKING(
   NCCL_CHECK_NONBLOCKING(from_nccl_result(result), comm);
 }
 
-static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
+static inline void NCCL_CHECK_NONBLOCKING(
     ncclResult status,
     std::vector<ncclComm_t>& comms) {
 #ifdef NCCL_HAS_COMM_NONBLOCKING
@@ -181,10 +181,10 @@ static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
 #endif
 }
 
-static inline void NCCL_CHECK_NONBLOCKING_GROUPEND(
+static inline void NCCL_CHECK_NONBLOCKING(
     ncclResult_t result,
     std::vector<ncclComm_t>& comms) {
-  NCCL_CHECK_NONBLOCKING_GROUPEND(from_nccl_result(result), comms);
+  NCCL_CHECK_NONBLOCKING(from_nccl_result(result), comms);
 }
 
 void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
@@ -389,7 +389,7 @@ AutoNcclGroup::~AutoNcclGroup() noexcept(false) {
   if (!comm_nonblocking_) {
     detail::NCCL_CHECK(ncclGroupEnd());
   } else {
-    detail::NCCL_CHECK_NONBLOCKING_GROUPEND(ncclGroupEnd(), comms_);
+    detail::NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), comms_);
   }
 #endif
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR < 2)
@@ -746,11 +746,7 @@ void all2all_single_equal_split(
 #if defined(USE_ROCM) && ROCM_VERSION >= 50000
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
-  if (!comm_nonblocking) {
-    NCCL_CHECK(ncclCommCount(comm, &numranks));
-  } else {
-    NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
-  }
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
@@ -796,11 +792,7 @@ void all2all_single_unequal_split(
   auto type = to_nccl_data_type(_type);
   auto comm = to_nccl_comm(_comm);
   int numranks;
-  if (!comm_nonblocking) {
-    NCCL_CHECK(ncclCommCount(comm, &numranks));
-  } else {
-    NCCL_CHECK_NONBLOCKING(ncclCommCount(comm, &numranks), _comm);
-  }
+  NCCL_CHECK(ncclCommCount(comm, &numranks));
   NCCL_CHECK(ncclGroupStart());
   for (const auto r : c10::irange(numranks)) {
     // NCCL uses 0 byte message for synchronization
