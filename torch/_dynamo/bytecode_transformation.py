@@ -149,7 +149,8 @@ def create_call_function(nargs, push_null):
     NULL and rotate it to the correct position immediately before making
     the function call.
     push_null should default to True unless you know you are calling a function
-    that you codegen'd with a null already pushed, for example,
+    that you codegen'd with a null already pushed, for example
+    (assume `math` is available in the global scope),
 
     create_load_global("math", True)  # pushes a null
     create_instruction("LOAD_ATTR", argval="sqrt")
@@ -520,7 +521,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
         elif instructions[i].opcode in HAS_FREE:
             check_argval()
             instructions[i].arg = freenames[instructions[i].argval]
-        elif instructions[i].opname == "LOAD_CONST":
+        elif instructions[i].opname in ("LOAD_CONST", "KW_NAMES"):
             check_argval()
             # cannot use a dictionary since consts may not be hashable
             instructions[i].arg = get_const_index(code_options, instructions[i].argval)
