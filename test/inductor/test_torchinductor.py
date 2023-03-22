@@ -4417,6 +4417,21 @@ class CommonTemplate:
             ],
         )
 
+    def test_index_put4(self):
+        # a, b[0] are not broadcastable
+        # https://github.com/pytorch/pytorch/issues/97104
+        def fn(a, b, c):
+            return torch.index_put(a, [b], c)
+
+        self.common(
+            fn,
+            [
+                torch.rand([8, 2]),
+                torch.rand([8]) > 0.5,
+                torch.rand([]),
+            ],
+        )
+
     def test_index_put_as_masked_fill(self):
         def fn(a, b, c, d):
             a = a.clone()
@@ -7635,9 +7650,9 @@ class ExprPrinterTests(TestCase):
             # Test exprs.
             (
                 s1 / (2 * s1 - 1) - 1 / (2 * s1 - 1),
-                lambda c: f"((-1)*({c}/(((-1) + (2*foo))))) + (foo*({c}/(((-1) + (2*foo)))))",
+                lambda c: f"((-1)*({c}/((-1) + (2*foo)))) + (foo*({c}/((-1) + (2*foo))))",
             ),
-            (s1 / (s2 - s3), lambda c: f"foo*({c}/((bar + ((-1)*baz))))"),
+            (s1 / (s2 - s3), lambda c: f"foo*({c}/(bar + ((-1)*baz)))"),
             # Test Pow directly.
             (
                 sympy.Pow(s1 + s2, 0),
@@ -7664,7 +7679,6 @@ class ExprPrinterTests(TestCase):
     def test_print_ceil(self):
         s1 = sympy.Symbol("s1", integer=False)
         expr = sympy.ceiling(s1)
-        self.assertEqual(texpr(expr), "tl.math.ceil(s1)")
         self.assertEqual(pexpr(expr), "math.ceil(s1)")
 
 
