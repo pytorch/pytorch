@@ -507,7 +507,7 @@ void try_plans_fused(cudnn_frontend::executionPlans_t& plans, const CacheKeyFuse
   TORCH_CHECK(false, "FIND was unable to find an engine to execute this computation");
 }
 
-void try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const cudnn_frontend::OperationGraph& opGraph, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
+bool try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const cudnn_frontend::OperationGraph& opGraph, const CacheKey& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w) {
   for (auto & config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
@@ -528,7 +528,7 @@ void try_configs(cudnn_frontend::EngineConfigList& configs, const std::string& o
   return false;
 }
 
-void try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const cudnn_frontend::OperationGraph& opGraph, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
+bool try_configs_fused(cudnn_frontend::EngineConfigList& configs, const std::string& opgraph_tag, const cudnn_frontend::OperationGraph& opGraph, const CacheKeyFused& key, const cudnnHandle_t handle, const Tensor& x, const Tensor& y, const Tensor& w, const Tensor& z, const Tensor& b) {
   for (auto & config : configs) {
     try {
       auto plan = cudnn_frontend::ExecutionPlanBuilder()
@@ -577,9 +577,8 @@ void run_single_conv(const cudnnBackendDescriptorType_t operation,
     if (try_configs(configs, opgraph_tag, opGraph, key, handle, x, y, w)) { return; }
     // fallback configs
     configs = get_configs_from_heuristics(handle, operation,
-                                          opgraph_tag,
-                                          x, y, w, key,
-                                          padding, stride, dilation,
+                                          opGraph,
+                                          x,
                                           deterministic, allow_tf32, true);
     if (try_configs(configs, opgraph_tag, opGraph, key, handle, x, y, w)) { return; }
     TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
@@ -622,9 +621,8 @@ void run_fused_conv(const Tensor& x, const Tensor& y, const Tensor& w, const Ten
     if (try_configs_fused(configs, opgraph_tag, opGraph, key, handle, x, y, w, z, b)) { return; }
     // fallback configs
     configs = get_configs_from_heuristics_fused(handle,
-                                                opgraph_tag,
-                                                x, y, w, z, b, alpha, key,
-                                                padding, stride, dilation,
+                                                opGraph,
+                                                x,
                                                 deterministic, allow_tf32, true);
     if (try_configs_fused(configs, opgraph_tag, opGraph, key, handle, x, y, w, z, b)) { return; }
     TORCH_CHECK(false, "GET was unable to find an engine to execute this computation");
