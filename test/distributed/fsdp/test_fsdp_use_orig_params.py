@@ -253,7 +253,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
         for i in range(10):
             losses = []
             inp = ref_model.get_input(torch.device("cuda"))
-            for (_model, _optim) in ((ref_model, ref_optim), (model, optim)):
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad()
                 loss = _model(*inp).sum()
                 losses.append(loss)

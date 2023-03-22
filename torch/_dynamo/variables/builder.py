@@ -717,9 +717,17 @@ class VariableBuilder:
 
     def wrap_tensor(self, value: torch.Tensor):
         source = self.get_source()
-        if source.guard_source().is_nn_module() and not isinstance(
-            source, FSDPNNModuleSource
-        ):
+        # TODO: This is a *hack*. We have `FSDPNNModuleSource.guard_source()`
+        # emulate `NNModuleSource.guard_source()` so that `is_nn_module()`
+        # returns true, skipping guard creation. However, for FSDP, we *do not*
+        # want to register the "parameters" (which are `Tensor` views) to the
+        # fake root module since they are transient. We need a way to make this
+        # distinction. For now, we hard code against `AttrSource`.
+        skip_register_attr = isinstance(source, FSDPNNModuleSource) or (
+            isinstance(source, AttrSource)
+            and isinstance(source.base, FSDPNNModuleSource)
+        )
+        if source.guard_source().is_nn_module() and not skip_register_attr:
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
