@@ -1,11 +1,9 @@
-import functools
 import logging
 import operator
 import os
 import re
 import sys
 import time
-import warnings
 from typing import Dict, List, Optional, Set
 
 import sympy
@@ -15,7 +13,6 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import dynamo_timed
-from torch._subclasses import FakeTensor
 from torch.fx.experimental.symbolic_shapes import (
     magic_methods,
     method_to_operator,
@@ -72,36 +69,17 @@ def supported_dtype_of_cpp_wrapper(dtype):
     return dtype in supported_dtype
 
 
-@functools.lru_cache(None)
-def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    )
-
-
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
-    # TODO: these dont always have meta["val"] yet but they should
-    if node.target is operator.getitem:
-        return False
-
     def check_skip_condition(node, check_cpu):
         if not isinstance(node, torch.fx.Node):
             return False
 
-        if "val" in node.meta:
-            meta = node.meta["val"]
-            metas = (meta,) if not isinstance(meta, (list, tuple)) else meta
-        else:
-            raise Exception(f"Unexpected node without meta: {node}")
+        if "val" not in node.meta:
+            return False
 
-        for meta in metas:
-            if not isinstance(meta, FakeTensor):
+        for meta in tree_flatten(node.meta["val"])[0]:
+            if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
-
-            if meta.dtype.is_complex:
-                _warn_complex_not_supported()
-                return True
-
             if check_cpu and meta.is_cpu and config.disable_cpp_codegen:
                 return True
 
