@@ -385,7 +385,7 @@ class TorchVariable(VariableTracker):
                 ),
                 example_value=self.value(),
                 source=GeneratorStateSource(
-                    self.value.__self__.device.type, self.value.__self__.initial_seed
+                    self.value.__self__.device.type, self.value.__self__.initial_seed()
                 ),
                 **options,
             )
