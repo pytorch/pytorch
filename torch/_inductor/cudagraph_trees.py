@@ -323,26 +323,23 @@ def is_cuda_tensor(x):
 
 
 @contextlib.contextmanager
-def _use_cuda_memory_pool_manager(device, mem_pool):
+def _use_cuda_memory_pool_manager(device, mem_pool, stream):
     """
     Context manager to use cuda graph pool for new allocations. If you use this manager
     all cudagraph tensors in use should be reflected in the allocator or they will be overwritten.
     existing_graph should already have been used in a capture, and the mem_pool must already exist,
     because this manager will not preserve a reference to the pool which keeps it alive.
     """
-    with torch.device(device):
-        torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
-        stream_context = torch.cuda.stream(stream)
-        stream_context.__enter__()
+    torch.cuda.synchronize()
+    stream.wait_stream(torch.cuda.current_stream())
+
+    with torch.cuda.stream(stream), torch.device(device):
         torch._C._cuda_beginAllocateCurrentStreamToPool(device, mem_pool)
         try:
             yield
         finally:
             torch._C._cuda_endAllocateCurrentStreamToPool(device)
             torch._C._cuda_releasePool(device, mem_pool)
-            stream_context.__exit__(None, None, None)
 
 
 def map_to_ref(t: Optional[Tensor]) -> Optional[StorageWeakRefWrapper]:
@@ -389,6 +386,7 @@ class CUDAWarmupNode:
         existing_cuda_graph: torch.cuda.Graph,
         device_index: int,
         stack_traces: Optional[StackTraces],
+        stream: torch.cuda.Stream,
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -398,6 +396,7 @@ class CUDAWarmupNode:
         self.has_run = False
         self.device_index = device_index
         self.stack_traces = stack_traces
+        self.stream = stream
 
     def run(self, new_inputs):
         assert not self.has_run, "Wrapped function should never be run twice"
@@ -422,7 +421,7 @@ class CUDAWarmupNode:
         with torch.cuda.device(
             self.device_index
         ), clear_cublas_manager(), _use_cuda_memory_pool_manager(
-            self.device_index, self.cuda_graphs_pool
+            self.device_index, self.cuda_graphs_pool, self.stream
         ):
             out = self.wrapped_function.model(new_inputs)
 
@@ -505,6 +504,7 @@ class CUDAGraphNode:
         cuda_graphs_pool: Tuple[int, int],
         device_index: int,
         stack_traces: Optional[StackTraces],
+        stream: torch.cuda.Stream,
     ):
         assert isinstance(inputs, (list, tuple))
 
@@ -512,6 +512,7 @@ class CUDAGraphNode:
         self.id = id
         self.device = device_index
         self.stack_traces = stack_traces
+        self.stream = stream
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -606,8 +607,6 @@ class CUDAGraphNode:
             for idx, x in enumerate(recording_inputs)
         ]
 
-        stream = torch.cuda.Stream()
-
         # DO THE RECORDING!!!
         # We record the CUDA graph in the constructor of CUDAGraphNode, which
         # gives you what the CPU side compute of the function would do.  We
@@ -618,7 +617,7 @@ class CUDAGraphNode:
         # NB: This relies on run() being called immediately after the
         # constructor, otherwise this optimization would not be valid.
         self.recording_outputs: OutputList[Optional[torch.Tensor]] = self._record(
-            wrapped_function.model, stream, recording_inputs
+            wrapped_function.model, recording_inputs
         )
 
         self.outputs_metadata: OutputList[Optional[Dict[str, Any]]] = []
@@ -697,7 +696,7 @@ class CUDAGraphNode:
                 return False
         return True
 
-    def _record(self, model, stream, inputs):
+    def _record(self, model, inputs):
         "Record the model"
 
         if config.triton.fast_cudagraph_asserts:
@@ -713,7 +712,7 @@ class CUDAGraphNode:
             check_memory_pool(self.cuda_graphs_pool, memory)
 
         with torch.cuda.device(self.device), clear_cublas_manager(), torch.cuda.graph(
-            self.graph, stream=stream, pool=self.cuda_graphs_pool
+            self.graph, stream=self.stream, pool=self.cuda_graphs_pool
         ):
             static_outputs = model(inputs)
 
@@ -952,8 +951,7 @@ class CUDAGraphNode:
         inps_alloc_graph = torch.cuda.CUDAGraph()
 
         torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
-        stream.wait_stream(torch.cuda.current_stream())
+        self.stream.wait_stream(torch.cuda.current_stream())
         recording_inputs = []
 
         with warnings.catch_warnings(record=True), torch.cuda.device(
@@ -961,7 +959,7 @@ class CUDAGraphNode:
         ), torch.cuda.graph(
             inps_alloc_graph,
             pool=self.cuda_graphs_pool,
-            stream=stream,
+            stream=self.stream,
         ):
             for i, inp in enumerate(inputs):
                 if i not in self.static_input_idxs:
@@ -1100,21 +1098,27 @@ class CUDAGraphTreeManager:
 
         self.warmed_up_functions: Set[FunctionID] = set()
 
+        # NB: cuda caching allocator will remember the stream a segment is allocated to
+        # and only allocate that segment to the same stream. we need to use a single stream
+        # for all allocations to the memory pool, otherwise the allocations to separate streams
+        # will not be reused; separate recordings would have use the same memory pool, but not
+        # the same memory.
+
+        torch.cuda.synchronize()
+        self.stream = torch.cuda.Stream()
+        self.stream.wait_stream(torch.cuda.current_stream())
+
         with torch.cuda.device(device_index):
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
-
-            torch.cuda.synchronize()
-            stream = torch.cuda.Stream()
-            stream.wait_stream(torch.cuda.current_stream())
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
             with warnings.catch_warnings(record=True), torch.cuda.graph(
                 self.graph,
                 pool=self.cuda_graphs_thread_pool,
-                stream=stream,
+                stream=self.stream,
             ):
                 pass
 
@@ -1227,6 +1231,7 @@ class CUDAGraphTreeManager:
             self.cuda_graphs_thread_pool,
             self.device_index,
             self.ids_to_stack_traces[function_id],
+            self.stream,
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -1254,6 +1259,7 @@ class CUDAGraphTreeManager:
             self.graph,
             self.device_index,
             self.ids_to_stack_traces[function_id],
+            self.stream,
         )
         self.current_node = node
         self.path_state = ExecutionState.WARMUP

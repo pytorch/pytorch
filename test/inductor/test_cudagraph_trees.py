@@ -551,6 +551,20 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertTrue(len(w) == 1)
             self.assertTrue("x * x * x" in str(w[0]))
 
+        def test_single_stream_use(self):
+            @torch.compile()
+            def foo(x):
+                return (x * x * x).relu()
+
+            inp = torch.rand([4], device="cuda", requires_grad=True)
+            streams = set()
+
+            for _ in range(3):
+                foo(inp).sum().backward()
+
+            streams = {seg["stream"] for seg in get_all_cudagraph_segments()}
+            self.assertEqual(len(streams), 1)
+
         def test_forward_generation(self):
             def foo(x):
                 return x * x * x
