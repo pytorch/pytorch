@@ -128,13 +128,17 @@ def is_concrete_int(a: Union[int, SymInt]):
     true if integer is passed in.
 
     Args:
-        a (SymInt or int): Object to test if int
+        a (SymInt or int): Object to test if it int
     """
     assert isinstance(a, SymInt) or isinstance(a, int)
-    if isinstance(a, SymInt):
-        return a.node.is_int()
 
-    return True
+    if isinstance(a, int):
+        return True
+
+    if isinstance(a.node.expr, sympy.core.numbers.Integer):
+        return True
+
+    return False
 
 # Returns True if every size dim on the tensor has a hint
 # TODO: Should this include strides too?  For now it doesn't matter,
