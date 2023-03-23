@@ -219,11 +219,11 @@ Tensor& _compressed_row_strided_addmm_out(
 
 namespace cpu {
 #if !AT_USE_MKL_SPARSE()
-template<typename scalar_t>
+template<typename scalar_t, typename idx_t>
 void addmv_sparse_csr(
     const scalar_t* mat_values,
-    const int64_t* crow_index,
-    const int64_t* col_index,
+    const idx_t* crow_index,
+    const idx_t* col_index,
     const int64_t mat_rows,
     const scalar_t* vec,
     const scalar_t alpha,
@@ -254,14 +254,14 @@ void addmv_sparse_bsr(
     scalar_t* result) {
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
-      const auto brow = row / blocksize_rows;
-      const auto rrow = row % blocksize_rows;
+      const auto block_row = row / blocksize_rows;
+      const auto block_row_offset = row % blocksize_rows;
       scalar_t acc(0);
-      for(const auto bidx: c10::irange(crow_index[brow], crow_index[brow + 1])) {
-        const auto boffs = (bidx * blocksize_rows + rrow) * blocksize_cols;
-        const auto voffs = col_index[bidx]* blocksize_cols;
+      for(const auto block_idx: c10::irange(crow_index[block_row], crow_index[block_row + 1])) {
+        const auto block_offs = (block_idx * blocksize_rows + block_row_offset) * blocksize_cols;
+        const auto vec_offs = col_index[block_idx]* blocksize_cols;
         for(const auto idx: c10::irange(blocksize_cols)) {
-          acc += mat_values[boffs + idx] * vec[voffs + idx];
+          acc += mat_values[block_offs + idx] * vec[vec_offs + idx];
         }
       }
       result[row] = acc * alpha + result[row] * beta;
@@ -300,7 +300,7 @@ void addmv_out_sparse_csr(
               alpha.to<scalar_t>(),
               beta.to<scalar_t>(),
               result.data<scalar_t>());
-        } else {
+        } else if (mat.layout() == kSparseCsr) {
           addmv_sparse_csr(mat.values().data<scalar_t>(),
               mat.crow_indices().data<int64_t>(),
               mat.col_indices().data_ptr<int64_t>(),
@@ -309,6 +309,8 @@ void addmv_out_sparse_csr(
               alpha.to<scalar_t>(),
               beta.to<scalar_t>(),
               result.data<scalar_t>());
+        } else {
+          TORCH_CHECK(false, "Unexpected layout ", mat.layout());
         }
       });
 #else
