@@ -1239,12 +1239,16 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
         trace_joint=False,
     )
 
-    if not aot_config.keep_inference_input_mutations:
-        # As long as we opted to remove input mutations, then
-        # there should be *NO* mutating ops in the graph at this point.
-        assert_functional_graph(fw_module.graph)
-        fw_module.graph.eliminate_dead_code()
-        fw_module.recompile()
+    # As long as we opted to remove input mutations, then
+    # there should be *NO* mutating ops in the graph at this point.
+    copy_count = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
+
+    fw_module.graph.eliminate_dead_code()
+    fw_module.recompile()
+
+    copy_count2 = assert_functional_graph(fw_module.graph, allow_input_mutations=aot_config.keep_inference_input_mutations)
+
+    assert copy_count == copy_count2
 
     aot_graphs_log.info(format_graph_code(f"====== Forward graph {aot_config.aot_id} ======\n", fw_module))
 
@@ -1265,11 +1269,27 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     return compiled_fn
 
 
-def assert_functional_graph(fx_g: torch.fx.Graph):
+# Returns the number of detected copy_
+def assert_functional_graph(fx_g: torch.fx.Graph, *, allow_input_mutations: bool = False) -> int:
+    placeholders = set()
+    copy_count = 0
+    # NB: It would also be nice to verify that the mutations all happen at the
+    # end, but we also do some administrative views after mutations so this
+    # isn't actually true.  (TODO: Could this cause problems for Inductor?)
     for n in fx_g.nodes:
+        if n.op == "placeholder":
+            placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            assert not n.target._schema.is_mutable, \
-                f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+            if n.target is aten.copy_.default and allow_input_mutations:
+                suffix = True
+                # Can only copy_ into an input, and can only do so once
+                assert n.args[0] in placeholders
+                placeholders.remove(n.args[0])
+                copy_count += 1
+            else:
+                assert not n.target._schema.is_mutable, \
+                    f'aot_autograd expected to have an entirely functional graph, but found {n.format_node()}'
+    return copy_count
 
 
 @contextmanager
