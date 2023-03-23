@@ -553,9 +553,11 @@ def mkldnn_fuse_fx(gm: torch.fx.GraphModule, example_inputs):
     # the binary inputs have same tensor info(device, dtype, and layout).
 
     fake_mode = fake_mode_from_tensors(example_inputs)
-    ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
+    if not dynamo_config.dynamic_shapes:
+        ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
     gm = fuse_unary(gm)
-    gm = fuse_binary(gm)
+    if not dynamo_config.dynamic_shapes:
+        gm = fuse_binary(gm)
     # why re-run fuse_unary? we want to enable conv+binary+unary fusion,
     # such as conv+add+relu for vision model.
     gm = fuse_unary(gm)
@@ -659,11 +661,12 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     or dynamo_config.dynamic_shapes
                 ):
                     continue
-                computation_node_input_size = (
-                    node.args[0].args[0].meta.get("tensor_meta").shape
-                )
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_size = None
+                else:
+                    computation_node_input_size = (
+                        node.args[0].args[0].meta.get("tensor_meta").shape
+                    )
                 fused_module = fuse_func(
                     computation_node, unary_node, computation_node_input_size
                 )
@@ -797,17 +800,23 @@ def pack_module(gm: torch.fx.GraphModule):
             if type(cur_module) in computation_op_packed_map:
                 if cur_module.training:
                     continue
-                computation_node_input_meta = node.args[0].meta.get("tensor_meta")
+                if dynamo_config.dynamic_shapes:
+                    computation_node_input_meta = None
+                    computation_node_input_size = None
+                else:
+                    computation_node_input_meta = node.args[0].meta.get("tensor_meta")
+                    computation_node_input_size = computation_node_input_meta.shape
                 # for fp32 linear, only packed when has mkl and static shape
                 if (
-                    computation_node_input_meta.dtype == torch.float32
+                    computation_node_input_meta is not None
+                    and computation_node_input_meta.dtype == torch.float32
                     and type(cur_module) in [torch.nn.Linear]
                     and (not torch._C.has_mkl or dynamo_config.dynamic_shapes)
                 ):
                     continue
-                computation_node_input_size = computation_node_input_meta.shape
                 if (
                     type(cur_module) in [torch.nn.Linear]
+                    and computation_node_input_size is not None
                     and len(computation_node_input_size) < 2
                 ):
                     continue
