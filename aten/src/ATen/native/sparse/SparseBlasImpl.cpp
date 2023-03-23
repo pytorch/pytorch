@@ -290,25 +290,49 @@ void addmv_out_sparse_csr(
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
         if (mat.layout() == kSparseBsr) {
-          addmv_sparse_bsr(mat.values().data<scalar_t>(),
-              mat.crow_indices().toType(kLong).data<int64_t>(),
-              mat.col_indices().toType(kLong).data_ptr<int64_t>(),
-              mat.size(0),
-              mat.values().size(1),
-              mat.values().size(2),
-              vec.data<scalar_t>(),
-              alpha.to<scalar_t>(),
-              beta.to<scalar_t>(),
-              result.data<scalar_t>());
+          if (mat.crow_indices().scalar_type() == kLong) {
+            addmv_sparse_bsr(mat.values().data<scalar_t>(),
+                mat.crow_indices().data<int64_t>(),
+                mat.col_indices().data_ptr<int64_t>(),
+                mat.size(0),
+                mat.values().size(1),
+                mat.values().size(2),
+                vec.data<scalar_t>(),
+                alpha.to<scalar_t>(),
+                beta.to<scalar_t>(),
+                result.data<scalar_t>());
+          } else {
+            addmv_sparse_bsr(mat.values().data<scalar_t>(),
+                mat.crow_indices().data<int32_t>(),
+                mat.col_indices().data_ptr<int32_t>(),
+                mat.size(0),
+                mat.values().size(1),
+                mat.values().size(2),
+                vec.data<scalar_t>(),
+                alpha.to<scalar_t>(),
+                beta.to<scalar_t>(),
+                result.data<scalar_t>());
+          }
         } else if (mat.layout() == kSparseCsr) {
-          addmv_sparse_csr(mat.values().data<scalar_t>(),
-              mat.crow_indices().data<int64_t>(),
-              mat.col_indices().data_ptr<int64_t>(),
-              mat.size(0),
-              vec.data<scalar_t>(),
-              alpha.to<scalar_t>(),
-              beta.to<scalar_t>(),
-              result.data<scalar_t>());
+          if (mat.crow_indices().scalar_type() == kLong) {
+            addmv_sparse_csr(mat.values().data<scalar_t>(),
+                mat.crow_indices().data<int64_t>(),
+                mat.col_indices().data_ptr<int64_t>(),
+                mat.size(0),
+                vec.data<scalar_t>(),
+                alpha.to<scalar_t>(),
+                beta.to<scalar_t>(),
+                result.data<scalar_t>());
+          } else {
+            addmv_sparse_csr(mat.values().data<scalar_t>(),
+                mat.crow_indices().data<int32_t>(),
+                mat.col_indices().data_ptr<int32_t>(),
+                mat.size(0),
+                vec.data<scalar_t>(),
+                alpha.to<scalar_t>(),
+                beta.to<scalar_t>(),
+                result.data<scalar_t>());
+          }
         } else {
           TORCH_CHECK(false, "Unexpected layout ", mat.layout());
         }
