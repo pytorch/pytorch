@@ -449,15 +449,11 @@ def _get_target_activation_dtype_for_node(
             ) else torch.float
 
         weight_index = None
-        WEIGHT_OBS_OR_FQ_CTR = qconfig.weight if node.target not in NON_QUANTIZABLE_WEIGHT_OPS else None
         if isinstance(node, Node) and node.op == "call_function" and \
            node.target in backend_config._pattern_complex_format_to_config:
             weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
             if weight_index is None or weight_index >= len(node.args):
                 weight_index = None
-
-        if weight_index is not None:
-            input_obs_or_fq_ctr_for_args[weight_index] = qconfig.weight
 
         bias_index = None
         if isinstance(node, Node) and node.op == "call_function" and \
@@ -467,6 +463,12 @@ def _get_target_activation_dtype_for_node(
                 bias_index = None
 
         input_obs_or_fq_ctr_for_args = [qconfig.activation, qconfig.activation, qconfig.activation]
+
+        WEIGHT_OBS_OR_FQ_CTR = qconfig.weight if node.target not in NON_QUANTIZABLE_WEIGHT_OPS else None
+        if weight_index is not None:
+            input_obs_or_fq_ctr_for_args[weight_index] = qconfig.weight
+
+
         BIAS_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=bias_dtype)
         if bias_index is not None:
             input_obs_or_fq_ctr_for_args[bias_index] = BIAS_OBS_OR_FQ_CTR
