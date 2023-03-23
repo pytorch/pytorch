@@ -264,6 +264,7 @@ __all__ = [
     "true_divide",
     "type_as",
     "unbind",
+    "unflatten",
     "unfold",
     "unsafe_chunk",
     "unsafe_split_with_sizes",
@@ -5127,6 +5128,30 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
+@_onnx_symbolic("aten::unflatten")
+@symbolic_helper.quantized_args(True, False, False)
+@symbolic_helper.parse_args("v", "i", "is")
+@_beartype.beartype
+def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
+    input_dim = symbolic_helper._get_tensor_rank(input)
+    if input_dim is None:
+        return symbolic_helper._unimplemented(
+            "input_dim",
+            "ONNX and PyTorch use different strategies to split the input. "
+            "Input rank must be known at export time.",
+            input,
+        )
+
+    if dim < 0:
+        dim = input_dim + dim
+
+    input_shape = symbolic_helper._get_tensor_sizes(input)
+    shape = [
+        *input_shape[:dim],
+        *unflattened_size,
+        *input_shape[dim + 1:]
+    ]
+    return reshape(g, input, shape)
 
 @_onnx_symbolic("aten::nonzero")
 @symbolic_helper.parse_args("v")
