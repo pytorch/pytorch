@@ -205,6 +205,10 @@ class WrapperCodeGen(CodeGen):
                 import torch
                 import math
                 import random
+                import os
+                import tempfile
+                from torch._inductor.utils import maybe_profile
+                
                 from torch import empty_strided, as_strided, device
                 from {codecache.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
@@ -307,13 +311,7 @@ class WrapperCodeGen(CodeGen):
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
             if config.profiler_mark_wrapper_call:
-                self.wrapper_call.writeline(
-                    "from torch.profiler import record_function"
-                )
-                self.wrapper_call.writeline(
-                    "with record_function('inductor_wrapper_call'):"
-                )
-                stack.enter_context(self.wrapper_call.indent())
+                self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("start_graph()")
 
@@ -500,6 +498,7 @@ class WrapperCodeGen(CodeGen):
                     "parser = argparse.ArgumentParser()",
                     'parser.add_argument("--benchmark-kernels", "-k", action="store_true", help="Whether to benchmark each individual kernels")',  # noqa: B950, line too long
                     'parser.add_argument("--benchmark-all-configs", "-c", action="store_true", help="Whether to benchmark each individual config for a kernel")',  # noqa: B950, line too long
+                    'parser.add_argument("--profile", "-p", action="store_true", help="Whether to profile the compiled module")', # noqa: B950, line too long
                     "args = parser.parse_args()",
                     "",
                     "if args.benchmark_kernels:",
@@ -511,7 +510,18 @@ class WrapperCodeGen(CodeGen):
                 )
             output.writeline("else:")
             with output.indent():
-                output.writeline("benchmark_compiled_module()")
+                output.writeline("with maybe_profile(args.profile) as p:")
+                with output.indent():
+                    output.writeline("benchmark_compiled_module()")
+                output.writeline("")
+                output.writeline("if p:")
+                with output.indent():
+                    output.writelines([
+                        'fd, path = tempfile.mkstemp(prefix="compiled_module_profile_", suffix=".json")',
+                        'p.export_chrome_trace(path)',
+                        'os.close(fd)',
+                        'print(f"Chrome trace for the profile is written to {path}")',
+                    ])
 
     def define_kernel(self, name: str, kernel: str, metadata: str = None):
         metadata_comment = f"{metadata}\n" if metadata else ""
@@ -522,6 +532,11 @@ class WrapperCodeGen(CodeGen):
 
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline("from torch.profiler import record_function")
+        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        stack.enter_context(self.wrapper_call.indent())
 
     def generate_kernel_call(self, name, call_args):
         self.writeline(
@@ -859,6 +874,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def make_buffer_free(self, buffer):
         return f"{buffer.get_name()}.reset();"
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline(
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+        )
 
     def make_buffer_allocation(self, buffer):
         from .cpp import DTYPE_TO_ATEN
