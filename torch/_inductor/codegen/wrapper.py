@@ -517,7 +517,7 @@ class WrapperCodeGen(CodeGen):
                 output.writeline("if p:")
                 with output.indent():
                     output.writelines([
-                        'fd, path = tempfile.mkstemp(prefix="compiled_module_profile", suffix=".json")',
+                        'fd, path = tempfile.mkstemp(prefix="compiled_module_profile_", suffix=".json")',
                         'p.export_chrome_trace(path)',
                         'os.close(fd)',
                         'print(f"Chrome trace for the profile is written to {path}")',
