@@ -7174,6 +7174,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert compiled([])[0].device.type == "cuda"
 
         @config.patch({"triton.cudagraphs": True})
+        def test_no_device_idx_repro_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self):
+                    full = torch.ops.aten.full.default(
+                        [8, 512],
+                        1,
+                        dtype=torch.float32,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    full_1 = torch.ops.aten.full.default(
+                        [8, 512],
+                        0,
+                        dtype=torch.int64,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    return (full_1, full)
+
+            self.common(Repro(), ())
+
+        @config.patch({"triton.cudagraphs": True})
         def test_expanded_inputs_cudagraphs(self):
             @torch._dynamo.optimize("inductor")
             def fn(x, y):
