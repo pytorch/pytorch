@@ -100,6 +100,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn,
                 **compile_meta,
             )
+            binary._init_handles()
 
         call_args = [
             arg
@@ -133,8 +134,6 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
-
-        binary._init_handles()
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)

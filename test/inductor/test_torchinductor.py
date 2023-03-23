@@ -2484,7 +2484,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
-    def test_recompile_on_index(self):
+    def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
         def gemm(x, y):
