@@ -43,6 +43,33 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
+element_size_lookup = {
+    torch.bfloat16: 2,
+    torch.bool: 1,
+    torch.complex128: 16,
+    torch.complex32: 4,
+    torch.complex64: 8,
+    torch.double: 8,
+    torch.float16: 2,
+    torch.float32: 4,
+    torch.float64: 8,
+    torch.float: 4,
+    torch.half: 2,
+    torch.int16: 2,
+    torch.int32: 4,
+    torch.int64: 8,
+    torch.int8: 1,
+    torch.int: 4,
+    torch.long: 8,
+    torch.qint32: 4,
+    torch.qint8: 1,
+    torch.quint2x4: 1,
+    torch.quint4x2: 1,
+    torch.quint8: 1,
+    torch.short: 2,
+    torch.uint8: 1,
+}
+
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -697,7 +724,11 @@ class NumpyTensorVariable(TensorVariable):
                 )
         elif name == "size":
             result = ConstantVariable(product(self.size), **options)
-        elif name in ["strides", "itemsize", "base", "flags", "dtype"]:
+        elif name == "itemsize":
+            result = ConstantVariable(element_size_lookup[self.dtype])
+        elif name == "strides":
+            result = TupleVariable([ConstantVariable(element_size_lookup[self.dtype] * x) for x in self.stride])
+        elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:
             unimplemented(f"ndarray.{name} not supported")
