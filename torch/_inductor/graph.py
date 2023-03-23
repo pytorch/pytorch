@@ -1,11 +1,9 @@
-import functools
 import logging
 import operator
 import os
 import re
 import sys
 import time
-import warnings
 from typing import Dict, List, Optional, Set
 
 import sympy
@@ -69,13 +67,6 @@ def supported_dtype_of_cpp_wrapper(dtype):
         # torch.float16, # TODO: implement this
     }
     return dtype in supported_dtype
-
-
-@functools.lru_cache(None)
-def _warn_complex_not_supported():
-    warnings.warn(
-        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
-    )
 
 
 def fallback_output(t):
