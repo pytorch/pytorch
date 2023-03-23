@@ -52,11 +52,11 @@ Tensor empty_like_nested(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
   Tensor new_buffer = at::empty_like(self_nt->get_buffer(), options);
-  auto nested_size = self_nt->get_nested_size_tensor().clone();
-  auto nested_strides = self_nt->get_nested_stride_tensor().clone();
-  auto offsets = std::vector<int64_t>(self_nt->get_storage_offsets());
+  auto nested_size = self_nt->get_nested_sizes().clone();
+  auto nested_strides = self_nt->get_nested_strides().clone();
+  auto offsets = self_nt->get_storage_offsets().clone();
   auto tensor = detail::make_tensor_base<NestedTensorImpl>(
-      new_buffer, nested_size, nested_strides, std::move(offsets));
+      new_buffer, nested_size, nested_strides, offsets);
   return tensor;
 }
 
@@ -115,7 +115,7 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
   const auto* nt_src = get_nested_tensor_impl(src);
   TORCH_CHECK(
       at::equal(
-          nt_self->get_nested_size_tensor(), nt_src->get_nested_size_tensor()),
+          nt_self->get_nested_sizes(), nt_src->get_nested_sizes()),
       "copy_ only supports tensors that are the same size for Nested implementations");
   nt_self->get_buffer().copy_(nt_src->get_buffer(), non_blocking);
   return self;
