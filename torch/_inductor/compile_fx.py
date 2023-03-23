@@ -186,6 +186,7 @@ def compile_fx_inner(
                 return compiled_fn
 
     if cudagraphs:
+        # output args are tuple of first argument
         output = list(gm.graph.nodes)[-1]
         assert len(output.args) == 1
         stack_traces = [
@@ -197,17 +198,10 @@ def compile_fx_inner(
             complex_memory_overlap(t) for t in example_inputs
         )
 
-        input_is_static = {name: idx < num_fixed for idx, name in enumerate(graph.graph_inputs.keys())} 
-
-        if config.triton.cudagraph_trees:
-            skip_mutation = any(not input_is_static[inp] for inp in graph.mutated_inputs)
-        else:
-            skip_mutation = len(graph.mutated_inputs) > 0
-
         if (
             set(graph.device_types) == {"cuda"}
             and not graph.mutated_inputs
-            and not skip_mutation
+            and not has_incompatible_cudagraph_ops(gm)
             and not complex_memory_overlap_inputs
             and (len(graph.device_idxs) == 1 or not config.triton.cudagraph_trees)
         ):
@@ -226,7 +220,7 @@ def compile_fx_inner(
             if len(set(graph.device_types)) > 1:
                 developer_warning("skipping cudagraphs due to multiple devices")
             elif set(graph.device_types) == {"cuda"}:
-                if skip_mutation:
+                if graph.mutated_inputs:
                     developer_warning("skipping cudagraphs due to input mutation")
                 elif complex_memory_overlap_inputs:
                     developer_warning(
