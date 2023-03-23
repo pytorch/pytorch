@@ -316,6 +316,7 @@
   - aten/src/ATen/autocast_mode.*
   - torch/csrc/jit/passes/autocast.cpp
   - test/test_autocast.py
+  - torch/testing/_internal/autocast_test_lists.py
   approved_by:
   - leslie-fang-intel
   - jgong5

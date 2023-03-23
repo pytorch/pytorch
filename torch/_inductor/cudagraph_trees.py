@@ -1105,6 +1105,12 @@ class CUDAGraphTreeManager:
 
         self.warmed_up_functions: Set[FunctionID] = set()
 
+        # NB: cuda caching allocator will remember the stream a segment is allocated to
+        # and only allocate that segment to the same stream. we need to use a single stream
+        # for all allocations to the memory pool, otherwise the allocations to separate streams
+        # will not be reused; separate recordings would have use the same memory pool, but not
+        # the same memory.
+
         torch.cuda.synchronize()
         self.stream = torch.cuda.Stream()
         self.stream.wait_stream(torch.cuda.current_stream())
