@@ -5018,8 +5018,8 @@ class TestQuantizedConv(TestCase):
                     Y_scale, Y_zero_point, use_bias, "add_relu", use_channelwise, False,
                     input_dtype=X_qdtype, output_dtype=X_qdtype, X2_scale=X2_scale, X2_zero_point=X2_zero_point)
 
-    def _test_inductor_qconv_impl(
-        self, qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+    def _test_qconv_impl_cpu_tensor(
+        self, qconv, qconv_prepack, conv_op, batch_size,
         input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, o_pads,
         dilations, X_scale, X_zero_point, W_scale, W_zero_point, Y_scale,
@@ -5086,30 +5086,30 @@ class TestQuantizedConv(TestCase):
             dtype=output_dtype)
 
         # Calculate the result for 2.X path
-        X_q_inductor = X_q.int_repr()
-        W_q_inductor = W_q.int_repr()
+        X_q_cpu_tensor = X_q.int_repr()
+        W_q_cpu_tensor = W_q.int_repr()
 
         weight_scale = W_q.q_per_channel_scales() if use_channelwise \
             else torch.tensor(W_q.q_scale(), dtype=torch.float, device=device)
         weight_zero_point = W_q.q_per_channel_zero_points() if use_channelwise \
             else torch.tensor(W_q.q_zero_point(), dtype=torch.int64, device=device)
 
-        packed_weight, packed_bias = qconv_prepack_inductor(
-            W_q_inductor, weight_scale,
-            X_q_inductor.size(), X_scale, X_zero_point,
+        packed_weight, packed_bias = qconv_prepack(
+            W_q_cpu_tensor, weight_scale,
+            X_q_cpu_tensor.size(), X_scale, X_zero_point,
             bias_float, strides, pads, dilations, groups)
         if post_op == 'add' or post_op == 'add_relu':
-            X2_q_inductor = X2_q.int_repr()
-            Y_q_inductor = qconv_inductor(
-                X_q_inductor, X_scale, X_zero_point,
-                X2_q_inductor, X2_scale, X2_zero_point,
+            X2_q_cpu_tensor = X2_q.int_repr()
+            Y_q_cpu_tensor = qconv(
+                X_q_cpu_tensor, X_scale, X_zero_point,
+                X2_q_cpu_tensor, X2_scale, X2_zero_point,
                 packed_weight, weight_scale, weight_zero_point,
                 packed_bias, strides, pads, dilations, groups,
                 Y_scale, Y_zero_point
             )
         else:
-            Y_q_inductor = qconv_inductor(
-                X_q_inductor, X_scale, X_zero_point,
+            Y_q_cpu_tensor = qconv(
+                X_q_cpu_tensor, X_scale, X_zero_point,
                 packed_weight, weight_scale, weight_zero_point,
                 packed_bias, strides, pads, dilations, groups,
                 Y_scale, Y_zero_point
@@ -5128,7 +5128,7 @@ class TestQuantizedConv(TestCase):
         # round(2.5 + 1) is 4 assuming the rounding mode is
         # round-to-nearest, ties-to-even.
         np.testing.assert_array_almost_equal(
-            result_ref_q.int_repr().cpu().numpy(), Y_q_inductor.cpu().numpy(), decimal=0,
+            result_ref_q.int_repr().cpu().numpy(), Y_q_cpu_tensor.cpu().numpy(), decimal=0,
             err_msg=f'''X: {X_q}, W: {W_q}, b: {bias_float}, strides: {strides},
             pads: {pads}, o_pads: {o_pads}, dilations: {dilations},
             groups: {groups}, y_s: {Y_scale}, y_zp: {Y_zero_point}, X2: {X2_q}''')
@@ -5138,7 +5138,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv1d(self):
+    def test_qconv1d_cpu_tensor(self):
         batch_size = 3
         groups_list = [1, 3]
         input_channels_per_group = 2
@@ -5170,14 +5170,14 @@ class TestQuantizedConv(TestCase):
                     dilation,
                     groups,
                 )
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
-                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_int8_packed_weight
 
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
 
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv1d, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv1d, batch_size,
                     input_channels_per_group, (length, ),
                     output_channels_per_group, groups, kernel, [stride], [pad], None,
                     [dilation], X_scale, X_zero_point, W_scale, W_zero_point,
@@ -5186,7 +5186,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv2d(self):
+    def test_qconv2d_cpu_tensor(self):
         batch_size = 3
         groups_list = [1, 10]
         input_channels_per_group = 2
@@ -5218,8 +5218,8 @@ class TestQuantizedConv(TestCase):
                 pads = (pad_h, pad_w)
                 dilations = (dilation, dilation)
 
-                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
                 conv_op = torch.nn.Conv2d(
                     input_channels,
                     output_channels,
@@ -5232,8 +5232,8 @@ class TestQuantizedConv(TestCase):
 
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv_op, batch_size,
                     input_channels_per_group, (height, width),
                     output_channels_per_group, groups, kernels, strides, pads, None,
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -5242,7 +5242,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv2d_relu(self):
+    def test_qconv2d_relu_cpu_tensor(self):
         batch_size = 3
         input_channels_per_group = 2
         height = 10
@@ -5274,8 +5274,8 @@ class TestQuantizedConv(TestCase):
                 pads = (pad_h, pad_w)
                 dilations = (dilation, dilation)
 
-                qconv_inductor = torch.ops.quantized.conv_relu_int8_packed_weight
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_relu_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
                 conv_op = torch.nn.Conv2d(
                     input_channels,
                     output_channels,
@@ -5289,8 +5289,8 @@ class TestQuantizedConv(TestCase):
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
 
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv_op, batch_size,
                     input_channels_per_group, (height, width),
                     output_channels_per_group, groups, kernels, strides, pads, None,
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -5299,7 +5299,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv2d_add(self):
+    def test_qconv2d_add_cpu_tensor(self):
         batch_size = 3
         groups_list = [1, 10]
         input_channels_per_group = 2
@@ -5333,8 +5333,8 @@ class TestQuantizedConv(TestCase):
                 pads = (pad_h, pad_w)
                 dilations = (dilation, dilation)
 
-                qconv_inductor = torch.ops.quantized.conv_add_int8_packed_weight
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_add_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
                 conv_op = torch.nn.Conv2d(
                     input_channels,
                     output_channels,
@@ -5347,8 +5347,8 @@ class TestQuantizedConv(TestCase):
 
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv_op, batch_size,
                     input_channels_per_group, (height, width),
                     output_channels_per_group, groups, kernels, strides, pads, None,
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -5358,7 +5358,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv2d_add_relu(self):
+    def test_qconv2d_add_relu_cpu_tensor(self):
         batch_size = 3
         height = 10
         width = 10
@@ -5393,8 +5393,8 @@ class TestQuantizedConv(TestCase):
                 pads = (pad_h, pad_w)
                 dilations = (dilation, dilation)
 
-                qconv_inductor = torch.ops.quantized.conv_add_relu_int8_packed_weight
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_add_relu_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
                 conv_op = torch.nn.Conv2d(
                     input_channels,
                     output_channels,
@@ -5407,8 +5407,8 @@ class TestQuantizedConv(TestCase):
 
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv_op, batch_size,
                     input_channels_per_group, (height, width),
                     output_channels_per_group, groups, kernels, strides, pads, None,
                     dilations, X_scale, X_zero_point, W_scale, W_zero_point,
@@ -5418,7 +5418,7 @@ class TestQuantizedConv(TestCase):
 
     @skipIfNoX86
     @skipIfNoONEDNN
-    def test_inductor_qconv3d(self):
+    def test_qconv3d_cpu_tensor(self):
         batch_size = 3
         input_channels_per_group = 2
         D = 6
@@ -5454,8 +5454,8 @@ class TestQuantizedConv(TestCase):
                 pads = (pad_d, pad_h, pad_w)
                 dilations = (dilation, dilation, dilation)
 
-                qconv_inductor = torch.ops.quantized.conv_int8_packed_weight
-                qconv_prepack_inductor = torch.ops.quantized.conv_prepack_cpu_tensor
+                qconv = torch.ops.quantized.conv_int8_packed_weight
+                qconv_prepack = torch.ops.quantized.conv_prepack_cpu_tensor
                 conv_op = torch.nn.Conv3d(
                     input_channels,
                     output_channels,
@@ -5467,8 +5467,8 @@ class TestQuantizedConv(TestCase):
                 )
                 X_qdtype = torch.quint8
                 weight_dtype = torch.qint8
-                self._test_inductor_qconv_impl(
-                    qconv_inductor, qconv_prepack_inductor, conv_op, batch_size,
+                self._test_qconv_impl_cpu_tensor(
+                    qconv, qconv_prepack, conv_op, batch_size,
                     input_channels_per_group, (D, H, W), output_channels_per_group,
                     groups, kernels, strides, pads, None, dilations, X_scale,
                     X_zero_point, W_scale, W_zero_point, Y_scale, Y_zero_point,

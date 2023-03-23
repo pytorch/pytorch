@@ -87,6 +87,7 @@ TORCH_LIBRARY(quantized, m) {
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_prepack_cpu_tensor(Tensor weight, Tensor w_scales, int[] x_shape, float x_scale, int x_zp, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups) -> (Tensor, Tensor)"));
 
   // conv calculation for inductor path
+  m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_unary.tensor(Tensor qx, Tensor input_scale, Tensor input_zero_point, Tensor qw, Tensor weight_scale, Tensor weight_zero_point, int w_axis, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, Tensor output_scale, Tensor output_zero_point, str unary_post_op) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_int8_packed_weight(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_relu_int8_packed_weight(Tensor qx, float x_scale, int x_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));
   m.def(TORCH_SELECTIVE_SCHEMA("quantized::conv_add_int8_packed_weight(Tensor qx, float x_scale, int x_zero_point, Tensor qaccum, float accum_scale, int accum_zero_point, Tensor qw, Tensor w_scale, Tensor w_zero_point, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, float output_scale, int output_zero_point) -> Tensor"));

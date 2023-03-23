@@ -1432,7 +1432,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
     int64_t output_zero_point);
 
 template <PostOp postOpFused>
-static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
+static at::Tensor packed_weights_conv_onednn(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
     int64_t act_zero_point,
@@ -1456,7 +1456,7 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   bool is_1d = (1 == kSpatialDim);
   // has_accum: extra input besides the conv to do conv add fusion.
   bool has_accum = (postOpFused == PostOp::Add) || (postOpFused == PostOp::AddReLU);
-  std::string func_name = "Inductor int8 conv";
+  std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
   if (postOpFused == PostOp::ReLU) {
     func_name += "_relu";
@@ -1465,7 +1465,6 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   } else if (postOpFused == PostOp::AddReLU) {
     func_name += "_add_relu";
   }
-  func_name += "_with_prepacked_weight";
   // For conv1d, compute as conv2d then squeeze output
   if (kSpatialDim == 1) {
     kSpatialDim += 1;
@@ -1767,7 +1766,7 @@ class ConvInt8CpuTensor final {
       double output_scale,
       int64_t output_zero_point) {
 #if AT_MKLDNN_ENABLED()
-    return onednn_conv_int8_with_prepacked_weight_bias<postOpFused>(
+    return packed_weights_conv_onednn<postOpFused>(
         act, act_scale, act_zero_point,
         c10::nullopt /*accum*/, 0.0 /*accum_scale*/, 0 /*accum_zero_point*/,
         weight, weight_scales, weight_zero_points,
@@ -1800,7 +1799,7 @@ class ConvAddInt8CpuTensor final {
       double output_scale,
       int64_t output_zero_point) {
 #if AT_MKLDNN_ENABLED()
-    return onednn_conv_int8_with_prepacked_weight_bias<postOpFused>(
+    return packed_weights_conv_onednn<postOpFused>(
         act, act_scale, act_zero_point,
         accum, accum_scale, accum_zero_point,
         weight, inv_weight_scales, weight_zero_points,
@@ -1812,7 +1811,72 @@ class ConvAddInt8CpuTensor final {
   }
 };
 
+class ConvUnary final {
+ public:
+  static Tensor run_with_packed_weight_bias(
+      Tensor qx, // contains quantized values but not QTensor
+      Tensor input_scale,
+      Tensor input_zero_point,
+      Tensor qw,
+      Tensor weight_scale,
+      Tensor weight_zero_point,
+      int64_t w_axis,
+      c10::optional<Tensor> bias,
+      torch::List<int64_t> stride,
+      torch::List<int64_t> padding,
+      torch::List<int64_t> dilation,
+      int64_t groups,
+      Tensor output_scale,
+      Tensor output_zero_point,
+      c10::string_view unary_post_op) {
+#if AT_MKLDNN_ENABLED()
+    TORCH_CHECK(
+        (input_scale.ndimension() == 0) && (input_scale.dtype() == at::kFloat),
+        "expected input_scale to be a 0d scalar tensor but got: ",
+        input_scale.ndimension(),
+        "expected input_scale of data type float but got: ",
+        input_scale.dtype());
+    TORCH_CHECK(
+        (input_zero_point.ndimension() == 0) && (input_zero_point.dtype() == at::kLong),
+        "expected input_zero_point to be a 0d scalar tensor but got: ",
+        input_zero_point.ndimension(),
+        "expected input_zero_point of data type float but got: ",
+        input_zero_point.dtype());
+    TORCH_CHECK(
+        (output_scale.ndimension() == 0) && (output_scale.dtype() == at::kFloat),
+        "expected output_scale to be a 0d scalar tensor but got: ",
+        output_scale.ndimension(),
+        "expected output_scale of data type float but got: ",
+        output_scale.dtype());
+    TORCH_CHECK(
+        (output_zero_point.ndimension() == 0) && (output_zero_point.dtype() == at::kLong),
+        "expected output_zero_point to be a 0d scalar tensor but got: ",
+        output_zero_point.ndimension(),
+        "expected output_zero_point of data type float but got: ",
+        output_zero_point.dtype());
+    if ((unary_post_op == "relu") || (unary_post_op == "relu_")) {
+      return ConvInt8CpuTensor<PostOp::ReLU>::run_with_packed_weight_bias(
+        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
+        qw, weight_scale, weight_zero_point, bias,
+        stride, padding, dilation, groups,
+        output_scale.item().toDouble(), output_zero_point.item().toLong()
+      );
+    } else {
+      return ConvInt8CpuTensor<PostOp::None>::run_with_packed_weight_bias(
+        qx, input_scale.item().toDouble(), input_zero_point.item().toLong(),
+        qw, weight_scale, weight_zero_point, bias,
+        stride, padding, dilation, groups,
+        output_scale.item().toDouble(), output_zero_point.item().toLong()
+      );
+    }
+#endif
+    TORCH_CHECK(false, "Unimplemented of ConvUnary");
+  }
+};
+
+
 TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
+  m.impl(TORCH_SELECTIVE_NAME("quantized::conv_unary.tensor"),      ConvUnary::run_with_packed_weight_bias);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_int8_packed_weight"),      ConvInt8CpuTensor<PostOp::None>::run_with_packed_weight_bias);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_relu_int8_packed_weight"), ConvInt8CpuTensor<PostOp::ReLU>::run_with_packed_weight_bias);
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_add_int8_packed_weight"),  ConvAddInt8CpuTensor<PostOp::Add>::run_with_packed_weight_bias);
