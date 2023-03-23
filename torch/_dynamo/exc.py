@@ -111,13 +111,13 @@ def augment_exc_message(exc, msg="\n"):
     ):
         if hasattr(exc.inner_exception, "buck_command"):
             msg += (
-                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                f"\nMinifier script written to {exc.inner_exception.minifier_path} Run "
                 f"this buck command to find the smallest traced graph "
                 f"which reproduces this error: {exc.inner_exception.buck_command}\n"
             )
         else:
             msg += (
-                f"\nMinifier script written to {exc.inner_exception.minifier_path}. Run "
+                f"\nMinifier script written to {exc.inner_exception.minifier_path} Run "
                 "this script to find the smallest traced graph which reproduces this error.\n"
             )
 

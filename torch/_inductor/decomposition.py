@@ -18,6 +18,7 @@ prims = torch.ops.prims
 
 inductor_decompositions = get_decompositions(
     [
+        aten.addmv,
         aten.arange,
         aten.bitwise_and_,
         aten.bitwise_or_,
