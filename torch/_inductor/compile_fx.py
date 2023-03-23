@@ -186,6 +186,7 @@ def compile_fx_inner(
                 return compiled_fn
 
     if cudagraphs:
+        # output args are tuple of first argument
         output = list(gm.graph.nodes)[-1]
         assert len(output.args) == 1
         stack_traces = [
