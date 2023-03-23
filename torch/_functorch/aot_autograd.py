@@ -2768,7 +2768,8 @@ def aot_function(
             larger Aten ops into simpler or core Aten ops.
         inference_compiler (Optional[Callable]): A Python function that accepts an
             Fx graph with Aten ops and input args, and returns a Callable that
-            semantically is equivalent to the input Fx graph.  Default: None
+            semantically is equivalent to the input Fx graph. inference_compiler is invoked
+            if no autograd is needed. Default: None
             (when None, it defaults to the :attr:`fw_compiler`)
     Returns:
         Returns a ``Callable`` that retains the eager behavior of the original
