@@ -227,7 +227,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
+            #sys.stderr.write('Downloading: \"{}\" to {}\n'.format(url, cached_file))
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -752,7 +752,7 @@ def load_state_dict_from_url(
         filename = file_name
     cached_file = os.path.join(model_dir, filename)
     if not os.path.exists(cached_file):
-        sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
+        #sys.stderr.write('Downloading: "{}" to {}\n'.format(url, cached_file))
         hash_prefix = None
         if check_hash:
             r = HASH_REGEX.search(filename)  # r is Optional[Match[str]]
