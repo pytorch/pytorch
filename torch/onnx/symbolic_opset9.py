@@ -5133,8 +5133,8 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 @symbolic_helper.parse_args("v", "i", "is")
 @_beartype.beartype
 def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
-    input_dim = symbolic_helper._get_tensor_rank(input)
-    if input_dim is None:
+    input_rank = symbolic_helper._get_tensor_rank(input)
+    if input_rank is None:
         return symbolic_helper._unimplemented(
             "input_dim",
             "ONNX and PyTorch use different strategies to split the input. "
@@ -5143,7 +5143,7 @@ def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
         )
 
     if dim < 0:
-        dim = input_dim + dim
+        dim = input_rank + dim
 
     input_shape = symbolic_helper._get_tensor_sizes(input)
     shape = [
