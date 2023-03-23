@@ -32,6 +32,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing import make_tensor
+from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -1474,6 +1475,21 @@ class CommonTemplate:
             return (torch.sum(a + b, -1, keepdim=True),)
 
         self.common(fn, (torch.randn(8, 8), torch.randn(8, 8)))
+
+    @largeTensorTest("6GB")
+    def test_large_tensor_reduction(self):
+        # Test 64-bit indexing works correctly
+        def fn(a):
+            return torch.max(a)
+
+        t = torch.ones(2**32, dtype=torch.int8, device=self.device)
+        t[-1] = 2
+
+        # self.common OOMs here because it copies inputs to check for mutations
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(t)
+        expect = torch.tensor(2, dtype=torch.int8, device=self.device)
+        self.assertEqual(expect, actual)
 
     def test_softmax(self):
         def fn(a, b):

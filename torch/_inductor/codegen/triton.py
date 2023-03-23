@@ -296,11 +296,13 @@ class TritonOverrides(OpOverrides):
         return f"{a} | {b}"
 
     @staticmethod
-    def rand(seed, offset, _):  # _ here to keep the contract identical to CPU rand op
+    def rand(seed, offset, _):
+        offset = f"({offset}).to(tl.uint32)"
         return f"tl.rand({seed}, {offset})"
 
     @staticmethod
-    def randn(seed, offset, _):  # _ here to keep the contract identical to CPU randn op
+    def randn(seed, offset, _):
+        offset = f"({offset}).to(tl.uint32)"
         return f"tl.randn({seed}, {offset})"
 
     @staticmethod
@@ -526,7 +528,7 @@ class IterationRangesRoot(IterationRanges):
 
     def ranges_code(self):
         size = self.kernel.indexing_size_str(self.index, self.prefix)
-        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}"
+        return f"tl.arange(0, {self.prefix.upper()}BLOCK){size}.to(tl.int64)"
 
     def pid_cache_lookup(self, key):
         if key in self.pid_cache:
@@ -543,7 +545,7 @@ class IterationRangesRoot(IterationRanges):
                 f"{self.name} = {self.ranges_code()}",
             )
         else:
-            pid = self.pid_cache_lookup(f"tl.program_id({self.index})")
+            pid = self.pid_cache_lookup(f"tl.program_id({self.index}).to(tl.int64)")
             code.writelines(
                 [
                     f"{x}offset = {pid} * {x.upper()}BLOCK",
@@ -916,16 +918,16 @@ class TritonKernel(Kernel):
 
         if (need_dense and not have_dense) or isinstance(index, sympy.Integer):
             if copy_shape:
-                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+                index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int64)"
             else:
-                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int32)"
+                index_str = f"{index_str} + tl.zeros({self.dense_size_str()}, tl.int64)"
             if isinstance(index, sympy.Integer):
                 return index_str, set(), "None"
             else:
                 mask_vars = dense_mask_vars
         elif not have_loop_vars and copy_shape:
             mask_vars = dense_mask_vars
-            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int32)"
+            index_str = f"{index_str} + tl.zeros({copy_shape}.shape, tl.int64)"
 
         if override_mask:
             mask_vars = {override_mask}
@@ -1131,8 +1133,8 @@ class TritonKernel(Kernel):
                 self.suffix.writelines(
                     [
                         f"{accumulator_index}_reduce = "
-                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int32)",
-                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK)"
+                        f"tl.{reduction_type}({accumulator}, {dim})[{', '.join(sizes)}].to(tl.int64)",
+                        f"{accumulator_index}_mask = tl.arange(0, {reduction_range_prefix.upper()}BLOCK).to(tl.int64)"
                         f"[{', '.join(reduction_sizes)}] == {accumulator_index}_reduce",
                         f"{result_var} = tl.sum("
                         f"tl.where({accumulator_index}_mask, {accumulator_index}, 0), {dim})[{', '.join(sizes)}]",
