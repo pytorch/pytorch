@@ -309,6 +309,7 @@ TESTED_OPS: frozenset[str] = frozenset(
         "sqrt",
         "stft",
         "t",
+        "unflatten",
     ]
 )
 
