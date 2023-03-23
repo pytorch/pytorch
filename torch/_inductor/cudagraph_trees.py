@@ -386,7 +386,7 @@ class CUDAWarmupNode:
         existing_cuda_graph: torch.cuda.Graph,
         device_index: int,
         stack_traces: Optional[StackTraces],
-        stream: torch.cuda.Stream
+        stream: torch.cuda.Stream,
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -504,7 +504,7 @@ class CUDAGraphNode:
         cuda_graphs_pool: Tuple[int, int],
         device_index: int,
         stack_traces: Optional[StackTraces],
-        stream: torch.cuda.Stream
+        stream: torch.cuda.Stream,
     ):
         assert isinstance(inputs, (list, tuple))
 
@@ -1119,7 +1119,6 @@ class CUDAGraphTreeManager:
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
             # Keeps Memory Pool Alive
             self.graph = torch.cuda.CUDAGraph()
-
 
             self.cuda_graphs_thread_pool = torch.cuda.graph_pool_handle()
 
