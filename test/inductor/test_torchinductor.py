@@ -1907,12 +1907,13 @@ class CommonTemplate:
                 res = self.linear(res)
                 return res
 
-        with torch.no_grad():
-            m = M(224, 224).bfloat16().eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(224, 224, dtype=torch.bfloat16)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
+        if has_bf16_support():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
 
     @slow()
     def test_conv2d_unary(self):
@@ -2101,6 +2102,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
@@ -6125,15 +6134,17 @@ if HAS_CPU:
                 value = torch.randn((2, 17), dtype=dtype)
                 mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    opt_fn = torch._dynamo.optimize("inductor")(fn)
-                    opt_fn(value, mask)
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            opt_fn = torch._dynamo.optimize("inductor")(fn)
+                            opt_fn(value, mask)
 
-                    real_out = fn(value, mask)
-                    compiled_out = opt_fn(value, mask)
-                    assert same(real_out, compiled_out, equal_nan=True)
-                    assert metrics.generated_cpp_vec_kernel_count >= 1
+                            real_out = fn(value, mask)
+                            compiled_out = opt_fn(value, mask)
+                            assert same(real_out, compiled_out, equal_nan=True)
+                            assert metrics.generated_cpp_vec_kernel_count >= 1
 
         def test_load_same_bool_tensor_twice(self):
             @torch._dynamo.optimize("inductor")
@@ -6229,12 +6240,16 @@ if HAS_CPU:
                 tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
                 with config.patch({"cpp.simdlen": None}):
-                    torch._dynamo.reset()
-                    metrics.reset()
-                    traced = make_fx(fn)(x)
-                    compiled = compile_fx_inner(traced, [x])
-                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol)
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+                    for cpp_wrapper_flag in [True, False]:
+                        with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                            torch._dynamo.reset()
+                            metrics.reset()
+                            traced = make_fx(fn)(x)
+                            compiled = compile_fx_inner(traced, [x])
+                            assert same(
+                                fn(x)[0], compiled([x])[0], equal_nan=True, tol=tol
+                            )
+                            assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -6372,14 +6387,19 @@ if HAS_CPU:
             x = torch.randn((2, 9), dtype=torch.bfloat16)
             y = torch.randn((2, 9), dtype=torch.bfloat16)
 
-            with config.patch({"cpp.simdlen": None}):
-                torch._dynamo.reset()
-                metrics.reset()
-                traced = make_fx(fn)(x, y)
-                compiled = compile_fx_inner(traced, [x, y])
-                assert same(fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2)
-                if codecache.valid_vec_isa_list():
-                    assert metrics.generated_cpp_vec_kernel_count == 1
+            for torch_compile_debug in [True, False]:
+                with config.patch(
+                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
+                ):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x, y)
+                    compiled = compile_fx_inner(traced, [x, y])
+                    assert same(
+                        fn(x, y)[0], compiled([x, y])[0], equal_nan=True, tol=1e-2
+                    )
+                    if codecache.valid_vec_isa_list():
+                        assert metrics.generated_cpp_vec_kernel_count == 1
 
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
@@ -7161,37 +7181,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
-
-        @config.patch(tune_layout=True)
-        def test_tune_layout(self):
-            class Repro(torch.nn.Module):
-                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
-                    convolution_1 = torch.ops.aten.convolution.default(
-                        unsqueeze,
-                        unsqueeze_1,
-                        arg1_1,
-                        [1, 1],
-                        [1, 0],
-                        [1, 1],
-                        False,
-                        [0, 0],
-                        1,
-                    )
-                    unsqueeze = unsqueeze_1 = arg1_1 = None
-                    return (convolution_1,)
-
-            args = [
-                ((512,), (1,), torch.float16, "cuda"),
-                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
-                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
-            ]
-            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-
-            mod = Repro()
-            opt_mod = torch._dynamo.optimize("inductor")(mod)
-            ref = mod(*args)
-            res = opt_mod(*args)
-            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):

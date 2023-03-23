@@ -2109,7 +2109,15 @@ class CppKernelProxy(CppKernel):
                                 node.replace_all_uses_with(val_node)
                                 sub_graph.erase_node(node)
 
-                    sub_graph.lint()
+                    # For debug mode, the graph of LoopBody will attach a new GraphModule as
+                    # owning_module for debugging while the release mode will not. The lint will
+                    # check whether the graph has owning_module to decide if it needs to check
+                    # call_module. LoopBody might contain get_index as a module call. But it
+                    # is just a function. Hence, it cannot pass the lint check for debug mode.
+                    # We bypass the check if the owning_module is None. Eventually, we should call
+                    # get_index via call_function but not call_module.
+                    if sub_graph.owning_module is None:
+                        sub_graph.lint()
 
                 def _eliminate_redundant_to_node(sub_grah: torch.fx.Graph):
                     # TODO(Eikan) Remove redundant to_dtype like load_bf16 + to_fp32 + to_bf16 + store_bf16
