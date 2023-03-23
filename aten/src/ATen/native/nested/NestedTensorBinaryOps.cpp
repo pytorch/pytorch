@@ -79,10 +79,7 @@ Tensor NestedTensor_elementwise_Tensor(
     const Tensor& self,
     const Tensor& other,
     const std::string& op_name,
-    bool supports_striding,
     Func f) {
-  Tensor self_contiguous = self;
-  Tensor other_contiguous = other;
   // self is a scalar
   if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
     auto other_impl = get_nested_tensor_impl(other);
@@ -128,8 +125,9 @@ Tensor NestedTensor_elementwise_Tensor(
     }
 
     if (is_broadcastable_3d) {
-      self_contiguous = self.contiguous();
-      self_ptr = get_nested_tensor_impl(self_contiguous);
+      if (!nested_tensor_impl_is_contiguous(self_ptr)) {
+        self_ptr = get_nested_tensor_impl(self.contiguous());
+      }
       const auto self_buffer = self_ptr->get_buffer();
       const auto self_sizes = self_ptr->get_nested_sizes();
       auto result_buffer = at::empty_like(self_buffer);
@@ -148,12 +146,8 @@ Tensor NestedTensor_elementwise_Tensor(
 
   NestedTensorImpl* self_impl = nullptr;
   NestedTensorImpl* other_impl = nullptr;
-
-  self_contiguous = supports_striding ? self.contiguous() : self;
-  other_contiguous = supports_striding ? other.contiguous() : other;
-
   std::tie(self_impl, other_impl) =
-      get_elementwise_nested_tensor_impl(self_contiguous, other_contiguous, op_name);
+      get_elementwise_nested_tensor_impl(self, other, op_name);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self_impl);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(other_impl);
   return wrap_buffer(
@@ -169,14 +163,14 @@ Tensor NestedTensor_add_Tensor(
     const Tensor& other,
     const Scalar& alpha) {
   return NestedTensor_elementwise_Tensor(
-      self, other, "add", true /* supports_striding*/, [alpha](const Tensor& b1, const Tensor& b2) {
+      self, other, "add", [alpha](const Tensor& b1, const Tensor& b2) {
         return at::add(b1, b2, alpha);
       });
 }
 
 Tensor NestedTensor_mul_Tensor(const Tensor& self, const Tensor& other) {
   return NestedTensor_elementwise_Tensor(
-      self, other, "mul", false /* supports_striding*/, [](const Tensor& b1, const Tensor& b2) {
+      self, other, "mul", [](const Tensor& b1, const Tensor& b2) {
         return at::mul(b1, b2);
       });
 }
@@ -188,7 +182,7 @@ Tensor NestedTensor_mul_Scalar(const Tensor& self, const Scalar& other) {
 
 Tensor NestedTensor_div_Tensor(const Tensor& self, const Tensor& other) {
   return NestedTensor_elementwise_Tensor(
-      self, other, "div", false /* supports_striding*/, [](const Tensor& b1, const Tensor& b2) {
+      self, other, "div", [](const Tensor& b1, const Tensor& b2) {
         return at::div(b1, b2);
       });
 }
