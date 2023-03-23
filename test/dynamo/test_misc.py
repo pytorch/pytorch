@@ -4391,6 +4391,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             compiler_fn=None,
             root_tx=None,
             export=False,
+            export_constraints=None,
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
@@ -4792,53 +4793,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_partial_constraint_range(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 4:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
-        with self.assertRaises(
-            torch._dynamo.exc.InternalTorchDynamoError,
-        ):
-            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_no_raise_partial_constraint_range(self):
-        y = torch.randn([5, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 4:
-                return x.sin()
-            return x.cos()
-
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
-        torch._dynamo.reset()
-        torch._dynamo.optimize("eager")(my_dyn_fn)(y)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_illegal_constraint_range(self):
-        y = torch.randn([5, 3, 3])
-        torch._dynamo.mark_dynamic_constrain(y, 0, min=5, max=7)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempt to constrain already constrained index 0"
-        ):
-            torch._dynamo.mark_dynamic_constrain(y, 0, min=2, max=4)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_raise_illegal_constraint_range_min_max_only(self):
-        y = torch.randn([5, 3, 3])
-        torch._dynamo.mark_dynamic_constrain(y, 0, min=5)
-        with self.assertRaisesRegex(
-            RuntimeError, "Attempt to constrain already constrained index 0"
-        ):
-            torch._dynamo.mark_dynamic_constrain(y, 0, max=4)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_no_raise_guard_partial_constraint_across_break(self):
         y = torch.randn([3, 3, 3])
 
@@ -5020,41 +4974,6 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.mark_dynamic(x, 2)
         torch._dynamo.optimize(counter)(my_dyn_fn)(x)
         self.assertEqual(counter.frame_count, 3)
-
-        # Clear dynamic
-        torch._dynamo.clear_dynamic(x, 0)
-        torch._dynamo.clear_dynamic(x, 1)
-        torch._dynamo.clear_dynamic(x, 2)
-        # Run with dynamic 0, 2, subset!
-        torch._dynamo.mark_dynamic(x, 2)
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        self.assertEqual(counter.frame_count, 4)
-
-    @torch._dynamo.config.patch(dynamic_shapes=True)
-    def test_py_guards_constrain_dynamic(self):
-        x = torch.randn([7, 7, 7])
-
-        def my_dyn_fn(a):
-            if a.shape[0] > 5:
-                return a.cos()
-            return a.sin()
-
-        torch._dynamo.mark_dynamic_constrain(x, 0, min=4, max=10)
-        counter = CompileCounter()
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        # First compile
-        self.assertEqual(counter.frame_count, 1)
-        # Constrain, narrowing, should not recompile
-        torch._dynamo.clear_dynamic(x, 0)
-        torch._dynamo.mark_dynamic_constrain(x, 0, min=5, max=8)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        self.assertEqual(counter.frame_count, 1)
-        torch._dynamo.clear_dynamic(x, 0)
-        # Constrain, widening, should recompile
-        torch._dynamo.mark_dynamic_constrain(x, 0, min=3, max=10)
-        torch._dynamo.optimize(counter)(my_dyn_fn)(x)
-        self.assertEqual(counter.frame_count, 2)
 
     def test_torch_compile_ctx_on_forward_and_training_step(self):
         class MyModel(torch.nn.Module):

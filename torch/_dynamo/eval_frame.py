@@ -566,8 +566,9 @@ def explain(f, *args, **kwargs):
 @dataclasses.dataclass
 class Constraint:
     w_tensor: weakref.ReferenceType[torch.Tensor]
+    t_id: int
     dim: int
-    constraint_range: Optional[MinMaxConstraint]
+    constraint_range: Optional[StrictMinMaxConstraint]
 
 
 def export(

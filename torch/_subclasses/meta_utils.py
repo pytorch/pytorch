@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 import weakref
-from typing import ContextManager, Dict, List, Optional
+from typing import ContextManager, List, Optional
 
 import torch
 from torch._guards import Source

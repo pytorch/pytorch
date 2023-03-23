@@ -20,7 +20,7 @@ from torch._guards import (
     GuardSource,
     Source,
 )
-from torch.fx.experimental.symbolic_shapes import SYMPY_INTERP
+from torch.fx.experimental.symbolic_shapes import RelaxedUnspecConstraint, SYMPY_INTERP
 
 from . import config, convert_frame, mutation_guard
 from .eval_frame import set_guard_error_hook, set_guard_fail_hook
@@ -422,10 +422,13 @@ class GuardBuilder(GuardBuilderBase):
         output_graph = self.check_fn_manager.output_graph
         # NB: self.output_graph can be None in the debug_nops tests
         fs = output_graph.tracked_fakes
+        dyn_ranges_or_indices = [a.dynamic_indices for a in fs]
         guards = output_graph.shape_env.produce_guards(
             [a.fake for a in fs],
             [a.source for a in fs],
+            constraint_inputs=dyn_ranges_or_indices,
             source_ref=self.source_ref,
+            strict_mark_dyn=output_graph.export,
         )
         for shape_guard in guards:
             self._produce_guard_code(guard, [shape_guard], shape_env=True)

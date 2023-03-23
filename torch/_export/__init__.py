@@ -241,4 +241,4 @@ def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
 # )
 def dynamic_dim(t: torch.Tensor, index: int):
     from torch._dynamo.eval_frame import Constraint
-    return Constraint(weakref.ref(t), index, None)
+    return Constraint(weakref.ref(t), id(t), index, None)

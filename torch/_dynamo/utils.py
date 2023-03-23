@@ -23,7 +23,7 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch._logging
 from . import config
@@ -43,7 +43,11 @@ import torch.fx.experimental.symbolic_shapes
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._subclasses.fake_tensor import FakeTensor
-from torch.fx.experimental.symbolic_shapes import DimConstraint, DimDynamic
+from torch.fx.experimental.symbolic_shapes import (
+    DimConstraint,
+    DimDynamic,
+    RelaxedUnspecConstraint,
+)
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._pytree import tree_flatten, tree_map
 
@@ -1432,6 +1436,44 @@ def format_bytecode(prefix, name, filename, line_no, code):
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
+def expand(
+    e: torch.Tensor, constraint_dims: Optional[DimList[DimConstraint]]
+) -> DimList[DimConstraint]:
+    constraint_dims_exhaustive = []
+    if constraint_dims is None:
+        constraint_dims_exhaustive = [None] * e.dim()
+    else:
+        for idx in range(0, e.dim()):
+            if idx in constraint_dims:
+                if isinstance(constraint_dims, set):
+                    constraint_dims_exhaustive.append(idx)
+                else:
+                    constraint_dims_exhaustive.append(constraint_dims[idx])
+            else:
+                constraint_dims_exhaustive.append(None)
+    return constraint_dims_exhaustive
+
+
+def export_contraints_to_contraints(dynamic_constraints) -> Dict[int, DimConstraint]:
+    return {
+        value.dim: RelaxedUnspecConstraint()
+        if value is not None and value.constraint_range is None
+        else value.constraint_range
+        if value is not None and value.constraint_range is not None
+        else None
+        for value in (
+            dynamic_constraints if dynamic_constraints is not None else [None]
+        )
+    }
+
+
+def dynamic_indices_to_contraints(dynamic_indices: Set[int]) -> DimList[DimConstraint]:
+    return [
+        RelaxedUnspecConstraint() if value is not None else value
+        for value in (dynamic_indices if dynamic_indices is not None else [None])
+    ]
+
+
 # Note - this could live in shape_env, but then we would need to plumb the
 # config as an input, and that seems a little annoying for little
 # gain.
@@ -1451,12 +1493,9 @@ def dynamic_dims_from_tensor(
     # We suppose we could patch the tests, but that feels like a strange thing to add to
     # what should just be a dynamic shapes test.
     # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
-    if constraint_dims is None:
-        constraint_dims = [None] * e.dim()
-    else:
-        assert e.dim() == len(constraint_dims)
+    constraint_dims_exhaustive = expand(e, constraint_dims)
     dynamic_dims: DimList[DimDynamic] = []
-    for constraint in constraint_dims:
+    for constraint in constraint_dims_exhaustive:
         # NB: Technically this is not necessary as ShapeEnv will take care
         # of this too, but it's more direct to do it this way
         if constraint is not None:

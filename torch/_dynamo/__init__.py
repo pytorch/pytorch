@@ -167,3 +167,36 @@ def mark_dynamic(t, index):
     assert isinstance(index, (list, tuple))
     for i in index:
         mark_dynamic(t, i)
+
+
+@forbid_in_graph
+def clear_dynamic(t, index):
+    """
+    Marks a given index or list of indices as not dynamic.
+    :param t: The tensor object to operate on.
+    :type t: tensor
+    :param index: The index or list of indices to mark as not dynamic.
+    :type index: int or list[int]
+    :raises AssertionError: If the tensor does not have
+        any dynamic dimensions.
+    """
+    if isinstance(index, int):
+        assert hasattr(
+            t, "_dynamo_dynamic_indices"
+        ), "Illegal call to clear without dynamic dims"
+        t._dynamo_dynamic_indices.remove(index)
+        return
+
+    assert isinstance(index, (list, tuple))
+    for i in index:
+        clear_dynamic(t, i)
+
+
+@forbid_in_graph
+def has_dynamic_dims(t):
+    return hasattr(t, "_dynamo_dynamic_indices")
+
+
+@forbid_in_graph
+def clear_dynamic_dims(t):
+    delattr(t, "_dynamo_dynamic_indices")

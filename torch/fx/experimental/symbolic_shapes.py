@@ -1695,7 +1695,7 @@ class ShapeEnv:
         # TODO: Make this more efficient by binding all the size/stride/offsets
         # to locals before performing tests on them.
 
-        from torch._dynamo.source import NegateSource, TensorPropertySource, TensorProperty
+        from torch._dynamo.source import TensorPropertySource, TensorProperty
 
         # Actual codegen must be delayed as we don't necessarily know what
         # the symbol mapping is
@@ -1728,7 +1728,6 @@ class ShapeEnv:
                 if isinstance(s, sympy.Symbol):
                     symbol_to_source[s].append(source)
                     if constraint is not None:
-                        breakpoint()
                         symbol_to_constraints[s].append(constraint)
                 else:
                     if constraint is not None:
@@ -1876,6 +1875,10 @@ class ShapeEnv:
                 if len(bounds) > 1:
                     exprs.append(" <= ".join(bounds))
 
+        if constraint_violations:
+            msgs = [f"{i}. {msg()}" for i, msg in enumerate(constraint_violations)]
+            msgs = "   \n".join(msgs)
+            raise RuntimeError(f"Constraints violated!\n{msgs}")
         return exprs
 
     def evaluate_guards_for_args(self, placeholders, args):
@@ -2257,7 +2260,7 @@ class ShapeEnv:
         return concrete_val
 
 def _dynamic_dim_range(t, d) -> DimConstraint:
-    return t._dynamo_dynamic_ranges[d]
+    return t._dynamo_dynamic_indices[d]
 
 def _is_int(expr):
     if not isinstance(expr, SymInt):

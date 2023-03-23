@@ -36,6 +36,9 @@ from ..source import (
 from ..utils import (
     clone_input,
     dynamic_dims_from_tensor,
+    dynamic_indices_to_contraints,
+    expand,
+    export_contraints_to_contraints,
     get_fake_value,
     getfile,
     global_key_name,
@@ -1070,7 +1073,7 @@ def wrap_fx_proxy_cls(
 class TrackedFake:
     fake: Union[FakeTensor, SymInt]
     source: Source
-    dynamic_ranges: Set[int]
+    dynamic_indices: Set[int]
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name()))
@@ -1094,14 +1097,40 @@ def wrap_to_fake_tensor_and_record(
 
         static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
 
-        dynamic_ranges = None
-        if hasattr(e, "_dynamo_dynamic_ranges"):
-            dynamic_ranges = e._dynamo_dynamic_ranges
+        # HERE BE DRAGONS
+        # CHANGE AT YOUR OWN RISK
+        dynamic_constraints = None
+        if hasattr(e, "_dynamo_dynamic_indices"):
+            # Eager marks dynamism by tensor
+            # Set[int] -> [RelaxedUnspecConstraint]
+            dynamic_constraints = dynamic_indices_to_contraints(
+                expand(e, e._dynamo_dynamic_indices)
+            )
             assert not static_shapes, tensor_static_reason_to_message(reason)
+        if tx.output.export_constraints:
+            # Export marks dynamism by stateless list piped in
+            assert (
+                dynamic_constraints is None
+            ), "Illegal to mix mark_dynamic on tensors with export constraints"
+            t_id = id(e)
+            # Find the relevant needles in the haytack
+            relevant_contraints = [
+                constraint
+                for constraint in tx.output.export_constraints
+                if constraint.t_id == t_id
+            ]
+            # Change the format from User structure to ShapeEnv structure
+            # [Constraint] -> {0: RelaxedUnspecConstraint, 1: StrictMinMaxConstraint}
+            dynamic_constraints_by_dim = export_contraints_to_contraints(
+                relevant_contraints
+            )
+            # Expand based on dims to fill in the blanks
+            # {0: RelaxedUnspecConstraint, 1: StrictMinMaxConstraint} -> [RelaxedUnspecConstraint, StrictMinMaxConstraint, None]
+            dynamic_constraints = expand(e, dynamic_constraints_by_dim)
 
         if not static_shapes:
             dynamic_dims: Dict[int, DimConstraint] = dynamic_dims_from_tensor(
-                e, dynamic_ranges
+                e, dynamic_constraints
             )
         else:
             dynamic_dims = None
@@ -1112,11 +1141,13 @@ def wrap_to_fake_tensor_and_record(
                 ignore_subclass=ignore_subclass,
                 source=source,
                 dynamic_dims=dynamic_dims,
-                constraint_dims=dynamic_ranges,
+                constraint_dims=dynamic_constraints,
             )
         )
         if is_tensor:
-            tx.output.tracked_fakes.append(TrackedFake(fake_e, source, dynamic_ranges))
+            tx.output.tracked_fakes.append(
+                TrackedFake(fake_e, source, dynamic_constraints)
+            )
         return fake_e
     else:
         return e
