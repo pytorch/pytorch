@@ -28,6 +28,13 @@ class TorchRuntimeError(TorchDynamoException):
     pass
 
 
+class InvalidBackend(TorchDynamoException):
+    def __init__(self, name):
+        super().__init__(
+            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+        )
+
+
 class ResetRequired(TorchDynamoException):
     def __init__(self):
         super().__init__(
@@ -159,8 +166,14 @@ def format_error_msg(exc, code, record_filename=None, frame=None):
     msg = os.linesep * 2
 
     if config.verbose:
-        msg = format_bytecode(
-            "WON'T CONVERT", code.co_name, code.co_filename, code.co_firstlineno, code
+        msg = str(
+            format_bytecode(
+                "WON'T CONVERT",
+                code.co_name,
+                code.co_filename,
+                code.co_firstlineno,
+                code,
+            )
         )
         msg += "=" * 10 + " TorchDynamo Stack Trace " + "=" * 10 + "\n"
         msg += format_exc()

@@ -1996,7 +1996,7 @@ def _write_ninja_file_to_build_library(path,
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     if IS_WINDOWS:
-        cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
+        cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
@@ -2112,10 +2112,13 @@ def _write_ninja_file(path,
     config = ['ninja_required_version = 1.3']
     config.append(f'cxx = {compiler}')
     if with_cuda or cuda_dlink_post_cflags:
-        if IS_HIP_EXTENSION:
-            nvcc = _join_rocm_home('bin', 'hipcc')
+        if "PYTORCH_NVCC" in os.environ:
+            nvcc = os.getenv("PYTORCH_NVCC")    # user can set nvcc compiler with ccache using the environment variable here
         else:
-            nvcc = _join_cuda_home('bin', 'nvcc')
+            if IS_HIP_EXTENSION:
+                nvcc = _join_rocm_home('bin', 'hipcc')
+            else:
+                nvcc = _join_cuda_home('bin', 'nvcc')
         config.append(f'nvcc = {nvcc}')
 
     if IS_HIP_EXTENSION:

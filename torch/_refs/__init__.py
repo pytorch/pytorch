@@ -4243,7 +4243,7 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: Union[int, float, bool],
+    fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
@@ -4366,7 +4366,7 @@ def arange(
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
         # Uses floordiv to avoid ceil in inductor.
-        sgn = (xstep > 0) - (xstep < 0)
+        sgn = bool(xstep > 0) - bool(xstep < 0)
         length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
