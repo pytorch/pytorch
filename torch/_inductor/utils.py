@@ -171,7 +171,7 @@ def timed(model, example_inputs, times=1):
     return t1 - t0
 
 
-def print_performance(fn, args=(), times=10, repeat=10, baseline=1.0):
+def print_performance(fn, args=(), times=10, repeat=1, baseline=1.0):
     timings = torch.tensor([timed(fn, args, times) for _ in range(repeat)])
     took = torch.median(timings)
     print(f"{took/baseline:.6f}")
@@ -795,3 +795,12 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
         )
+
+
+@contextlib.contextmanager
+def maybe_profile(should_profile, *args, **kwargs):
+    if should_profile:
+        with torch.profiler.profile(*args, **kwargs) as p:
+            yield p
+    else:
+        yield
