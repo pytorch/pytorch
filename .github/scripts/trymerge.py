@@ -992,13 +992,15 @@ class GitHubPR:
                 pr_num=self.pr_num,
                 owner=self.org,
                 project=self.project,
+                author=self.get_author(),
                 pending_checks=pending_checks,
                 failed_checks=failed_checks,
+                last_commit_sha=self.last_commit().get("oid", ""),
+                merge_base_sha=self.get_merge_base(),
                 is_failed=False,
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
                 ignore_current=bool(ignore_current_checks),
-                error="",
                 workspace=ROCKSET_MERGES_WORKSPACE,
             )
         else:
@@ -1230,19 +1232,13 @@ def find_matching_merge_rule(
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
 
-        if skip_mandatory_checks:
-            # Categorize all mandatory checks when skip_mandatory_checks (force merge) is set. So that the
-            # list of all pending and failed checks can be save onto Rockset. The above categorization has
-            # only EasyCLA for force merge
-            pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
-                checks,
-                mandatory_checks,
-                ok_failed_checks_threshold=0,
-            )
-        else:
-            # Otherwise, just return the current lists of pending and failed checks
-            pending_mandatory_checks, failed_mandatory_checks = pending_checks, failed_checks
-
+        # Categorize all checks when skip_mandatory_checks (force merge) is set. Do it here
+        # where the list of checks is readily available
+        pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
+            checks,
+            [],
+            ok_failed_checks_threshold=0,
+        )
         return (rule, pending_mandatory_checks, failed_mandatory_checks)
 
     if reject_reason_score == 20000:
@@ -1274,8 +1270,12 @@ def save_merge_record(
     pr_num: int,
     owner: str,
     project: str,
+    author: str,
     pending_checks: List[Tuple[str, Optional[str]]],
     failed_checks: List[Tuple[str, Optional[str]]],
+    last_commit_sha: str,
+    merge_base_sha: str,
+    merge_commit_sha: str = "",
     is_failed: bool = False,
     dry_run: bool = False,
     skip_mandatory_checks: bool = False,
@@ -1287,6 +1287,11 @@ def save_merge_record(
     """
     This saves the merge records into Rockset, so we can query them (for fun and profit)
     """
+    if dry_run:
+        # Decide not to save the record to Rockset if dry-run is set to not pollute
+        # the collection
+        return
+
     try:
         import rockset  # type: ignore[import]
 
@@ -1297,10 +1302,13 @@ def save_merge_record(
                 "pr_num": pr_num,
                 "owner": owner,
                 "project": project,
+                "author": author,
                 "pending_checks": pending_checks,
                 "failed_checks": failed_checks,
+                "last_commit_sha": last_commit_sha,
+                "merge_base_sha": merge_base_sha,
+                "merge_commit_sha": merge_commit_sha,
                 "is_failed": is_failed,
-                "dry_run": dry_run,
                 "skip_mandatory_checks": skip_mandatory_checks,
                 "ignore_current": ignore_current,
                 "error": error,
@@ -1329,8 +1337,12 @@ def save_merge_record(
                 pr_num=pr_num,
                 owner=owner,
                 project=project,
+                author=author,
                 pending_checks=pending_checks,
                 failed_checks=failed_checks,
+                last_commit_sha=last_commit_sha,
+                merge_base_sha=merge_base_sha,
+                merge_commit_sha=merge_commit_sha,
                 is_failed=is_failed,
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
@@ -1524,7 +1536,8 @@ def categorize_checks(
     failed_checks: List[Tuple[str, Optional[str]]] = []
     ok_failed_checks: List[Tuple[str, Optional[str]]] = []
 
-    relevant_checknames = [name for name in check_runs.keys() if any([x in name for x in required_checks])]
+    # If required_checks is not set or empty, consider all names are relevant
+    relevant_checknames = [name for name in check_runs.keys() if not required_checks or any([x in name for x in required_checks])]
 
     for checkname in required_checks:
         if all([checkname not in x for x in check_runs.keys()]):
@@ -1767,8 +1780,11 @@ def main() -> None:
                 pr_num=args.pr_num,
                 owner=org,
                 project=project,
+                author=pr.get_author(),
                 pending_checks=[],
                 failed_checks=[],
+                last_commit_sha=pr.last_commit().get("oid", ""),
+                merge_base_sha=pr.get_merge_base(),
                 is_failed=True,
                 dry_run=args.dry_run,
                 skip_mandatory_checks=args.force,
