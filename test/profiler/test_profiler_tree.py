@@ -131,6 +131,7 @@ class ProfilerTree:
         if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
+        # Profiler inserts a `hipDeviceSynchronize` at the end of profiling.
         if flat_nodes and flat_nodes[-1][1] == "hipDeviceSynchronize":
             flat_nodes = flat_nodes[:-1]
 
