@@ -368,7 +368,7 @@ class OpOverload(OperatorBase):
         self.__qualname__ = self._name
         self.__annotations__ = {}
 
-        # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
+        # Logic replicated from aten/src/ATen/view/TransformFallback.h
         is_write = None
         for a in self._schema.arguments:
             if a.alias_info is None:
