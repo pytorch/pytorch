@@ -2605,8 +2605,6 @@ class CommonTemplate:
             (torch.randn([10, 4]), torch.randint(10, [8]), torch.tensor([0, 2, 6])),
         )
 
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3597
-    @skipIfRocm
     def test_batch_norm_2d(self):
         m = torch.nn.Sequential(
             torch.nn.BatchNorm2d(10),
