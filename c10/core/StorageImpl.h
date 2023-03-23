@@ -83,12 +83,17 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
   template <typename T>
   inline T* data() const {
-    return unsafe_data<T>();
+    return static_cast<T*>(data_ptr_.get());
   }
 
   template <typename T>
-  inline T* unsafe_data() const {
+  inline T* mutable_unsafe_data() {
     return static_cast<T*>(this->data_ptr_.get());
+  }
+
+  template <typename T>
+  inline const T* unsafe_data() const {
+    return static_cast<const T*>(this->data_ptr_.get());
   }
 
   // Destructor doesn't call release_resources because it's
