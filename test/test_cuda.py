@@ -4943,7 +4943,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history("state")
+            torch.cuda.memory._record_memory_history("state", stacks="python")
             x = torch.rand(311, 411, device='cuda')
 
             # create a bunch of tensors that all will tile into the
@@ -5062,7 +5062,7 @@ class TestCudaComm(TestCase):
     def test_memory_snapshot_script(self):
         try:
             torch.cuda.memory.empty_cache()
-            torch.cuda.memory._record_memory_history("state")
+            torch.cuda.memory._record_memory_history("state", stacks="python")
 
             @torch.jit.script
             def foo():
