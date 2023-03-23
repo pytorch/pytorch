@@ -232,9 +232,6 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                 if p in opt.state:
                     named_states[n] = opt.state[p]
 
-            if dist.get_rank() == 0:
-                print(f"====== {len(opt.state)}, {opt.state}")
-
             def stateless_func(
                 func, args, kwargs, named_states, params_and_buffers
             ):
@@ -243,8 +240,9 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                 ), _rematerialize_optimizer(
                     opt, named_states, params_and_buffers
                 ):
-                    func(*args, **kwargs)
-                    return list(mod.parameters())
+                    ret = func(*args, **kwargs)
+                    # make sure updated parameters are returned
+                    return ret, list(mod.parameters())
 
             # parameters are at the end of placeholders
             # FIXME(@mrshenli): let make_fx ignore nn.Module in args? or it should
@@ -277,7 +275,7 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
             with torch.no_grad():
                 # N.B.: we don't need autograd as backward has already been
                 # captured in the graph.
-                return gm(args, kwargs, named_states, params_and_buffers)
+                return gm(args, kwargs, named_states, params_and_buffers)[0]
 
         return wrapper
 
