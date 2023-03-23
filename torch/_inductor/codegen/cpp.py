@@ -208,6 +208,10 @@ class CppPrinter(ExprPrinter):
 cexpr = CppPrinter().doprint
 
 
+def cexpr_index(index):
+    return f"static_cast<{INDEX_TYPE}>({cexpr(index)})"
+
+
 @dataclasses.dataclass
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
@@ -910,7 +914,7 @@ class CppKernel(Kernel):
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
-        line = f"{var}[static_cast<{INDEX_TYPE}>({cexpr(index)})]"
+        line = f"{var}[{cexpr_index(index)}]"
         if V.graph.get_dtype(name) in [torch.float16]:
             line = f"static_cast<float>({line})"
         return self.cse.generate(self.loads, line)
@@ -920,12 +924,12 @@ class CppKernel(Kernel):
         var = self.args.output(name)
         index = self.rename_indexing(index)
         if mode is None:
-            line = f"{var}[static_cast<{INDEX_TYPE}>({cexpr(index)})] = {value};"
+            line = f"{var}[{cexpr_index(index)}] = {value};"
         elif mode == "atomic_add":
             if not config.cpp.dynamic_threads and self.num_threads == 1:
-                line = f"{var}[{cexpr(index)}] += {value};"
+                line = f"{var}[{cexpr_index(index)}] += {value};"
             else:
-                line = f"atomic_add(&{var}[{cexpr(index)}], {value});"
+                line = f"atomic_add(&{var}[{cexpr_index(index)}], {value});"
         else:
             raise NotImplementedError(f"store mode={mode}")
         self.stores.writeline(name, line)
@@ -967,7 +971,7 @@ class CppKernel(Kernel):
             var = self.args.output(name)
             member_name = ".index" if argmax_or_argmin else ""
             self.reduction_suffix.writeline(
-                name, f"{var}[{cexpr(index)}] = {tmpvar}{member_name};"
+                name, f"{var}[{cexpr_index(index)}] = {tmpvar}{member_name};"
             )
         self.cse.store_cache[name] = tmpvar
 
@@ -2565,9 +2569,9 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        offset_str = f"for({INDEX_TYPE} {self.var}=static_cast<{INDEX_TYPE}>({cexpr(self.offset)});"
-        size_str = f"{self.var}<static_cast<{INDEX_TYPE}>({cexpr(self.size)});"
-        steps_str = f"{self.var}+=static_cast<{INDEX_TYPE}>({cexpr(self.steps)}))"
+        offset_str = f"for({INDEX_TYPE} {self.var}={cexpr_index(self.offset)};"
+        size_str = f"{self.var}<{cexpr_index(self.size)};"
+        steps_str = f"{self.var}+={cexpr_index(self.steps)})"
         line2 = f"{offset_str} {size_str} {steps_str}"
         if self.collapsed or not line1:
             return [line2]
