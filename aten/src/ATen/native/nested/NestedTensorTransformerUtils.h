@@ -18,6 +18,18 @@ sdpa_nested_preprocessing(
     const Tensor& key,
     const Tensor& value);
 
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+sdpa_nested_preprocessing_backward(
+    const at::Tensor& grad_out_,
+    const at::Tensor& query,
+    const at::Tensor& key,
+    const at::Tensor& value,
+    const at::Tensor& out,
+    const Tensor& cumulative_sequence_length_q,
+    const Tensor& cumulative_sequence_length_kv,
+    const int64_t max_seqlen_batch_q,
+    const int64_t max_seqlen_batch_kv);
+
 } // namespace preprocessing
 } // namespace native
 } // namespace at
