@@ -1199,7 +1199,7 @@ def find_matching_merge_rule(
         # Does the PR pass the checks required by this rule?
         mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
         required_checks = list(filter(lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks))
-        [pending_checks, failed_checks] = categorize_checks(
+        pending_checks, failed_checks = categorize_checks(
             checks,
             required_checks,
             ok_failed_checks_threshold=3 if rule.ignore_flaky_failures else 0
@@ -1230,7 +1230,20 @@ def find_matching_merge_rule(
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
 
-        return (rule, pending_checks, failed_checks)
+        if skip_mandatory_checks:
+            # Categorize all mandatory checks when skip_mandatory_checks (force merge) is set. So that the
+            # list of all pending and failed checks can be save onto Rockset. The above categorization has
+            # only EasyCLA for force merge
+            pending_mandatory_checks, failed_mandatory_checks = categorize_checks(
+                checks,
+                mandatory_checks,
+                ok_failed_checks_threshold=0,
+            )
+        else:
+            # Otherwise, just return the current lists of pending and failed checks
+            pending_mandatory_checks, failed_mandatory_checks = pending_checks, failed_checks
+
+        return (rule, pending_mandatory_checks, failed_mandatory_checks)
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
