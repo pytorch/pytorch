@@ -151,14 +151,8 @@ void mean_kernel_impl(TensorIterator& iter) {
 static void mean_kernel_cpu(TensorIterator& iter) {
   if (iter.dtype() == kHalf) {
     mean_kernel_impl<at::Half, float>(iter);
-  } else if (iter.dtype(1) == kHalf && iter.dtype() == kFloat) {
-    // type promotion that does cast and reduction in a single kernel
-    mean_kernel_impl<at::Half, float, float>(iter);
   } else if(iter.dtype() == kBFloat16) {
     mean_kernel_impl<at::BFloat16, float>(iter);
-  } else if (iter.dtype(1) == kBFloat16 && iter.dtype() == kFloat) {
-    // type promotion that does cast and reduction in a single kernel
-    mean_kernel_impl<at::BFloat16, float, float>(iter);
   } else {
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX(iter.dtype(), "mean_cpu", [&]() {
       mean_kernel_impl<scalar_t>(iter);
