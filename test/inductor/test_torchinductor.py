@@ -4,6 +4,7 @@ import dataclasses
 import functools
 import importlib
 import itertools
+import math
 import os
 import random
 import sys
@@ -5693,9 +5694,10 @@ class CommonTemplate:
 
     @torch._dynamo.config.patch(dynamic_shapes=True)
     def test_index_dynamic_shapes(self):
-        # Repro from vision_maskrcnn
-        import math
+        if self.device == "cuda":
+            raise unittest.SkipTest("index dynamic shapes only supports cpu")
 
+        # Repro from vision_maskrcnn
         def fn(arg0_1):
             unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
             sym_size = arg0_1.size(1)
