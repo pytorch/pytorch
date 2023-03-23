@@ -111,7 +111,7 @@ class TestNestedTensor(TestCase):
                 length = np.random.randint(low=1, high=max_seq_len)
             row = list(np.random.randint(low=0, high=vocab_size, size=(length,)))
             data.append(row)
-            nested_tensor_ref_list.append(torch.tensor(row))
+            nested_tensor_ref_list.append(torch.Tensor(row))
         nested_tensor = torch.nested.nested_tensor(data, dtype=torch.int64)
         nested_tensor_list = nested_tensor.unbind()
         for id in range(batch_size):
