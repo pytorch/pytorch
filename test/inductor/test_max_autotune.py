@@ -10,10 +10,6 @@ from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import AlgorithmSelectorCache, ChoiceCaller
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 torch.set_float32_matmul_precision("high")
@@ -32,7 +28,6 @@ class FailChoiceCaller(ChoiceCaller):
         raise RuntimeError("This choice caller will always throw")
 
 
-@instantiate_parametrized_tests
 class TestDoBench(TestCase):
     def _create_buffer(self, name, shape):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
@@ -111,8 +106,7 @@ class TestDoBench(TestCase):
             child.join()
             self.assertNotEqual(0, child.exitcode)
 
-    @parametrize("autotune_in_subproc", (True, False))
-    def test_max_autotune_mm_plus_mm(self, autotune_in_subproc):
+    def test_max_autotune_mm_plus_mm(self):
         """
         This crash previously due to a triton issue: https://github.com/openai/triton/issues/1298 .
         With autotuning in subprocess, we don't crash anymore.
@@ -127,9 +121,7 @@ class TestDoBench(TestCase):
         c = torch.randn(m, k).cuda()
         d = torch.randn(k, n).cuda()
 
-        with config.patch(
-            {"max_autotune": True, "autotune_in_subproc": autotune_in_subproc}
-        ):
+        with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm_plus_mm)(a, b, c, d)
 
     def test_max_autotune_regular_mm(self):
@@ -143,7 +135,6 @@ class TestDoBench(TestCase):
 
         a = torch.randn(100, 10).cuda()
         b = torch.randn(10, 100).cuda()
-
         with config.patch({"max_autotune": True, "autotune_in_subproc": True}):
             torch.compile(mm)(a, b)
 

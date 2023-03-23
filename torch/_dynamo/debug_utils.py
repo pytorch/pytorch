@@ -25,9 +25,6 @@ log = logging.getLogger(__name__)
 inductor_config = import_module("torch._inductor.config")
 use_buck = inductor_config.is_fbcode()
 
-if use_buck:
-    import libfb.py.build_info
-
 
 extra_deps = []
 extra_imports = ""
@@ -39,7 +36,6 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
-    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
@@ -75,7 +71,6 @@ python_binary(
         "//caffe2:torch",
         "//caffe2/functorch:functorch",
         "//triton:triton",
-        "{cur_target}",
     ],
     cpp_deps = [
 {extra_cpp_deps}
