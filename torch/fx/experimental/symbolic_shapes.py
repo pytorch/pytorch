@@ -1479,7 +1479,9 @@ class ShapeEnv:
                 )
                 stride[i] = self.create_symbol(
                     val,
-                    TensorPropertySource(source, TensorProperty.STRIDE, i)
+                    TensorPropertySource(source, TensorProperty.STRIDE, i),
+                    dynamic_dim=DimDynamic.DUCK,
+                    constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
         sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
