@@ -182,7 +182,7 @@ bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 
-int thread_local LastSavedDevice = -1;
+static std::atomic_int LastSavedDevice = -1;
 
 // Wrappers for raw CUDA device management functions
 cudaError_t GetDeviceCount(int* dev_count) {
@@ -199,7 +199,7 @@ cudaError_t GetDevice(int* device) {
 
 cudaError_t SetDevice(int device) {
   TORCH_CHECK(device >= 0, "device id must be positive!");
-  LastSavedDevice = -1;
+  LastSavedDevice = device;
   int curdev = -1;
   C10_CUDA_CHECK(cudaGetDevice(&curdev));
   if (device == curdev) {
