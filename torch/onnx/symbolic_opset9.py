@@ -5128,6 +5128,7 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 
     return symbolic_helper._flatten_helper(g, input, start_dim, end_dim, dim)
 
+
 @_onnx_symbolic("aten::unflatten")
 @symbolic_helper.quantized_args(True, False, False)
 @symbolic_helper.parse_args("v", "i", "is")
@@ -5146,12 +5147,9 @@ def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
         dim = input_rank + dim
 
     input_shape = symbolic_helper._get_tensor_sizes(input)
-    shape = [
-        *input_shape[:dim],
-        *unflattened_size,
-        *input_shape[dim + 1:]
-    ]
+    shape = [*input_shape[:dim], *unflattened_size, *input_shape[dim + 1 :]]
     return reshape(g, input, shape)
+
 
 @_onnx_symbolic("aten::nonzero")
 @symbolic_helper.parse_args("v")
