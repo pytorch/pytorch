@@ -4230,7 +4230,9 @@ exit(2)
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params = [
+                torch.randn((i + 5, i + 5), device="cuda") for i in range(2)
+            ] + [torch.randn((), device="cuda")]
             params_control = [p.clone().requires_grad_() for p in params]
             params_graphed = [p.clone().requires_grad_() for p in params]
 
