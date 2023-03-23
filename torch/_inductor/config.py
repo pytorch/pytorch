@@ -102,7 +102,7 @@ def is_fbcode():
 
 
 # warnings intended for PyTorch developers, disable for point releases
-developer_warnings = is_fbcode() or "+" in torch.__version__
+developer_warnings = is_fbcode() or "dev" in torch.__version__
 
 
 def decide_compile_threads():
