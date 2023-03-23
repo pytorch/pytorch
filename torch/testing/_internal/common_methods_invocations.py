@@ -288,9 +288,9 @@ def sample_inputs_as_strided_scatter(op_info, device, dtype, requires_grad, **kw
         ((3, 3), (2, 2), (1, 2), 0),
         ((3, 3), (2, 2), (1, 2), 1),
         ((3, 3), (2, 2), (2, 1), 0),
-        # Scatter to larger dimentions
+        # Scatter to larger dimensions
         ((16,), (2, 2, 2, 2), (8, 4, 2, 1), 0),
-        # Scatter to larger dimentions with strides inverted
+        # Scatter to larger dimensions with strides inverted
         ((16,), (2, 1, 1, 2), (1, 2, 4, 8), 0),
     ]
 
@@ -2202,7 +2202,7 @@ def error_inputs_hstack_dstack_vstack(op, device):
 def sample_inputs_unbind(op_info, device, dtype, requires_grad, **kwargs):
     # Note: we don't do any tests where we unbind along 0-length dims
     # because in that case unbind returns and empty tuple, and that breaks
-    # some asumptions in some backward tests in test_ops.py
+    # some assumptions in some backward tests in test_ops.py
     shape_dims = (((S,), 0),
                   ((S, S), 0),
                   ((S, S), 1),
@@ -2267,7 +2267,7 @@ def error_inputs_gather(op_info, device, **kwargs):
     #        [1, 0]
     idx = torch.tensor(((0, 0), (1, 0)), device=device, dtype=torch.long)
 
-    # Index should be smaller than self except on dimesion 1
+    # Index should be smaller than self except on dimension 1
     bad_src = make_tensor((1, 1), device=device, dtype=torch.float32)
     yield ErrorInput(SampleInput(bad_src, args=(1, idx,)),
                      error_regex="Size does not match at dimension 0")
@@ -4128,7 +4128,7 @@ def sample_inputs_gelu(self, device, dtype, requires_grad, **kwargs):
 
 
 def error_inputs_gelu(op, device, **kwargs):
-    # Tests thtat gelu errors out when passed an approximation we don't know.
+    # Tests that gelu errors out when passed an approximation we don't know.
     yield ErrorInput(SampleInput(make_tensor((), dtype=torch.float, device=device), kwargs={"approximate": "asdf"}),
                      error_regex="approximate argument must be either")
 
@@ -5778,7 +5778,7 @@ def sample_inputs_diagonal_scatter(op_info, device, dtype, requires_grad, **kwar
 
     for input_shape, arg in chain(product(shapes_2d, args_2d), product(shapes_3d, args_3d)):
         input_ = make_arg(input_shape)
-        # We can programatically figure out the right shape for src:
+        # We can programmatically figure out the right shape for src:
         # It should be the same size as input.diagonal(other_args...)
         if not isinstance(arg, tuple):
             arg_tuple = (arg,)
@@ -7983,13 +7983,13 @@ def sample_inputs_max_unpool_grad(op_info, device, dtype, requires_grad, **kwarg
         # It could be that a single element from the max_pool's
         # input is mapped to several locations in its output.
         # This situation leads to failed gradchecks because
-        # the finite difference algorithm perturbes the elements
+        # the finite difference algorithm perturbs the elements
         # of the output one by one, and not in classes of
         # equivalences determined by whether two elements
         # in the output are coming from the same location in the
         # input (simply put, they have the same corresponding index).
         # So, there are two ways to resolve this issue:
-        # 1. Extract a pertubation for one element and apply it all
+        # 1. Extract a perturbation for one element and apply it all
         #    the elements from the same equivalence class, or
         # 2. Make sure that the equivalence classes are all singletons,
         # i.e. the index tensor has to be comprised of only unique
@@ -9186,7 +9186,7 @@ op_db: List[OpInfo] = [
            skips=(
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
-               # Tests that assume input tensor has a meningful effect on output tensor
+               # Tests that assume input tensor has a meaningful effect on output tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
@@ -13691,7 +13691,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     ref=np.power,
-                    # Due to AVX2 curently not being fully supported for Float16, log_vml_cpu can't be enabled
+                    # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
@@ -16789,7 +16789,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Skip reference_numerics tests for bool type, as the defined function doesn't work for bool
@@ -16825,7 +16825,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_binary is not a valid op
@@ -16850,7 +16850,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
@@ -16881,7 +16881,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
@@ -16912,7 +16912,7 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
-            # Jiterator ops doesn't suport CompositeCompliantTensor
+            # Jiterator ops doesn't support CompositeCompliantTensor
             # Following test should expectedFailure, but it's causing cascading failures in CUDA, thus skipped
             DecorateInfo(unittest.skip("skip"), 'TestCompositeCompliance', 'test_operator'),
             # Expected failure: torch.jiterator_4inputs_with_extra_args is not a valid op
