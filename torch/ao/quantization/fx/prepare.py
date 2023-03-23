@@ -120,12 +120,12 @@ _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 # should be moved to the new programmable API class soon
 _DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation,
-    "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation
+    "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation
 }
 
 _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
-    "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
+    "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
@@ -210,8 +210,9 @@ def _is_output_dtype_supported_by_backend(
     # TODO: we should check is_dynamic here as well, the code from _is_input_arg_dtype_supported_by_backend
     # from input activation check can be reused here
     qconfig_output_dtype = None
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
-    qconfig_output_dtype, qconfig_output_is_dynamic = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    output_obs_or_fq_ctrs = node.meta["target_dtype_info"].get("output_obs_or_fq_ctrs")
+    assert not isinstance(output_obs_or_fq_ctrs, (tuple, dict)), "tuple or dict output configuration is not yet supported"
+    qconfig_output_dtype, qconfig_output_is_dynamic = _get_dtype_and_is_dynamic(output_obs_or_fq_ctrs)
     # TODO: this is a hack because we can only specify one activation_obs_or_fq for
     # qconfig (qconfig.activation), and we are only supporting dynamically quantized
     # linear op which has fp32 output dtype, this should be removed if we generalize
@@ -412,7 +413,7 @@ def _get_target_activation_dtype_for_node(
 
       {
         "input_obs_or_fq_ctr_for_args": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
-        "output_act_obs_or_fq_ctr": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
+        "output_obs_or_fq_ctrs": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
       }
 
     TODO(future PR, if needed): explicitly spell out the non-Tensor
@@ -424,7 +425,7 @@ def _get_target_activation_dtype_for_node(
     if args_have_no_tensors:
         return {
             "input_obs_or_fq_ctr_for_args": None,
-            "output_act_obs_or_fq_ctr": None,
+            "output_obs_or_fq_ctrs": None,
         }
     # get qconfig to determine the eventual dtype of this node
     if qconfig is not None:
@@ -478,7 +479,7 @@ def _get_target_activation_dtype_for_node(
             # this is kept for fx graph mode quantization use cases, not supposed
             # to be used for quantize_pt2e
             "_input_obs_or_fq_ctr_for_kwargs": {"weight": qconfig.weight, "bias": BIAS_OBS_OR_FQ_CTR},
-            "output_act_obs_or_fq_ctr": qconfig.activation,
+            "output_obs_or_fq_ctrs": qconfig.activation,
         }
     return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
 
@@ -498,17 +499,18 @@ def _get_arg_target_dtype_as_output(
     # the specific nodes we added in order to reach the original LSTM node. Otherwise, we would
     # not be able to accurately detect whether this node is a consumer of custom module LSTM.
     custom_module_lstm_node = _maybe_get_custom_module_lstm_from_node_arg(arg, named_modules)
-    output_act_obs_or_fq_ctr = None
+    output_obs_or_fq_ctrs = None
     if custom_module_lstm_node is not None:
-        output_act_obs_or_fq_ctr = custom_module_lstm_node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        output_obs_or_fq_ctrs = custom_module_lstm_node.meta["target_dtype_info"].get("output_obs_or_fq_ctrs")
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
         assert isinstance(observed_arg, Node), "Currently we only support observing Node"
-        output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
+        output_obs_or_fq_ctrs = observed_arg.meta["target_dtype_info"]["output_obs_or_fq_ctrs"]
     else:
-        output_act_obs_or_fq_ctr = \
-            arg.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"]
-    output_act_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+        output_obs_or_fq_ctrs = \
+            arg.meta["target_dtype_info"]["output_obs_or_fq_ctrs"]
+    assert not isinstance(output_obs_or_fq_ctrs, (tuple, dict)), "tuple or dict output configuration is not yet supported"
+    output_act_dtype, _ = _get_dtype_and_is_dynamic(output_obs_or_fq_ctrs)
     # TODO: should support is_dynamic here as well
     return output_act_dtype
 
@@ -851,8 +853,9 @@ def _maybe_insert_output_observer_for_node(
 
     is_standalone_module = qhandler is not None and qhandler.is_standalone_module()
 
-    output_act_obs_or_fq_ctr = node.meta["target_dtype_info"].get("output_act_obs_or_fq_ctr")
-    qconfig_dtype, _ = _get_dtype_and_is_dynamic(output_act_obs_or_fq_ctr)
+    output_obs_or_fq_ctrs = node.meta["target_dtype_info"].get("output_obs_or_fq_ctrs")
+    assert not isinstance(output_obs_or_fq_ctrs, (tuple, dict)), "tuple or dict output configuration is not yet supported"
+    qconfig_dtype, _ = _get_dtype_and_is_dynamic(output_obs_or_fq_ctrs)
     should_insert_observer = qconfig_dtype not in _DO_NOT_OBS_DTYPE_LIST + [torch.float]
     # TODO(future PR): move the following logic to
     # should_insert_observer_for_output
@@ -977,7 +980,7 @@ def _maybe_propagate_dtype_for_node(
     the first argument, to propagate the dtype to the caller.
     """
     node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"] = None
-    node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"] = None
+    node.meta["target_dtype_info"]["output_obs_or_fq_ctrs"] = None
     # if this is a copy node, propagate to first arg
     root_node, _, pattern, qhandler, qconfig = node_name_to_match_result_with_qconfig.get(
         node.name, (None, None, None, None, None))
@@ -1189,7 +1192,7 @@ def insert_observers_for_model(
     # # for getattr node
     # # weight = getattr(self, 'weight')
     # weight.meta["target_dtype_info"] = {
-    #    'output_act_obs_or_fq_ctr': qconfig.weight,
+    #    'output_obs_or_fq_ctrs': PlaceholderObserver.with_args(torch.float32),
     # }
     # # for conv2d node
     # # conv2d = call_function[target=torch.nn.functional.conv2d](
@@ -1197,7 +1200,7 @@ def insert_observers_for_model(
     # conv2d.meta["target_dtype_info"] = {
     #   'input_obs_or_fq_ctr_for_args': (qconfig.activation, qconfig.weight, PlaceholderObserver.with_args(dtype=torch.float32)),
     #   '_input_obs_or_fq_ctr_for_kwargs': {"weight": qconfig.weight, "bias": PlaceholderObserver.with_args(dtype=torch.float32)},
-    #   'output_act_obs_or_fq_ctr': qconfig.activation,
+    #   'output_obs_or_fq_ctrs': qconfig.activation,
     # }
     #
     cache_for_no_tensor_check: Dict[Node, bool] = {}
@@ -1264,7 +1267,7 @@ def insert_observers_for_model(
             if args_have_no_tensors:
                 node.meta["target_dtype_info"] = {
                     "input_obs_or_fq_ctr_for_args": None,
-                    "output_act_obs_or_fq_ctr": None,
+                    "output_obs_or_fq_ctrs": None,
                 }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
             node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
@@ -1289,7 +1292,9 @@ def insert_observers_for_model(
         # get output_act_dtype so that we don't also reset the special typed nodes
         # TODO: we might want to handle these more uniformly with the default path
         # this can be improved if we can use node.meta["val"]
-        output_act_dtype, _ = _get_dtype_and_is_dynamic(node.meta["target_dtype_info"]["output_act_obs_or_fq_ctr"])
+        output_obs_or_fq_ctrs = node.meta["target_dtype_info"]["output_obs_or_fq_ctrs"]
+        assert not isinstance(output_obs_or_fq_ctrs, (tuple, dict)), "tuple or dict output configuration is not yet supported"
+        output_act_dtype, _ = _get_dtype_and_is_dynamic(output_obs_or_fq_ctrs)
         if not is_supported_by_backend and output_act_dtype not in [None, int, float, torch.bool]:
             # restore target_dtype_info to default if it is not supported by backend
             _set_target_dtype_info_for_matched_node_pattern(
