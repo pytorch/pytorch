@@ -1801,6 +1801,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_size_dim(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, dim):
+            return x.size(dim=dim)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.empty([4, 9, 8])
+        self.assertTrue(opt_fn(x, 1) == 9)
+        self.assertTrue(opt_fn(x, -2) == 9)
+
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2033,41 +2044,46 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             z = y**3
             return z
 
-        x = torch.randn((2, 2), requires_grad=True)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager")
+        for profiler, get_events in (
+            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
+            (torch.profiler.profiler.profile, lambda prof: prof.events()),
+        ):
+            x = torch.randn((2, 2), requires_grad=True)
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="aot_eager")
 
-        # warmup
-        opt_fn(x)
+            # warmup
+            opt_fn(x)
 
-        # whenver we enter the profiler context, hooks are automatically registered
-        with torch.autograd.profiler.profile() as prof:
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            # whenver we enter the profiler context, hooks are automatically registered
+            with profiler() as prof:
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(
-            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
-        )
-
-        with torch.autograd.profiler.profile() as prof:
-            # just make sure the disable functionality works
-            _enable_dynamo_cache_lookup_profiler(False)
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            self.assertTrue(same(ref, res))
+            self.assertTrue(
+                len(events) == 1,
+                "Expected one lookup profiler event for one opt_fn run",
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(len(events) == 0, "Expected disabled profiling")
+            with profiler() as prof:
+                # just make sure the disable functionality works
+                _enable_dynamo_cache_lookup_profiler(False)
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
+            )
+
+            self.assertTrue(same(ref, res))
+            self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
@@ -5189,6 +5205,19 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             ).run(prof.report())
         else:
             base_checker().check("No recompilation detected.").run(prof.report())
+
+        # Ensure correct guard fail message is selected to show to user
+        if not torch._dynamo.config.dynamic_shapes:
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
+
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
 
 
 class CustomFunc1(torch.autograd.Function):
