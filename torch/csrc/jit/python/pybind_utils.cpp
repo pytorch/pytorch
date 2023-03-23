@@ -4,7 +4,6 @@
 #include <torch/csrc/jit/python/python_dict.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
 #include <torch/csrc/jit/python/python_list.h>
-#include <torch/csrc/jit/python/utf8_decoding_ignore.h>
 
 #include <ATen/ScalarOps.h>
 
@@ -556,13 +555,7 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isBool()) {
     return py::cast(std::move(ivalue).toBool());
   } else if (ivalue.isString()) {
-    if (getUTF8DecodingIgnore()) {
-      std::string s = std::move(ivalue).toStringRef();
-      PyObject* pyObj = PyUnicode_DecodeUTF8(s.data(), s.length(), "ignore");
-      return py::reinterpret_steal<py::object>(pyObj);
-    } else {
-      return py::cast(std::move(ivalue).toStringRef());
-    }
+    return py::cast(std::move(ivalue).toStringRef());
   } else if (ivalue.isList()) {
     auto list = std::move(ivalue).toList();
     py::list t{list.size()};
