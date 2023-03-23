@@ -911,6 +911,59 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaisesRegex(RuntimeError, "derivative for aten::chunk is not implemented",
                                lambda: chunked[0].backward(chunked[0].clone()))
 
+    @dtypes(*floating_types_and_half())
+    def test_nested_tensor_split_with_sizes(self, device, dtype):
+        a = torch.randn(3, 20, device=device, dtype=dtype)
+        b = torch.randn(2, 20, device=device, dtype=dtype)
+        c = torch.randn(1, 20, device=device, dtype=dtype)
+
+        split_sizes = [4, 6, 10]
+        a_splits = a.split_with_sizes(split_sizes, dim=-1)
+        b_splits = b.split_with_sizes(split_sizes, dim=-1)
+        c_splits = c.split_with_sizes(split_sizes, dim=-1)
+
+        nt = torch.nested.nested_tensor([a, b, c])
+        nt_splits = nt.split_with_sizes(split_sizes, dim=-1)
+
+        self.assertEqual(nt_splits[0],
+                         torch.nested.nested_tensor([a_splits[0], b_splits[0], c_splits[0]]))
+        self.assertEqual(nt_splits[1],
+                         torch.nested.nested_tensor([a_splits[1], b_splits[1], c_splits[1]]))
+        self.assertEqual(nt_splits[2],
+                         torch.nested.nested_tensor([a_splits[2], b_splits[2], c_splits[2]]))
+
+        for split in nt_splits:
+            self.assertFalse(split.is_contiguous())
+
+        # Failure calling on ragged dimensions
+        self.assertRaisesRegex(
+            RuntimeError, "split_with_sizes for nested tensors is currently only supported for the last dimension.",
+            lambda: torch.split_with_sizes(nt, split_sizes, dim=1))
+        self.assertRaisesRegex(
+            RuntimeError, "split_with_sizes for nested tensors is currently only supported for the last dimension.",
+            lambda: torch.split_with_sizes(nt, split_sizes, dim=0))
+
+        # Failure on non-contiguous nt
+        _, nt_noncontiguous = random_nt_noncontiguous_pair((2, 3), device, dtype)
+        self.assertRaisesRegex(
+            RuntimeError, "split_with_sizes expects `self` to be contiguous.",
+            lambda: torch.split_with_sizes(nt_noncontiguous, split_sizes, dim=-1))
+
+        # Failure when calling with split_sizes that don't cover the full dim size
+        bad_split_sizes = [4, 6, 9]  # don't add up to 20
+        self.assertRaisesRegex(
+            RuntimeError, "split_with_sizes expects split_sizes to sum exactly to 20",
+            lambda: torch.split_with_sizes(nt, bad_split_sizes, dim=-1))
+
+        # Failure when calling backward on a split_with_sizes
+        a = torch.randn(3, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        b = torch.randn(2, 3 * 4, device=device, dtype=dtype, requires_grad=True)
+        nt_grad = torch.nested.as_nested_tensor([a, b])
+        split_sizes = [2, 6, 4]
+        splits = torch.split_with_sizes(nt_grad, split_sizes, dim=-1)
+        self.assertRaisesRegex(RuntimeError, "the derivative for 'aten::split_with_sizes' is not implemented",
+                               lambda: splits[0].backward(splits[0].clone()))
+
     @dtypes(torch.float, torch.float16, torch.double)
     @torch.inference_mode()
     def test_nested_tensor_indexing_noncontiguous(self, device, dtype):
