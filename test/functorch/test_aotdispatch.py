@@ -410,8 +410,7 @@ class TestAOTAutograd(AOTTestCase):
         x = torch.arange(3)
         y = torch.arange(3)
         self.verify_aot_autograd(F(), [x, y], dynamic=False)
-        with self.assertRaisesRegex(AssertionError, "symbolic on sparse NYI"):
-            self.verify_aot_autograd(F(), [x, y], dynamic=True)
+        self.verify_aot_autograd(F(), [x, y], dynamic=True)
 
 
 
