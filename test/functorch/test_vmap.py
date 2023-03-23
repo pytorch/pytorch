@@ -1174,7 +1174,8 @@ class TestVmapAPI(TestCase):
             y.sum()
             return x
 
-        torch.func.vmap(foo)(torch.randn(3, 3))
+        with self.assertRaisesRegex(RuntimeError, "accessing `data` under vmap transform"):
+            torch.func.vmap(foo)(torch.randn(3, 3))
 
 
 def slice_inputs(inputs, bdims, i):
