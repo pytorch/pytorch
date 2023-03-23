@@ -51,10 +51,6 @@ test_skips = {
     #
     # These are from switching to specialize_int=False
     #
-    "test_div5_dynamic_shapes": (
-        "cpu",
-        "cuda",
-    ),  # The values for attribute 'dtype' do not match
     "test_div8_dynamic_shapes": ("cpu", "cuda"),  # StopIteration
     # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
     "test_reflection_pad2d_backward_dynamic_shapes": ("cpu", "cuda"),
