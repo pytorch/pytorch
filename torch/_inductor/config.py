@@ -239,7 +239,7 @@ class triton:
     # NOTE: mobilevit_s in timm_models required X to be set to the higher value 2048
     max_block = {"X": 2048, "Y": 1024, "Z": 1024}
 
-    mathlib_name = "libdevice" if is_fbcode() else "math"
+    mathlib_name = "math"
 
 
 # create a directory containing lots of debug information
