@@ -325,8 +325,8 @@ void upsample_avx_bilinear_uint8(
     buffer_vert = at::empty({4, yout, xout}, input.options());
   }
 
-  // TODO: The unpack / pack operations create a
-  // copy of the original input and output tensor. There should be a way to avoid these copies by instead
+  // TODO: The unpack / pack operations create a copy of the original input and
+  // output tensor. There should be a way to avoid these copies by instead
   // modifying the low-level kernels. Or maybe at least avoid copying the entire
   // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
