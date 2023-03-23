@@ -1069,6 +1069,11 @@ if(BUILD_PYTHON)
   find_package(PythonInterp 3.0)
   find_package(PythonLibs 3.0)
 
+  if(NOT PYTHONLIBS_VERSION_STRING)
+    message(FATAL_ERROR
+      "Python development libraries could not be found.")
+  endif()
+
   if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
     message(FATAL_ERROR
       "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
