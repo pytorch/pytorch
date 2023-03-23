@@ -406,10 +406,11 @@ aten::_nested_tensor_from_mask.out
 aten::_nested_tensor_from_mask_left_aligned
 aten::_nested_tensor_from_tensor_list
 aten::_nested_tensor_from_tensor_list.out
-aten::_nested_tensor_offsets
 aten::_nested_tensor_size
 aten::_nested_tensor_size.out
 aten::_nested_tensor_softmax_with_shape
+aten::_nested_tensor_storage_offsets
+aten::_nested_tensor_storage_offsets.out
 aten::_nested_tensor_strides
 aten::_nested_tensor_strides.out
 aten::_nested_view_from_buffer
