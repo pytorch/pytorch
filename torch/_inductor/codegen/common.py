@@ -39,12 +39,29 @@ def index_prevent_reordering(index: typing.List[sympy.Expr], index_vars, sizes):
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
+        def all_in_parens(string):
+            if string[0] != "(" or len(string) < 2:
+                return False
+            count = 1
+            for i, char in enumerate(string[1:]):
+                if char == "(":
+                    count += 1
+                elif char == ")":
+                    count -= 1
+                if count == 0 and i != len(string) - 2:
+                    return False
+            assert count == 0
+            return True
+
         if (
             isinstance(string, CSEVariable)
             or re.match(r"^[a-z0-9_.]+$", string, re.I)
             or re.match(r"^\([^)]*\)$", string, re.I)
             or string == ""
         ):
+            return string
+        # don't put extra parens for strings that are already wrapped in parens
+        if all_in_parens(string):
             return string
         return f"({string})"
 
@@ -97,11 +114,11 @@ class PythonPrinter(ExprPrinter):
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
-        return f"math.floor({self.paren(self._print(expr.args[0]))})"
+        return f"math.floor({self._print(expr.args[0])})"
 
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
-        return f"math.ceil({self.paren(self._print(expr.args[0]))})"
+        return f"math.ceil({self._print(expr.args[0])})"
 
 
 class OpOverrides:
@@ -667,6 +684,8 @@ class Kernel(CodeGen):
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def rename_indexing(self, index) -> sympy.Expr:
+        # adds the necessary kernel args for index expressions
+        # and renames variables in index expressions to kernel arg names
         if isinstance(index, (list, tuple)):
             return [self.rename_indexing(x) for x in index]
         index = V.graph.sizevars.simplify(index)

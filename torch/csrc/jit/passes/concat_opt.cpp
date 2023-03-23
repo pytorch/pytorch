@@ -296,7 +296,7 @@ class ConcatExpander {
     auto cat_dim_value = maybe_cat_dim.value();
     auto cat_dim = node->input(1);
 
-    // Set the insertion point to the curent `cat` node.
+    // Set the insertion point to the current `cat` node.
     WithInsertPoint guard(node);
     auto none = graph_->insertConstant(IValue());
     auto one = graph_->insertConstant(1);
