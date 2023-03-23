@@ -16,17 +16,18 @@ cc_library(
     ],
 )
 
-cc_proto_library(
-    name = "caffe2_protos",
-    deps = [":protos"],
-    # Legacy, this should probably be restricted to the targets that
-    # actually need this.
-    visibility = ["//:__pkg__"],
-)
-
 proto_library(
-    name = "protos",
+    name = "caffe2_proto_source",
     srcs = glob([
         "*.proto",
     ]),
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "caffe2_protos",
+    deps = [":caffe2_proto_source"],
+    # Legacy, this should probably be restricted to the targets that
+    # actually need this.
+    visibility = ["//:__pkg__"],
 )
