@@ -49,7 +49,7 @@ class MyModule(torch.nn.Module):
     def __init__(self, a, b):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(a, b),
+            CustomLinear(a, b),
             nn.ReLU(),
         )
 

@@ -645,17 +645,28 @@ class VariableBuilder:
         elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
-            if getattr(value, "_is_fsdp_managed_module", False):
-                # Note: we can't do this assert inside FSDP constructor,
-                # since we don't know yet whether dynamo will be used
-                assert getattr(
-                    value, "_fsdp_use_orig_params", False
-                ), "Dynamo only supports FSDP with use_orig_params=True"
+            return UnspecializedNNModuleVariable(
+                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+            )
+        elif getattr(value, "_is_fsdp_managed_module", False):
+            # Note: we can't do this assert inside FSDP constructor,
+            # since we don't know yet whether dynamo will be used
+            assert getattr(
+                value, "_fsdp_use_orig_params", False
+            ), "Dynamo only supports FSDP with use_orig_params=True"
+
+            guard_create_fns = [GuardBuilder.TYPE_MATCH]
+            if torch._dynamo.config.skip_fsdp_guards:
+                guard_create_fns = [GuardBuilder.ID_MATCH]
 
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
-            return UnspecializedNNModuleVariable(
-                value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
+
+            # Todo(whc) rename FSDPWrappedNNModuleVariable
+            return FSDPNNModuleVariable(
+                value,
+                guards=self.make_guards(*guard_create_fns),
+                source=self.get_source(),
             )
         else:
             return self.tx.output.register_attr_or_module(
@@ -700,7 +711,12 @@ class VariableBuilder:
             )
 
     def wrap_tensor(self, value: torch.Tensor):
-        if self.get_source().guard_source().is_nn_module():
+        source = self.get_source()
+
+        if (
+            source.guard_source().is_nn_module()
+            and not source.guard_source().is_fsdp_module()
+        ):
             return self.tx.output.register_attr_or_module(
                 value,
                 self.name,
