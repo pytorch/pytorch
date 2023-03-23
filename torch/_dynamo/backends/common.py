@@ -41,6 +41,9 @@ def aot_autograd(**kwargs):
 
         bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
         kwargs["bw_compiler"] = _wrapped_bw_compiler
+        kwargs["inference_compiler"] = (
+            kwargs.get("inference_compiler") or kwargs["fw_compiler"]
+        )
 
         from functorch.compile import nop
 

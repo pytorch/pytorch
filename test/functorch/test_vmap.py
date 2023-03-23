@@ -3663,7 +3663,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),
         xfail('linalg.tensorsolve'),
         xfail('bernoulli', ''),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
