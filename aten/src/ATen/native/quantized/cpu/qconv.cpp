@@ -1432,7 +1432,7 @@ template at::Tensor PackedConvWeightsOnednn<3>::apply_relu(
     int64_t output_zero_point);
 
 template <PostOp postOpFused>
-static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
+static at::Tensor packed_weights_conv_onednn(
     at::Tensor act, // contains quantized values but not QTensor
     double act_scale,
     int64_t act_zero_point,
@@ -1456,7 +1456,7 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   bool is_1d = (1 == kSpatialDim);
   // has_accum: extra input besides the conv to do conv add fusion.
   bool has_accum = (postOpFused == PostOp::Add) || (postOpFused == PostOp::AddReLU);
-  std::string func_name = "Inductor int8 conv";
+  std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
   if (postOpFused == PostOp::ReLU) {
     func_name += "_relu";
@@ -1465,7 +1465,6 @@ static at::Tensor onednn_conv_int8_with_prepacked_weight_bias(
   } else if (postOpFused == PostOp::AddReLU) {
     func_name += "_add_relu";
   }
-  func_name += "_with_prepacked_weight";
   // For conv1d, compute as conv2d then squeeze output
   if (kSpatialDim == 1) {
     kSpatialDim += 1;
@@ -1767,7 +1766,7 @@ class ConvInt8CpuTensor final {
       double output_scale,
       int64_t output_zero_point) {
 #if AT_MKLDNN_ENABLED()
-    return onednn_conv_int8_with_prepacked_weight_bias<postOpFused>(
+    return packed_weights_conv_onednn<postOpFused>(
         act, act_scale, act_zero_point,
         c10::nullopt /*accum*/, 0.0 /*accum_scale*/, 0 /*accum_zero_point*/,
         weight, weight_scales, weight_zero_points,
@@ -1800,7 +1799,7 @@ class ConvAddInt8CpuTensor final {
       double output_scale,
       int64_t output_zero_point) {
 #if AT_MKLDNN_ENABLED()
-    return onednn_conv_int8_with_prepacked_weight_bias<postOpFused>(
+    return packed_weights_conv_onednn<postOpFused>(
         act, act_scale, act_zero_point,
         accum, accum_scale, accum_zero_point,
         weight, inv_weight_scales, weight_zero_points,
@@ -1874,6 +1873,7 @@ class ConvUnary final {
     TORCH_CHECK(false, "Unimplemented of ConvUnary");
   }
 };
+
 
 TORCH_LIBRARY_IMPL(quantized, MkldnnCPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("quantized::conv_unary.tensor"),      ConvUnary::run_with_packed_weight_bias);
