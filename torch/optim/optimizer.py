@@ -446,7 +446,7 @@ class Optimizer:
                 (in one case it does the step with a gradient of 0 and in the other it skips
                 the step altogether).
         """
-        foreach = self.defaults.get('foreach', False)
+        foreach = self.defaults.get('foreach', False) or self.defaults.get('fused', False)
 
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
