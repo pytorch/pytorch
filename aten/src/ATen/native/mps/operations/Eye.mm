@@ -51,6 +51,13 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
   using namespace mps;
   MPSStream* stream = getCurrentMPSStream();
 
+  auto outputDataType = result.scalar_type();
+  ScalarType inputDataType = outputDataType;
+  if (!is_macos_13_or_newer() && outputDataType == kBool) {
+    // workaround for unsupported bool constant on macOS 12.
+    inputDataType = kByte;
+  }
+
   // Derive from MPSCachedGraph
   // This structure is used to cache an MPSGraph with certain keys, so that we don't have to compile the same MPSGraph
   // time and time again for the same operation The keys of this structure are based on the inputs and outputs needed
@@ -80,12 +87,16 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
           newCachedGraph = new CachedGraph(mpsGraph);
           MPSGraphTensor* onesTensor = [mpsGraph constantWithScalar:1.0f
                                                               shape:getMPSShape(result)
-                                                           dataType:getMPSDataType(result)];
+                                                           dataType:getMPSDataType(inputDataType)];
 
           // Here we can call the MPSGraph API needed to execute the operation.
           // The API details can be found here:
           // https://developer.apple.com/documentation/metalperformanceshadersgraph/mpsgraph
           MPSGraphTensor* outputTensor = [mpsGraph bandPartWithTensor:onesTensor numLower:0 numUpper:0 name:nil];
+
+          if ([outputTensor dataType] != getMPSDataType(outputDataType)) {
+            outputTensor = castMPSTensor(mpsGraph, outputTensor, outputDataType);
+          }
           newCachedGraph->outputTensor_ = outputTensor;
         }
         return newCachedGraph;

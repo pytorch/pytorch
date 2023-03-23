@@ -33,6 +33,7 @@ from torch.package import PackageExporter
 from torch.storage import TypedStorage
 from torch.types import (
     _bool,
+    _complex,
     _device,
     _dispatchkey,
     _dtype,
@@ -1233,6 +1234,7 @@ def _get_custom_class_python_wrapper(name: str, attr: str) -> Any: ...
 
 # Defined in torch/csrc/Module.cpp
 def _rename_privateuse1_backend(backend: str) -> None: ...
+def _get_privateuse1_backend_name() -> str: ...
 
 # Defined in torch/csrc/Generator.cpp
 class Generator:
