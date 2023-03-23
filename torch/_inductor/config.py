@@ -194,7 +194,11 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = False
 
-    debug_cudagraph_trees = True
+    # assertions not on the fast path, steady state
+    fast_cudagraph_asserts = True
+
+    # assertions on the fast path
+    slow_cudagraph_asserts = False
 
     # skip warmup for cudagraph trees
     skip_cudagraph_warmup = False
