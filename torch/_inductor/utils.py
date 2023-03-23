@@ -570,7 +570,10 @@ def is_big_gpu(index):
     return True
 
 
-def use_triton_template(layout):
+def use_triton_template(layout, *, enable_int32=False):
+    layout_dtypes = (torch.float16, torch.bfloat16, torch.float32)
+    if enable_int32:
+        layout_dtypes = (torch.float16, torch.bfloat16, torch.float32, torch.int32)
     return (
         (
             config.max_autotune
@@ -578,7 +581,7 @@ def use_triton_template(layout):
             or config.search_autotune_cache
         )
         and layout.device.type == "cuda"
-        and layout.dtype in (torch.float16, torch.bfloat16, torch.float32, torch.int32)
+        and layout.dtype in layout_dtypes
         and is_big_gpu(layout.device.index or 0)
     )
 
