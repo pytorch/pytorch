@@ -33,9 +33,9 @@ int main() {
     for (const auto& pair : net.named_parameters()) {
       inputs.push_back(pair.value());
     }
-    torch::Tensor results_opt = aot_inductor_entry(inputs);
+    auto results_opt = aot_inductor_entry(inputs);
 
-    assert(torch::allclose(results_ref, results_opt));
+    assert(torch::allclose(results_ref, results_opt[0]));
     printf("PASS\n");
     return 0;
 }

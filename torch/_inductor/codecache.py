@@ -448,9 +448,10 @@ def cpp_flags():
 
 
 def optimization_flags(cuda=False):
-    if cuda:
-        return "-O0 -g"
     base_flags = "-O3 -ffast-math -fno-finite-math-only"
+    if cuda:
+        return base_flags
+
     if sys.platform == "darwin":
         # Per https://mac.r-project.org/openmp/ right way to pass `openmp` flags to MacOS is via `-Xclang`
         # Also, `-march=native` is unrecognized option on M1
@@ -588,7 +589,6 @@ class AotCodeCache:
                         vec_isa=picked_vec_isa,
                         cuda=cuda,
                     ).split(" ")
-                    log.info(" ".join(cmd))
                     try:
                         subprocess.check_output(cmd, stderr=subprocess.STDOUT)
                     except subprocess.CalledProcessError as e:
@@ -659,6 +659,10 @@ class PyCodeCache:
     @classmethod
     def load(cls, source_code, extra="", linemap=()):
         key, path = write(source_code, "py", extra)
+        return cls.load_by_key_path(key, path, linemap)
+
+    @classmethod
+    def load_by_key_path(cls, key, path, linemap=()):
         if key not in cls.cache:
             with open(path) as f:
                 try:
@@ -673,7 +677,8 @@ class PyCodeCache:
                 exec(code, mod.__dict__, mod.__dict__)
                 # another thread might set this first
                 cls.cache.setdefault(key, mod)
-                cls.linemaps[path] = linemap
+                # unzip into separate lines/nodes lists
+                cls.linemaps[path] = list(zip(*linemap))
 
         return cls.cache[key]
 
@@ -683,11 +688,11 @@ class PyCodeCache:
         if path not in cls.linemaps:
             return None
         # [(starting_line, <fx node>), ...]
-        linemap = cls.linemaps[path]
-        p = bisect_right(linemap, lineno, key=lambda x: x[0])
+        lines, nodes = cls.linemaps[path]
+        p = bisect_right(lines, lineno)
         if p == 0:
             return None
-        _, entry = linemap[p - 1]
+        entry = nodes[p - 1]
         if not entry:
             return None
 

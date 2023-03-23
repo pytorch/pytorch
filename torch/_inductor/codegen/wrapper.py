@@ -362,13 +362,7 @@ class WrapperCodeGen(CodeGen):
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
             if config.profiler_mark_wrapper_call:
-                self.wrapper_call.writeline(
-                    "from torch.profiler import record_function"
-                )
-                self.wrapper_call.writeline(
-                    "with record_function('inductor_wrapper_call'):"
-                )
-                stack.enter_context(self.wrapper_call.indent())
+                self.generate_profiler_mark_wrapper_call(stack)
             if config.profile_bandwidth:
                 self.wrapper_call.writeline("start_graph()")
 
@@ -581,7 +575,12 @@ class WrapperCodeGen(CodeGen):
     def wrap_kernel_call(self, name, call_args):
         return "{}({})".format(name, ", ".join(call_args))
 
-    def generate_kernel_call(self, name, call_args):
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline("from torch.profiler import record_function")
+        self.wrapper_call.writeline("with record_function('inductor_wrapper_call'):")
+        stack.enter_context(self.wrapper_call.indent())
+
+    def generate_kernel_call(self, name, call_args, device_index=None):
         self.writeline(
             self.wrap_kernel_call(name, call_args),
         )
@@ -763,6 +762,8 @@ class CppWrapperCodeGen(WrapperCodeGen):
             #include <dlfcn.h>
             #include <assert.h>
 
+            typedef at::BFloat16 bfloat16;
+
             template <typename KernelFunc>
             KernelFunc load_cpp_kernel(const char* so_filename) {
                 KernelFunc kernel_cpp;
@@ -779,10 +780,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
         inputs_len = len(V.graph.graph_inputs.keys())
         output_refs = self.get_output_refs()
         if output_refs:
-            if len(output_refs) == 1:
-                output_types = "at::Tensor"
-            else:
-                output_types = "std::vector<at::Tensor>"
+            output_types = "std::vector<at::Tensor>"
         else:
             output_types = "void"
 
@@ -844,17 +842,9 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def generate_return(self, output_refs):
         if output_refs:
-            if len(output_refs) == 1:
-                self.wrapper_call.writeline(
-                    f"return {output_refs[0]};{self.return_end_str()}"
-                )
-            else:
-                self.wrapper_call.writeline(
-                    "return std::vector<at::Tensor>({"
-                    + ", ".join(output_refs)
-                    + "});"
-                    + self.return_end_str()
-                )
+            self.wrapper_call.writeline(
+                "return {" + ", ".join(output_refs) + "};" + self.return_end_str()
+            )
         else:
             self.wrapper_call.writeline(f"return;{self.return_end_str()}")
 
@@ -917,6 +907,11 @@ class CppWrapperCodeGen(WrapperCodeGen):
 
     def make_buffer_free(self, buffer):
         return f"{buffer.get_name()}.reset();"
+
+    def generate_profiler_mark_wrapper_call(self, stack):
+        self.wrapper_call.writeline(
+            'RECORD_FUNCTION("inductor_wrapper_call", c10::ArrayRef<c10::IValue>({{}}));'
+        )
 
     def make_buffer_allocation(self, buffer):
         from .cpp import DEVICE_TO_ATEN, DTYPE_TO_ATEN
@@ -988,6 +983,7 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
             #include <ATen/cuda/CUDAContext.h>
             #include <ATen/cuda/Exceptions.h>
             #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
+            #include <c10/cuda/CUDAGuard.h>
 
             #include <fstream>
 
@@ -1006,7 +1002,9 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
                     int gridZ,
                     int numWraps,
                     int sharedMemBytes,
-                    void* args[]) {
+                    void* args[],
+                    int device_index) {
+                at::cuda::CUDAGuard device_guard(device_index);
                 AT_CUDA_DRIVER_CHECK(cuLaunchKernel(
                     func, gridX, gridY, gridZ, 32*numWraps, 1, 1, sharedMemBytes,
                     at::cuda::getCurrentCUDAStream(), args, nullptr));
@@ -1051,7 +1049,7 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
 
         return ", ".join(new_args)
 
-    def generate_kernel_call(self, name, call_args):
+    def generate_kernel_call(self, name, call_args, device_index):
         self.generate_load_kernel(name)
         call_args = self.generate_args_decl(call_args)
         self.writeline(
@@ -1060,7 +1058,7 @@ class CudaAotWrapperCodeGen(CppAotWrapperCodeGen):
         self.writeline(
             DeferredKernelParamLine(
                 name,
-                f"launchKernel({name}, LAUNCH_PARAMS, kernel_args_{self.kernel_callsite_id});",
+                f"launchKernel({name}, LAUNCH_PARAMS, kernel_args_{self.kernel_callsite_id}, {device_index});",
             )
         )
         self.kernel_callsite_id += 1
@@ -1096,10 +1094,10 @@ class TwoPassAotWrapperCodeGen(WrapperCodeGen):
 
     # For actions happen before calling .generate(), we need to record them
     # for both WrapperCodeGen
-    def generate_kernel_call(self, name, call_args):
+    def generate_kernel_call(self, name, call_args, device_index):
         # The Triton codegen does not call generate_kernel_call.
         # Could use some refactoring here.
-        self.cpp_wrapper.generate_kernel_call(name, call_args)
+        self.cpp_wrapper.generate_kernel_call(name, call_args, device_index)
 
     def define_kernel(self, name: str, kernel: str, kernel_path: str = None):
         self.cpp_wrapper.define_kernel(name, kernel)
