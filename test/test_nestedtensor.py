@@ -940,6 +940,8 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "split_with_sizes for nested tensors is currently only supported for the last dimension.",
             lambda: torch.split_with_sizes(nt, split_sizes, dim=1))
+
+        # Failure calling on non-last dimension
         self.assertRaisesRegex(
             RuntimeError, "split_with_sizes for nested tensors is currently only supported for the last dimension.",
             lambda: torch.split_with_sizes(nt, split_sizes, dim=0))
