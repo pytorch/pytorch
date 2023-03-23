@@ -5749,6 +5749,9 @@ class CommonTemplate:
             def name(self):
                 return "mock"
 
+            def device_name(self, device: torch.device) -> str:
+                return "mock_device"
+
             def compatible_with_triton(self):
                 return True
 
@@ -5758,6 +5761,7 @@ class CommonTemplate:
             def target_version(self):
                 return 11
 
+        triton_backends_copy = list(triton_backends)
         triton_backends.clear()
 
         mock_device_backend = MockDeviceBackend()
@@ -5772,6 +5776,10 @@ class CommonTemplate:
         res = register_triton_backend(mock_device_backend1)
         self.assertFalse(res)
         self.assertTrue(mock_device_backend1 not in triton_backends)
+
+        triton_backends.clear()
+        for item in triton_backends_copy:
+            register_triton_backend(item)
 
     @unittest.skipIf(HAS_CUDA, "test in_out_ptr for CppKernel")
     def test_in_out_buffer(self):

@@ -1,15 +1,5 @@
 import torch
-from torch._inductor.cuda_properties import get_device_capability
-
-def _has_triton():
-    if not torch.cuda.is_available():
-        return False
-    try:
-        import triton
-
-        return triton is not None and get_device_capability() >= (7, 0)
-    except ImportError:
-        return False
+from torch._inductor.utils import has_triton
 
 def compressed_indices_to_plain_indices(cidx, pidx):
     nnz = pidx.shape[-1]
@@ -39,7 +29,7 @@ def slicer(dim, slice_range, *tensors):
         slices[dim] = slice_range
         yield t[slices]
 
-if _has_triton():
+if has_triton():
     import triton
     import triton.language as tl
     from typing import Optional, Tuple

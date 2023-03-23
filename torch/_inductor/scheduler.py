@@ -1158,6 +1158,10 @@ class Scheduler:
                     raise RuntimeError(
                         "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                     )
+                else:
+                    raise RuntimeError(
+                        f"Found {_triton_backend.device_name(device)} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
+                    )
 
             from .codegen.triton import TritonScheduling
 
