@@ -150,20 +150,12 @@ inductor_skips["cuda"] = {
     "_native_batch_norm_legit": {f16, f32, f64},
 }
 
-inductor_skips_rocm["cuda"] = {
-    # FIXME: https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3817
-    "cumulative_trapezoid": {f16, f32, f64, b8, i32, i64},
-    "trapezoid": {f16, f32, f64, b8, i32, i64},
-    "trapz": {f16, f32, f64, b8, i32, i64},
-    # FIXME: LAPACK support - can skip like this https://github.com/ROCmSoftwarePlatform/pytorch/pull/1177 - https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3598
-    ("linalg.pinv", "hermitian"): {f16, f32, f64, b8, i32, i64},
-    ("linalg.matrix_rank", "hermitian"): {f16, f32, f64, b8, i32, i64},
-    # FIXME: Tensors are not alike https://github.com/ROCmSoftwarePlatform/frameworks-internal/issues/3462
-    "logcumsumexp": {f32},
-    # FIXME: MIOpen batch norm failure
-    "nn.functional.batch_norm": {f32},
-    "nn.functional.instance_norm": {f32},
-}
+if TEST_WITH_ROCM:
+    # LAPACK support
+    inductor_skips["cuda"][("linalg.pinv", "hermitian")] = {f16, f32, f64, b8, i32, i64}
+    inductor_skips["cuda"][("linalg.matrix_rank", "hermitian")] = {f16, f32, f64, b8, i32, i64}
+    # Tensors are not alike
+    inductor_skips["cuda"]["logcumsumexp"] = {f32}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -364,7 +356,7 @@ if not TEST_WITH_ROCM:
     # (including _linalg_svd), possibly we should have something similar here
     inductor_expected_failures_single_sample["cuda"]["linalg.cond"] = {f32, f64}
     inductor_expected_failures_single_sample["cuda"]["linalg.svdvals"] = {f32, f64}
-    inductor_expected_failures_single_sample["cuda"]["norm.nuc"] = {f32, f64}
+    inductor_expected_failures_single_sample["cuda"][("norm", "nuc")] = {f32, f64}
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
@@ -388,6 +380,10 @@ inductor_gradient_expected_failures_single_sample["cuda"] = {
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+else:
+    # aten.miopen_batch_norm is unsupported for lowering
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.batch_norm"] = {f16, f32}
+    inductor_expected_failures_single_sample["cuda"]["nn.functional.instance_norm"] = {f16, f32}  
 
 inductor_should_fail_with_exception = defaultdict(dict)
 
@@ -417,23 +413,13 @@ def get_skips_and_xfails(from_dict, xfails=True):
 # Note: if you get a "AssertionError: Couldn't find OpInfo for ..." error for an OpInfo you are sure
 # exists, you might be trying to use a test variant and you need to replace, for example,
 # "max.reduction_no_dim" with ("max", "reduction_no_dim") as the key of one of these dictionaries
-if not TEST_WITH_ROCM:
-    test_skips_or_fails = (
-        get_skips_and_xfails(inductor_skips, xfails=False)
-        | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
-        | get_skips_and_xfails(
-            inductor_gradient_expected_failures_single_sample, xfails=True
-        )
+test_skips_or_fails = (
+    get_skips_and_xfails(inductor_skips, xfails=False)
+    | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
+    | get_skips_and_xfails(
+        inductor_gradient_expected_failures_single_sample, xfails=True
     )
-else:
-    test_skips_or_fails = (
-        get_skips_and_xfails(inductor_skips, xfails=False)
-        | get_skips_and_xfails(inductor_skips_rocm, xfails=False)
-        | get_skips_and_xfails(inductor_expected_failures_single_sample, xfails=True)
-        | get_skips_and_xfails(
-            inductor_gradient_expected_failures_single_sample, xfails=True
-        )
-    )
+)
 
 def wrapper_set_seed(op, *args, **kwargs):
     """Wrapper to set seed manually for some functions like dropout
@@ -542,10 +528,6 @@ class TestInductorOpInfo(TestCase):
             # with open("test_output.txt", "a") as f:
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True, file=f)
             #     print(f"SKIPPING OP {op_name} on {device_type}", flush=True)
-        elif TEST_WITH_ROCM and dtype in inductor_skips_rocm[device_type].get(
-            op_name, set()
-        ):
-            test_expect = ExpectedTestResult.SKIP
         elif dtype in inductor_expected_failures_single_sample[device_type].get(
             op_name, set()
         ) or dtype in inductor_gradient_expected_failures_single_sample[

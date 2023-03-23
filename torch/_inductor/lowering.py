@@ -1459,7 +1459,10 @@ make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
 
+# ROCm specific
+make_fallback(aten.miopen_batch_norm, warn=False)
 
+ 
 @register_lowering(aten.clone)
 def clone(x, *, memory_format=0):
     # TODO(jansel): memory format
