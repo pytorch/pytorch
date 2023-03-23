@@ -1105,7 +1105,13 @@ class FakeTensorMode(TorchDispatchMode):
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
         ):
-            out = func(*args, **kwargs)
+            assert all(
+                t.constant is not None for t in flat_arg_fake_tensors
+            ), "f{func} should not have fake inputs without constants"
+            const_args, const_kwargs = pytree.tree_map_only(
+                FakeTensor, lambda t: t.constant, (args, kwargs)
+            )
+            out = func(*const_args, **const_kwargs)
             if self.may_turn_const(out):
                 # NB: not in_kernel_invocation_manager because we're doing real
                 # compute here
@@ -1131,6 +1137,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert (
                 len(kwargs) == 0 and len(args) == 1 and type(args[0]) is torch.Tensor
             ), f"{args} {kwargs}"
+
             return converter(self, args[0])
 
         args, kwargs = self.validate_and_convert_non_fake_tensors(

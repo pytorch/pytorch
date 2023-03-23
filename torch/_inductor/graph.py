@@ -1,9 +1,11 @@
+import functools
 import logging
 import operator
 import os
 import re
 import sys
 import time
+import warnings
 from typing import Dict, List, Optional, Set
 
 import sympy
@@ -69,8 +71,19 @@ def supported_dtype_of_cpp_wrapper(dtype):
     return dtype in supported_dtype
 
 
+@functools.lru_cache(None)
+def _warn_complex_not_supported():
+    warnings.warn(
+        "Torchinductor does not support code generation for complex operators. Performance may be worse than eager."
+    )
+
+
+def fallback_output(t):
+    return t.is_cpu and config.disable_cpp_codegen
+
+
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
-    def check_skip_condition(node, check_cpu):
+    def check_skip_condition(node, is_output):
         if not isinstance(node, torch.fx.Node):
             return False
 
@@ -80,17 +93,19 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
         for meta in tree_flatten(node.meta["val"])[0]:
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
-            if check_cpu and meta.is_cpu and config.disable_cpp_codegen:
-                return True
+            
+            if is_output:
+                if fallback_output(meta):
+                    return True
 
         return False
 
     # only skip codegen if there is a cpu output, not input
     for arg in tree_flatten((node.args, node.kwargs))[0]:
-        if check_skip_condition(arg, check_cpu=False):
+        if check_skip_condition(arg, is_output=False):
             return True
 
-    return check_skip_condition(node, check_cpu=True)
+    return check_skip_condition(node, is_output=True)
 
 
 def is_magic_method(op):
@@ -182,6 +197,10 @@ class GraphLowering(torch.fx.Interpreter):
         if name not in self._warned_fallback:
             self._warned_fallback.add(name)
             log.info(f"Using FallbackKernel: {name}")
+
+    def add_device_idx(self, idx: Optional[int]):
+        if idx is not None:
+            self.device_idxs.add(idx)
 
     @property
     def fake_mode(self):
@@ -348,8 +367,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
-        if example.device.type == "cuda":
-            self.device_idxs.add(example.device.index)
+        self.add_device_idx(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
@@ -394,6 +412,10 @@ class GraphLowering(torch.fx.Interpreter):
     def get_attr(self, target, args, kwargs):
         # this is a constant
         value = getattr(self.module, target)
+
+        if fallback_output(value):
+            return self.add_tensor_constant(value)
+
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
@@ -512,7 +534,7 @@ class GraphLowering(torch.fx.Interpreter):
                         # Currently, it's not very clear why this is helpful.
                         # The general idea here is that even though a node may
                         # have FlexibleLayout, we still often *treat* it as if
-                        # it was contiguous. This appears to sometime result in
+                        # it was contiguous. This appears to sometimes result in
                         # suboptimal behavior.
                         #
                         # When we do a better job selecting layout, we should
@@ -547,7 +569,7 @@ class GraphLowering(torch.fx.Interpreter):
             # Realize if the IRNode already has accumulated lots of reads
             if isinstance(result, TensorBox) and result.has_exceeded_max_reads():
                 # Prevent excessive accumulation in a computed buffer, when
-                # there are multiple branches meach with small number of memory
+                # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
 

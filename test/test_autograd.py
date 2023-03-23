@@ -5606,18 +5606,18 @@ for shape in [(1,), ()]:
 
         def context_fn():
             return verbose_mode, contextlib.nullcontext()
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
-        self.assertEqual(verbose_mode.operators, ['sin.default'])
+        out = checkpoint(lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn)
+        self.assertEqual(verbose_mode.operators, ['exp.default'])
 
         verbose_mode.operators = []
 
         def context_fn():
             return contextlib.nullcontext(), verbose_mode
-        out = checkpoint(lambda x: x.sin(), x, use_reentrant=False, context_fn=context_fn)
+        out = checkpoint(lambda x: x.exp(), x, use_reentrant=False, context_fn=context_fn)
         out.backward()
         self.assertEqual(
             verbose_mode.operators,
-            ['detach.default', 'detach.default', 'detach.default', 'detach.default', 'sin.default']
+            ['exp.default', 'detach.default', 'detach.default']
         )
 
         with self.assertRaisesRegex(Exception, "only supported when use_reentrant=False"):
@@ -10677,7 +10677,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint(self, early_stop):
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             x = torch.randn((), requires_grad=True)
 
             def f(x):
@@ -10703,7 +10703,7 @@ class TestNestedCheckpoint(TestCase):
 
     @parametrize("early_stop", [True, False])
     def test_nested_checkpoint_two_children(self, early_stop):
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             grad, sum, c = self.grad, self.sum, self.checkpoint
 
             def f(x):
@@ -10742,7 +10742,7 @@ class TestNestedCheckpoint(TestCase):
         def f(x):
             return x.sin()
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out, _unused1, _unused2 = checkpoint(fn, k, a, b, f, use_reentrant=False)
         actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10762,7 +10762,7 @@ class TestNestedCheckpoint(TestCase):
         a = torch.tensor(2., requires_grad=True)
         b = torch.tensor(3., requires_grad=True)
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, blah=b, use_reentrant=False)
             actual_grads = torch.autograd.grad(out, (a, b))
 
@@ -10783,7 +10783,7 @@ class TestNestedCheckpoint(TestCase):
 
         a = torch.tensor(1., requires_grad=True)
 
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             out = checkpoint(fn, a, use_reentrant=False)
         # The hook is registered on the original graph
         out.grad_fn.next_functions[0][0].register_hook(hook)
@@ -10805,10 +10805,108 @@ class TestNestedCheckpoint(TestCase):
             x.backward(retain_graph=True)
 
         a = torch.tensor(1., requires_grad=True)
-        with torch.utils.checkpoint._set_checkpoint_early_stop(early_stop):
+        with torch.utils.checkpoint.set_checkpoint_early_stop(early_stop):
             x, out = checkpoint(fn, a, use_reentrant=False)
         out.grad_fn.register_hook(hook)
         out.backward(retain_graph=True)
+
+    def test_nested_checkpoint_set_early_stop(self):
+        counter = [0]
+
+        def clone(x):
+            counter[0] += 1
+            return x.clone()
+
+        def fn(x):
+            # Since clone does not save anything, it is not recomputed iff
+            # early stop is enabled.
+            return clone(x.sin().cos())
+
+        # Early stopping is enabled by default
+        a = torch.tensor(1., requires_grad=True)
+        out = checkpoint(fn, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Try using the context manager to set early stopping to False.
+        # Expect early stopping to be disabled for all checkpoints ran under
+        # the context manager, even though context manager is no longer active
+        # when backward/recomputation is performed.
+        counter = [0]
+        a = torch.tensor(1., requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn, a, use_reentrant=False)
+
+        out.backward()
+        self.assertEqual(counter[0], 2)
+
+    def test_nested_checkpoint_set_early_stop_no_recompution_needed(self):
+        # Case 1: We have one tensor saved and its the input
+
+        # We have two different counters here because in this case we actually
+        # do call into x.sin() at the python level during recomputation whether
+        # or not early stop is enabled. This is because the early stopping
+        # only happens at the autograd level (preventing us from reaching the
+        # backend).
+        python_dispatch_counter = [0]
+        counter = [0]
+
+        class SinCounterMode(TorchDispatchMode):
+            def __init__(self):
+                self.count = 0
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                kwargs = {} if kwargs is None else kwargs
+                if func is torch.ops.aten.sin.default:
+                    self.count += 1
+                return func(*args, **kwargs)
+
+        def fn(x):
+            counter[0] += 1
+            return x.sin()
+
+        # With early stopping (enabled by default)
+        a = torch.tensor(1., requires_grad=True)
+        with SinCounterMode() as python_dispatch_counter:
+            out = checkpoint(fn, a, use_reentrant=False)
+            out.backward()
+        self.assertEqual(counter[0], 2)
+        self.assertEqual(python_dispatch_counter.count, 1)
+
+        # Without early stopping
+        counter = [0]
+        a = torch.tensor(1., requires_grad=True)
+        with SinCounterMode() as python_dispatch_counter:
+            with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+                out = checkpoint(fn, a, use_reentrant=False)
+            out.backward()
+        self.assertEqual(counter[0], 2)
+        self.assertEqual(python_dispatch_counter.count, 2)
+
+        # Case 2: Forward saves no tensors
+
+        # Since unpack isn't even called, counter is 1 whether or not early stop
+        # is enabled!
+        counter = [0]
+
+        def fn2(x):
+            counter[0] += 1
+            return x.clone()
+
+        # With early stopping (enabled by default)
+        a = torch.tensor(1., requires_grad=True)
+        out = checkpoint(fn2, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
+        # Without early stopping
+        counter = [0]
+        a = torch.tensor(1., requires_grad=True)
+        with torch.utils.checkpoint.set_checkpoint_early_stop(False):
+            out = checkpoint(fn2, a, use_reentrant=False)
+        out.backward()
+        self.assertEqual(counter[0], 1)
+
 
 class TestAutogradMultipleDispatch(TestCase):
     def test_autograd_multiple_dispatch_registrations(self, device):
