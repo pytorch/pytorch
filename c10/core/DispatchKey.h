@@ -268,6 +268,8 @@ enum class DispatchKey : uint16_t {
   // This is implemented at a dispatch level right before any backends run
   Negative,
 
+  CompositeView, // see ATen/view/CompositeViewFallback.cpp
+
   ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
 
   // Note [ADInplaceOrView key]

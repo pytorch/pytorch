@@ -10,7 +10,9 @@
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/core/WrapDimMinimal.h>
-// Do not include ExtraMeta.h, it is forward declared to reduce the compile impact of changing it.
+// Do not include ExtraMeta.h, it is forward declared to reduce the
+// compile impact of changing it.
+//
 // #include <c10/core/impl/ExtraMeta.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/core/impl/NamedTensorMetaInterface.h>
@@ -58,14 +60,23 @@ class Tensor;
 class TensorBase;
 } // namespace at
 
+// Forward declarations to be friended. Never called in this unit.
+namespace at::view {
+void copy_into_view(Tensor& view_tensor, Tensor const& tensor);
+bool has_composite_view(const TensorBase& tensor);
+Tensor materialize(Tensor const& tensor);
+} // namespace at::view
+
 namespace c10 {
 class Scalar;
 struct Storage;
 } // namespace c10
 
-namespace c10 {
+namespace c10::impl {
+struct ExtraMeta;
+} // namespace c10::impl
 
-namespace impl { struct ExtraMeta; }
+namespace c10 {
 
 /**
  * A utility function to convert vector<int> to vector<int64_t>.
@@ -473,6 +484,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       DispatchKeySet,
       const caffe2::TypeMeta data_type);
 
+  // The copy constructor is implicitly a view constructor. This has
+  // the added power of copying any composite views that might be
+  // represented in the input.
+  //
+  // Note that this does not copy all the state of the input.
+  explicit TensorImpl(TensorImpl const& that);
+
   /**
    * Construct a 1-dim 0 size tensor that doesn't have a storage.
    */
@@ -509,7 +527,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       c10::optional<c10::Device>);
 
  public:
-  TensorImpl(const TensorImpl&) = delete;
   TensorImpl& operator=(const TensorImpl&) = delete;
   TensorImpl(TensorImpl&&) = delete;
   TensorImpl& operator=(TensorImpl&&) = delete;
@@ -778,7 +795,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool sym_is_non_overlapping_and_dense_default() const;
 
  public:
-
   // NB: these dim accessor functions don't have _default(), as you can use
   // sizes_default/strides_default
   /**
@@ -2571,6 +2587,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     refresh_layout_policy();
   }
 
+  // Adds an infallible view to this instance.
+  void add_composite_view(IntArrayRef sizes);
+
  protected:
   void refresh_sizes_strides_policy() {
     if (has_symbolic_sizes_strides_) {
@@ -2594,6 +2613,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   Storage storage_;
 
  private:
+  // Gets a mutable instance to the extra_meta_ field, creating it if
+  // it does not already exist.
+  impl::ExtraMeta& extra_meta();
+
   // This pointer points to an AutogradMeta struct that stores autograd-specific
   // fields (such as grad_ / grad_fn_ / grad_accumulator_). This pointer always
   // has unique ownership (meaning only one TensorImpl can own it at a time).
@@ -2775,6 +2798,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   //
   // INVARIANT: extra_meta_->named_tensor_meta_ != nullptr  <==>
   // key_set_.has(DispatchKey::Named)
+  // INVARIANT: !extra_meta_->composite_views().empty() ⟺
+  // key_set_.has(DispatchKey::CompositeView)
   DispatchKeySet key_set_;
 
  private:
@@ -2790,6 +2815,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       size_t cuda_version_major,
       size_t ptr_size>
   friend class C10_TensorImpl_Size_Check_Dummy_Class;
+
+  // We friend these function so that it may read the ExtraMeta.
+  friend void at::view::copy_into_view(
+      at::Tensor& view_tensor,
+      at::Tensor const& source);
+  friend bool at::view::has_composite_view(TensorBase const& tensor);
+
+  // We friend this function because we choose to modify this instance
+  // in place when we need to materialize composite views. The overall
+  // process is to:
+  // 1. prepare instance for materialization
+  // 2. reshape
+  // 3. restore the instance to the state before 1.
+  //
+  // The state that we modify may not be mutated publicly by this
+  // class.
+  friend at::Tensor at::view::materialize(at::Tensor const& tensor);
 };
 
 // Note [TensorImpl size constraints]

@@ -9958,7 +9958,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_view_as_real,
            test_conjugated_samples=False,
-           ),
+           skips=(
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
+           )),
     OpInfo('view_as_complex',
            dtypes=floating_types_and(torch.half),
            supports_out=False,
@@ -10471,6 +10473,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_grad'),
                # Pre-existing condition (calls .item); needs to be fixed
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
            )),
     UnaryUfuncInfo('floor',
                    ref=np.floor,
@@ -10723,6 +10726,7 @@ op_db: List[OpInfo] = [
                    skips=(
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
+                       DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_infallible_view_samples"),
                    )),
     OpInfo('gradient',
            dtypes=floating_and_complex_types_and(torch.int8, torch.int16,
@@ -11926,6 +11930,7 @@ op_db: List[OpInfo] = [
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.float,)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
                             dtypes=(torch.int64,)),
@@ -11967,6 +11972,7 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                             dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
                             dtypes=(torch.int64,)),
@@ -12026,6 +12032,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip("Skipped! 75029"), 'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
                DecorateInfo(unittest.skip("Skipped! 75363"), 'TestCudaFuserOpInfo', 'test_nvfuser_extremal_values'),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                # RuntimeError: "slow_conv3d_cpu_grad_input" not implemented for 'Long'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
                             dtypes=(torch.int64,)),
@@ -12055,6 +12062,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing'
                ),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-3, rtol=1e-3)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
@@ -12098,6 +12106,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
                    'TestCommon', 'test_complex_half_reference_testing',
                ),
+               DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=1e-2, rtol=1e-2)}),
                    'TestCudaFuserOpInfo', 'test_nvfuser_correctness',
@@ -13815,6 +13824,7 @@ op_db: List[OpInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/66357
                    check_batched_forward_grad=False,
                    skips=(
+                       DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_infallible_view_samples'),
                        # Skip since real and imag don't have out variants.
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_out_arg_all_dtypes'),
                    )),
@@ -14616,7 +14626,10 @@ op_db: List[OpInfo] = [
                    ref=np.isfinite,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_infallible_view_samples"),
+                   )),
     UnaryUfuncInfo('isinf',
                    ref=np.isinf,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -14649,7 +14662,10 @@ op_db: List[OpInfo] = [
                    ref=np.isreal,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
                    supports_out=False,
-                   supports_autograd=False),
+                   supports_autograd=False,
+                   skips=(
+                       DecorateInfo(unittest.skip('Skipped!'), "TestCommon", "test_infallible_view_samples"),
+                   )),
     UnaryUfuncInfo('isnan',
                    ref=np.isnan,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),

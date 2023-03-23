@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple
 from torchgen.utils import dataclass_repr
 
 import torch
-from torch.testing import make_tensor
+from torch.testing import assert_close, make_tensor
 from torch.testing._internal.common_device_type import (
     skipCPUIfNoFFT,
     tol,
@@ -304,6 +304,25 @@ cannot specify additional metadata in keyword arguments"""
             return t
 
         return self.transform(to_noncontiguous)
+
+    def infallible_view(self):
+        def to_infallible_view(t):
+            if isinstance(t, torch.Tensor):
+                if t.dim() >= 2:
+                    size = t.size()
+                    u = t.transpose(0, 1)
+                    torch._C._infallible_view(u, [t.numel()])
+                    u = u.view(
+                        [t.size()[1], t.size()[0]] + list(t.size()[2:])
+                    ).transpose(0, 1)
+                    assert_close(t, u, equal_nan=True)
+                    return u
+            elif isinstance(t, torch.dtype):
+                return t
+
+            return t
+
+        return self.transform(to_infallible_view)
 
 
 NumericsFilter = collections.namedtuple("NumericsFilter", ["condition", "safe_val"])

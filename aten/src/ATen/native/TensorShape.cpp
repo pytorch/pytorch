@@ -26,6 +26,7 @@
 #include <ATen/native/cpu/SerialStackImpl.h>
 #include <ATen/native/cpu/StackKernel.h>
 #include <ATen/quantized/QTensorImpl.h>
+#include <ATen/view/materialize.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/SmallVector.h>
@@ -1139,8 +1140,7 @@ Tensor make_qtensor(const Tensor& self, IntArrayRef size, IntArrayRef stride, Qu
 Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
   TORCH_INTERNAL_ASSERT(!self.is_mps(), "as_strided_tensorimpl does not work with MPS; call self.as_strided(...) instead");
   auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+  auto result = at::detail::make_tensor<TensorImpl>(*self.unsafeGetTensorImpl());
   setStrided(result, size, stride, storage_offset);
   return result;
 }
@@ -1555,8 +1555,7 @@ Tensor alias_with_sizes_and_strides(
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
   } else {
-    self_ = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
+    self_ = at::detail::make_tensor<TensorImpl>(*self.unsafeGetTensorImpl());
     auto* self_tmp_ = self_.unsafeGetTensorImpl();
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
@@ -1631,6 +1630,9 @@ Tensor _reshape_copy_symint(const Tensor& self, c10::SymIntArrayRef proposed_sha
 Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
+  }
+  if (self.key_set().has(c10::DispatchKey::CompositeView)) {
+    return reshape(view::materialize(self), proposed_shape);
   }
   DimVector shape = infer_size_dv(proposed_shape, self.numel());
 
