@@ -39,13 +39,10 @@ static __m128i inline mm_cvtepu8_epi32(const uint32_t* C10_RESTRICT ptr) {
   return _mm_cvtepu8_epi32(_mm_cvtsi32_si128(*(int32_t*)ptr));
 }
 
-// TODO: We may want to hard-code an unrolled version for the case where
-// num_channels=3 to hint the compiler to vectorize this (looks at original
-// PIL-SIMD's code).
 at::Tensor unpack_rgb(const at::Tensor& packed_tensor) {
   // Convert a "packed" tensor (typically RGBRGBRGB if channels_last) into
-  // RGBARGBARGBA format where A is hard-coded to 255. Each pixel is encoded
-  // into as 32bits. This generalizes to num_channels <= 4 and also works for
+  // RGBARGBARGBA format where A is hard-coded to 0. Each pixel is encoded
+  // into as 32 bits. This generalizes to num_channels <= 4 and also works for
   // non-channels_last tensors.
 
   const uint8_t* packed = (const uint8_t*)packed_tensor.data_ptr<uint8_t>();
@@ -71,7 +68,7 @@ void pack_rgb(
     const at::Tensor& unpacked_tensor, // IN
     const at::Tensor& packed_tensor // OUT
 ) {
-  // Convert back RGBA into RGB.
+  // Convert from unpacked channels last 4-channels tensor into original data layout.
 
   constexpr int rgba_size = 4;
   uint8_t* unpacked = (uint8_t*)unpacked_tensor.data_ptr<uint8_t>();
@@ -315,28 +312,31 @@ void upsample_avx_bilinear_uint8(
             /*align_i32=*/true);
   }
 
-  bool is_rgba = num_channels == 4 && input.is_contiguous(at::MemoryFormat::ChannelsLast);
+  bool needs_unpacking = num_channels == 4 && input.is_contiguous(at::MemoryFormat::ChannelsLast);
 
   at::Tensor buffer_horiz, buffer_vert;
-  if (need_horizontal && !(is_rgba && !need_vertical)) {
+  // Minor optimization: we can avoid allocating an extra buffer if we're performing
+  // horizontal-only or vertical-only interpolation, and if the tensor doesn't
+  // need unpacking
+  if (need_horizontal && !(needs_unpacking && !need_vertical)) {
     buffer_horiz = at::empty({4, yin, xout}, input.options());
   }
-  if (need_vertical && !is_rgba) {
+  if (need_vertical && !needs_unpacking) {
     buffer_vert = at::empty({4, yout, xout}, input.options());
   }
 
-  // TODO: The unpack / pack operations create a copy of the original input and
-  // output tensor. There should be a way to avoid these copies by instead
+  // TODO: The unpack / pack operations create a
+  // copy of the original input and output tensor. There should be a way to avoid these copies by instead
   // modifying the low-level kernels. Or maybe at least avoid copying the entire
   // tensors and just copy part of them (line by line).
   for (const auto i : c10::irange(batch_size)) {
 
-    at::Tensor unpacked_input = (is_rgba) ? input[i] : unpack_rgb(input[i]);
+    at::Tensor unpacked_input = (needs_unpacking) ? input[i] : unpack_rgb(input[i]);
     at::Tensor unpacked_output;
 
     if (need_horizontal) {
 
-      at::Tensor unpacked_output_temp = (is_rgba && !need_vertical) ? output[i] : buffer_horiz;
+      at::Tensor unpacked_output_temp = (needs_unpacking && !need_vertical) ? output[i] : buffer_horiz;
 
       ImagingResampleHorizontal(
           unpacked_output_temp,
@@ -347,7 +347,7 @@ void upsample_avx_bilinear_uint8(
       unpacked_output = unpacked_input = unpacked_output_temp;
     }
     if (need_vertical) {
-      unpacked_output = (is_rgba) ? output[i] : buffer_vert;
+      unpacked_output = (needs_unpacking) ? output[i] : buffer_vert;
 
       ImagingResampleVertical(
           unpacked_output,
@@ -359,7 +359,7 @@ void upsample_avx_bilinear_uint8(
 
     TORCH_INTERNAL_ASSERT(unpacked_output.defined());
 
-    if (!is_rgba) {
+    if (!needs_unpacking) {
       pack_rgb(unpacked_output, output[i]);
     }
   }
@@ -382,7 +382,8 @@ void ImagingResampleHorizontalConvolution8u4x(
     unsigned int coefs_precision) {
   // Interpolation horizontal pass processing together 4 vertical lines.
   // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
-  // - We split the size of weight vector for a given output index as a sum: K = n * 4 + m * 2 + k.
+  // - We split the size of weight vector for a given output index as a sum:
+  //   ids_size = num_blocks_4 * 4 + num_blocks_2 * 2 + num_blocks_1.
   // - We load and process 4 weights values in a loop ("block 4") then we process 2 weights values
   // in another loop ("block 2") and finally we process 1 weights value in the final loop ("block 1").
 
@@ -549,7 +550,8 @@ void ImagingResampleHorizontalConvolution8u(
 
   // Interpolation horizontal pass processing only one vertical line.
   // - Input data format is RGBA with R,G,B,A being uint8, we can encode 4 values as a single uint32 value.
-  // - We split the size of weight vector for a given output index as a sum: K = n * 8 + m * 4 + k * 2 + l.
+  // - We split the size of weight vector for a given output index as a sum:
+  //   ids_size = num_blocks_8 * 8 + num_blocks_4 * 4 + num_blocks_2 * 2 + num_blocks_1
   // - We load and process 8 weights values in a loop ("block 8") then 4 weights and 2 weights values in
   // in another loops ("block 4" and "block 2") and finally we process 1 weight value in the final loop ("block 1").
 
