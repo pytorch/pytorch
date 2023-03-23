@@ -2484,7 +2484,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
-    def test_recompile_on_index(self):
+    def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
         def gemm(x, y):
@@ -7181,37 +7181,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
-
-        @config.patch(tune_layout=True)
-        def test_tune_layout(self):
-            class Repro(torch.nn.Module):
-                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
-                    convolution_1 = torch.ops.aten.convolution.default(
-                        unsqueeze,
-                        unsqueeze_1,
-                        arg1_1,
-                        [1, 1],
-                        [1, 0],
-                        [1, 1],
-                        False,
-                        [0, 0],
-                        1,
-                    )
-                    unsqueeze = unsqueeze_1 = arg1_1 = None
-                    return (convolution_1,)
-
-            args = [
-                ((512,), (1,), torch.float16, "cuda"),
-                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
-                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
-            ]
-            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-
-            mod = Repro()
-            opt_mod = torch._dynamo.optimize("inductor")(mod)
-            ref = mod(*args)
-            res = opt_mod(*args)
-            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):

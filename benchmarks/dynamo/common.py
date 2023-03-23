@@ -193,7 +193,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "Background_Matting",  # fp64_OOM
     "dlrm",  # Fails on CI - unable to repro locally
     "hf_T5_base",  # accuracy
-    "mobilenet_v3_large",  # accuracy
     "resnet50_quantized_qat",  # Eager model failed to run
     # Huggingface
     "BlenderbotForCausalLM",  # OOM
@@ -207,8 +206,6 @@ CI_SKIP[CI("inductor", training=True)] = [
     "eca_halonext26ts",  # accuracy
     "fbnetv3_b",  # accuracy
     "levit_128",  # fp64_OOM
-    # https://github.com/pytorch/pytorch/issues/94066
-    "rexnet_100",  # Accuracy failed for key name stem.bn.weight.grad
     "sebotnet33ts_256",  # Accuracy failed for key name stem.conv1.conv.weight.grad
     "xcit_large_24_p8_224",  # fp64_OOM
 ]
@@ -248,8 +245,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # torchbench
-    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
     # timm_models
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
@@ -2007,8 +2002,14 @@ def run(runner, args, original_dir=None):
             # some of the models do not support use_deterministic_algorithms
             torch.use_deterministic_algorithms(True)
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-        torch.backends.cudnn.enabled = False
         torch.backends.cudnn.deterministic = True
+
+        # We shouldn't need this after setting torch.backends.cudnn.deterministic
+        # to True, but somehow some benchmarks still show random accuracy failures
+        # with cudnn turned on.
+        if args.only in {"mobilenet_v3_large", "rexnet_100"}:
+            torch.backends.cudnn.enabled = False
+
         torch.backends.cudnn.allow_tf32 = False
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
