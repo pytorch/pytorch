@@ -221,7 +221,7 @@ struct MediumRadixSort {
       case 4:
       case 2:
         TORCH_INTERNAL_ASSERT(
-            false, "Expected size <= 64 to be handled by different algorithm");
+            false, "Expected size <= 128 to be handled by a different algorithm");
         break;
       case 1:
         /* Nothing to do, data already sorted */
@@ -356,6 +356,7 @@ void sortKeyValueInplace(
   if (sort_size <= 1) {
     return; // Already sorted
   } else if (!stable && sort_size <= 32) {
+    // NOTE: Bitonic sort is unstable
     sortCommon(SmallBitonicSort{}, key, value, dim, descending);
   } else if (sort_size <= 128) {
     sortCommon(WarpMergeSort<128>{}, key, value, dim, descending);
