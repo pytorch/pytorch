@@ -1063,17 +1063,14 @@ def is_weakly_lesser_type(a: type, b: type) -> bool:
     The comparison is determined by the following type ordering: bool, int, float, complex.
     """
     ordered_types = (
-        torch.SymBool,
         bool,
-        torch.SymInt,
         int,
-        torch.SymFloat,
         float,
         complex,
     )
 
-    assert a in ordered_types, f"{a} not in {ordered_types}"
-    assert b in ordered_types, f"{b} not in {ordered_types}"
+    assert a in ordered_types
+    assert b in ordered_types
 
     for typ in ordered_types:
         if a == typ:

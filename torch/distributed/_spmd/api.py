@@ -128,8 +128,8 @@ def _dtensor_expand(
             schemas.append(shard_schema)
 
     for o in pytree.tree_flatten(named_states)[0]:
-        if isinstance(a, torch.Tensor):
-            inps.append(a)
+        if isinstance(o, torch.Tensor):
+            inps.append(o)
             schemas.append(replicate_schema)
         else:
             inps.append(torch.empty(0))
@@ -160,6 +160,7 @@ def _rematerialize_optimizer(
     orig_params = param_group["params"]
     # FIXME(@mrshenli): exclude buffers
     param_group["params"] = params.values()
+
     try:
         yield
     finally:

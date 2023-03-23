@@ -442,6 +442,8 @@ def _convert_to_distributed(
                     node, node_to_obj
                 )
             else:
+                # FIXME(@mrshenli, @wanchaol): this prevents DTensor to insert
+                # allreduce for partial DTensor objects.
                 # FIXME: assuming it's inplace on the first arugment
                 node_to_obj[node] = node_to_obj[node.args[0]]
                 logger.info(f"Skipping expanding inplace operator {node.target.name()}")

@@ -23,6 +23,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -490,6 +491,7 @@ class TraceTrainStepTest(DTensorTestBase):
     def world_size(self):
         return 2
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_train_step_toy(self):
         @_compile()
@@ -502,6 +504,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
         train_step(mod, inp)
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_sgd(self):
         @compile()
@@ -520,6 +523,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
         train_step(mod, opt, inp)
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_adam(self):
         @compile()
@@ -539,6 +543,7 @@ class TraceTrainStepTest(DTensorTestBase):
 
         train_step(mod, opt, inp)
 
+    @skip_if_lt_x_gpu(2)
     @with_comms
     def test_train_step_override(self):
         class DDMOverride(Override):
