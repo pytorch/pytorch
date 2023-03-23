@@ -340,6 +340,7 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 self.assertTrue(same(correct_results, opt_results))
 
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     def test_c10d_collectives(self):
         class FakeModel(nn.Module):
 
