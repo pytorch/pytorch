@@ -1131,7 +1131,7 @@ void TensorImpl::set_sizes_and_strides(
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
+    extra_meta_ = std::make_unique<impl::ExtraMeta>();
     if (!storage_offset.has_value()) {
       extra_meta_->storage_offset_ = storage_offset_;
     }
@@ -1160,7 +1160,7 @@ void TensorImpl::generic_set_sizes_contiguous(SymIntArrayRef sizes) {
   has_symbolic_sizes_strides_ = true;
   refresh_sizes_strides_policy();
   if (!extra_meta_) {
-    extra_meta_ = std::make_unique<ExtraMeta>();
+    extra_meta_ = std::make_unique<impl::ExtraMeta>();
     extra_meta_->storage_offset_ = storage_offset_;
   }
 
