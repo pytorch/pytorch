@@ -5840,6 +5840,25 @@ class CommonTemplate:
         self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
         self.common(fn2, ())
 
+    def test_argmax_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97127
+        def fn():
+            a = torch.zeros([2, 2])
+            b = a.argmax(0)
+            return b.float().mean()
+
+        self.common(fn, ())
+
+    def test_const_int32_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97124
+        def fn():
+            a = torch.zeros([1, 2], dtype=torch.int32)
+            a = a + a
+            b = a.to(dtype=torch.float32)
+            return b * 0.8
+
+        self.common(fn, ())
+
 
 def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
@@ -6428,7 +6447,16 @@ if HAS_CPU:
                     torch.double,
                 ),
             )
-            _graph.output((b, c))
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    b,
+                    b,
+                ),
+            )
+            _graph.output((d, c))
 
             def get_index():
                 return ""
@@ -6514,7 +6542,16 @@ if HAS_CPU:
                     torch.int64,
                 ),
             )
-            _graph.output(c)
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    c,
+                    c,
+                ),
+            )
+            _graph.output(d)
 
             def get_index():
                 return ""
@@ -7135,6 +7172,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             mod = make_fx(forward)()
             compiled = compile_fx_inner(mod, ())
             assert compiled([])[0].device.type == "cuda"
+
+        @config.patch({"triton.cudagraphs": True})
+        def test_no_device_idx_repro_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self):
+                    full = torch.ops.aten.full.default(
+                        [8, 512],
+                        1,
+                        dtype=torch.float32,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    full_1 = torch.ops.aten.full.default(
+                        [8, 512],
+                        0,
+                        dtype=torch.int64,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    return (full_1, full)
+
+            self.common(Repro(), ())
 
         @config.patch({"triton.cudagraphs": True})
         def test_expanded_inputs_cudagraphs(self):

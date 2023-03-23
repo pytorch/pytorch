@@ -1714,6 +1714,8 @@ class CppVecKernelChecker(CppVecKernel):
         V.graph.wrapper_code = WrapperCodeGen()
 
         class VecCheckerProxy:
+            bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
+
             @staticmethod
             def _bin_cmp_op(x, y):
                 current_node: torch.fx.Node = V.interpreter.current_node
@@ -1723,10 +1725,8 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def __getattr__(name):
-                bin_cmp_ops = ["eq", "ne", "le", "ge", "lt", "gt"]
-
                 def inner(*args, **kwargs):
-                    if name in bin_cmp_ops:
+                    if name in VecCheckerProxy.bin_cmp_ops:
                         return VecCheckerProxy._bin_cmp_op(args, kwargs)
 
                     if not (name in self.fast_vec_list):
@@ -1773,7 +1773,14 @@ class CppVecKernelChecker(CppVecKernel):
                             opt_ctx.dtype = torch.float32
 
                     supported_dtypes = [torch.float32, torch.int32, torch.bfloat16]
-                    if opt_ctx.dtype not in supported_dtypes:
+
+                    if opt_ctx.dtype not in supported_dtypes or (
+                        opt_ctx.dtype == torch.int32
+                        and not all(
+                            user.target in VecCheckerProxy.bin_cmp_ops
+                            for user in node_ctx.current_node.users
+                        )
+                    ):
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
 
                     if opt_ctx.dtype in [torch.bfloat16]:
@@ -1837,6 +1844,10 @@ class CppVecKernelChecker(CppVecKernel):
                         and min_expr.is_number
                         and max_expr <= i32_iinfo.max
                         and min_expr >= i32_iinfo.min
+                        and all(
+                            user.target in VecCheckerProxy.bin_cmp_ops
+                            for user in node_ctx.current_node.users
+                        )
                     ):
                         opt_ctx.dtype = torch.int32
                     else:
