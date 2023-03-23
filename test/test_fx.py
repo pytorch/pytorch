@@ -58,6 +58,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     find_library_location,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase

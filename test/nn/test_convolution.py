@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     parametrize as parametrize_test,
     run_tests,
     set_default_dtype,
+    skipIfRocm,
     skipIfNotMiopenSuggestNHWC,
     skipIfRocmVersionLessThan,
     subtest,
@@ -4060,8 +4061,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad_weight.shape, weight.shape)
 
     @onlyCUDA
-    @largeTensorTest("40GB")
-    @largeTensorTest("24GB", "cpu")
+    @largeTensorTest('40GB')
+    @largeTensorTest('24GB', 'cpu')
+    # Skipped for ROCm temp - https://ontrack-internal.amd.com/browse/SWDEV-383635
+    @skipIfRocm
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
         m = torch.nn.Conv3d(32, 1, kernel_size=1, padding=0, stride=1, bias=False)

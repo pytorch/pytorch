@@ -28,7 +28,7 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
     check_model_gpu,
     copy_tests,
 )
-from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import TEST_WITH_ASAN, TEST_WITH_ROCM, skipIfRocm
 
 
 importlib.import_module("functorch")

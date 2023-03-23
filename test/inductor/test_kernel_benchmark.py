@@ -17,7 +17,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import xfailIfSM89
 from torch.testing._internal.common_device_type import expectedFailureXPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-
+from torch.testing._internal.common_utils import skipIfRocm
 
 class TestKernelBenchmark(TestCase):
     device_type = GPU_TYPE
@@ -153,6 +153,7 @@ class TestKernelBenchmark(TestCase):
     @expectedFailureXPU
     @config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     @fresh_inductor_cache()
+    @skipIfRocm #This seems to be disabled upstream https://github.com/pytorch/pytorch/issues/118346
     def test_mm_triton_kernel_benchmark(self):
         M = 2048
         N = 2432

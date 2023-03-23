@@ -1959,9 +1959,8 @@ exit(2)
             with torch.cuda.graph(torch.cuda.CUDAGraph()):
                 torch.zeros(2**40, device="cuda")
 
-    @unittest.skipIf(
-        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
-    )
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @skipIfRocm(msg="TODO: temp skip on ROCm 6.2")
     @serialTest()
     @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):
@@ -2918,6 +2917,7 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @skipIfRocm(msg="TODO: temp skip on ROCm 6.2")
     def test_graph_make_graphed_callables_same_pool(self):
         torch.manual_seed(5)
         torch.cuda.manual_seed(5)

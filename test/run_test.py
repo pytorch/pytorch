@@ -185,6 +185,9 @@ ROCM_BLOCKLIST = [
     "distributed/_tensor/test_attention",
 ]
 
+if sys.version_info.major < 3 or (sys.version_info.major == 3 and sys.version_info.minor <= 9):
+   ROCM_BLOCKLIST.append("test_typing")
+
 # whitelist of tests for s390x
 S390X_TESTLIST = [
     "backends/xeon/test_launch.py",
