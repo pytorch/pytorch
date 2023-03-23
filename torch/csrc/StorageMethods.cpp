@@ -105,7 +105,7 @@ static PyObject* THPStorage_new(PyObject* self, PyObject* noargs) {
       /*resizable=*/true);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  return THPStorage_New(std::move(new_storage));
+  return THPStorage_Wrap(std::move(new_storage));
   END_HANDLE_TH_ERRORS
 }
 
@@ -317,7 +317,7 @@ static PyObject* THPStorage_fromBuffer(
   }
 
   PyBuffer_Release(&buffer);
-  return (PyObject*)THPStorage_New(storage);
+  return THPStorage_Wrap(storage);
   END_HANDLE_TH_ERRORS
 }
 
@@ -357,7 +357,10 @@ static PyObject* THPStorage_fromFile(
     storage->set_nbytes(actual_nbytes);
   }
 
-  return (PyObject*)THPStorage_New(std::move(storage));
+  return THPStorage_NewWithStorage(
+      THPStorageClass,
+      std::move(storage),
+      c10::impl::PyInterpreterStatus::TAGGED_BY_US);
   END_HANDLE_TH_ERRORS
 }
 
@@ -408,7 +411,7 @@ PyObject* THPStorage_newWithFile(PyObject* _unused, PyObject* args) {
   auto storage = THPStorage_readFileRaw<int>(fd, {}, element_size);
   if (!storage.defined())
     return nullptr;
-  return THPStorage_New(std::move(storage));
+  return THPStorage_Wrap(std::move(storage));
   END_HANDLE_TH_ERRORS
 }
 

@@ -86,13 +86,10 @@ PyObject* createPyObject(const at::Storage& storage) {
         false,
         "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
   }
-  PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPStorageClass);
-  auto obj = THPObjectPtr(type->tp_alloc(type, 0));
+  PyObject* obj = THPStorage_Wrap(storage);
   if (!obj)
     throw python_error();
-  ((THPStorage*)obj.get())->cdata =
-      c10::MaybeOwned<at::Storage>::owned(at::Storage(/* copy */ storage));
-  return obj.release();
+  return obj;
 }
 
 PyTypeObject* loadTypedStorageTypeObject() {
@@ -117,8 +114,7 @@ bool isStorage(PyObject* obj) {
     return true;
   }
   auto obj_type = Py_TYPE(obj);
-
-  return obj_type == reinterpret_cast<PyTypeObject*>(THPStorageClass);
+  return THPStorage_CheckExact(obj);
 }
 
 at::Storage createStorageGetType(
@@ -148,8 +144,7 @@ at::Storage createStorageGetType(
     untyped_storage_obj = obj;
   }
 
-  if (Py_TYPE(untyped_storage_obj) !=
-      reinterpret_cast<PyTypeObject*>(THPStorageClass)) {
+  if (!THPStorage_CheckExact(untyped_storage_obj)) {
     throw TypeError("not a storage '%s'", Py_TYPE(obj)->tp_name);
   }
 

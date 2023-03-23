@@ -77,8 +77,31 @@ struct THPStorage {
   c10::MaybeOwned<c10::Storage> cdata;
 };
 
-TORCH_PYTHON_API PyObject* THPStorage_New(c10::Storage storage);
-extern PyObject* THPStorageClass;
+TORCH_PYTHON_API PyObject* THPStorage_Wrap(c10::Storage storage);
+TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
+    PyTypeObject* type,
+    c10::Storage _storage,
+    c10::impl::PyInterpreterStatus status,
+    bool allow_preexisting_pyobj = false);
+extern PyTypeObject* THPStorageClass;
+
+static inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
+  return tp == THPStorageClass;
+}
+
+static inline bool THPStorage_CheckExact(PyObject* obj) {
+  return THPStorage_CheckTypeExact(Py_TYPE(obj));
+}
+
+inline bool THPStorage_Check(PyObject* obj) {
+  if (!THPStorageClass)
+    return false;
+
+  const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
+  if (result == -1)
+    throw python_error();
+  return result;
+}
 
 bool THPStorage_init(PyObject* module);
 void THPStorage_postInit(PyObject* module);
