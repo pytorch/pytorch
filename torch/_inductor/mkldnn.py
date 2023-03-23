@@ -132,7 +132,7 @@ class ConvUnary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             )
             if input_size is not None
             else self.weight.to_mkldnn(),
@@ -208,7 +208,7 @@ class ConvBinary2d(nn.Conv2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             )
             if input_size is not None
             else self.weight.to_mkldnn(),
@@ -410,10 +410,10 @@ class ConvTransposeUnary2d(nn.ConvTranspose2d):
                 self.stride,
                 self.dilation,
                 self.groups,
-                input_size,
+                tuple(guard_int(x) for x in input_size),
             )
             if input_size is not None
-            else self.weight.to_mkldnn()
+            else self.weight.transpose(0, 1).to_mkldnn()
         )
         self.weight = torch.nn.Parameter(
             packed_weight,
@@ -654,7 +654,10 @@ def fuse_unary(gm: torch.fx.GraphModule):
                 ):
                     continue
                 # TODO: remove this when group depthwise ConvTranspose is supported
-                if is_group_depthwise_conv_transpose(computation_node):
+                if (
+                    is_group_depthwise_conv_transpose(computation_node)
+                    or dynamo_config.dynamic_shapes
+                ):
                     continue
                 computation_node_input_size = (
                     node.args[0].args[0].meta.get("tensor_meta").shape
@@ -813,7 +816,10 @@ def pack_module(gm: torch.fx.GraphModule):
                 ):
                     continue
                 # TODO: remove this when group depthwise ConvTranspose is supported
-                if is_group_depthwise_conv_transpose(cur_module):
+                if (
+                    is_group_depthwise_conv_transpose(cur_module)
+                    or dynamo_config.dynamic_shapes
+                ):
                     continue
                 if dynamo_config.dynamic_shapes:
                     computation_node_input_size = None
