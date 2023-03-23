@@ -50,21 +50,22 @@ get_elementwise_nested_tensor_impl(
       " does not support broadcasting when given a NestedTensor");
   TORCH_CHECK(
       at::equal(
-          self_ptr->get_nested_size_tensor(),
-          other_ptr->get_nested_size_tensor()),
+          self_ptr->get_nested_sizes(),
+          other_ptr->get_nested_sizes()),
       op_name,
       " does not support broadcasting when given a NestedTensor");
   TORCH_CHECK(
       at::equal(
-          self_ptr->get_nested_stride_tensor(),
-          other_ptr->get_nested_stride_tensor()),
+          self_ptr->get_nested_strides(),
+          other_ptr->get_nested_strides()),
       op_name,
       " requires strides to match when given NestedTensors");
-  auto self_offsets = self_ptr->get_storage_offsets();
-  auto other_offsets = other_ptr->get_storage_offsets();
+  const auto self_offsets = self_ptr->get_storage_offsets();
+  int64_t *self_offsets_ptr = self_offsets.data_ptr<int64_t>();
+  int64_t *other_offsets_ptr = other_ptr->get_storage_offsets().data_ptr<int64_t>();
   bool offsets_match = true;
-  for (size_t i = 0; i < self_offsets.size(); i++) {
-    offsets_match = offsets_match && (self_offsets[i] == other_offsets[i]);
+  for (auto i = 0; i < self_offsets.size(0); i++) {
+    offsets_match = offsets_match && (self_offsets_ptr[i] == other_offsets_ptr[i]);
   }
   TORCH_CHECK(
       offsets_match,
@@ -84,8 +85,8 @@ Tensor NestedTensor_elementwise_Tensor(
     auto other_impl = get_nested_tensor_impl(other);
     return wrap_buffer(
       f(self, other_impl->get_unsafe_storage_as_tensor()),
-      other_impl->get_nested_size_tensor().clone(),
-      other_impl->get_nested_stride_tensor().clone(),
+      other_impl->get_nested_sizes().clone(),
+      other_impl->get_nested_strides().clone(),
       other_impl->get_storage_offsets()
     );
   }
@@ -94,8 +95,8 @@ Tensor NestedTensor_elementwise_Tensor(
     auto self_impl = get_nested_tensor_impl(self);
     return wrap_buffer(
       f(self_impl->get_unsafe_storage_as_tensor(), other),
-      self_impl->get_nested_size_tensor().clone(),
-      self_impl->get_nested_stride_tensor().clone(),
+      self_impl->get_nested_sizes().clone(),
+      self_impl->get_nested_strides().clone(),
       self_impl->get_storage_offsets()
     );
   }
@@ -128,7 +129,7 @@ Tensor NestedTensor_elementwise_Tensor(
         self_ptr = get_nested_tensor_impl(self.contiguous());
       }
       const auto self_buffer = self_ptr->get_buffer();
-      const auto self_sizes = self_ptr->get_nested_size_tensor();
+      const auto self_sizes = self_ptr->get_nested_sizes();
       auto result_buffer = at::empty_like(self_buffer);
       auto result = wrap_buffer(result_buffer, self_sizes);
       if (op_name == "add") {
@@ -152,8 +153,8 @@ Tensor NestedTensor_elementwise_Tensor(
   return wrap_buffer(
       f(self_impl->get_unsafe_storage_as_tensor(),
         other_impl->get_unsafe_storage_as_tensor()),
-      self_impl->get_nested_size_tensor(),
-      self_impl->get_nested_stride_tensor(),
+      self_impl->get_nested_sizes(),
+      self_impl->get_nested_strides(),
       self_impl->get_storage_offsets());
 }
 
