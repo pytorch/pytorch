@@ -2569,10 +2569,10 @@ class LoopLevel:
             line1 = "#pragma GCC ivdep"
         else:
             line1 = ""
-        offset_str = f"for({INDEX_TYPE} {self.var}={cexpr_index(self.offset)};"
-        size_str = f"{self.var}<{cexpr_index(self.size)};"
-        steps_str = f"{self.var}+={cexpr_index(self.steps)})"
-        line2 = f"{offset_str} {size_str} {steps_str}"
+        offset_str = f"{INDEX_TYPE} {self.var}={cexpr_index(self.offset)}"
+        size_str = f"{self.var}<{cexpr_index(self.size)}"
+        steps_str = f"{self.var}+={cexpr_index(self.steps)}"
+        line2 = f"for({offset_str}; {size_str}; {steps_str})"
         if self.collapsed or not line1:
             return [line2]
         return [line1, line2]
