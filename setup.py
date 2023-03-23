@@ -178,9 +178,6 @@
 #   NVFUSER_SOURCE_DIR
 #     specify nvfuser root directory
 #
-#   NVTOOLSEXT_PATH (Windows only)
-#     specify where nvtoolsext is installed
-#
 #   ACL_ROOT_DIR
 #     specify where Compute Library is installed
 #

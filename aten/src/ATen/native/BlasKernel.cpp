@@ -1,13 +1,14 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <limits>
-#include <algorithm>
-#include <climits>
 #include <ATen/Config.h>
+#include <ATen/OpMathType.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/irange.h>
 #include <c10/util/Exception.h>
 #include <c10/util/complex.h>
-
+#include <c10/util/irange.h>
+#include <algorithm>
+#include <climits>
+#include <iostream>
+#include <limits>
 #if AT_BUILD_WITH_BLAS()
 extern "C" double ddot_(int *n, double *x, int *incx, double *y, int *incy);
 extern "C" void dscal_(int *n, double *a, double *x, int *incx);
@@ -180,9 +181,10 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
     return;
   }
 
+  using opmath_t = at::opmath_type<scalar_t>;
   if ((trans == 'T') || (trans == 't')) {
     for (const auto i : c10::irange(n)) {
-      scalar_t sum = 0;
+      opmath_t sum = 0;
       scalar_t *row_ = a + lda * i;
       for (const auto j : c10::irange(m)) {
         sum += x[j * incx] * row_[j];
@@ -196,15 +198,37 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t
   } else {
     if (beta != scalar_t(1) && beta != scalar_t(0)) scal<scalar_t>(m, beta, y, incy);
 
+    bool is_low_precision = !std::is_same<opmath_t, scalar_t>::value;
+    std::vector<opmath_t> sum;
+    if (is_low_precision) {
+      sum.resize(m);
+    }
     for (const auto j : c10::irange(n)) {
       scalar_t *column_ = a + lda * j;
-      scalar_t z = alpha * x[j * incx];
+      opmath_t z = alpha * static_cast<opmath_t>(x[j * incx]);
       for (const auto i : c10::irange(m)) {
         //output values are ignored if beta is 0, and set to 0, nans and infs are not propagated
         if (j==0 && beta==scalar_t(0)) {
-         y[i * incy] = scalar_t(0);
+          if (!is_low_precision) {
+            y[i * incy] = 0;
+          }
         }
-        y[i * incy] += z * column_[i];
+        if (is_low_precision) {
+          sum[i] += z * column_[i];
+        } else {
+          y[i * incy] += z * column_[i];
+        }
+      }
+    }
+    if (is_low_precision) {
+      if (beta == scalar_t(0)) {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] = sum[i];
+        }
+      } else {
+        for (const auto i : c10::irange(m)) {
+          y[i * incy] += sum[i];
+        }
       }
     }
   }
@@ -263,11 +287,12 @@ scalar_t dot_naive(
     Functor op) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t i;
-  scalar_t sum = 0;
+  using opmath_t = at::opmath_type<scalar_t>;
+  opmath_t sum = 0;
   for (i = 0; i < n; i++) {
-    sum += op(x[i * incx], y[i * incy]);
+    sum += op(static_cast<opmath_t>(x[i * incx]), static_cast<opmath_t>(y[i * incy]));
   }
-  return sum;
+  return static_cast<scalar_t>(sum);
 }
 
 } // namespace blas_impl

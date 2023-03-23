@@ -1307,7 +1307,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
                 """
             )
@@ -1317,7 +1317,7 @@ class TritonKernel(Kernel):
                         from torch._dynamo.testing import rand_strided
                         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                         import torch
-                        from torch._inductor.triton_ops.autotune import grid
+                        from torch._inductor.triton_heuristics import grid
                     """
                 )
 
