@@ -671,7 +671,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
 
-            # TODO hit method without __code__
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
