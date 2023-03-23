@@ -31,6 +31,8 @@ jobs:
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
           { config: "backwards_compat", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "distributed", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_8-gcc7-test:
