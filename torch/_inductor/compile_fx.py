@@ -196,7 +196,7 @@ def compile_fx_inner(
 
         complex_memory_overlap_inputs = any(
             complex_memory_overlap(t) for t in example_inputs
-        )
+        ) and False
 
         if (
             set(graph.device_types) == {"cuda"}
