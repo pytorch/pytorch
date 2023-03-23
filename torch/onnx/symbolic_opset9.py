@@ -5131,10 +5131,13 @@ def flatten(g: jit_utils.GraphContext, input, start_dim, end_dim):
 
 @_onnx_symbolic("aten::unflatten")
 @symbolic_helper.quantized_args(True, False, False)
-@symbolic_helper.parse_args("v", "i", "is")
 @_beartype.beartype
 def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
     input_rank = symbolic_helper._get_tensor_rank(input)
+    input_shape = symbolic_helper._get_tensor_sizes(input)
+    dim = symbolic_helper._maybe_get_const(dim, "i")
+    unflattened_size = symbolic_helper._parse_arg(unflattened_size, "is")
+    
     if input_rank is None:
         return symbolic_helper._unimplemented(
             "input_dim",
@@ -5146,7 +5149,6 @@ def unflatten(g: jit_utils.GraphContext, input, dim, unflattened_size):
     if dim < 0:
         dim = input_rank + dim
 
-    input_shape = symbolic_helper._get_tensor_sizes(input)
     shape = [*input_shape[:dim], *unflattened_size, *input_shape[dim + 1 :]]
     return reshape(g, input, shape)
 
