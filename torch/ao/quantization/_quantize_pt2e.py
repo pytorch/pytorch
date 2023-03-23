@@ -1,3 +1,5 @@
+import torch
+
 from torch.fx import GraphModule
 
 from .qconfig_mapping import QConfigMapping
@@ -16,7 +18,7 @@ def prepare_pt2e(
     qconfig_mapping: QConfigMapping,
     example_inputs: Tuple[Any, ...],
     backend_config: BackendConfig,
-):
+) -> GraphModule:
     # TODO: move this information to fx node itself
     node_name_to_scope: Dict[str, Tuple[str, type]] = {}
     for n in model.graph.nodes:
@@ -47,5 +49,5 @@ def prepare_pt2e(
 
 def convert_pt2e(
     model: GraphModule
-):
+) -> torch.nn.Module:
     return _convert_to_reference_decomposed_fx(model)
