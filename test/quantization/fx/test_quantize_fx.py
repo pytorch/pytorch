@@ -5830,8 +5830,8 @@ class TestQuantizeFx(QuantizationTestCase):
             (M2().eval(), ns.call_function(torch.channel_shuffle)),
             (M3().eval(), ns.call_function(torch.channel_shuffle))
         ]
-        for m, node in model_node_pairs:
-            m = prepare_fx(m, {"": default_qconfig}, example_inputs=(x,))
+        for orig_m, node in model_node_pairs:
+            m = prepare_fx(orig_m, {"": default_qconfig}, example_inputs=(x,))
             m_copy = copy.deepcopy(m)
             m = convert_fx(m)
             m_ref = convert_to_reference_fx(m_copy)
