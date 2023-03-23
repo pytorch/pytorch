@@ -240,6 +240,9 @@ torch._functorch.config.load_config({repr(torch._functorch.config.save_config())
 
 TEST_REPLACEABLE_COMMENT = "# REPLACEABLE COMMENT FOR TESTING PURPOSES"
 
+# get hint shape/stride when dynamic shape enabled
+def hint_if_symint(x):
+    return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
 def generate_compiler_repro_string(gm, args):
     model_str = textwrap.dedent(
@@ -269,9 +272,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 
     model_str += "args = []\n"
 
-    # get hint shape/stride when dynamic shape enabled
-    def hint_if_symint(x):
-        return tuple(i.node.hint if isinstance(i, torch.SymInt) else i for i in x)
 
     for arg in args:
         if isinstance(arg, int):
@@ -989,7 +989,7 @@ from torch._dynamo.testing import rand_strided
 {TEST_REPLACEABLE_COMMENT}
 {extra_imports}
 
-args = {[(tuple(a.shape), tuple(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
+args = {[(hint_if_symint(a.shape), hint_if_symint(a.stride()), a.dtype, a.device.type, a.requires_grad) for a in args]}
 args = [rand_strided(sh, st, dt, dev).requires_grad_(rg) for (sh, st, dt, dev, rg) in args]
 
 {model_str}
@@ -1028,7 +1028,6 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
         assert config.repro_after in ("dynamo", "aot", None)
 
         if config.repro_after == "dynamo":
-
             def add_paths(exc):
                 exc.minifier_path = os.path.join(minifier_dir(), "minifier_launcher.py")
                 if use_buck:
@@ -1040,45 +1039,68 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
             if config.repro_level == 3:
                 dump_to_minify_after_dynamo(gm, example_inputs, compiler_name)
 
-            # Check for either accuracy (level 4) or other type of failures.
-            if config.repro_level == 4:
-                # Check Accuracy
+            try:
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                if backend_accuracy_fails(gm, example_inputs, compiler_fn):
-                    log.warning(
-                        "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
+            except Exception as exc:
+                log.warning(
+                    "Compiled Fx GraphModule failed. Creating script to minify the error."
+                )
+                if config.repro_level == 1:
+                    dump_state_fn = functools.partial(
+                        dump_backend_state, compiler_name=compiler_name
                     )
+                    dump_state_fn(
+                        fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
+                    )
+                elif config.repro_level == 2:
                     dump_to_minify_after_dynamo(
                         fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                         example_inputs,
                         compiler_name,
                     )
-                    exc = AccuracyError("Bad accuracy detected.")
-                    add_paths(exc)
-                    raise exc
-            else:
-                try:
-                    compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                    run_fwd_maybe_bwd(compiled_gm, example_inputs)
-                except Exception as exc:
-                    log.warning(
-                        "Compiled Fx GraphModule failed. Creating script to minify the error."
-                    )
-                    if config.repro_level == 1:
-                        dump_state_fn = functools.partial(
-                            dump_backend_state, compiler_name=compiler_name
+                add_paths(exc)
+                raise
+
+            def runtime_wrapper(*runtime_inputs):
+                # Check for either accuracy (level 4) or other type of failures.
+                if config.repro_level == 4:
+                    # Check Accuracy
+                    if backend_accuracy_fails(gm, runtime_inputs, compiler_fn):
+                        log.warning(
+                            "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                         )
-                        dump_state_fn(
-                            fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
-                        )
-                    elif config.repro_level == 2:
                         dump_to_minify_after_dynamo(
                             fx.GraphModule(gm, copy.deepcopy(gm.graph)),
                             example_inputs,
                             compiler_name,
                         )
-                    add_paths(exc)
-                    raise
+                        exc = AccuracyError("Bad accuracy detected.")
+                        add_paths(exc)
+                        raise exc
+                else:
+                    try:
+                        run_fwd_maybe_bwd(compiled_gm, runtime_inputs)
+                    except Exception as exc:
+                        log.warning(
+                            "Compiled Fx GraphModule failed. Creating script to minify the error."
+                        )
+                        if config.repro_level == 1:
+                            dump_state_fn = functools.partial(
+                                dump_backend_state, compiler_name=compiler_name
+                            )
+                            dump_state_fn(
+                                fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs
+                            )
+                        elif config.repro_level == 2:
+                            dump_to_minify_after_dynamo(
+                                fx.GraphModule(gm, copy.deepcopy(gm.graph)),
+                                example_inputs,
+                                compiler_name,
+                            )
+                        add_paths(exc)
+                        raise
+                return compiled_gm(*runtime_inputs)
+            return runtime_wrapper
         else:
             compiled_gm = compiler_fn(gm, example_inputs)
 
