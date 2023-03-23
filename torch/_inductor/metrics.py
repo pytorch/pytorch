@@ -17,7 +17,7 @@ def reset():
     global generated_cpp_vec_kernel_count
     global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
-    global to_dtype_count
+    global cpp_to_dtype_count
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
