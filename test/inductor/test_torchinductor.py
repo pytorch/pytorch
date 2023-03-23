@@ -5737,10 +5737,18 @@ class CommonTemplate:
                 unsqueeze, [None, None, unsqueeze_2, convert_element_type_6]
             )
             index_1 = torch.ops.aten.index.Tensor(
-                unsqueeze, [None, None, convert_element_type_5.unsqueeze(1), convert_element_type_6]
+                unsqueeze,
+                [
+                    None,
+                    None,
+                    convert_element_type_5.unsqueeze(1),
+                    convert_element_type_6,
+                ],
             )
             sub_6 = clamp_min.unsqueeze(1) - unsqueeze_2
-            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (1.0 - (clamp_min_1 - convert_element_type_6))
+            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (
+                1.0 - (clamp_min_1 - convert_element_type_6)
+            )
             select = torch.ops.aten.select.int(mul_10, 0, 0)
             return (select,)
 
