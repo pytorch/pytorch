@@ -67,6 +67,28 @@ int64_t get_consistent_last_dim_of_nested_tensor(const NestedTensorImpl& nt) {
   return *last_dim;
 }
 
+std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int64_t dim) {
+  int64_t ndim = self.dim();
+  if (ndim == 0) {
+    TORCH_CHECK_INDEX(false, "chunk() cannot be applied to a 0-dim tensor.");
+  }
+  dim = maybe_wrap_dim(dim, ndim);
+  TORCH_CHECK(self.dim() - 1 == dim,
+           "Chunk for nested tensors is currently only supported for the last dimension.");
+  TORCH_CHECK(chunks > 0, "chunk expects `chunks` to be greater than 0, got: ", chunks);
+  TORCH_CHECK(self.is_contiguous(), "chunk expects `self` to be contiguous.");
+  auto self_impl = get_nested_tensor_impl(self);
+  const int64_t last_dim_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
+    TORCH_CHECK(last_dim_size % chunks == 0,
+           "Chunk for nested tensors is only supported for nested tensors with trailing dimension divisible by chunks, got: ",
+           last_dim_size, " % ", chunks, " != 0");
+
+  // logic handled by split_with_sizes
+  int64_t split_size = last_dim_size / chunks;
+  std::vector<int64_t> split_sizes(chunks, split_size);
+  return split_with_sizes_nested(self, split_sizes, dim);
+}
+
 std::vector<Tensor> split_with_sizes_nested(
     const Tensor& self,
     c10::IntArrayRef split_sizes,
@@ -121,28 +143,6 @@ std::vector<Tensor> split_with_sizes_nested(
     splits[split_idx] = create_nested_view_tensor(self, new_sizes, new_strides, new_offsets);
   }
   return splits;
-}
-
-std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int64_t dim) {
-  int64_t ndim = self.dim();
-  if (ndim == 0) {
-    TORCH_CHECK_INDEX(false, "chunk() cannot be applied to a 0-dim tensor.");
-  }
-  dim = maybe_wrap_dim(dim, ndim);
-  TORCH_CHECK(self.dim() - 1 == dim,
-           "Chunk for nested tensors is currently only supported for the last dimension.");
-  TORCH_CHECK(chunks > 0, "chunk expects `chunks` to be greater than 0, got: ", chunks);
-  TORCH_CHECK(self.is_contiguous(), "chunk expects `self` to be contiguous.");
-  auto self_impl = get_nested_tensor_impl(self);
-  const int64_t last_dim_size = get_consistent_last_dim_of_nested_tensor(*self_impl);
-    TORCH_CHECK(last_dim_size % chunks == 0,
-           "Chunk for nested tensors is only supported for nested tensors with trailing dimension divisible by chunks, got: ",
-           last_dim_size, " % ", chunks, " != 0");
-
-  // logic handled by split_with_sizes
-  int64_t split_size = last_dim_size / chunks;
-  std::vector<int64_t> split_sizes(chunks, split_size);
-  return split_with_sizes_nested(self, split_sizes, dim);
 }
 
 } // namespace native

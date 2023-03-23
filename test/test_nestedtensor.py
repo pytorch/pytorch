@@ -925,15 +925,16 @@ class TestNestedTensorDeviceType(TestCase):
         nt = torch.nested.nested_tensor([a, b, c])
         nt_splits = nt.split_with_sizes(split_sizes, dim=-1)
 
-        self.assertEqual(nt_splits[0],
-                         torch.nested.nested_tensor([a_splits[0], b_splits[0], c_splits[0]]))
-        self.assertEqual(nt_splits[1],
-                         torch.nested.nested_tensor([a_splits[1], b_splits[1], c_splits[1]]))
-        self.assertEqual(nt_splits[2],
-                         torch.nested.nested_tensor([a_splits[2], b_splits[2], c_splits[2]]))
-
-        for split in nt_splits:
-            self.assertFalse(split.is_contiguous())
+        for i, nt_split in enumerate(nt_splits):
+            self.assertEqual(nt_split, torch.nested.nested_tensor(
+                [a_splits[i], b_splits[i], c_splits[i]]))
+            dense_strides = torch.stack([
+                torch.tensor(a_splits[i].stride()),
+                torch.tensor(b_splits[i].stride()),
+                torch.tensor(c_splits[i].stride())
+            ])
+            self.assertEqual(nt_split._nested_tensor_strides(), dense_strides)
+            self.assertFalse(nt_split.is_contiguous())
 
         # Failure calling on ragged dimensions
         self.assertRaisesRegex(
