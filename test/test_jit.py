@@ -367,7 +367,6 @@ class TestJitProfiler(JitTestCase):
             self.graph_executor_optimize_opt
         )
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix occasional windows failure')
     def test_profiler(self):
         torch._C._set_graph_executor_optimize(False)
 
