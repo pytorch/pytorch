@@ -211,7 +211,9 @@ struct CUDAStreamGuard {
 /// CUDAGuard for when you can use this.
 struct OptionalCUDAStreamGuard {
   /// Create an uninitialized guard.
-  explicit OptionalCUDAStreamGuard() : guard_() {}
+  explicit OptionalCUDAStreamGuard() : guard_() {
+    c10::cuda::set_device(c10::cuda::current_device());
+  }
 
   /// Set the current CUDA device to the device associated with the passed
   /// stream, and set the current CUDA stream on that device to the passed
