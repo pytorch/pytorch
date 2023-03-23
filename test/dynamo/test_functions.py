@@ -845,8 +845,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @requires_numpy_pytorch_interop
     def test_numpy_attributes(x):
         a = x.numpy()
-        return a.itemsize, a.strides, a.shape, a.ndim, a.size, \
-            torch.from_numpy(a.T), torch.from_numpy(a.real), torch.from_numpy(a.imag)
+        return (
+            a.itemsize,
+            a.strides,
+            a.shape,
+            a.ndim,
+            a.size,
+            torch.from_numpy(a.T),
+            torch.from_numpy(a.real),
+            torch.from_numpy(a.imag),
+        )
 
     @make_test
     @requires_numpy_pytorch_interop

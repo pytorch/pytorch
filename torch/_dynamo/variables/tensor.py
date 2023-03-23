@@ -43,33 +43,6 @@ supported_const_comparison_ops = {
     "!=": operator.ne,
 }
 
-element_size_lookup = {
-    torch.bfloat16: 2,
-    torch.bool: 1,
-    torch.complex128: 16,
-    torch.complex32: 4,
-    torch.complex64: 8,
-    torch.double: 8,
-    torch.float16: 2,
-    torch.float32: 4,
-    torch.float64: 8,
-    torch.float: 4,
-    torch.half: 2,
-    torch.int16: 2,
-    torch.int32: 4,
-    torch.int64: 8,
-    torch.int8: 1,
-    torch.int: 4,
-    torch.long: 8,
-    torch.qint32: 4,
-    torch.qint8: 1,
-    torch.quint2x4: 1,
-    torch.quint4x2: 1,
-    torch.quint8: 1,
-    torch.short: 2,
-    torch.uint8: 1,
-}
-
 
 class TensorVariable(VariableTracker):
     """A torch.Tensor input or an intermediate value in the FX graph"""
@@ -367,7 +340,9 @@ class TensorVariable(VariableTracker):
             unimplemented("dynamic Tensor.repeat")
         elif name == "numpy":
             if not config.numpy_ndarray_as_tensor:
-                unimplemented(f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy().")
+                unimplemented(
+                    f"Tensor.{name}. Turn on config.numpy_ndarray_as_tensor to support tensor.numpy()."
+                )
             from .builder import wrap_fx_proxy_cls
 
             assert not args, "Tensor.numpy() doesn't take args."
@@ -674,11 +649,28 @@ class NumpyTensorVariable(TensorVariable):
         specialized_value=None,
         **kwargs,
     ):
-        super().__init__(proxy, dtype, device, layout, ndim, size, stride, requires_grad, is_quantized, is_contiguous, is_sparse, class_type, specialized_value, **kwargs)
+        super().__init__(
+            proxy,
+            dtype,
+            device,
+            layout,
+            ndim,
+            size,
+            stride,
+            requires_grad,
+            is_quantized,
+            is_contiguous,
+            is_sparse,
+            class_type,
+            specialized_value,
+            **kwargs,
+        )
 
     def var_getattr(self, tx, name):
-        from .builder import wrap_fx_proxy_cls, TupleVariable
+        from torch_np._dtypes import DType
+
         from torch._dynamo.variables import GetAttrVariable
+        from .builder import TupleVariable, wrap_fx_proxy_cls
 
         result = None
         options = VariableTracker.propagate(self)
@@ -688,7 +680,9 @@ class NumpyTensorVariable(TensorVariable):
         elif name == "ndim" and self.ndim is not None:
             result = ConstantVariable(self.ndim, **options)
         elif name == "T":
-            dims = TupleVariable([ConstantVariable(x) for x in range(self.ndim - 1, -1, -1)])
+            dims = TupleVariable(
+                [ConstantVariable(x) for x in range(self.ndim - 1, -1, -1)]
+            )
             result = wrap_fx_proxy_cls(
                 target_cls=NumpyTensorVariable,
                 tx=tx,
@@ -725,9 +719,13 @@ class NumpyTensorVariable(TensorVariable):
         elif name == "size":
             result = ConstantVariable(product(self.size), **options)
         elif name == "itemsize":
-            result = ConstantVariable(element_size_lookup[self.dtype])
+            dtype_obj = DType(self.dtype)
+            result = ConstantVariable(dtype_obj.itemsize)
         elif name == "strides":
-            result = TupleVariable([ConstantVariable(element_size_lookup[self.dtype] * x) for x in self.stride])
+            dtype_obj = DType(self.dtype)
+            result = TupleVariable(
+                [ConstantVariable(dtype_obj.itemsize * x) for x in self.stride]
+            )
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:

@@ -1943,15 +1943,24 @@ class InstructionTranslator(InstructionTranslatorBase):
         )
         tos = self.stack[-1]
         from .variables.tensor import NumpyTensorVariable
+
         # This is a hack to handle NumpyTensorVariable before returning it. This actually calls Tensor.numpy() to
         # convert tensor to ndarray. Note that this doesn't handle TupleVariable so if more than one return values
         # and one of them is NumpyTensorVariable this doesn't convert it and the result will be tensor instead of
         # ndarray.
         if isinstance(tos, NumpyTensorVariable):
-            self.output.add_output_instructions([
-                create_instruction(name="LOAD_METHOD", arg=len(self.stack)-1, argval="numpy"),
-                create_instruction(name="CALL_METHOD", arg=len(self.stack)-1, argval=len(self.stack)-1),
-            ])
+            self.output.add_output_instructions(
+                [
+                    create_instruction(
+                        name="LOAD_METHOD", arg=len(self.stack) - 1, argval="numpy"
+                    ),
+                    create_instruction(
+                        name="CALL_METHOD",
+                        arg=len(self.stack) - 1,
+                        argval=len(self.stack) - 1,
+                    ),
+                ]
+            )
         self.output.add_output_instructions([create_instruction("RETURN_VALUE")])
 
 
