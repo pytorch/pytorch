@@ -16,6 +16,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
 from torch.serialization import MAP_LOCATION
+from rich.progress import Progress, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn, SpinnerColumn, TimeElapsedColumn
 
 class _Faketqdm:  # type: ignore[no-redef]
 
@@ -627,8 +628,21 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()
-        with tqdm(total=file_size, disable=not progress,
-                  unit='B', unit_scale=True, unit_divisor=1024) as pbar:
+        with Progress(  
+                SpinnerColumn('arc'),        
+                TextColumn("[bright_blue]Downloading: {task.fields[filename]}", justify="right"),
+                BarColumn(bar_width=None),
+                "[progress.percentage]{task.percentage:>3.1f}%",
+                "•",
+                DownloadColumn(),
+                "•",
+                TransferSpeedColumn(),
+                "•",
+                TimeElapsedColumn(),
+                "•",
+                TimeRemainingColumn(),
+            ) as progress:
+            task1 = progress.add_task("Downloading...", total=file_size, filename=url)
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
@@ -636,7 +650,7 @@ def download_url_to_file(url, dst, hash_prefix=None, progress=True):
                 f.write(buffer)
                 if hash_prefix is not None:
                     sha256.update(buffer)
-                pbar.update(len(buffer))
+                progress.update(task1, advance=len(buffer))
 
         f.close()
         if hash_prefix is not None:
