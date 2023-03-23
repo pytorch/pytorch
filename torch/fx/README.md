@@ -1,4 +1,4 @@
-# FX Technical Overview (WIP)
+# FX Technical Overview
 
 FX is a toolkit for pass writers to facilitate Python-to-Python transformation of `nn.Module` instances. This toolkit aims to support a subset of Python language semantics—rather than the whole Python language—to facilitate ease of implementation of transforms. Currently, this feature is under a Beta release and its API may change.
 
@@ -7,25 +7,23 @@ FX is a toolkit for pass writers to facilitate Python-to-Python transformation o
 <!-- toc -->
 
 - [Introduction](#introduction)
-  - [Motivation](#motivation)
   - [Use Cases](#use-cases)
   - [Technical Details](#technical-details)
 - [Internal Structure](#internal-structure)
   - [Graph](#graph)
+  - [Node](#node)
   - [GraphModule](#graphmodule)
-- [Symbolic Tracing](#symbolic-tracing)
-  - [Tracer](#tracer)
+- [Tracing](#tracing)
+  - [Symbolic Tracer](#symbolic-tracer)
   - [Proxy](#proxy)
-- [The FX IR](#the-fx-ir)
+  - [TorchDynamo](#torchdynamo)
+- [The FX IR Container](#the-fx-ir-container)
 - [Transformation and Codegen](#transformation-and-codegen)
+- [Next steps](#next-steps)
 
 <!-- tocstop -->
 
 # Introduction
-
-## Motivation ##
-
-TODO
 
 ## Use Cases ##
 
@@ -41,7 +39,7 @@ By using `nn.Module` as the interface between passes, FX transforms are interope
 
 The following sections will walk us through the components that transform from original `torch.nn.Module` to FX IR and finally to generated Python code and a GraphModule instance:
 
-FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). This functionality is exposed through an API called `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
+FX’s front-end makes use of the dynamic nature of Python to intercept call-sites for various entities (PyTorch operators, Module invocations, and Tensor method invocations). The simplest way to get an FX graph is by using `torch.fx.symbolic_trace`.  We can see how this works by way of an example:
 
 ```python
 import torch
@@ -69,14 +67,18 @@ Here, we set up a simple Module that exercises different language features: fetc
 # Internal Structure
 
 ## [Graph](https://pytorch.org/docs/master/fx.html#torch.fx.Graph) ##
-TODO
+The `fx.Graph` is a core data structure in FX that represents the operations and their dependencies in a structured format. It consists of a List of `fx.Node` representing individual operations and their inputs and outputs. The Graph enables simple manipulation and analysis of the model structure, which is essential for implementing various transformations and optimizations.
+
+## Node
+An `fx.Node` is a datastructure that represent individual operations within an `fx.Graph`, it maps to callsites such as operators, methods and modules. Each `fx.Node` keeps track of its inputs, the previous and next nodes, the stacktrace so you can map back the node to a line of code in your python file and some optional metadata stored in a `meta` dict.
 
 ## [GraphModule](https://pytorch.org/docs/master/fx.html#torch.fx.GraphModule) ##
-TODO
+The `fx.GraphModule` is a subclass of `nn.Module` that holds the transformed Graph, the original module's parameter attributes and its source code. It serves as the primary output of FX transformations and can be used like any other `nn.Module`. `fx.GraphModule` allows for the execution of the transformed model, as it generates a valid forward method based on the Graph's structure.
 
-# Symbolic Tracing
 
-## [Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
+# Tracing
+
+## [Symbolic Tracer](https://pytorch.org/docs/master/fx.html#torch.fx.Tracer) ##
 
 `Tracer` is the class that implements the symbolic tracing functionality of `torch.fx.symbolic_trace`. A call to `symbolic_trace(m)` is equivalent to `Tracer().trace(m)`. Tracer can be subclassed to override various behaviors of the tracing process. The different behaviors that can be overridden are described in the docstrings of the methods on the class.
 
@@ -101,9 +103,15 @@ During the call to `symbolic_trace`, the parameter `x` is transformed into a Pro
 
 If you're doing graph transforms, you can wrap your own Proxy method around a raw Node so that you can use the overloaded operators to add additional things to a Graph.
 
-# The FX IR
+## [TorchDynamo](https://pytorch.org/docs/master/compile/technical-overview.html) ##
 
-Symbolic tracing captures an intermediate representation (IR), which is represented as a doubly-linked list of Nodes.
+Tracing has limitations in that it can't deal with dynamic control flow and is limited to outputting a single graph at a time, so a better alternative is the new `torch.compile()` infrastructure where you can output multiple subgraphs in either an aten or torch IR using `torch.fx`. [This tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf) gives more context on how this works.
+
+
+
+# The FX IR Container
+
+Tracing captures an intermediate representation (IR), which is represented as a doubly-linked list of Nodes.
 
 Node is the data structure that represents individual operations within a Graph. For the most part, Nodes represent callsites to various entities, such as operators, methods, and Modules (some exceptions include Nodes that specify function inputs and outputs). Each Node has a function specified by its `op` property. The Node semantics for each value of `op` are as follows:
 
@@ -120,7 +128,7 @@ To facilitate easier analysis of data dependencies, Nodes have read-only propert
 
 An invocation of `symbolic_traced` above requires a valid `forward()` method to be defined on the Module instance. How does this work? GraphModule actually generates valid Python source code based on the IR it is instantiated with. This can be seen by accessing the code attribute on the GraphModule: `print(symbolic_traced.code)`.
 
-After symbolic tracing, the code given under [Technical Details](#technical-details) is represented as follows:
+After tracing, the code given under [Technical Details](#technical-details) is represented as follows:
 
 ```python
 def forward(self, x):
@@ -132,3 +140,6 @@ def forward(self, x):
 ```
 
 This is the core of why FX is a Python-to-Python translation toolkit. Outside users can treat the results of FX transformations as they would any other `nn.Module` instance.
+
+# Next steps
+If you're interested in learning more about obtaining fx graphs, which kinds of IRs are available to you and how to execute simple transformations make sure to check out [this tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf)
