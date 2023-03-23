@@ -17,8 +17,8 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import torch
 
+import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
@@ -31,7 +31,6 @@ from torch._dynamo.testing import (
     same,
     unsupported,
 )
-
 from torch._dynamo.utils import CompileProfiler, ifunspec
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -784,7 +783,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 3)
@@ -799,7 +798,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         v2 = torch.randn((10, 10))
         correct = fn(v1, v2)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize((cnts))(fn)
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
@@ -1812,6 +1811,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(opt_fn(x, 1) == 9)
         self.assertTrue(opt_fn(x, -2) == 9)
 
+    def test_stride_dim(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, dim):
+            return x.stride(dim=dim)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.empty([4, 9, 8])
+        self.assertTrue(opt_fn(x, 0) == 72)
+        self.assertTrue(opt_fn(x, -2) == 8)
+
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2241,7 +2251,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                 return "Bar " + self.name_
 
         class Baz(Foo):
-            def __init__(self, name):  # noqa: B903
+            def __init__(self, name):
                 self.name_ = name
 
             def get_name(self):
@@ -2491,7 +2501,9 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 5)
 
     def test_sample_input(self):
-        from torch.testing._internal.common_methods_invocations import SampleInput
+        from torch.testing._internal.common_methods_invocations import (
+            SampleInput,
+        )
 
         def fn(sample):
             if isinstance(sample.input, torch.Tensor):
@@ -2898,7 +2910,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
                     memo=memo, prefix=prefix, remove_duplicate=remove_duplicate
                 ):
                     for pn, p in self.named_parameters():
-                        fpn = "%s.%s" % (mn, pn) if mn else pn
+                        fpn = "{}.{}".format(mn, pn) if mn else pn
                         self.names.append(fpn)
 
         # Test plain recurse
