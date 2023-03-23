@@ -154,16 +154,6 @@ __global__ void kernelHistogram1D(
       HANDLE_CASE(CUDAHistogramMemoryType::GLOBAL, getOp, 0);              \
   }
 
-inline int64_t getFreeGlobalMemory() {
-  // no need to use `cudaSetDevice`
-  size_t free_mem, total_mem;
-  cudaMemGetInfo(&free_mem, &total_mem);
-  TORCH_INTERNAL_ASSERT(
-      cudaGetLastError() == cudaSuccess,
-      "CUDA_tensor_histogram failed to get free global memory");
-  return static_cast<int64_t>(free_mem);
-}
-
 /*
   Calculate the frequency of the input values.
 
