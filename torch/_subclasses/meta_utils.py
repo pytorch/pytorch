@@ -171,6 +171,9 @@ class MetaConverter:
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
+        static_shape, _ = torch._dynamo.utils.tensor_always_has_static_shape(
+            t, source, True
+        )
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -182,7 +185,8 @@ class MetaConverter:
         # to apply
         if shape_env is not None:
             if dynamic_dims is None:
-                dynamic_dims = [DimDynamic.DUCK] * t.dim()
+                val = DimDynamic.STATIC if static_shape else DimDynamic.DUCK
+                dynamic_dims = [val] * t.dim()
             if constraint_dims is None:
                 constraint_dims = [None] * t.dim()
 
