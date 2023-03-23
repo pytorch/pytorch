@@ -93,7 +93,7 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node):
         for meta in tree_flatten(node.meta["val"])[0]:
             if not isinstance(meta, torch._subclasses.FakeTensor):
                 continue
-            
+
             if is_output:
                 if fallback_output(meta):
                     return True
