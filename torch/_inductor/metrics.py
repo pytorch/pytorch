@@ -8,7 +8,7 @@ nodes_num_elem = []
 ir_nodes_pre_fusion = 0
 
 # counters for tracking to_dtype inserted
-to_dtype_count = 0
+cpp_to_dtype_count = 0
 
 
 # reset all counters
@@ -24,4 +24,4 @@ def reset():
     num_bytes_accessed = 0
     nodes_num_elem.clear()
     ir_nodes_pre_fusion = 0
-    to_dtype_count = 0
+    cpp_to_dtype_count = 0

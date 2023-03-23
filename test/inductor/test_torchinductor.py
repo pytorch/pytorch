@@ -6416,7 +6416,7 @@ if HAS_CPU:
             traced = make_fx(fn)(x)
             compiled = compile_fx_inner(traced, [x])
             assert same(fn(x)[0], compiled([x])[0])
-            assert metrics.to_dtype_count == 0
+            assert metrics.cpp_to_dtype_count == 0
             if codecache.valid_vec_isa_list():
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
@@ -6432,7 +6432,7 @@ if HAS_CPU:
             traced = make_fx(fn)(x)
             compiled = compile_fx_inner(traced, [x])
             assert same(fn(x)[0], compiled([x])[0])
-            assert metrics.to_dtype_count == 2
+            assert metrics.cpp_to_dtype_count == 2
             if codecache.valid_vec_isa_list():
                 assert metrics.generated_cpp_vec_kernel_count == 1
 
