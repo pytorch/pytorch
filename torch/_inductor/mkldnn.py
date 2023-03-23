@@ -657,7 +657,7 @@ def fuse_unary(gm: torch.fx.GraphModule):
                     continue
                 # TODO: remove this when group depthwise ConvTranspose is supported
                 if is_group_depthwise_conv_transpose(computation_node) or (
-                    type(cur_module) in [nn.ConvTranspose2d]
+                    type(computation_node) in [nn.ConvTranspose2d]
                     and dynamo_config.dynamic_shapes
                 ):
                     continue
