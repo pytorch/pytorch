@@ -204,7 +204,7 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not torch.backends.mps.is_available(), "requires mps")
     def test_default_mps_to_aot_eager(self):
         model = Seq().to("mps")
-        example_input = torch.randn(1, 10)
+        example_input = torch.randn(1, 10).to("mps")
         
         # Not sure yet if there's a better way to test this
         a = torch.compile(model, backend="inductor")(example_input)
