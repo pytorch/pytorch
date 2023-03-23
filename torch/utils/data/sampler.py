@@ -22,6 +22,9 @@ class Sampler(Generic[T_co]):
     way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
     that returns the length of the returned iterators.
 
+    Args:
+        data_source (Dataset): This argument is not used and will be removed 2 versions from now.
+
     Example:
         class AccedingSequenceLengthSampler(Sampler[int]):
             def __init__(self, data: List[str]) -> None:
@@ -51,6 +54,12 @@ class Sampler(Generic[T_co]):
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
+
+    def __init__(self, data_source: Optional[Sized] = None) -> None:
+        if data_source is not None:
+            import warnings
+
+            warnings.warn("data_source argument is not used and will be removed 2 versions from now.")
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
