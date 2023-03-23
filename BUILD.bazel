@@ -1282,7 +1282,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros_h",
         "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:caffe2_protos",
         "//c10:headers",
     ],
 )
