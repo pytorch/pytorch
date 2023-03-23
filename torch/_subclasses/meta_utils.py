@@ -171,9 +171,10 @@ class MetaConverter:
         dynamic_dims: Optional[DimList[DimDynamic]] = None,
         constraint_dims: Optional[DimList[DimConstraint]] = None,
     ):
-        static_shape, _ = torch._dynamo.utils.tensor_always_has_static_shape(
-            t, source, True
-        )
+        # Ideally, we could use something like tensor_always_has_static_shape, but that is a little too dynamo bound
+        # specific atm. Maybe we can refactor that later, so we can keep having a centralized policy.
+        static_shape = type(t) is torch.nn.Parameter or source is None
+
         if source is None:
             from torch._dynamo.source import ConstantSource
 

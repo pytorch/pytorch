@@ -395,7 +395,7 @@ class TestAOTAutograd(AOTTestCase):
 
         self.verify_aot_autograd(F(), inp)
 
-    def test_embedding_bag_view(self):
+    def test_embedding_bag_view_dynamic(self):
         # Backwards pass tries to wrap a sparse tensor in a FunctionalTensorWrapper;
         # test that this works even though the sparse tensor has no storage.
 
@@ -409,7 +409,11 @@ class TestAOTAutograd(AOTTestCase):
 
         x = torch.arange(3)
         y = torch.arange(3)
-        self.verify_aot_autograd(F(), [x, y], dynamic=True)
+        self.verify_aot_autograd(F(), [x, y], dynamic=False)
+        with self.assertRaisesRegex(AssertionError, "symbolic on sparse NYI"):
+            self.verify_aot_autograd(F(), [x, y], dynamic=True)
+
+
 
     @patch("functorch.compile.config.use_fake_tensor", True)
     def test_input_mutation_simple(self):

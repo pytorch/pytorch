@@ -1886,7 +1886,7 @@ class ShapeEnv:
     def evaluate_guards_for_args(self, placeholders, args):
         from torch._dynamo.source import GlobalSource
         arg_names = [f"t{i}" for i in range(len(args))]
-        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names], dynamic_ranges=None)
+        guards = self.produce_guards(placeholders, [GlobalSource(a) for a in arg_names], constraint_inputs=None)
         if guards:
             code = " and ".join(guards)
             return eval(code, SYMPY_INTERP, dict(zip(arg_names, args)))
