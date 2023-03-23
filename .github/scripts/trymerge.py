@@ -414,6 +414,8 @@ RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 CIFLOW_LABEL = re.compile(r"^ciflow/.+")
 CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
+ROCKSET_MERGES_COLLECTION = "merges"
+ROCKSET_MERGES_WORKSPACE = "commons"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -966,7 +968,7 @@ class GitHubPR:
                    comment_id: Optional[int] = None,
                    ignore_current_checks: Optional[List[str]] = None) -> None:
         # Raises exception if matching rule is not found
-        find_matching_merge_rule(
+        merge_rule, pending_checks, failed_checks = find_matching_merge_rule(
             self,
             repo,
             skip_mandatory_checks=skip_mandatory_checks,
@@ -980,6 +982,28 @@ class GitHubPR:
             self.add_numbered_label("merged")
             for pr in additional_merged_prs:
                 pr.add_numbered_label("merged")
+
+        if comment_id and self.pr_num:
+            # Finally, upload the record to Rockset. The list of pending and failed
+            # checks are at the time of the merge
+            save_merge_record(
+                collection=ROCKSET_MERGES_COLLECTION,
+                comment_id=comment_id,
+                pr_num=self.pr_num,
+                owner=self.org,
+                project=self.project,
+                pending_checks=pending_checks,
+                failed_checks=failed_checks,
+                is_failed=False,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                ignore_current=bool(ignore_current_checks),
+                error="",
+                workspace=ROCKSET_MERGES_WORKSPACE,
+            )
+        else:
+            print("Missing comment ID or PR number, couldn't upload to Rockset")
+
 
     def merge_changes(self,
                       repo: GitRepo,
@@ -1072,11 +1096,13 @@ def find_matching_merge_rule(
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: Optional[List[str]] = None,
-) -> MergeRule:
-    """Returns merge rule matching to this pr or raises an exception.
+) -> Tuple[MergeRule, List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
+    """
+    Returns merge rule matching to this pr together with the list of associated pending
+    and failing jobs OR raises an exception.
 
-    NB: this function is used in Meta-internal workflows, see the comment
-    at the top of this file for details.
+    NB: this function is used in Meta-internal workflows, see the comment at the top of
+    this file for details.
     """
     changed_files = pr.get_changed_files()
     approved_by = set(pr.get_approved_by())
@@ -1204,7 +1230,7 @@ def find_matching_merge_rule(
         if not skip_internal_checks and pr.has_internal_changes():
             raise RuntimeError("This PR has internal changes and must be landed via Phabricator")
 
-        return rule
+        return (rule, pending_checks, failed_checks)
 
     if reject_reason_score == 20000:
         raise MandatoryChecksMissingError(reject_reason, rule)
@@ -1227,6 +1253,79 @@ def _get_flaky_rules(url: str, num_retries: int = 3) -> List[FlakyRule]:
         if num_retries > 0:
             return _get_flaky_rules(url, num_retries=num_retries - 1)
         return []
+
+
+def save_merge_record(
+    collection: str,
+    comment_id: int,
+    pr_num: int,
+    owner: str,
+    project: str,
+    pending_checks: List[Tuple[str, Optional[str]]],
+    failed_checks: List[Tuple[str, Optional[str]]],
+    is_failed: bool = False,
+    dry_run: bool = False,
+    skip_mandatory_checks: bool = False,
+    ignore_current: bool = False,
+    error: str = "",
+    workspace: str = "commons",
+    num_retries: int = 3,
+) -> None:
+    """
+    This saves the merge records into Rockset, so we can query them (for fun and profit)
+    """
+    try:
+        import rockset  # type: ignore[import]
+
+        # Prepare the record to be written into Rockset
+        data = [
+            {
+                "id": comment_id,
+                "pr_num": pr_num,
+                "owner": owner,
+                "project": project,
+                "pending_checks": pending_checks,
+                "failed_checks": failed_checks,
+                "is_failed": is_failed,
+                "dry_run": dry_run,
+                "skip_mandatory_checks": skip_mandatory_checks,
+                "ignore_current": ignore_current,
+                "error": error,
+            }
+        ]
+
+        client = rockset.RocksetClient(
+            host="api.usw2a1.rockset.com", api_key=os.environ["ROCKSET_API_KEY"]
+        )
+        client.Documents.add_documents(
+            collection=collection,
+            data=data,
+            workspace=workspace,
+        )
+
+    except ModuleNotFoundError:
+        print("Rockset is missing, no record will be saved")
+        return
+
+    except Exception as e:
+        print(f"Could not upload to Rockset: {e}")
+        if num_retries > 0:
+            return save_merge_record(
+                collection=collection,
+                comment_id=comment_id,
+                pr_num=pr_num,
+                owner=owner,
+                project=project,
+                pending_checks=pending_checks,
+                failed_checks=failed_checks,
+                is_failed=is_failed,
+                dry_run=dry_run,
+                skip_mandatory_checks=skip_mandatory_checks,
+                ignore_current=ignore_current,
+                error=error,
+                workspace=workspace,
+                num_retries=num_retries - 1,
+            )
 
 
 def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
@@ -1644,6 +1743,28 @@ def main() -> None:
               ignore_current=args.ignore_current)
     except Exception as e:
         handle_exception(e)
+
+        if args.comment_id and args.pr_num:
+            # Finally, upload the record to Rockset, we don't have access to the
+            # list of pending and failed checks here, but they are not really
+            # needed at the moment
+            save_merge_record(
+                collection=ROCKSET_MERGES_COLLECTION,
+                comment_id=args.comment_id,
+                pr_num=args.pr_num,
+                owner=org,
+                project=project,
+                pending_checks=[],
+                failed_checks=[],
+                is_failed=True,
+                dry_run=args.dry_run,
+                skip_mandatory_checks=args.force,
+                ignore_current=args.ignore_current,
+                error=str(e),
+                workspace=ROCKSET_MERGES_WORKSPACE,
+            )
+        else:
+            print("Missing comment ID or PR number, couldn't upload to Rockset")
 
 
 if __name__ == "__main__":
