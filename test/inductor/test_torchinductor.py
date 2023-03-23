@@ -5699,16 +5699,9 @@ class CommonTemplate:
 
         # Repro from vision_maskrcnn
         def fn(arg0_1):
-            unsqueeze = torch.ops.aten.unsqueeze.default(arg0_1, 0)
+            unsqueeze = arg0_1.unsqueeze(0)
             sym_size = arg0_1.size(1)
-            mul = sym_size * 1.8735363483428955
-            floor = math.ceil(mul)
-            mul = None
-            sub = floor - 0
-            truediv = sub / 1
-            sub = None
-            ceil = math.ceil(truediv)
-            truediv = None
+            ceil = math.ceil(sym_size * 1.8735363483428955)
             iota = torch.ops.prims.iota.default(
                 ceil,
                 start=0,
@@ -5717,29 +5710,10 @@ class CommonTemplate:
                 device="cpu",
                 requires_grad=False,
             )
-            ceil = None
-            convert_element_type = torch.ops.prims.convert_element_type.default(
-                iota, torch.float64
-            )
-            iota = None
-            mul_1 = torch.ops.aten.mul.Tensor(convert_element_type, 1)
-            convert_element_type = None
-            add = torch.ops.aten.add.Tensor(mul_1, 0)
-            mul_1 = None
-            convert_element_type_1 = torch.ops.prims.convert_element_type.default(
-                add, torch.float32
-            )
-            add = None
+            convert_element_type_1 = iota.to(torch.float32)
             sym_size_1 = arg0_1.size(2)
-            arg0_1 = None
-            mul_2 = sym_size_1 * 1.8735363483428955
-            floor_1 = math.floor(mul_2)
-            mul_2 = None
-            sub_1 = floor_1 - 0
-            truediv_1 = sub_1 / 1
-            sub_1 = None
-            ceil_1 = math.ceil(truediv_1)
-            truediv_1 = None
+            floor_1 = math.floor(sym_size_1 * 1.8735363483428955)
+            ceil_1 = math.ceil(floor_1)
             iota_1 = torch.ops.prims.iota.default(
                 ceil_1,
                 start=0,
@@ -5748,124 +5722,26 @@ class CommonTemplate:
                 device="cpu",
                 requires_grad=False,
             )
-            ceil_1 = None
-            convert_element_type_2 = torch.ops.prims.convert_element_type.default(
-                iota_1, torch.float64
-            )
-            iota_1 = None
-            mul_3 = torch.ops.aten.mul.Tensor(convert_element_type_2, 1)
-            convert_element_type_2 = None
-            add_1 = torch.ops.aten.add.Tensor(mul_3, 0)
-            mul_3 = None
-            convert_element_type_3 = torch.ops.prims.convert_element_type.default(
-                add_1, torch.float32
-            )
-            add_1 = None
-            add_2 = torch.ops.aten.add.Tensor(convert_element_type_1, 0.5)
-            convert_element_type_1 = None
-            truediv_2 = sym_size / floor
-            floor = None
-            mul_4 = torch.ops.aten.mul.Tensor(add_2, truediv_2)
-            add_2 = truediv_2 = None
-            sub_2 = torch.ops.aten.sub.Tensor(mul_4, 0.5)
-            mul_4 = None
-            clamp_min = torch.ops.aten.clamp_min.default(sub_2, 0.0)
-            sub_2 = None
-            add_3 = torch.ops.aten.add.Tensor(convert_element_type_3, 0.5)
-            convert_element_type_3 = None
-            truediv_3 = sym_size_1 / floor_1
-            floor_1 = None
-            mul_5 = torch.ops.aten.mul.Tensor(add_3, truediv_3)
-            add_3 = truediv_3 = None
-            sub_3 = torch.ops.aten.sub.Tensor(mul_5, 0.5)
-            mul_5 = None
-            clamp_min_1 = torch.ops.aten.clamp_min.default(sub_3, 0.0)
-            sub_3 = None
-            convert_element_type_4 = torch.ops.prims.convert_element_type.default(
-                clamp_min, torch.int64
-            )
-            ceil_2 = torch.ops.aten.ceil.default(clamp_min)
+            convert_element_type_3 = iota_1.to(torch.float32)
+            sub_2 = (convert_element_type_1 + 0.5) * (sym_size / ceil) - 0.5
+            clamp_min = sub_2.clamp_min(0.0)
+            sub_3 = (convert_element_type_3 + 0.5) * (sym_size_1 / floor_1) - 0.5
+            clamp_min_1 = sub_3.clamp_min(0.0)
+            convert_element_type_4 = clamp_min.to(torch.int64)
             sub_4 = sym_size - 1
-            sym_size = None
-            clamp_max = torch.ops.aten.clamp_max.default(ceil_2, sub_4)
-            ceil_2 = sub_4 = None
-            convert_element_type_5 = torch.ops.prims.convert_element_type.default(
-                clamp_max, torch.int64
-            )
-            clamp_max = None
-            convert_element_type_6 = torch.ops.prims.convert_element_type.default(
-                clamp_min_1, torch.int64
-            )
-            ceil_3 = torch.ops.aten.ceil.default(clamp_min_1)
-            sub_5 = sym_size_1 - 1
-            sym_size_1 = None
-            clamp_max_1 = torch.ops.aten.clamp_max.default(ceil_3, sub_5)
-            ceil_3 = sub_5 = None
-            convert_element_type_7 = torch.ops.prims.convert_element_type.default(
-                clamp_max_1, torch.int64
-            )
-            clamp_max_1 = None
-            unsqueeze_1 = torch.ops.aten.unsqueeze.default(clamp_min, 1)
-            clamp_min = None
-            unsqueeze_2 = torch.ops.aten.unsqueeze.default(convert_element_type_4, 1)
-            convert_element_type_4 = None
-            unsqueeze_3 = torch.ops.aten.unsqueeze.default(convert_element_type_5, 1)
-            convert_element_type_5 = None
-            slice_1 = torch.ops.aten.slice.Tensor(unsqueeze, 0, 0, 9223372036854775807)
-            slice_2 = torch.ops.aten.slice.Tensor(slice_1, 1, 0, 9223372036854775807)
-            slice_1 = None
+            clamp_max = clamp_min.ceil().clamp_max(sub_4)
+            convert_element_type_5 = clamp_max.to(torch.int64)
+            convert_element_type_6 = clamp_min_1.to(torch.int64)
+            unsqueeze_2 = convert_element_type_4.unsqueeze(1)
             index = torch.ops.aten.index.Tensor(
-                slice_2, [None, None, unsqueeze_2, convert_element_type_6]
+                unsqueeze, [None, None, unsqueeze_2, convert_element_type_6]
             )
-            slice_2 = None
-            slice_3 = torch.ops.aten.slice.Tensor(unsqueeze, 0, 0, 9223372036854775807)
-            slice_4 = torch.ops.aten.slice.Tensor(slice_3, 1, 0, 9223372036854775807)
-            slice_3 = None
             index_1 = torch.ops.aten.index.Tensor(
-                slice_4, [None, None, unsqueeze_3, convert_element_type_6]
+                unsqueeze, [None, None, convert_element_type_5.unsqueeze(1), convert_element_type_6]
             )
-            slice_4 = None
-            slice_5 = torch.ops.aten.slice.Tensor(unsqueeze, 0, 0, 9223372036854775807)
-            slice_6 = torch.ops.aten.slice.Tensor(slice_5, 1, 0, 9223372036854775807)
-            slice_5 = None
-            index_2 = torch.ops.aten.index.Tensor(
-                slice_6, [None, None, unsqueeze_2, convert_element_type_7]
-            )
-            slice_6 = None
-            slice_7 = torch.ops.aten.slice.Tensor(unsqueeze, 0, 0, 9223372036854775807)
-            unsqueeze = None
-            slice_8 = torch.ops.aten.slice.Tensor(slice_7, 1, 0, 9223372036854775807)
-            slice_7 = None
-            index_3 = torch.ops.aten.index.Tensor(
-                slice_8, [None, None, unsqueeze_3, convert_element_type_7]
-            )
-            slice_8 = unsqueeze_3 = convert_element_type_7 = None
-            sub_6 = torch.ops.aten.sub.Tensor(unsqueeze_1, unsqueeze_2)
-            unsqueeze_1 = unsqueeze_2 = None
-            sub_7 = torch.ops.aten.sub.Tensor(1.0, sub_6)
-            sub_8 = torch.ops.aten.sub.Tensor(clamp_min_1, convert_element_type_6)
-            clamp_min_1 = convert_element_type_6 = None
-            sub_9 = torch.ops.aten.sub.Tensor(1.0, sub_8)
-            mul_6 = torch.ops.aten.mul.Tensor(index, sub_7)
-            index = None
-            mul_7 = torch.ops.aten.mul.Tensor(index_1, sub_6)
-            index_1 = None
-            add_4 = torch.ops.aten.add.Tensor(mul_6, mul_7)
-            mul_6 = mul_7 = None
-            mul_8 = torch.ops.aten.mul.Tensor(index_2, sub_7)
-            index_2 = sub_7 = None
-            mul_9 = torch.ops.aten.mul.Tensor(index_3, sub_6)
-            index_3 = sub_6 = None
-            add_5 = torch.ops.aten.add.Tensor(mul_8, mul_9)
-            mul_8 = mul_9 = None
-            mul_10 = torch.ops.aten.mul.Tensor(add_4, sub_9)
-            add_4 = sub_9 = None
-            mul_11 = torch.ops.aten.mul.Tensor(add_5, sub_8)
-            add_5 = sub_8 = None
-            add_6 = torch.ops.aten.add.Tensor(mul_10, mul_11)
-            mul_10 = mul_11 = None
-            select = torch.ops.aten.select.int(add_6, 0, 0)
-            add_6 = None
+            sub_6 = clamp_min.unsqueeze(1) - unsqueeze_2
+            mul_10 = (index * (1.0 - sub_6) + index_1 * (sub_6)) * (1.0 - (clamp_min_1 - convert_element_type_6))
+            select = torch.ops.aten.select.int(mul_10, 0, 0)
             return (select,)
 
         x = torch.randn(15, 20, 3)
