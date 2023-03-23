@@ -554,7 +554,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_single_stream_use(self):
             @torch.compile()
             def foo(x):
-                return x * x * x
+                return (x * x * x).relu()
 
             inp = torch.rand([4], device="cuda", requires_grad=True)
             streams = set()
