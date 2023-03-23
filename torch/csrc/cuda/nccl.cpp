@@ -1037,7 +1037,7 @@ void scatter(
           NCCL_CHECK(
               ncclSend(sendbuff, send_count, send_type, r, comm, stream));
         } else {
-          ncclSend(sendbuff, send_count, send_type, r, comm, stream);
+          NCCL_CHECK(ncclSend(sendbuff, send_count, send_type, r, comm, stream));
         }
       } else {
         // on its own rank, simply copy it to the output
