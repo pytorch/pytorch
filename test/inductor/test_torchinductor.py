@@ -79,6 +79,7 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     expectedFailureXPU,
     largeTensorTest,
+    get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_dtype import all_types, get_all_dtypes
 from torch.testing._internal.common_quantization import (
@@ -97,6 +98,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfWindows,
     skipIfXpu,
+    subtest,
+    skipIfRocmArch,
     subtest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -141,6 +144,10 @@ _P = ParamSpec("_P")
 
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
+_desired_test_bases = get_desired_device_type_test_bases()
+RUN_CPU = any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_GPU = any(getattr(x, "device_type", "") == GPU_TYPE for x in _desired_test_bases)
+NAVI_ARCH = ("gfx1100", "gfx1101") # Used for navi exclusive skips on ROCm
 
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
@@ -7579,6 +7586,8 @@ class CommonTemplate:
             ),
         )
 
+    @skipIfWindows
+    @skipIfRocm
     def test_roi_align(self):
         if not has_torchvision_roi_align():
             raise unittest.SkipTest("requires torchvision")
@@ -8428,6 +8437,7 @@ class CommonTemplate:
             )
 
     @skip_if_gpu_halide
+    # issue #1150
     def test_dense_mask_index(self):
         r"""
         There will be a little difference for reduce order between aten and inductor

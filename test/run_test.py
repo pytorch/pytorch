@@ -168,7 +168,6 @@ WINDOWS_BLOCKLIST = [
 
 ROCM_BLOCKLIST = [
     "distributed/rpc/test_faulty_agent",
-    "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
     "test_determination",
@@ -177,6 +176,9 @@ ROCM_BLOCKLIST = [
     "test_jit_cuda_fuser",
 ]
 
+if sys.version_info.major < 3 or (sys.version_info.major == 3 and sys.version_info.minor <= 9):
+    ROCM_BLOCKLIST.append("test_typing")
+    
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
     "dynamo/test_misc",

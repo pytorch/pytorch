@@ -37,6 +37,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     freeze_rng_state,
     IS_FBCODE,
+    skipIfRocm,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     xfailIfPy312Plus,
@@ -73,7 +75,7 @@ except unittest.SkipTest:
         sys.exit(0)
     raise
 
-
+NAVI_ARCH = ("gfx1100", "gfx1101") # Used for navi exclusive skips on ROCm
 TestCase = test_torchinductor.TestCase
 ToTuple = test_torchinductor.ToTuple
 check_model_cuda = test_torchinductor.check_model_cuda

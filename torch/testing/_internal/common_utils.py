@@ -102,7 +102,8 @@ except ImportError:
     has_pytest = False
 
 
-MI300_ARCH = ("gfx942",)
+MI300_ARCH = ("gfx940", "gfx941", "gfx942")
+NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 
 
 def freeze_rng_state(*args, **kwargs):
@@ -1348,6 +1349,16 @@ IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
+
+NAVI32_ARCH = "gfx1101"
+
+def is_navi_arch():
+    if torch.cuda.is_available():
+        prop = torch.cuda.get_device_properties(0)
+        gfx_arch = prop.gcnArchName.split(":")[0]
+        if gfx_arch in ["gfx1100", "gfx1101", "gfx1102"]:
+            return True
+    return False
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':

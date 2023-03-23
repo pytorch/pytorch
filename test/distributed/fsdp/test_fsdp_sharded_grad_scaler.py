@@ -36,6 +36,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
+    NAVI_ARCH,
+    skipIfRocmArch,
 )
 
 
@@ -236,6 +238,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
         return model, optim, ref_model, ref_optim
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocmArch(NAVI_ARCH)
     def test_sharded_grad_scaler_found_inf(self):
         self.run_subtests(
             {

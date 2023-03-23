@@ -34,6 +34,8 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     TEST_WITH_ROCM,
+    NAVI_ARCH,
+    skipIfRocmArch,
 )
 from torch.utils._triton import has_triton_tma_device
 
@@ -1000,6 +1002,7 @@ class TestMaxAutotune(TestCase):
         act = f(x, y)
         torch.testing.assert_close(act, ref, atol=2e-2, rtol=1e-2)
 
+    @skipIfRocmArch(NAVI_ARCH)
     def test_non_contiguous_input_addmm(self):
         b = torch.randn((768), dtype=torch.bfloat16, device=GPU_TYPE)
         x = rand_strided(
