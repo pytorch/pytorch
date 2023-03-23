@@ -136,11 +136,7 @@ class Unflatten(Module):
         raise TypeError("unflattened_size must be a tuple of ints, but found type {}".format(type(input).__name__))
 
     def forward(self, input: Tensor) -> Tensor:
-        return input.view([
-            *input.shape[:self.dim],
-            *self.unflattened_size,
-            *input.shape[self.dim + 1:]
-        ])
+        return input.unflatten(self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
         return 'dim={}, unflattened_size={}'.format(self.dim, self.unflattened_size)
