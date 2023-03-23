@@ -1907,12 +1907,13 @@ class CommonTemplate:
                 res = self.linear(res)
                 return res
 
-        with torch.no_grad():
-            m = M(224, 224).bfloat16().eval()
-            m_opt = torch.compile(m)
-            x = torch.randn(224, 224, dtype=torch.bfloat16)
-            m_opt(x)
-            self.assertEqual(m(x), m_opt(x))
+        if has_bf16_support():
+            with torch.no_grad():
+                m = M(224, 224).bfloat16().eval()
+                m_opt = torch.compile(m)
+                x = torch.randn(224, 224, dtype=torch.bfloat16)
+                m_opt(x)
+                self.assertEqual(m(x), m_opt(x))
 
     @slow()
     def test_conv2d_unary(self):
@@ -2101,6 +2102,14 @@ class CommonTemplate:
                     mod,
                     (v,),
                 )
+            if has_bf16_support() and len(input_shape) > 1:
+                mod = mod.to(torch.bfloat16)
+                v = v.to(torch.bfloat16)
+                with torch.no_grad():
+                    self.common(
+                        mod,
+                        (v,),
+                    )
 
     def test_linear_buffer_reuse(self):
         class M(torch.nn.Module):
@@ -7183,37 +7192,6 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 rand_strided((5, 5, 5, 5), (0, 5, 0, 1), device="cuda"),
             )
             self.assertTrue(same(fn(*inputs), inputs[0] + inputs[1]))
-
-        @config.patch(tune_layout=True)
-        def test_tune_layout(self):
-            class Repro(torch.nn.Module):
-                def forward(self, arg1_1, unsqueeze, unsqueeze_1):
-                    convolution_1 = torch.ops.aten.convolution.default(
-                        unsqueeze,
-                        unsqueeze_1,
-                        arg1_1,
-                        [1, 1],
-                        [1, 0],
-                        [1, 1],
-                        False,
-                        [0, 0],
-                        1,
-                    )
-                    unsqueeze = unsqueeze_1 = arg1_1 = None
-                    return (convolution_1,)
-
-            args = [
-                ((512,), (1,), torch.float16, "cuda"),
-                ((4096, 512, 16, 1), (8192, 16, 1, 1), torch.float16, "cuda"),
-                ((512, 512, 3, 1), (1536, 3, 1, 1), torch.float16, "cuda"),
-            ]
-            args = [rand_strided(sh, st, dt, dev) for (sh, st, dt, dev) in args]
-
-            mod = Repro()
-            opt_mod = torch._dynamo.optimize("inductor")(mod)
-            ref = mod(*args)
-            res = opt_mod(*args)
-            self.assertTrue(same(ref, res))
 
         @config.patch({"triton.cudagraphs": True})
         def test_inplace_updates_cudagraphs(self):
