@@ -2484,7 +2484,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
-    def test_recompile_on_index(self):
+    def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
         def gemm(x, y):
@@ -7381,7 +7381,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             https://github.com/pytorch/torchdynamo/issues/1670
             """
             from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            from torch._inductor.triton_ops.autotune import CachingAutotuner, grid
+            from torch._inductor.triton_heuristics import CachingAutotuner, grid
             from torch._inductor.utils import instance_descriptor
 
             def autotune(configs, meta):
@@ -7486,7 +7486,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.triton_ops.autotune import CachingAutotuner
+        from torch._inductor.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -7538,7 +7538,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                        val, torch._inductor.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 
