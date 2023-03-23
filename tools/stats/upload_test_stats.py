@@ -354,6 +354,21 @@ if __name__ == "__main__":
         invoking_file_times,
     )
 
+    # Separate out the failed test cases.
+    # Uploading everying is too data intensive most of the time,
+    # but these will be just a tiny fraction.
+    failed_tests_cases = []
+    for test_case in test_cases:
+        if "rerun" in test_case or "failure" in test_case or "error" in test_case:
+            failed_tests_cases.append(test_case)
+
+    upload_workflow_stats_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "failed_test_runs",
+        failed_tests_cases,
+    )
+
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
         upload_workflow_stats_to_s3(
