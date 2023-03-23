@@ -1144,7 +1144,9 @@ class CppVecKernel(CppKernel):
         is_broadcast = expanded_index == new_index
 
         var_expr = (
-            f"{var}[{cexpr_index(index)}]" if is_broadcast else f"{var} + {cexpr(new_index)}"
+            f"{var}[{cexpr_index(index)}]"
+            if is_broadcast
+            else f"{var} + {cexpr(new_index)}"
         )
 
         if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
