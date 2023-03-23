@@ -449,11 +449,15 @@ def _get_target_activation_dtype_for_node(
             ) else torch.float
 
         weight_index = None
+        WEIGHT_OBS_OR_FQ_CTR = qconfig.weight if node.target not in NON_QUANTIZABLE_WEIGHT_OPS else None
         if isinstance(node, Node) and node.op == "call_function" and \
            node.target in backend_config._pattern_complex_format_to_config:
             weight_index = backend_config._pattern_complex_format_to_config[node.target]._input_type_to_index.get("weight")
             if weight_index is None or weight_index >= len(node.args):
                 weight_index = None
+
+        if weight_index is not None:
+            input_obs_or_fq_ctr_for_args[weight_index] = qconfig.weight
 
         bias_index = None
         if isinstance(node, Node) and node.op == "call_function" and \
@@ -464,8 +468,6 @@ def _get_target_activation_dtype_for_node(
 
         input_obs_or_fq_ctr_for_args = [qconfig.activation, qconfig.activation, qconfig.activation]
         BIAS_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=bias_dtype)
-        if weight_index is not None:
-            input_obs_or_fq_ctr_for_args[weight_index] = qconfig.weight
         if bias_index is not None:
             input_obs_or_fq_ctr_for_args[bias_index] = BIAS_OBS_OR_FQ_CTR
 
@@ -557,7 +559,6 @@ def _get_arg_target_dtype_as_input_to_node(
     assert isinstance(arg, Node)
     assert "target_dtype_info" in node.meta
     assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    # TODO: figure out why NON_QUANTIZABLE_WEIGHT_OPS is not needed
     input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
     arg_to_ctr = {}
     _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
