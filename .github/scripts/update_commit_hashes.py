@@ -135,7 +135,7 @@ def main() -> None:
         .stdout.decode("utf-8")
         .strip()
     )
-    with open(f"{args.pin_path}/{args.repo_name}", "r+") as f:
+    with open(f"{args.pin_folder}/{args.repo_name}", "r+") as f:
         old_hash = f.read().strip()
         subprocess.run(f"git checkout {old_hash}".split(), cwd=args.repo_name)
         f.seek(0)
@@ -144,7 +144,7 @@ def main() -> None:
     if is_newer_hash(hash, old_hash, args.repo_name):
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add {args.pin_path}/{args.repo_name}".split())
+        subprocess.run(f"git add {args.pin_folder}/{args.repo_name}".split())
         subprocess.run(
             "git commit -m".split() + [f"update {args.repo_name} commit hash"]
         )
