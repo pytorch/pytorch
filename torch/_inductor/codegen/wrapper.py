@@ -885,7 +885,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{DTYPE_TO_ATEN[dtype]}){self.ending}"
         )
 
-
     def generate_fusion_ops_code(
         self,
         name,
