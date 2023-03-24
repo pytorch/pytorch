@@ -362,7 +362,7 @@ class TransformerDecoder(Module):
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as tgt mask.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
 
         Shape:
@@ -707,7 +707,7 @@ class TransformerDecoderLayer(Module):
             memory_key_padding_mask: the mask for the memory keys per batch (optional).
             tgt_is_causal: If specified, applies a causal mask as tgt mask.
                 Mutually exclusive with providing tgt_mask. Default: ``False``.
-            memory_is_causal: If specified, applies a causal mask as tgt mask.
+            memory_is_causal: If specified, applies a causal mask as memory mask.
                 Mutually exclusive with providing memory_mask. Default: ``False``.
         Shape:
             see the docs in Transformer class.
