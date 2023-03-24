@@ -1534,17 +1534,22 @@ def check_for_sev(org: str, project: str, skip_mandatory_checks: bool) -> None:
 def has_label(labels: List[str], pattern: Pattern[str] = CIFLOW_LABEL) -> bool:
     return len(list(filter(pattern.match, labels))) > 0
 
+
 def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
-    ok_failed_checks_threshold: int = 3
+    ok_failed_checks_threshold: int = 3,
 ) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
     pending_checks: List[Tuple[str, Optional[str]]] = []
     failed_checks: List[Tuple[str, Optional[str]]] = []
     ok_failed_checks: List[Tuple[str, Optional[str]]] = []
 
     # If required_checks is not set or empty, consider all names are relevant
-    relevant_checknames = [name for name in check_runs.keys() if not required_checks or any([x in name for x in required_checks])]
+    relevant_checknames = [
+        name
+        for name in check_runs.keys()
+        if not required_checks or any([x in name for x in required_checks])
+    ]
 
     for checkname in required_checks:
         if all([checkname not in x for x in check_runs.keys()]):
@@ -1555,24 +1560,27 @@ def categorize_checks(
         elif not is_passing_status(check_runs[checkname].status):
             if check_runs[checkname].classification == "IGNORE_CURRENT_CHECK":
                 pass
-            elif check_runs[checkname].classification in ('BROKEN_TRUNK', 'FLAKY'):
+            elif check_runs[checkname].classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, check_runs[checkname].url))
             else:
                 failed_checks.append((checkname, check_runs[checkname].url))
 
     if ok_failed_checks:
         print(
-            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: " +
-            ", ".join([x[0] for x in ok_failed_checks]) +
-            (f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
-             if len(ok_failed_checks) > ok_failed_checks_threshold
-             else '')
+            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
+            + ", ".join([x[0] for x in ok_failed_checks])
+            + (
+                f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
+                if len(ok_failed_checks) > ok_failed_checks_threshold
+                else ""
+            )
         )
 
     if len(ok_failed_checks) > ok_failed_checks_threshold:
         failed_checks = failed_checks + ok_failed_checks
 
     return (pending_checks, failed_checks)
+
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
