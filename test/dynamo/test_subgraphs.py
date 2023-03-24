@@ -8,7 +8,7 @@ import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo import config
 from torch._dynamo.testing import unsupported
-from torch._dynamo.utils import disable_cache_limit
+from torch._dynamo.utils import disable_cache_limit, ifunspec
 
 globalmod = torch.nn.ReLU()
 
@@ -326,7 +326,11 @@ class SubGraphTests(torch._dynamo.test_case.TestCase):
                 x = x + i
             return x
 
-        self._common(fn, 2, 4)
+        # We don't specialize on range with dynamic shapes, which
+        # means we fail to unroll the loop.
+        # TODO: Consider forcing specialization when we iterate over
+        # the loop
+        self._common(fn, 2, ifunspec(1, 4))
 
     def test_restore_range_iter(self):
         def fn(a, b):

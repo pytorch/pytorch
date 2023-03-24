@@ -125,7 +125,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackImpl::runPythonFunction(
     return asFuture(std::current_exception());
   }
 
-  // After sync exection or failed async execution return the value as-is.
+  // After sync execution or failed async execution return the value as-is.
   if (pythonRpcHandler.isRemoteException(result) || !isAsyncExecution) {
     return asFuture(
         c10::ivalue::ConcretePyObjectHolder::create(result),
