@@ -2421,12 +2421,8 @@ class DoubleTensor(torch.Tensor):
 
     @staticmethod
     def __new__(cls, a, b):
-        if not isinstance(a, torch.Tensor) or not isinstance(b, torch.Tensor):
-            import pdb; pdb.set_trace()
-        if a.device != b.device or a.layout != b.layout or a.requires_grad != b.requires_grad or a.dtype != b.dtype:
-            import pdb; pdb.set_trace()
         assert a.device == b.device and a.layout == b.layout and a.requires_grad == b.requires_grad and a.dtype == b.dtype
-        # Eh it would be more accurate to represent the shape as torch.cat(a, b).shape
+        # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = a.shape
         kwargs = {}
         kwargs["device"] = a.device
@@ -2533,6 +2529,13 @@ class TestAOTDispatch(AOTTestCase):
             self.assertEqual(a_ref.grad.b, a_test.grad.b)
             self.assertEqual(b_ref.grad, b_test.grad)
 
+            # Important pieces of the graph:
+            # - mul() and div() show up twice, because we called them on a DoubleTensor
+            # - add() shows up once, because we called it on a plain Tensor
+            # - add() shows up once, because we called it on a plain Tensor
+            # - The user forward() fn returns 1 output (the result of div)
+            # - div, div_1 correspond to the two inner dense tensors that will be wrapped
+            # - into a single DoubleTensor output.
             self.assertExpectedInline(fw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3):
     mul = torch.ops.aten.mul.Tensor(primals_1, 2)
@@ -2542,6 +2545,13 @@ def forward(self, primals_1, primals_2, primals_3):
     div_1 = torch.ops.aten.div.Tensor(mul_1, add);  mul_1 = add = None
     return [div, div_1, primals_1, primals_2, primals_3, div, div_1]""")
 
+            # Important pieces of the graph:
+            # - 4 total dense outputs.
+            #   This corresponds to the fact that each user fwd inpt (a, b)
+            #   will get a gradient that is a DoubleTensor subclass,
+            #   so (mul_4, mul_5) will be wrapped into a.grad
+            #   and (mul_2, mul_3) will be wrapped into b.grad
+            # - 4 total dense outputs,
             self.assertExpectedInline(bw_graph_cell[0].code.strip(), """\
 def forward(self, primals_1, primals_2, primals_3, div, div_1, tangents_1, tangents_2):
     add = torch.ops.aten.add.Tensor(primals_3, 3);  primals_3 = None

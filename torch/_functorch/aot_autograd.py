@@ -1256,8 +1256,9 @@ class TensorToSubclassInfo:
     # Needed by the runtime wrapper for the bw,
     # so it can properly wrap dense tensor outputs back into subclasses
     bw_output_infos: List[Union[int, SubclassCreationMeta]]
-    # Needed during the backward, so we can error out if we find
-    # that the grad_ouputs have different subclass types than what traced with
+    # Needed during the runtime wrapper for the bw,
+    # so we can error out if we find that the grad_outputs
+    # have different subclass types than what we traced with
     fw_output_types: List[type]
 
 
@@ -1309,7 +1310,7 @@ def aot_dispatch_base(
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
-        compiled_fw = make_boxed_func(compiler(fw_module, flat_args))
+        compiled_fw = compiler(fw_module, flat_args)
 
     if maybe_subclass_metadata is None:
         compiled_fw_wrapper = compiled_fw
@@ -2105,13 +2106,18 @@ def aot_dispatch_subclass(
     args: Union[List[Any], Tuple[List[Any], List[Any]]],
     *,
     # This is the fwd-only version of flat_fn. Needed to recompute fw metadata
-    flat_fn_for_metadata: Callable = flat_fn,
+    flat_fn_for_metadata: Optional[Callable] = None,
     aot_config: AOTConfig,
     # The inner function we use for tracing
     trace_fn: Callable[[Callable, Sequence[Any], AOTConfig, bool], torch.fx.GraphModule],
     meta: ViewAndMutationMeta,
     trace_joint: bool,
 ) -> Tuple[torch.fx.GraphModule, Optional[TensorToSubclassInfo]]:
+
+    if flat_fn_for_metadata is None:
+        # In the inference case, these are the same.
+        # In the autogrd case, we are passed the joint fn, but need to trace only the fwd for metadata.
+        flat_fn_for_metadata = flat_fn
 
 
     any_subclass = False
@@ -2150,7 +2156,7 @@ def aot_dispatch_subclass(
         args_unwrapped = (args_unwrapped_primals, args_unwrapped_tangents)
         wrap_info = (wrap_info_primals, wrap_info_tangents)
     else:
-        args_unwrapped, wrap_info = to_flat(args[0])
+        args_unwrapped, wrap_info = to_flat(args)
         args_unwrapped_primals, wrap_info_primals = args_unwrapped, wrap_info
 
     if not any_subclass:
@@ -2657,7 +2663,7 @@ def aot_dispatch_autograd(
                 fw_module, flat_args
             )
         if maybe_subclass_metadata is None:
-            compiled_fw_func_wrapper = make_boxed_func(compiled_fw_func)
+            compiled_fw_func_wrapper = compiled_fw_func
         else:
             assert maybe_subclass_metadata.fw_output_infos is not None
             assert maybe_subclass_metadata.bw_output_infos is not None
