@@ -147,9 +147,9 @@ def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.
 def _get_arg_to_obs_or_fq_ctr(node):
     assert "target_dtype_info" in node.meta
     assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
+    input_ctr_config = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
     arg_to_ctr: Dict[Argument, Any] = {}
-    _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
+    _populate_arg_to_ctr_for_args(node.args, input_ctr_config, arg_to_ctr)
     if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
         _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
     return arg_to_ctr
