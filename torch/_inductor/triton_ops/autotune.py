@@ -27,10 +27,7 @@ from ..utils import (
     has_triton,
     next_power_of_2,
 )
-from .conv_perf_model import (
-    early_config_prune as conv_early_config_prune,
-    estimate_conv_time,
-)
+
 
 log = logging.getLogger(__name__)
 
@@ -233,8 +230,8 @@ def start_graph():
 def end_graph():
     if len(collected_calls) == 0:
         return
-    overall_time = sum(call[1] for call in collected_calls)
-    overall_gb = sum(call[2] for call in collected_calls)
+    overall_time = sum(call[0] for call in collected_calls)
+    overall_gb = sum(call[1] for call in collected_calls)
     cur_file = inspect.stack()[1].filename
     print(f"SUMMARY ({cur_file})")
     print(
@@ -257,7 +254,14 @@ class DebugAutotuner(CachingAutotuner):
         (launcher,) = self.launchers
 
         ms = self.bench(launcher, *args, grid=grid)[0]
-        num_gb = get_num_bytes(*args) / 1e9
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in self.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
         gb_per_s = num_gb / (ms / 1e3)
 
         collected_calls.append((ms, num_gb, gb_per_s, kernel_name)),
@@ -621,89 +625,6 @@ def template(num_stages, num_warps, meta, filename=None):
     return cached_autotune(
         [triton.Config({}, num_stages=num_stages, num_warps=num_warps)], meta=meta
     )
-
-
-def conv_heuristics():
-    configs = [
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=2, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 32}, num_stages=4, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 32}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=3, num_warps=8
-        ),
-        triton.Config(
-            {"BLOCK_M": 256, "BLOCK_N": 32, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 128}, num_stages=4, num_warps=4
-        ),
-        triton.Config(
-            {"BLOCK_M": 128, "BLOCK_N": 32, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        triton.Config(
-            {"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        ),
-        # triton.Config(
-        #     {"BLOCK_M": 128, "BLOCK_N": 16, "BLOCK_K": 64}, num_stages=4, num_warps=2
-        # ),
-    ]
-    key = [
-        "BATCH",
-        "IN_C",
-        "IN_H",
-        "IN_W",
-        "KERNEL_N",
-        "KERNEL_H",
-        "KERNEL_W",
-        "OUT_H",
-        "OUT_W",
-        # parameters of conv
-        "stride_h",
-        "stride_w",
-        "padding_h",
-        "padding_w",
-        "dilation_h",
-        "dilation_w",
-        "output_padding_h",
-        "output_padding_w",
-        "groups",
-    ]
-    prune_configs_by = {
-        "early_config_prune": conv_early_config_prune,
-        "perf_model": estimate_conv_time,
-        "top_k": 10,
-    }
-    return triton.autotune(configs, key, prune_configs_by=prune_configs_by)
 
 
 def grid(xnumel, ynumel=None, znumel=None):

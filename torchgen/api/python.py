@@ -636,6 +636,7 @@ def has_tensor_options(f: NativeFunction) -> bool:
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 # 'simple_type' was introduced by the old codegen, which is slightly
 # different from the python schema type, e.g.: doesn't have '?' suffix
 # for optional Tensor/TensorList; doesn't have '[size]' suffix for list type.
@@ -919,7 +920,7 @@ def argument_type_str_pyi(t: Type) -> str:
         elif t.name == BaseTy.str:
             ret = "str"
         elif t.name == BaseTy.Scalar:
-            ret = "Number"
+            ret = "Union[Number, _complex]"
         elif t.name == BaseTy.ScalarType:
             ret = "_dtype"
         elif t.name == BaseTy.bool:
@@ -1214,6 +1215,7 @@ def cpp_dispatch_exprs(
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 # We explicitly enumerate the PythonArgParser unpacking methods for all
 # supported types. This might be more verbose than necessary, partially
 # because of the irregularity of unpacking method naming, partially
@@ -1354,6 +1356,7 @@ TENSOR_OPTIONS_FIELDS = {
     "pin_memory": "bool?",
     "requires_grad": "bool?",
 }
+
 
 # bind arg parser outputs (python args) with dispatch lambda arguments (c++ args).
 def dispatch_lambda_exprs(
