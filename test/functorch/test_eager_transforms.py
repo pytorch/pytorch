@@ -1038,7 +1038,8 @@ class TestAutogradFunction(TestCase):
     @parametrize("inner_requires_grad", [True, False])
     @parametrize("save_for", ["jvp", "vjp"])
     @parametrize("save_tensors", ["input", "output", "neither"])
-    def test_function_returns_input(self, device, inner_requires_grad, save_for, save_tensors):
+    @parametrize("mark_dirty", [True, False])
+    def test_function_returns_input(self, device, inner_requires_grad, save_for, save_tensors, mark_dirty):
         class A(torch.autograd.Function):
             @staticmethod
             def forward(x):
@@ -1051,6 +1052,9 @@ class TestAutogradFunction(TestCase):
                 else:
                     save_fn = ctx.save_for_backward
 
+                if mark_dirty:
+                    ctx.mark_dirty(inputs[0])
+
                 if save_tensors == "input":
                     save_fn(inputs[0])
                 elif save_tensors == "output":
@@ -1062,12 +1066,15 @@ class TestAutogradFunction(TestCase):
             def backward(ctx, grad_output):
                 return grad_output
 
+        def fn(x):
+            return A.apply(x.clone())
+
         x = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
-        if save_tensors in ("input", "output"):
+        if save_tensors in ("input", "output") and not mark_dirty:
             with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
-                grad(A.apply)(x)
+                grad(fn)(x)
         else:
-            grad(A.apply)(x)
+            grad(fn)(x)
 
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):

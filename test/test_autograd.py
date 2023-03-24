@@ -348,7 +348,7 @@ class TestAutograd(TestCase):
             t3.sum().backward()
 
     def test_custom_function_raises_if_input_returned_as_is_and_saved(self):
-        for save_inputs, mark_dirty, requires_grad in product(*([(True, False)] * 3)):
+        for save_inputs, mark_dirty, requires_grad, save_for_fw in product(*([(True, False)] * 4)):
             class Func(torch.autograd.Function):
                 @staticmethod
                 def forward(x):
@@ -356,13 +356,18 @@ class TestAutograd(TestCase):
 
                 @staticmethod
                 def setup_context(ctx, inputs, outputs):
+                    if save_for_fw:
+                        save_fn = ctx.save_for_forward
+                    else:
+                        save_fn = ctx.save_for_backward
+
                     if mark_dirty:
                         ctx.mark_dirty(inputs[0])
 
                     if save_inputs:
-                        ctx.save_for_backward(inputs[0])
+                        save_fn(inputs[0])
                     else:
-                        ctx.save_for_backward(outputs[1])
+                        save_fn(outputs[1])
 
                 @staticmethod
                 def backward(ctx, grad_output, grad_x):
