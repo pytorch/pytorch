@@ -2793,11 +2793,11 @@ class ExternKernelAlloc(ExternKernel):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
+        self.cpp_kernel = cpp_kernel
+        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
-        self.cpp_kernel = cpp_kernel
-        self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
 
     def should_allocate(self):
         return False
@@ -3462,10 +3462,9 @@ class MKLPackedLinear(ExternKernelAlloc):
         constant_args=(),
         cpp_constant_args=(),
         kernel="torch.ops.mkl._mkl_linear",
+        cpp_kernel="mkl::_mkl_linear",
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
-        self.cpp_kernel = "mkl::_mkl_linear"
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
         self.cpp_kernel_key = "mkl_linear"
         self.cpp_op_schema = """
             at::Tensor(
