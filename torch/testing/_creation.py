@@ -127,7 +127,7 @@ def make_tensor(
         low = low if low is not None else default_low
         high = high if high is not None else default_high
 
-        if math.isnan(low) or math.isnan(high):
+        if any(isinstance(value, float) and math.isnan(value) for value in [low, high]):
             raise ValueError(
                 f"`low` and `high` cannot be NaN, but got {low=} and {high=}"
             )
@@ -140,6 +140,11 @@ def make_tensor(
             )
         elif low >= high:
             raise ValueError(f"`low` must be less than `high`, but got {low} >= {high}")
+        elif high < lowest_inclusive or low >= highest_exclusive:
+            raise ValueError(
+                f"The value interval specified by `low` and `high` is [{low}, {high}), "
+                f"but {dtype} only supports [{lowest_inclusive}, {highest_exclusive})"
+            )
 
         low = clamp(low, lowest_inclusive, highest_exclusive)
         high = clamp(high, lowest_inclusive, highest_exclusive)
