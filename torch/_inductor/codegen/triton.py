@@ -85,10 +85,6 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"tl.math.floor({self.paren(self._print(expr.args[0]))})"
 
-    def _print_ceiling(self, expr):
-        assert len(expr.args) == 1
-        return f"tl.math.ceil({self.paren(self._print(expr.args[0]))})"
-
 
 texpr = TritonPrinter().doprint
 pexpr = PythonPrinter().doprint
@@ -862,6 +858,23 @@ class TritonKernel(Kernel):
         # if simple replacements didn't get rid of floor/ceil, try full subs
         if len(index.atoms(sympy.floor)) or len(index.atoms(sympy.ceiling)):
             index = index.subs(V.graph.sizevars.precomputed_replacements)
+        # last resort, if no range vars are in the expr, hoist it
+        # TODO instead of trying to blindly find complicated exprs, we should hoist the
+        # inputs/outputs sizes and strides, but at the time indexing is generated
+        # kernel inputs and outputs are not set yet, we'd need a deeper refactor
+        # to do it this way
+
+        if len(index.atoms(sympy.ceiling)):
+            for a in index.atoms(sympy.ceiling):
+                # for nested exprs, atoms yields top level first (?)
+                # so if everything goes fine, lower level replacements will come up empty
+                symbols = a.free_symbols
+                if len(symbols) > 0 and all(
+                    s.name.startswith("s") or s.name.startswith("ps") for s in symbols
+                ):
+                    replacements = {a: V.graph.sizevars.lookup_precomputed_size(a)}
+                    index = sympy_subs(index, replacements)
+
         index_vars = index.free_symbols
         index_str = texpr(self.rename_indexing(self.codegen_indexing(index)))
 
@@ -1291,7 +1304,7 @@ class TritonKernel(Kernel):
                     import triton.language as tl
                     from torch._inductor.ir import ReductionHint
                     from torch._inductor.ir import TileHint
-                    from torch._inductor.triton_ops.autotune import {heuristics}
+                    from torch._inductor.triton_heuristics import {heuristics}
                     from torch._inductor.utils import instance_descriptor
                 """
             )
@@ -1301,7 +1314,7 @@ class TritonKernel(Kernel):
                         from torch._dynamo.testing import rand_strided
                         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
                         import torch
-                        from torch._inductor.triton_ops.autotune import grid
+                        from torch._inductor.triton_heuristics import grid
                     """
                 )
 
