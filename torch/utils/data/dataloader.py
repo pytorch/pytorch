@@ -13,7 +13,7 @@ import queue
 import threading
 import warnings
 
-from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
+from typing import Any, Callable, Iterable, TypeVar, Generic, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch

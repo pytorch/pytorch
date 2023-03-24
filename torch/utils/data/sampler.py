@@ -23,7 +23,8 @@ class Sampler(Generic[T_co]):
     that returns the length of the returned iterators.
 
     Args:
-        data_source (Dataset): This argument is not used and will be removed 2 versions from now.
+        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
+            You may still have custom implementation that utilizes it.
 
     Example:
         class AccedingSequenceLengthSampler(Sampler[int]):
