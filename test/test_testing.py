@@ -1397,7 +1397,9 @@ class TestMakeTensor(TestCase):
             t = make_tensor()
             self.assertEqual(t.requires_grad, requires_grad)
         else:
-            with self.assertRaisesRegex(ValueError, "requires_grad must be False for integral dtype"):
+            with self.assertRaisesRegex(
+                    ValueError, "`requires_grad=True` is not supported for boolean and integral dtypes"
+            ):
                 make_tensor()
 
     @supported_dtypes
@@ -1431,7 +1433,7 @@ class TestMakeTensor(TestCase):
 
     @supported_dtypes
     def test_noncontiguous_memory_format(self, dtype, device):
-        with self.assertRaises(AssertionError):
+        with self.assertRaisesRegex(ValueError, "`noncontiguous` and `memory_format` are mutually exclusive"):
             torch.testing.make_tensor(
                 (2, 3, 4, 5),
                 dtype=dtype,
@@ -1505,7 +1507,7 @@ class TestMakeTensor(TestCase):
             # FIXME: bool needs to fail as well
             return
 
-        with self.assertRaisesRegex(ValueError, "one of low or high was NaN"):
+        with self.assertRaisesRegex(ValueError, "`low` and `high` cannot be NaN"):
             torch.testing.make_tensor(dtype=dtype, device=device, low=low, high=high)
 
     # FIXME this fails for all dtypes
