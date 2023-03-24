@@ -247,6 +247,32 @@ jobs:
       cuda-version: "11.7"
       test-matrix: ${{ needs.win-vs2019-cuda11_7-py3-build.outputs.test-matrix }}
 
+  linux-focal-rocm5_4_2-py3_8-build:
+    name: linux-focal-rocm5.4.2-py3.8
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image-name: pytorch-linux-focal-rocm-n-py3
+      sync-tag: rocm-build
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 2, num_shards: 3, runner: "linux.rocm.gpu" },
+          { config: "default", shard: 3, num_shards: 3, runner: "linux.rocm.gpu" },
+        ]}
+
+  linux-focal-rocm5_4_2-py3_8-test:
+    name: linux-focal-rocm5.4.2-py3.8
+    uses: ./.github/workflows/_rocm-test.yml
+    needs: linux-focal-rocm5_4_2-py3_8-build
+    with:
+      build-environment: linux-focal-rocm5.4.2-py3.8
+      docker-image: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm5_4_2-py3_8-build.outputs.test-matrix }}
+    secrets:
+      AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
+      AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
   android-emulator-build-test:
     name: android-emulator-build-test
     uses: ./.github/workflows/_run_android_tests.yml
