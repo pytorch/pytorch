@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import enum
 import typing
-from typing import Dict, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import torch
 from torch._C import _onnx as _C_onnx
 from torch.onnx import errors
 from torch.onnx._internal import _beartype
-
 
 if typing.TYPE_CHECKING:
     # Hack to help mypy to recognize torch._C.Value
@@ -336,3 +335,29 @@ _SCALAR_TYPE_TO_DTYPE = {
 }
 
 _DTYPE_TO_SCALAR_TYPE = {v: k for k, v in _SCALAR_TYPE_TO_DTYPE.items()}
+
+
+# NOTE: Belows are from torch/fx/node.py
+BaseArgumentTypes = Union[
+    str,
+    int,
+    float,
+    bool,
+    complex,
+    torch.dtype,
+    torch.Tensor,
+    torch.device,
+    torch.memory_format,
+    torch.layout,
+]
+Argument = Optional[
+    Union[
+        Tuple[Any, ...],  # actually Argument, but mypy can't represent recursive types
+        List[Any],  # actually Argument
+        Dict[str, Any],  # actually Argument
+        slice,  # Slice[Argument, Argument, Argument], but slice is not a templated type in typing
+        range,
+        "torch.fx.Node",
+        BaseArgumentTypes,
+    ]
+]
