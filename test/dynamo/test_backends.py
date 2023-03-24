@@ -210,7 +210,8 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
         a = torch.compile(model, backend="inductor")(example_input)
         torch._dynamo.reset()
         b = torch.compile(model, backend="aot_eager")(example_input)
-        assert torch.equal(a,b)
+        self.assertTrue(same(a, b))
+
 
 
 if __name__ == "__main__":
