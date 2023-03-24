@@ -49,7 +49,7 @@ from common_utils import (
 )
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode
+from torch.fx.experimental.symbolic_shapes import ShapeEnv, GuardOnDataDependentSymNode, DimDynamic
 
 USE_TORCHVISION = False
 try:
@@ -2321,7 +2321,7 @@ class TestAOTModuleSimplified(AOTTestCase):
         y = torch.randn(128, 30, requires_grad=True)
 
         inputs = [x, y]
-        fake_inputs = [fake_mode.from_tensor(x) for x in inputs]
+        fake_inputs = [fake_mode.from_tensor(x, dynamic_dims=[DimDynamic.DUCK] * x.dim()) for x in inputs]
         compiled_f = aot_module_simplified(mod, fake_inputs, nop)
 
         ref = mod(*inputs)
@@ -2333,7 +2333,7 @@ class TestAOTModuleSimplified(AOTTestCase):
 
         self.assertExpectedInline(shape_env.format_guards(), """\
  - Eq(s1, 20)
- - Eq(s2, 30)""")
+ - Eq(30, s2)""")
 
         assert torch.allclose(ref[0], res[0])
         assert torch.allclose(inputs[0].grad, cloned_inputs[0].grad)

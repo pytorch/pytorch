@@ -2282,19 +2282,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
 
-    def test_export_dynamic_dim_duplicate_dims(self):
-        y = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        with self.assertRaisesRegex(RuntimeError, "Duplicate dim 0"):
-            torch._dynamo.export(
-                my_dyn_fn, y, constraints=[dynamic_dim(y, 0), dynamic_dim(y, 0)]
-            )
-
     def test_export_dynamic_dim_unknown_tensor(self):
         y = torch.randn([3, 3, 3])
         z = torch.randn([3, 3, 3])

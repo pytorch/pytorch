@@ -803,6 +803,7 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
+                and value >= 0
             ):
                 from torch.fx.experimental.symbolic_shapes import DimDynamic
 
