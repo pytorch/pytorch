@@ -73,6 +73,7 @@ constant_fold_functions = [
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
 
+
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
     return torch._C._TensorBase.__radd__(*args)
@@ -822,6 +823,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    param_name_to_source=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
@@ -873,7 +875,13 @@ class TorchPyOperator(VariableTracker):
             tx.output.graph = graph_checkpoint
             tx.restore_graphstate(checkpoint)
 
-            return output, graph, guards, nn_modules, comparable_state
+            return (
+                output,
+                graph,
+                guards,
+                nn_modules,
+                comparable_state,
+            )
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive

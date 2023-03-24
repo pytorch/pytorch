@@ -2,7 +2,7 @@ import torch
 import warnings
 import weakref
 from weakref import ReferenceType
-from typing import Any, Iterable, List, Tuple, Dict, Optional, DefaultDict
+from typing import Any, Callable, ContextManager, Iterable, List, Tuple, Dict, Optional, DefaultDict
 from collections import defaultdict
 import uuid
 import contextlib
@@ -10,7 +10,7 @@ import contextlib
 __all__ = [
     "checkpoint", "checkpoint_sequential", "CheckpointFunction",
     "check_backward_validity", "detach_variable", "get_device_states",
-    "set_device_states",
+    "set_device_states", "noop_context_fn", "set_checkpoint_early_stop"
 ]
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -165,61 +165,84 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + grads
 
 
-def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
+def noop_context_fn():
+    return contextlib.nullcontext(), contextlib.nullcontext()
+
+
+def checkpoint(
+    function,
+    *args,
+    use_reentrant: bool = True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    **kwargs
+):
     r"""Checkpoint a model or part of the model
 
-    Checkpointing works by trading compute for memory. Rather than storing all
-    intermediate activations of the entire computation graph for computing
-    backward, the checkpointed part does **not** save intermediate activations,
-    and instead recomputes them in backward pass. It can be applied on any part
-    of a model.
+    Checkpointing is a technique that trades compute for memory. Instead of
+    storing all intermediate activations of the entire computation graph for
+    the backward pass, the checkpointed part omits saving intermediate
+    activations and recomputes them during the backward pass. This can be
+    applied to any part of a model.
 
-    Specifically, in the forward pass, :attr:`function` will run in
-    :func:`torch.no_grad` manner, i.e., not storing the intermediate
-    activations. Instead, the forward pass saves the inputs tuple and the
-    :attr:`function` parameter. In the backwards pass, the saved inputs and
-    :attr:`function` is retrieved, and the forward pass is computed on
-    :attr:`function` again, now tracking the intermediate activations, and then
-    the gradients are calculated using these activation values.
-
-    The output of :attr:`function` can contain non-Tensor values and gradient
-    recording is only performed for the Tensor values. Note that if the output
-    consists of nested structures (ex: custom objects, lists, dicts etc.)
-    consisting of Tensors, these Tensors nested in custom structures will not
-    be considered as part of autograd.
-
+    There are currently two checkpointing implementations available, determined
+    by the :attr:`use_reentrant` parameter. It is recommended that you use
+    ``use_reentrant=False``. Please refer the note below for a discussion of
+    their differences.
 
     .. warning::
-        If :attr:`function` invocation during backward does anything different
-        than the one during forward, e.g., due to some global variable, the
-        checkpointed version won't be equivalent, and unfortunately it can't be
-        detected.
+
+        If the :attr:`function` invocation during the backward pass differs
+        from the forward pass, e.g., due to a global variable, the checkpointed
+        checkpointed version may not be equivalent, potentially causing an
+        error being raised or leading to silently incorrect gradients.
 
     .. warning::
-        If ``use_reentrant=True`` is specified, then if the checkpointed segment
-        contains tensors detached from the computational graph by `detach()` or
-        `torch.no_grad()`, the backward pass will raise an error. This is
-        because `checkpoint` makes all the outputs require gradients which
-        causes issues when a tensor is defined to have no gradient in the model.
-        To circumvent this, detach the tensors outside of the `checkpoint`
-        function. Note that the checkpointed segment can contain tensors
-        detached from the computational graph if ``use_reentrant=False`` is
-        specified.
 
-    .. warning::
-        If ``use_reentrant=True`` is specified, at least one of the inputs needs
-        to have :code:`requires_grad=True` if grads are needed for model inputs,
-        otherwise the checkpointed part of the model won't have gradients. At
-        least one of the outputs needs to have :code:`requires_grad=True` as
-        well. Note that this does not apply if ``use_reentrant=False`` is
-        specified.
+        If you are using the ``use_reentrant=True`` variant (this is currently
+        the default), please refer to the note below for important
+        considerations and potential limitations.
 
-    .. warning::
-        If ``use_reentrant=True`` is specified, checkpointing currently only
-        supports :func:`torch.autograd.backward` and only if its `inputs`
-        argument is not passed. :func:`torch.autograd.grad`
-        is not supported. If ``use_reentrant=False`` is specified, checkpointing
-        will work with :func:`torch.autograd.grad`.
+    .. note::
+
+        The reentrant variant of checkpoint (``use_reentrant=True``) and
+        the non-reentrant variant of checkpoint (``use_reentrant=False``)
+        differ in the following ways:
+
+        * Non-reentrant checkpoint stops recomputation as soon as all needed
+          intermediate activations have been recomputed. This feature is enabled
+          by default, but can be disabled with :func:`set_checkpoint_early_stop`.
+          Reentrant checkpoint always recomputes :attr:`function` in its
+          entirety during the backward pass.
+
+       * The reentrant variant does not record the autograd graph during the
+          forward pass, as it runs with the forward pass under
+          :func:`torch.no_grad`. The non-reentrant version does record the
+          autograd graph, allowing one to perform backward on the graph within
+          checkpointed regions.
+
+        * The reentrant checkpoint only supports the
+          :func:`torch.autograd.backward` API for the backward pass without its
+          `inputs` argument, while the non-reentrant version supports all ways
+          of performing the backward pass.
+
+        * At least one input and output must have ``requires_grad=True`` for the
+          reentrant variant. If this condition is unmet, the checkpointed part
+          of the model will not have gradients. The non-reentrant version does
+          not have this requirement.
+
+        * The reentrant version does not consider tensors in nested structures
+          (e.g., custom objects, lists, dicts, etc) as participating in
+          autograd, while the non-reentrant version does.
+
+        * The reentrant checkpoint does not support checkpointed regions with
+          detached tensors from the computational graph, whereas the
+          non-reentrant version does. For the reentrant variant, if the
+          checkpointed segment contains tensors detached using ``detach()`` or
+          with :func:`torch.no_grad`, the backward pass will raise an error.
+          This is because ``checkpoint`` makes all the outputs require gradients
+          and this causes issues when a tensor is defined to have no gradient in
+          the model. To avoid this, detach the tensors outside of the
+          ``checkpoint`` function.
 
     Args:
         function: describes what to run in the forward pass of the model or
@@ -239,6 +262,10 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
             keyword arguments input into the checkpointed function. Note that future
             versions of PyTorch will default to ``use_reentrant=False``.
             Default: ``True``
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively.
+            This argument is only supported if ``use_reentrant=False``.
         args: tuple containing inputs to the :attr:`function`
 
     Returns:
@@ -250,11 +277,14 @@ def checkpoint(function, *args, use_reentrant: bool = True, **kwargs):
         raise ValueError("Unexpected keyword arguments: " + ",".join(arg for arg in kwargs))
 
     if use_reentrant:
+        if context_fn is not noop_context_fn:
+            raise ValueError("Passing context_fn is only supported when use_reentrant=False.")
         return CheckpointFunction.apply(function, preserve, *args)
     else:
         return _checkpoint_without_reentrant(
             function,
             preserve,
+            context_fn,
             *args,
             **kwargs,
         )
@@ -265,22 +295,15 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 
     Sequential models execute a list of modules/functions in order
     (sequentially). Therefore, we can divide such a model in various segments
-    and checkpoint each segment. All segments except the last will run in
-    :func:`torch.no_grad` manner, i.e., not storing the intermediate
-    activations. The inputs of each checkpointed segment will be saved for
-    re-running the segment in the backward pass.
-
-    See :func:`~torch.utils.checkpoint.checkpoint` on how checkpointing works.
+    and checkpoint each segment. All segments except the last will not store
+    the intermediate  activations. The inputs of each checkpointed segment will
+    be saved for re-running the segment in the backward pass.
 
     .. warning::
-        Checkpointing currently only supports :func:`torch.autograd.backward`
-        and only if its `inputs` argument is not passed. :func:`torch.autograd.grad`
-        is not supported.
-
-    .. warning:
-        At least one of the inputs needs to have :code:`requires_grad=True` if
-        grads are needed for model inputs, otherwise the checkpointed part of the
-        model won't have gradients.
+        If you are using the ``use_reentrant=True` variant (this is the
+        default), please see :func:`~torch.utils.checkpoint.checkpoint` for
+        the important considerations and limitations of this variant. It is
+        recommended that you use ``use_reentrant=False``.
 
     .. warning:
         Since PyTorch 1.4, it allows only one Tensor as the input and
@@ -464,24 +487,42 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # out = checkpoint(fn)(inp)
 #
 # In the code above fn is computed (potentially partially) 4 times in total.
-#   1. Don't save x and y since we are inside a checkpoint.
-#   2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
-#   3. If early stop is enabled, stop at (2)
-#   4. Continue original forward at (4), not saving x and w.
-#   5. (5) triggers a recompute of fn
-#   6. During recompute, we see that in the original graph, gx has already
-#      cleared x and y since backward is run at (3) without retain_graph=True
-#      We save x and w, however.
-#   7. Continue with returning
 #
+# 1. Don't save x and y since we are inside a checkpoint.
+# 2. Trigger a recompute of fn as we reach (3) since x and y weren't saved.
+# 3. If early stop is enabled, stop at (2)
+# 4. Continue original forward at (4), not saving x and w.
+# 5. (5) triggers a recompute of fn
+# 6. During recompute, we see that in the original graph, gx has already
+#    cleared x and y since backward is run at (3) without retain_graph=True
+#    We save x and w, however.
+# 7. Continue with returning
 
-# NB: This is temporary and should be removed in a follow up PR. Early stopping
-#     is currently disabled by default. Since some nested test cases require
-#     ealry stopping to pass, _set_checkpoint_early_stop can be used to enable.
-_enable_checkpoint_early_stop = False
+_enable_checkpoint_early_stop = True
 
 @contextlib.contextmanager
-def _set_checkpoint_early_stop(enable):
+def set_checkpoint_early_stop(enable: bool):
+    """Context manager that sets whether checkpoint should stop recomputation
+    early.
+
+    By default, non-reentrant checkpoint stops recomputation as soon as it
+    has computed all needed Tensors. This context manager can be used to disable
+    that feature if it is problematic for your specific application.
+
+    This context manager only needs to be active when forward is run. It does
+    not need to be active during backward.
+
+    Example::
+
+    >>> # xdoctest: +SKIP(failing)
+    >>> message = "saved tensors default hooks are disabled"
+    >>> with set_checkpoint_early_stop(False):
+    ...     # Any checkpoint under this context manager will respect this
+    ...     # context manager, even if its backward is performed outside.
+    ...     out = checkpoint(fn, inputs)
+    ...
+    >>> out.backward()
+    """
     global _enable_checkpoint_early_stop
     try:
         prev = _enable_checkpoint_early_stop
@@ -529,7 +570,7 @@ class _NoopSaveInputs(torch.autograd.Function):
         raise AssertionError("Did not expect to backward on this graph")
 
 class _CheckpointFrame():
-    def __init__(self, recompute_fn):
+    def __init__(self, recompute_fn, early_stop):
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -542,6 +583,9 @@ class _CheckpointFrame():
         # https://github.com/pytorch/pytorch/pull/90105#discussion_r1135889885
         self.recomp_counter: DefaultDict[int, int] = defaultdict(int)
         self.is_recomputed: DefaultDict[int, bool] = defaultdict(bool)
+
+        # See Rule 5
+        self.early_stop = early_stop
 
 # See Rule 5
 class _StopRecomputationError(Exception):
@@ -567,7 +611,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     holder.handles[gid] = _Handle()
                 target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
 
-            if _enable_checkpoint_early_stop and \
+            if target_frame.early_stop and \
                target_frame.recomp_counter[gid] == len(target_frame.weak_holders):
                 raise _StopRecomputationError()
             # See Rule 6: [ Basic case ] above
@@ -601,7 +645,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 try:
                     with _recomputation_hook(weakref.ref(frame), gid), torch.autograd.enable_grad():
                         frame.recompute_fn(*args)
-                        if _enable_checkpoint_early_stop:
+                        if frame.early_stop:
                             raise AssertionError("if early stop is enabled, we don't expect to reach here")
                 except _StopRecomputationError:
                     pass
@@ -626,7 +670,13 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
 
 # NB: this helper wraps fn before calling checkpoint_impl. kwargs and
 #     saving/restoring of global state is handled here.
-def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
+def _checkpoint_without_reentrant(
+    fn,
+    preserve_rng_state=True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    *args,
+    **kwargs
+):
     """Checkpointining without re-entrant autograd
     Args:
         function: describes what to run in the forward pass of the model or
@@ -637,9 +687,13 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
         preserve_rng_state(bool, optional):  Omit stashing and restoring
             the RNG state during each checkpoint.
             Default: ``True``
+        context_fn(Callable, optional): A callable returning a tuple of two
+            context managers. The function and its recomputation will be run
+            under the first and second context managers respectively.
         *args: Arguments to pass in to the given ``function``.
         **kwargs: Keyword arguments to pass into the given ``function``.
     """
+    forward_context, recompute_context = context_fn()
     # Accommodates the (remote) possibility that autocast is enabled for cpu AND gpu.
     gpu_autocast_kwargs, cpu_autocast_kwargs = _get_autocast_kwargs()
 
@@ -669,10 +723,11 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
                     set_device_states(fwd_gpu_devices, fwd_gpu_states)
 
             with torch.cuda.amp.autocast(**gpu_autocast_kwargs), \
-                 torch.cpu.amp.autocast(**cpu_autocast_kwargs):
+                 torch.cpu.amp.autocast(**cpu_autocast_kwargs), \
+                 recompute_context:
                 fn(*args, **kwargs)
 
-    new_frame = _CheckpointFrame(recompute_fn)
+    new_frame = _CheckpointFrame(recompute_fn, _enable_checkpoint_early_stop)
     dummy = torch.empty((0,), requires_grad=True)
     new_frame.input_saver = _NoopSaveInputs.apply(dummy, kwargs, *args)
 
@@ -680,7 +735,8 @@ def _checkpoint_without_reentrant(fn, preserve_rng_state=True, *args, **kwargs):
     if new_frame.input_saver.grad_fn is None:
         return fn(*args, **kwargs)
 
-    with _checkpoint_hook(new_frame):
+    with _checkpoint_hook(new_frame), \
+         forward_context:
         ret = fn(*args, **kwargs)
 
     if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
