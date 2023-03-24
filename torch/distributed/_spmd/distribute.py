@@ -20,6 +20,7 @@ from torch.distributed._tensor import (
     DTensor,
     Replicate,
     Shard,
+    distribute_tensor,
 )
 from torch.distributed._tensor.dispatch import (
     _CURRENT_DECOMPOSITION_TABLE,
@@ -42,6 +43,7 @@ torch._functorch.aot_autograd.aot_function = patched_aot_function  # type: ignor
 
 logger: Optional[logging.Logger] = None
 
+fake_mode: FakeTensorMode = FakeTensorMode(allow_non_fake_inputs=True)
 
 class TrainingPhase(Enum):
     FORWARD = auto()
@@ -144,30 +146,49 @@ def _get_dtensor_dispatch_graph(
     args = tree_map(_remap_arg, node.args)
     # kwargs in this set of tests are all constants
     kwargs = cast(Dict[str, object], node.kwargs)
-
     op_overload = cast(torch._ops.OpOverload, node.target)
 
-    # run dispatch once to get the real DTensor output.
-    with torch.no_grad():
-        out = operator_dispatch(
-            op_overload,
-            args,
-            kwargs,  # kwargs in this set of tests are all constants
-            DTensor._propagator,
-            DTensor._custom_dispatch_ops,
-        )
-        node_to_obj[node] = out
-
     op_schema = DTensor._propagator.prepare_op_schema(op_overload, args, kwargs)
+
     # get DTensor specs for inputs and outputs
-    output_sharding = DTensor._propagator.propagate_op_sharding(
-        op_overload,
-        op_schema,
-    )
+    with maybe_disable_fake_tensor_mode():
+        output_sharding = DTensor._propagator.propagate_op_sharding(
+            op_overload,
+            op_schema,
+        )
 
     assert output_sharding.schema_suggestions is not None
     target_schema = output_sharding.schema_suggestions[0]
     redistribute = target_schema is not op_schema
+
+    # We need to allow non fake inputs because the first args in the BW pass
+    # are going to be real.
+
+    def get_local_output(output_dspec):
+        global_shape = list(output_dspec.shape)
+
+        for placement in output_dspec.placements:
+            if placement.is_shard():
+                dim =  placement.dim
+                global_shape[dim] = global_shape[dim] // torch.distributed.get_world_size()
+
+
+        local_tensor = torch.ones(global_shape)
+        return DTensor.from_local(fake_mode.from_tensor(local_tensor), device_mesh=output_dspec.mesh, placements=output_dspec.placements)
+
+    if isinstance(output_sharding.output_spec, tuple):
+        dten_out = []
+        output_specs = list(output_sharding.output_spec)
+        for spec in output_specs:
+            if not spec:
+                dten_out.append(spec)
+            else:
+                dten_out.append(get_local_output(spec))
+        dten_out = tuple(dten_out)
+    else:
+        dten_out = get_local_output(output_sharding.output_spec)
+
+    node_to_obj[node] = dten_out
 
     # TODO: this is broken when kwargs contains tensors
     # or if a non-tensor kwarg was modified by the sharding propagation
@@ -210,6 +231,7 @@ def _build_dummy_add_graph(
     ]
     assert len(placeholders) == 2
     assert len(call_functions) == 1
+    # TODO(anj): Remove this once we can trace DTs using fake tensors.
     node_to_obj[placeholders[0]] = dt
     node_to_obj[placeholders[1]] = DTensor.from_local(
         zero, dt.device_mesh, [Replicate()], run_check=False
@@ -253,7 +275,7 @@ def _convert_output(
 
         wait = [n for n in traced_dispatch.graph.nodes if n.name == "wait_comm" or n.name == "wait_tensor"]
         add = [n for n in traced_dispatch.graph.nodes if n.name == "add"]
-        assert len(wait) == 1 and len(add) == 1
+        assert len(wait) == 1 and len(add) == 1, f"{wait} {add}"
 
         # remove add node and replace it with wait node
         add[0].replace_all_uses_with(wait[0])
@@ -305,7 +327,6 @@ def _rebuild_graph(
     gm: fx.GraphModule,
     node_replacements: Dict[torch.fx.Node, torch.fx.GraphModule],
 ) -> None:
-
     # replace nodes in local traced graph with DTensor's dispatch graph
     for node in gm.graph.nodes:
         if node not in node_replacements:
@@ -365,7 +386,6 @@ def _rebuild_graph(
                     value_remap[dtn] = gm.graph.node_copy(
                         dtn, lambda n: value_remap[n]
                     )
-
     gm.graph.lint()
     gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -513,17 +533,18 @@ class _SPMD:
 
     def _compile_wrapper(
         self,
+        num_inputs: int,
         training_phase: TrainingPhase,
         original_inputs: List[List[torch.Tensor]],
         gm: fx.GraphModule,
         inps: List[torch.Tensor],
     ) -> fx.GraphModule:
 
-        with maybe_disable_fake_tensor_mode():
-            return self._compile(training_phase, gm, original_inputs[0])
+        return self._compile(num_inputs, training_phase, gm, original_inputs[0])
 
     def _compile(
         self,
+        num_inputs: int,
         training_phase: TrainingPhase,
         gm: fx.GraphModule,
         inps: List[torch.Tensor],
@@ -533,10 +554,12 @@ class _SPMD:
         )
         schemas: List[Schema] = []
         inp_schema_count = 0
-        nparams = 0
+        nparams = len(inps) - num_inputs
+        cur_param_count = 0
 
         # iterate through inputs (and initial nodes of the graph that should
         # correspond 1:1 to those inputs)
+        names = []
         for inp, placeholder_node in zip(inps, gm.graph.nodes):
             # This is a no-op but we want the order of schemas
             # to match the order of inputs when we iterate through
@@ -561,14 +584,22 @@ class _SPMD:
                     )
                 )
             else:
-                if self._is_param(inp):
-                    schemas.append(self._param_schema)
-                    nparams += 1
-                elif self._input_schemas:
-                    schemas.append(self._input_schemas[inp_schema_count])  # type: ignore[arg-type]
-                    inp_schema_count += 1
+                if training_phase == TrainingPhase.FORWARD:
+                    if cur_param_count < nparams:
+                        schemas.append(self._param_schema)
+                        cur_param_count += 1
+                    elif self._input_schemas:
+                        schemas.append(self._input_schemas[inp_schema_count])  # type: ignore[arg-type]
+                        inp_schema_count += 1
+                    else:
+                        schemas.append(shard_schema)
                 else:
-                    schemas.append(shard_schema)
+                    if self._input_schemas:
+                        schemas.append(self._input_schemas[inp_schema_count])  # type: ignore[arg-type]
+                        inp_schema_count += 1
+                    else:
+                        schemas.append(shard_schema)
+            names.append(placeholder_node.name)
 
         parallelized_gm, output_specs = _convert_to_distributed(
             gm,
@@ -596,9 +627,6 @@ def distribute(
     flat_args, _ = tree_flatten(args)
     flat_kwargs, _ = tree_flatten(kwargs)
     input_set: Set[object] = set(flat_args + flat_kwargs)
-
-    fake_mode: FakeTensorMode = FakeTensorMode()
-
     # will update this to the original forward inputs
     original_inputs: List[Optional[Sequence[object]]] = [None]
 
@@ -613,17 +641,22 @@ def distribute(
         # TODO assume non-inputs (params, etc) are replicated for now.
         return y
 
+    def input_to_fake_no_expand(input: object) -> object:
+        if not isinstance(input, torch.Tensor):
+            return input
+        return fake_mode.from_tensor(input)
+
     def gather_inputs_for_compilation(
         inps: Tuple[object, ...],
     ) -> Tuple[object, ...]:
-        original_inputs[0] = inps
+        original_inputs[0] = tuple(input_to_fake_no_expand(x) for x in inps)
         return tuple(input_to_fake(x) for x in inps)
 
     spmd = _SPMD(dist_graph, param_schema, input_schemas)
     compiled_m = aot_module(
         cast(nn.Module, dist_graph.orig_module),
-        partial(spmd._compile_wrapper, TrainingPhase.FORWARD, original_inputs),
-        partial(spmd._compile, TrainingPhase.BACKWARD),
+        partial(spmd._compile_wrapper, len(input_set), TrainingPhase.FORWARD, original_inputs),
+        partial(spmd._compile, len(input_set), TrainingPhase.BACKWARD),
         pre_compile_fn=gather_inputs_for_compilation,
         decompositions=_CURRENT_DECOMPOSITION_TABLE,
     )

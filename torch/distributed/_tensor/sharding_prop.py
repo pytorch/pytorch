@@ -51,7 +51,7 @@ class ShardingPropagator:
                 lambda t: t.to_local().shape if isinstance(t, dtensor.DTensor) else None,
                 args,
             )
-            print(f"    local shapes: {local_shapes}")
+            print(f"local shapes: {local_shapes}")
 
         return op_schema
 
