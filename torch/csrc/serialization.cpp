@@ -10,7 +10,7 @@ template <class io>
 Py_ssize_t doPartialRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-Py_ssize_t doPartialWrite(io fildes, void* buf, size_t nbytes);
+Py_ssize_t doPartialWrite(io fildes, const void* buf, size_t nbytes);
 
 static Py_ssize_t doPartialPythonReadBuffered(
     PyObject* fildes,
@@ -22,7 +22,7 @@ static Py_ssize_t doPartialPythonReadInto(
     size_t nbytes);
 static Py_ssize_t doPartialPythonWrite(
     PyObject* fildes,
-    void* buf,
+    const void* buf,
     size_t nbytes);
 
 template <>
@@ -46,14 +46,14 @@ Py_ssize_t doPartialRead<PyObject*>(
 }
 
 template <>
-Py_ssize_t doPartialWrite<int>(int fildes, void* buf, size_t nbytes) {
+Py_ssize_t doPartialWrite<int>(int fildes, const void* buf, size_t nbytes) {
   return write(fildes, buf, nbytes);
 }
 
 template <>
 Py_ssize_t doPartialWrite<PyObject*>(
     PyObject* fildes,
-    void* buf,
+    const void* buf,
     size_t nbytes) {
   return doPartialPythonWrite(fildes, buf, nbytes);
 }
@@ -140,9 +140,10 @@ static Py_ssize_t doPartialPythonReadInto(
 // Call Python fildes.write(buf)
 static Py_ssize_t doPartialPythonWrite(
     PyObject* fildes,
-    void* buf,
+    const void* buf,
     size_t nbytes) {
-  return doPartialPythonIO(fildes, buf, nbytes, /* is_read */ false);
+  return doPartialPythonIO(
+      fildes, const_cast<void*>(buf), nbytes, /* is_read */ false);
 }
 
 // Requires that we read EXACTLY nbytes; fails if we don't.
@@ -187,8 +188,8 @@ void doRead(io fildes, void* raw_buf, size_t nbytes) {
 }
 
 template <typename io>
-void doWrite(io fildes, void* raw_buf, size_t nbytes) {
-  char* buf = static_cast<char*>(raw_buf);
+void doWrite(io fildes, const void* raw_buf, size_t nbytes) {
+  auto buf = static_cast<const char*>(raw_buf);
   while (nbytes > 0) {
     errno = 0; // doPartialWrite may not set errno
     // we write in 1GB blocks to avoid bugs on Mac OS X Lion
@@ -226,7 +227,7 @@ void THPStorage_writeFileRaw(
     bool save_size,
     uint64_t element_size) {
   c10::DeviceGuard guard(self->device());
-  uint8_t* data{};
+  const uint8_t* data{};
   at::Tensor cpu_tensor;
   int64_t size_bytes = self->nbytes();
   int64_t numel = size_bytes / element_size;
@@ -235,14 +236,17 @@ void THPStorage_writeFileRaw(
   } else {
     // Here we use a tensor.to() to impl D2H for all non-CPU device.
     auto device_tensor = at::from_blob(
-        self->data<void>(),
+        // The data should never be written, but from_blob requires a
+        // mutable pointer. We could in theory fix this with a
+        // read-only tensor type.
+        self->mutable_data<void>(),
         {size_bytes},
         {1},
         NULL,
         at::device(self->device()).dtype(c10::kByte),
         {self->device()});
     cpu_tensor = device_tensor.to(at::kCPU);
-    data = (uint8_t*)cpu_tensor.data_ptr();
+    data = (const uint8_t*)cpu_tensor.data_ptr();
   }
   if (save_size) {
     if (torch::utils::THP_nativeByteOrder() ==
@@ -343,7 +347,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
 
   uint8_t* data{};
   if (storage->device_type() == at::kCPU) {
-    data = storage->data<uint8_t>();
+    data = storage->mutable_data<uint8_t>();
   } else {
     cpu_data = std::unique_ptr<char[]>(new char[nbytes]);
     data = (uint8_t*)cpu_data.get();
@@ -392,7 +396,7 @@ c10::intrusive_ptr<c10::StorageImpl> THPStorage_readFileRaw(
     auto cpu_tensor = at::from_blob(
         (void*)data, {nbytes}, at::device(at::kCPU).dtype(c10::kByte));
     auto device_tensor = at::from_blob(
-        storage->data<void>(),
+        storage->mutable_data<void>(),
         {nbytes},
         {1},
         NULL,

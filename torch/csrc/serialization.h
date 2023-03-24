@@ -5,7 +5,7 @@ template <class io>
 void doRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-void doWrite(io fildes, void* buf, size_t nbytes);
+void doWrite(io fildes, const void* buf, size_t nbytes);
 
 template <class io>
 void THPStorage_writeFileRaw(
