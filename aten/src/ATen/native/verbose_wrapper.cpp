@@ -14,8 +14,13 @@ namespace verbose {
 
 TORCH_API int _mkl_set_verbose(int enable) {
 #if AT_MKL_ENABLED()
-  return mkl_verbose(enable);
+  int ret = mkl_verbose(enable);
+
+  // Return 0 when the mkl_verbose function fails to set verbose level.
+  // Return 1 on success.
+  return ret != -1;
 #else
+  // Return 0 since oneMKL is not enabled.
   return 0;
 #endif
 }
