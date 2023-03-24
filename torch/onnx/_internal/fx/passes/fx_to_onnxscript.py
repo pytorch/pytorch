@@ -316,14 +316,14 @@ def _wrap_fx_args_as_onnxscript_args(
     # https://github.com/pytorch/pytorch/issues/97201
     # We manually assigned overload for aten::sym_size.
     if hasattr(node.target, "_schema"):
-        node_schema = node.target._schema
+        node_schema = node.target._schema  # type: ignore[union-attr]
     else:
-        node_schema = torch.ops.aten.sym_size.int._schema
+        node_schema = torch.ops.aten.sym_size.int._schema  # type: ignore[union-attr]
 
     if inspect.isbuiltin(node.target):
         complete_args = list(node.args)
     else:
-        for i, expected_arg in enumerate(node_schema.arguments):  # type: ignore[union-attr]
+        for i, expected_arg in enumerate(node_schema.arguments):
             if i < len(node.args):
                 complete_args.append(node.args[i])
             elif expected_arg.name in node.kwargs:
@@ -484,8 +484,6 @@ def _export_fx_node_to_onnxscript(
                 complete_args, complete_kwargs
             )
             _validate_op_between_ort_torch(node, symbolic_fn, torch_args, torch_kwargs)
-        # TODO(titaiwang): Tuple output is not currently handled.
-        # https://github.com/pytorch/pytorch/issues/97301
         fx_name_to_onnxscipt_value[node.name] = output
     elif node.op == "output":
         if isinstance(node.args[0], torch.fx.Node):
