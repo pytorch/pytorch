@@ -213,7 +213,6 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(a, b))
 
 
-
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
