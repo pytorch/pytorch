@@ -120,7 +120,7 @@ class _NamedOptimizer(optim.Optimizer):
 
     def state_dict(self) -> Dict[str, Any]:
         """
-        Return the ``state_dict`` of the optimzer. Instead of using number to index
+        Return the ``state_dict`` of the optimizer. Instead of using number to index
         parameters, we will use module fully qualifed name (FQN) as the key.
         """
         state_dict = self._optimizer.state_dict()
