@@ -46,7 +46,7 @@ def parse_args() -> Any:
 
 def make_pr(repo_name: str, branch_name: str) -> Any:
     params = {
-        "title": f"[{repo_name} hash update] update the pinned {repo_name} hash",
+        "title": "test",
         "head": branch_name,
         "base": "master",
         "body": "This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/"
@@ -152,8 +152,8 @@ def main() -> None:
         if pr_num is None:
             # no existing pr, so make a new one and approve it
             pr_num = make_pr(args.repo_name, branch_name)
-            approve_pr(pr_num)
-        make_comment(pr_num, "@pytorchbot merge")
+            # approve_pr(pr_num)
+        # make_comment(pr_num, "@pytorchbot merge")
     else:
         print(
             f"tried to update from old hash: {old_hash} to new hash: {hash} but the old hash seems to be newer, not creating pr"

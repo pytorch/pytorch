@@ -3,10 +3,15 @@ name: update-commit-hash
 on:
   workflow_call:
     inputs:
+      repo-owner:
+        required: false
+        type: string
+        description: Name of repository's owner.
+        default: pytorch
       repo-name:
         required: true
         type: string
-        description: Name of the repository we're updating commit hash for.  Must be in pytorch org.
+        description: Name of the repository we're updating commit hash for.
       branch:
         required: true
         type: string
@@ -36,7 +41,7 @@ jobs:
       - name: Checkout
         shell: bash
         run: |
-          git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --quiet
+          git clone https://github.com/${{ inputs.repo-owner }}/${{ inputs.repo-name }}.git --quiet
 
       - name: Check if there already exists a PR
         shell: bash
