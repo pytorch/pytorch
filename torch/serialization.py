@@ -675,7 +675,7 @@ def load(
     map_location: MAP_LOCATION = None,
     pickle_module: Any = None,
     *,
-    weights_only: bool = False,
+    weights_only: bool = True,
     **pickle_load_args: Any
 ) -> Any:
     # Reference: https://github.com/pytorch/pytorch/issues/54354
@@ -730,7 +730,7 @@ def load(
             :attr:`errors=...`.
 
     .. warning::
-        :func:`torch.load()` unless `weights_only` parameter is set to `True`,
+        :func:`torch.load()` when `weights_only` parameter is set to `False`,
         uses ``pickle`` module implicitly, which is known to be insecure.
         It is possible to construct malicious pickle data which will execute arbitrary code
         during unpickling. Never load data that could have come from an untrusted
