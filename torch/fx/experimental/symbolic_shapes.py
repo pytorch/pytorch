@@ -1526,7 +1526,6 @@ class ShapeEnv:
         constraint_dim: DimConstraint,
     ) -> "sympy.Expr":
         assert isinstance(source, Source), f"{type(source)} {source}"
-
         # It's always sound to allocate a symbol as DYNAMIC.  If the user
         # constrained the symbol, force the policy to DYNAMIC, because our
         # constraint code will do weird stuff if, e.g., it's duck shaped

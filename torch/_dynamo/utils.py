@@ -1437,7 +1437,8 @@ def format_bytecode(prefix, name, filename, line_no, code):
 
 
 def expand(
-    e: torch.Tensor, constraint_dims: Optional[DimList[DimConstraint]]
+    e: torch.Tensor,
+    constraint_dims: Optional[DimList[DimConstraint]],
 ) -> DimList[DimConstraint]:
     constraint_dims_exhaustive = []
     if constraint_dims is None:
@@ -1488,22 +1489,17 @@ def dynamic_dims_from_tensor(
     Otherwise, it is set to the default dimension state, either DUCK or STATIC
     depending on the configuration.
     """
-    # Note - while dynamo callers must be in config.dynamic_shapes
-    # This is invoked outside of dynamo tests, so we do not assert on it here.
-    # We suppose we could patch the tests, but that feels like a strange thing to add to
-    # what should just be a dynamic shapes test.
-    # in dynamo, it is protected by being downstream of tensor_always_has_static_shape
     constraint_dims_exhaustive = expand(e, constraint_dims)
     dynamic_dims: DimList[DimDynamic] = []
     for constraint in constraint_dims_exhaustive:
         # NB: Technically this is not necessary as ShapeEnv will take care
         # of this too, but it's more direct to do it this way
-        if constraint is not None:
-            dynamic_dims.append(DimDynamic.DYNAMIC)
-        else:
+        if not constraint or isinstance(constraint, RelaxedUnspecConstraint):
             if config.assume_static_by_default:
                 dynamic_dims.append(DimDynamic.STATIC)
             else:
                 dynamic_dims.append(DimDynamic.DUCK)
-
+        else:
+            dynamic_dims.append(DimDynamic.DYNAMIC)
+    print(f"{constraint_dims_exhaustive}{constraint_dims} -> {dynamic_dims}")
     return dynamic_dims

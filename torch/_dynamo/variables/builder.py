@@ -1129,12 +1129,17 @@ def wrap_to_fake_tensor_and_record(
             # {0: RelaxedUnspecConstraint, 1: StrictMinMaxConstraint} -> [RelaxedUnspecConstraint, StrictMinMaxConstraint, None]
             dynamic_constraints = expand(e, dynamic_constraints_by_dim)
 
+        if dynamic_constraints and static_shapes:
+            raise RuntimeError(
+                "Illegal configuration, cannot apply dynamic constraints for static shapes"
+            )
+
+        dynamic_dims = None
         if not static_shapes:
             dynamic_dims: Dict[int, DimConstraint] = dynamic_dims_from_tensor(
-                e, dynamic_constraints
+                e,
+                dynamic_constraints,
             )
-        else:
-            dynamic_dims = None
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(

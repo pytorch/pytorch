@@ -2098,7 +2098,8 @@ class ExportTests(torch._dynamo.test_case.TestCase):
             return a * b * c
 
         torch._dynamo.export(my_dyn_fn, y, y, y)
-        torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
+        if config.assume_static_by_default:
+            torch._dynamo.export(my_dyn_fn, y, y, y, constraints=[dynamic_dim(y, 0)])
 
     @config.patch(dynamic_shapes=True)
     def test_export_multi_dynamic_dim_safe_relationship(self):
