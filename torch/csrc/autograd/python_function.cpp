@@ -490,7 +490,7 @@ static void _get_tensors_to_save(
     std::vector<c10::optional<at::Tensor>>& tensors_to_save,
     bool overridden_setup_context,
     bool is_executable) {
-  if (self->saved_for_forward) {
+  if (self->saved_for_forward && overridden_setup_context) {
     // We look at saved_for_forward here purely for the purpose of populating
     // to_save_if_setup_context, the actual saving is not done here.
     THPFunction_assert(
@@ -502,7 +502,7 @@ static void _get_tensors_to_save(
         PyTuple_GET_SIZE(self->saved_for_forward);
     for (const auto i : c10::irange(num_saved_for_forward)) {
       PyObject* obj = PyTuple_GET_ITEM(self->saved_for_forward, i);
-      if (THPVariable_Check(obj) && overridden_setup_context) {
+      if (THPVariable_Check(obj)) {
         const auto& tensor = THPVariable_Unpack(obj);
         to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
       }
