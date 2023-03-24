@@ -18,6 +18,11 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         assert not kwargs, "`kwargs` is not supported."
         module = self.module
 
+        # NOTE(titaiwang): Usually fx graph should have all the node meta value we need,
+        # so we don't have to run FakeTensorProp to fill in node meta values. However, this
+        # can be used to validate op-level debugging when we only have symbolic shapes in
+        # graph
+
         # Use this FakeTensorMode to
         # 1. convert nn.Parameter's in nn.Module to FakeTensor
         # 2. run FakeTensorProp
@@ -43,10 +48,7 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
 
         # Shape inference via FakeTensorProp
         with stateless._reparametrize_module(module, fake_parameters_and_buffers):
-            # Assign output types and shapes to each node.
-            # TODO(wechi): It's possible to get symbolic types (and shapes)
-            # for each node's output. Consider to set "tracing_mode=symbolic"
-            # when calling make_fx and then remove FakeTensorProp below.
+            # Assign output types and shapes to each node without meta values.
             fake_tensor_prop.FakeTensorProp(module, fake_tensor_mode).propagate(*args)
 
         return module
