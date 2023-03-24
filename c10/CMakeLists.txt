@@ -43,39 +43,39 @@ file(GLOB C10_HEADERS
         macros/*.h
         util/*.h
         )
-add_library(c10 ${C10_SRCS} ${C10_HEADERS})
+add_library(c10.objlib OBJECT ${C10_SRCS} ${C10_HEADERS})
 if(HAVE_SOVERSION)
-  set_target_properties(c10 PROPERTIES
+  set_target_properties(c10.objlib PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 # If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
+target_compile_options(c10.objlib PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+  target_compile_options(c10.objlib PRIVATE "-fvisibility=hidden")
 endif()
 if(WERROR)
-  target_compile_options_if_supported(c10 PRIVATE "-Werror=sign-compare")
-  target_compile_options_if_supported(c10 PRIVATE "-Werror=shadow")
+  target_compile_options_if_supported(c10.objlib PRIVATE "-Werror=sign-compare")
+  target_compile_options_if_supported(c10.objlib PRIVATE "-Werror=shadow")
 endif()
 
 # ---[ Dependency of c10
 if(${USE_GFLAGS})
-   target_link_libraries(c10 PUBLIC gflags)
+   target_link_libraries(c10.objlib PUBLIC gflags)
 endif()
 
 if(${USE_GLOG})
-    target_link_libraries(c10 PUBLIC glog::glog)
+    target_link_libraries(c10.objlib PUBLIC glog::glog)
 endif()
-target_link_libraries(c10 PRIVATE fmt::fmt-header-only)
+target_link_libraries(c10.objlib PRIVATE fmt::fmt-header-only)
 
 find_package(Backtrace)
 if(Backtrace_FOUND)
-  target_include_directories(c10 PRIVATE ${Backtrace_INCLUDE_DIRS})
-  target_link_libraries(c10 PRIVATE ${Backtrace_LIBRARIES})
-  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=1)
+  target_include_directories(c10.objlib PRIVATE ${Backtrace_INCLUDE_DIRS})
+  target_link_libraries(c10.objlib PRIVATE ${Backtrace_LIBRARIES})
+  target_compile_definitions(c10.objlib PRIVATE SUPPORTS_BACKTRACE=1)
 else()
-  target_compile_definitions(c10 PRIVATE SUPPORTS_BACKTRACE=0)
+  target_compile_definitions(c10.objlib PRIVATE SUPPORTS_BACKTRACE=0)
 endif()
 
 if(USE_NUMA)
@@ -83,17 +83,17 @@ if(USE_NUMA)
   message(STATUS ${Numa_INCLUDE_DIR})
   message(STATUS ${Numa_LIBRARIES})
   include_directories(SYSTEM ${Numa_INCLUDE_DIR})
-  target_link_libraries(c10 PRIVATE ${Numa_LIBRARIES})
+  target_link_libraries(c10.objlib PRIVATE ${Numa_LIBRARIES})
 else()
   message(STATUS "don't use NUMA")
 endif()
 
 if(ANDROID)
-    target_link_libraries(c10 PRIVATE log)
+    target_link_libraries(c10.objlib PRIVATE log)
 endif()
 
 target_include_directories(
-    c10 PUBLIC
+    c10.objlib PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>)
@@ -111,6 +111,7 @@ if(USE_ROCM)
   add_subdirectory(hip)
 endif()
 
+add_library(c10 $<TARGET_OBJECTS:c10.objlib>)
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
