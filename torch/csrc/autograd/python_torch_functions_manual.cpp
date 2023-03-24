@@ -525,7 +525,7 @@ static PyMethodDef torch_functions_manual[] = {
      castPyCFunctionWithKeywords(THPVariable__freeze_functional_tensor),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
-    {"_sync",
+    {"_sync_functional_tensor",
      castPyCFunctionWithKeywords(THPVariable__sync),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},

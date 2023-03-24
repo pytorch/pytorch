@@ -82,9 +82,13 @@ PyObject* createPyObject(const at::Storage& storage) {
       // This is useful for checking aliasing info from python
       dynamic_cast<at::functionalization::FunctionalStorageImpl*>(
           storage.unsafeGetStorageImpl()) == nullptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "python bindings to nullptr storage (e.g., from torch.Tensor._make_wrapper_subclass) are currently unsafe and thus disabled.  See https://github.com/pytorch/pytorch/issues/61669 for more details");
+    // TODO: allowing wrapper tensor subclasses to call .storage()
+    // is dangerous, but needed for AOTAutograd analysis.
+    // Some options:
+    // (1) remove the check
+    // (2) introduce ReadOnlyStorage
+    // (3) Add private TLS telling us when it is ok to return a null storage,
+    //     use it in AOTAutograd
   }
   PyTypeObject* type = reinterpret_cast<PyTypeObject*>(THPStorageClass);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));

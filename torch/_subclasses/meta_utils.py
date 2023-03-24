@@ -7,6 +7,7 @@ import torch
 from torch._guards import Source
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils.weak import WeakIdRef
+from torch.utils._python_dispatch import supports_mode_tracing, transform_subclass
 
 
 def safe_is_leaf(t):
@@ -511,6 +512,9 @@ class MetaConverter:
             # tensors into their trace / some subclasses don't correctly
             # support meta.  Trying to YOLO this is more trouble than it's
             # worth.
+            if supports_mode_tracing(t):
+                out = transform_subclass(t, lambda t: self.meta_tensor(t, shape_env=shape_env, callback=callback, source=source))
+                return out
             self.miss += 1
             return NotImplemented
         else:

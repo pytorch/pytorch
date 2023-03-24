@@ -8,7 +8,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, Set, List, Optional, Tuple, Union, NewType, Deque
+from typing import Any, Callable, Dict, Set, List, Optional, Tuple, Union, NewType, Deque, Sequence
 
 from functorch import make_fx
 
@@ -30,6 +30,11 @@ from torch.nn.utils import stateless
 from . import config
 from .partitioners import default_partition
 from torch._guards import TracingContext, DuplicateInputs, Source
+from torch.utils._python_dispatch import (
+    _get_current_dispatch_mode_stack,
+    _pop_mode_temporarily,
+    supports_mode_tracing,
+)
 
 log = logging.getLogger(__name__)
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
@@ -971,6 +976,7 @@ def fn_prepped_for_autograd(
         # This is annoying: our joint function needs to be aware of functionalization
         # (syncing mutated inputs before calling autograd.grad())
         # In theory, we could make the autograd engine do this automatically, although that probably isn't any cleaner.
+        # (In particular, the tensor itself might be a tensor subclass wrapper that contains functional tensors)
         for i, arg in enumerate(args_maybe_cloned):
             if not isinstance(arg, Tensor):
                 continue
@@ -1219,7 +1225,54 @@ def call_func_with_args(f, args, steal_args=False, disable_amp=False):
             del guard
     return out
 
-def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+@dataclasses.dataclass
+class SubclassCreationMeta:
+    """
+    Used for AOTDispatch: The graph that we'd like to trace out contains flat tensor inputs,
+    And this dataclass gives us the information we need to reconstruct a tensor subclass
+    from our flat inputs.
+    """
+
+    creation_lambda: Callable[..., torch.Tensor]
+    flat_tensor_start_idx: int
+    arg_count: int
+
+@dataclasses.dataclass
+class TensorToSubclassInfo:
+    """
+    Used for AOTDispatch: Tells us globally how to convert a sequence
+    of dense tensor arguments into subclasses
+    """
+
+    wrap_info: Sequence[Union[int, SubclassCreationMeta]]
+    # Needed by the partitioner to know how many flat
+    # outputs there are in the fw graph
+    meta: ViewAndMutationMeta
+    # Needed by the partitioner to pass in flat joint inputs
+    maybe_joint_inputs: Sequence[Any]
+    # Needed by the runtime wrapper for the fw,
+    # so it can properly wrap dense tensor outputs back into subclasses
+    fw_output_infos: List[Union[int, SubclassCreationMeta]]
+    # Needed by the runtime wrapper for the bw,
+    # so it can properly wrap dense tensor outputs back into subclasses
+    bw_output_infos: List[Union[int, SubclassCreationMeta]]
+    # Needed during the backward, so we can error out if we find
+    # that the grad_ouputs have different subclass types than what traced with
+    fw_output_types: List[type]
+
+
+def aot_dispatch_base(
+    flat_fn,
+    flat_args: List[Tensor],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+    # inner_fn takes in the joint function that we want to trace, and produces a flat FX graph on dense tensors
+    inner_fn: Callable[[Callable, Sequence[Any], AOTConfig, ViewAndMutationMeta, bool], torch.fx.GraphModule],
+    # Produes a runtime wrapper that wraps the compiled function
+    # It provides the glue from (subclass_inp -> dense_inp -> dense_out -> subclass_out)
+    inner_runtime_wrapper: Callable[[Callable, List[Union[int, SubclassCreationMeta]]], Callable],
+):
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -1227,17 +1280,16 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
     # While cases that it does need to handle include:
     # - input mutations (including when inputs are aliases of each other)
     # - input metadata mutations
-    keep_mutations = aot_config.keep_inference_input_mutations
     fn_to_trace = fn_input_mutations_to_outputs(
         flat_fn,
         fw_metadata,
         keep_data_input_mutations=aot_config.keep_inference_input_mutations,
     )
-    fw_module = create_functionalized_graph(
+    fw_module, maybe_subclass_metadata = inner_fn(
         fn_to_trace,
         flat_args,
-        meta=fw_metadata,
         aot_config=aot_config,
+        meta=fw_metadata,
         trace_joint=False,
     )
 
@@ -1257,10 +1309,16 @@ def aot_dispatch_base(flat_fn, flat_args: List[Tensor], aot_config: AOTConfig, *
 
     with context(), track_graph_compiling(aot_config, "inference"):
         compiler = aot_config.inference_compiler if aot_config.inference_compiler is not None else aot_config.fw_compiler
-        compiled_fw = compiler(fw_module, flat_args)
+        compiled_fw = make_boxed_func(compiler(fw_module, flat_args))
+
+    if maybe_subclass_metadata is None:
+        compiled_fw_wrapper = compiled_fw
+    else:
+        assert maybe_subclass_metadata.fw_output_infos is not None
+        compiled_fw_wrapper = inner_runtime_wrapper(compiled_fw, out_infos=maybe_subclass_metadata.fw_output_infos)
 
     compiled_fn = create_runtime_wrapper(
-        compiled_fw,
+        compiled_fw_wrapper,
         runtime_metadata=fw_metadata,
         trace_joint=False,
         keep_input_mutations=aot_config.keep_inference_input_mutations
@@ -2036,6 +2094,293 @@ def aot_wrapper_synthetic_base(
     return wrapped_compiled_fn
 
 
+# Unfortunately, this function needs to be able to handle the inference vs autograd case,
+# Since tensor subclass unwrapping happens underneath autograd.
+# In the inference case we return a compiled fw callable.
+# In the autograd case we return a separate callable for the compiled fw and bw.
+def aot_dispatch_subclass(
+    # In the autograd case this is the joint; in the inference case this is just the fwd
+    flat_fn,
+    # can come from either inference or autograd case
+    args: Union[List[Any], Tuple[List[Any], List[Any]]],
+    *,
+    # This is the fwd-only version of flat_fn. Needed to recompute fw metadata
+    flat_fn_for_metadata: Callable = flat_fn,
+    aot_config: AOTConfig,
+    # The inner function we use for tracing
+    trace_fn: Callable[[Callable, Sequence[Any], AOTConfig, bool], torch.fx.GraphModule],
+    meta: ViewAndMutationMeta,
+    trace_joint: bool,
+) -> Tuple[torch.fx.GraphModule, Optional[TensorToSubclassInfo]]:
+
+
+    any_subclass = False
+
+    def to_flat(flat_args: List[Any]) -> Tuple[List[Any], List[Union[int, SubclassCreationMeta]]]:
+        nonlocal any_subclass
+        # Maps the i'th argument (in the calling convention prior to flattening subclasses)
+        # to metadata telling us how to reconstitute that argument.
+        wrap_info: List[Union[int, SubclassCreationMeta]] = []
+        flat_args_unwrapped: List[Any] = []
+        for a in flat_args:
+            assert not isinstance(a, (list, tuple))
+            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                subclass_type = type(a)
+                unwrapped_tensors, ctx = subclass_type.__tensor_flatten__(a)
+                wrap_info.append(SubclassCreationMeta(
+                    creation_lambda=lambda tensors, fn=subclass_type.__tensor_unflatten__, ctx=ctx: fn(tensors, ctx),
+                    flat_tensor_start_idx=len(flat_args_unwrapped),
+                    arg_count=len(unwrapped_tensors),
+                ))
+                flat_args_unwrapped += unwrapped_tensors
+                any_subclass = True
+            else:
+                wrap_info.append(len(flat_args_unwrapped))
+                flat_args_unwrapped.append(a)
+        return flat_args_unwrapped, wrap_info
+
+    if trace_joint:
+        # Annoying: we can't really use pytrees, because we want all of the primal tensors
+        # to be concated into a larger primals list, instead of getting a list of lists
+        assert len(args) == 2
+        assert isinstance(args[0], list)
+        assert isinstance(args[1], list)
+        args_unwrapped_primals, wrap_info_primals = to_flat(args[0])
+        args_unwrapped_tangents, wrap_info_tangents = to_flat(args[1])
+        args_unwrapped = (args_unwrapped_primals, args_unwrapped_tangents)
+        wrap_info = (wrap_info_primals, wrap_info_tangents)
+    else:
+        args_unwrapped, wrap_info = to_flat(args[0])
+        args_unwrapped_primals, wrap_info_primals = args_unwrapped, wrap_info
+
+    if not any_subclass:
+        # No-op case
+        fx_g = trace_fn(flat_fn, args, meta=meta, aot_config=aot_config, trace_joint=trace_joint)
+        return fx_g, None
+
+
+    subclass_meta = TensorToSubclassInfo(
+        wrap_info=wrap_info,
+        maybe_joint_inputs=args_unwrapped,
+        # set later
+        meta=None,
+        fw_output_infos=None,
+        bw_output_infos=None,
+        fw_output_types=None,
+    )
+
+    # This is a function that takes in plain tensors, and figures out how to (potentially)
+    # wrap them into the tensor subclasses that our module expects.
+    # Order goes:
+    # def f(args_flat)
+    #     args_subclass = wrap(args_flat)
+    #     out_subclass = user_f(args_subclass)
+    #     out_flat = unwrap(out_subclass)
+    #     return out_flat
+    def get_wrapped_fn(fn, *, wrap_info_, store_output_meta: bool):
+        nonlocal subclass_meta
+
+        def wrapped_flat_fn(*args_unwrapped):
+            # In the joint case, wrap_info and args_unwrapped will not be given to us in a flattened manner;
+            # We'll get them both as (primals_list, tangents_list)
+            # This is annoying; I need to manually store some extra info for the primals and tangents separately,
+            # so I can't blindly use pytrees
+            # As a result, I'm effectively manually handling the calling conventions for the joint vs inference case.
+            if isinstance(args_unwrapped[0], list):
+                # joint case
+                assert len(args_unwrapped) == 2
+                assert isinstance(args_unwrapped[1], list)
+                assert len(wrap_info_) == 2
+                assert isinstance(wrap_info[0], list) and isinstance(wrap_info[1], list)
+                args_unwrapped_flat = args_unwrapped[0] + args_unwrapped[1]
+                is_joint = True
+            else:
+                args_unwrapped_flat = args_unwrapped
+                is_joint = False
+
+            args_wrapped = []
+            for infos in wrap_info_ if is_joint else [wrap_info_]:
+                curr_args_wrapped = []
+                for info in infos:
+                    if isinstance(info, int):
+                        curr_args_wrapped.append(args_unwrapped_flat[info])
+                        continue
+                    assert isinstance(info, SubclassCreationMeta)
+                    assert info.flat_tensor_start_idx + info.arg_count < len(args_unwrapped_flat)
+                    lambda_args = args_unwrapped_flat[info.flat_tensor_start_idx:info.flat_tensor_start_idx + info.arg_count]
+                    wrapped_arg = info.creation_lambda(lambda_args)
+                    curr_args_wrapped.append(wrapped_arg)
+                args_wrapped.append(curr_args_wrapped)
+
+            # In joint case, args_wrapped here is (primals, tangents).
+            # Open to suggestions on how to make this better.
+            if not is_joint:
+                assert len(args_wrapped) == 1 and isinstance(args_wrapped[0], list)
+                outs_wrapped = fn(*args_wrapped[0])
+            else:
+                assert len(args_wrapped) == 2
+                outs_wrapped = fn(*args_wrapped)
+
+            def unwrap_output_list(outs, *, is_primals: bool):
+                unwrapped_outs_count = 0
+                curr_outs_unwrapped = []
+                unwrap_infos = []
+                for a in outs:
+                    assert isinstance(a, torch.Tensor)
+                    if supports_mode_tracing(a):
+                        subclass_type = type(a)
+                        unwrapped_tensors, ctx = subclass_type.__tensor_flatten__(a)
+                        curr_outs_unwrapped += unwrapped_tensors
+                        unwrap_infos.append(SubclassCreationMeta(
+                            creation_lambda=lambda tensors, fn=subclass_type.__tensor_unflatten__, ctx=ctx: fn(tensors, ctx),
+                            flat_tensor_start_idx=unwrapped_outs_count,
+                            arg_count=len(unwrapped_tensors),
+                        ))
+                        unwrapped_outs_count += len(unwrapped_tensors)
+                    else:
+                        curr_outs_unwrapped.append(a)
+                        unwrap_infos.append(unwrapped_outs_count)
+                        unwrapped_outs_count += 1
+
+                if store_output_meta:
+                    # This is very shady (I don't like it, but can't think of a better alternative)
+                    # At runtime, we need access to metadata that tells us how to map
+                    # the dense output tensors back into subclass tensors that the user expects
+                    # We need this info separately for both the fw graph and bw graph
+                    # The only way to actually get this info is by running the fw and bw at tracetime.
+                    #
+                    # I don't want to have to trace the entire function AGAIN (and increase the compile time),
+                    # So instead I rely here on this metadata getting populated
+                    # at the time that we make_fx() the final traced function.
+                    #
+                    # Alternatively we could run functionalization and make_fx() directly here,
+                    # although keeping them separate feels cleaner.
+                    nonlocal subclass_meta
+                    if is_primals:
+                        assert subclass_meta.fw_output_infos is None
+                        subclass_meta.fw_output_infos = unwrap_infos
+                        assert subclass_meta.fw_output_types is None
+                        subclass_meta.fw_output_types = [type(x) for x in outs]
+                    else:
+                        assert subclass_meta.bw_output_infos is None
+                        subclass_meta.bw_output_infos = unwrap_infos
+                return curr_outs_unwrapped
+            if is_joint:
+                assert len(outs_wrapped) == 2
+                assert isinstance(outs_wrapped[0], (list, tuple))
+                assert isinstance(outs_wrapped[1], (list, tuple))
+                outs_unwrapped = (
+                    type(outs_wrapped[0])(unwrap_output_list(outs_wrapped[0], is_primals=True)),
+                    type(outs_wrapped[1])(unwrap_output_list(outs_wrapped[1], is_primals=False)),
+                )
+            else:
+                assert isinstance(outs_wrapped, list)
+                outs_unwrapped = list(unwrap_output_list(outs_wrapped, is_primals=True))
+            return outs_unwrapped
+        return wrapped_flat_fn
+
+    # I'm actually not convinced that we can easily "pre-compute" the updated fw_metadata
+    # without manually running the whole thing.
+    # This means that we're performing tracing a second time.
+    # The silver lining is that this only happens when you actual trace with a TorchDispatchMode
+    curr_modes = _get_current_dispatch_mode_stack()
+    # First, sanity assert. FakeTensorMode is used by tracing, and should be the most recent
+    # mode pushed onto the mode stack
+    assert len(curr_modes) > 0
+    assert type(curr_modes[-1]) == FakeTensorMode
+    # Next, user asserts: We only support a single TorchDispatchMode usage for now
+    assert len(curr_modes) == 2, "AOTDispatch only supports a single TorchDispatchMode for now. \
+        If you're doing something involving multiple modes, please file an issue!"
+    assert type(curr_modes[0]) != FakeTensorMode
+
+    # This is a bit questionable: in particular, we are assuming that the entire graph
+    # should be traced with the user mode enabled.
+    # In practice this might not be the case: the user mode might be disabled halfway through the function.
+    # Maybe this is where we'll need higher order functions
+    with _pop_mode_temporarily() as fake_mode, _pop_mode_temporarily() as user_mode:
+        user_mode._dispatch_key = torch._C.DispatchKey.Functionalize
+        # Currently, python dispatcher is required when using per-dispatch-key modes
+        with enable_python_dispatcher(), fake_mode, user_mode:
+            # Collect metadata on the user function.
+            # There's a layering problem here: at this point, flat_fn might be the joint fwd + bwd,
+            # but metadata collection should only happen on the fw.
+            # This function forces the caller to pass in the fw separately as "flat_fn_for_metadata"
+            fn_for_metadata = get_wrapped_fn(flat_fn_for_metadata, wrap_info_=wrap_info_primals, store_output_meta=False)
+            meta_updated = run_functionalized_fw_and_collect_metadata(
+                fn_for_metadata,
+                keep_input_mutations=meta.keep_input_mutations,
+            )(*args_unwrapped_primals)
+            subclass_meta.meta = meta_updated
+            # Finally, trace the actual user function into a graph, now that we've (temporarily)
+            # moved the user's TorchDispatchMode into the Functionalize dispatch key's mode stack.
+            wrapped_flat_fn = get_wrapped_fn(flat_fn, wrap_info_=wrap_info, store_output_meta=True)
+            fx_g = trace_fn(wrapped_flat_fn, args_unwrapped, meta=meta_updated, aot_config=aot_config, trace_joint=trace_joint)
+        del user_mode._dispatch_key
+
+    return fx_g, subclass_meta
+
+
+
+def aot_dispatch_subclass_runtime_wrapper(compiled_fn: Callable, out_infos: List[Union[int, SubclassCreationMeta]]):
+    def unwrap_args(args_wrapped):
+        args_unwrapped = []
+        for a in args_wrapped:
+            if isinstance(a, torch.Tensor) and supports_mode_tracing(a):
+                a_unwrapped, _ = type(a).__tensor_flatten__(a)
+                args_unwrapped += a_unwrapped
+            else:
+                args_unwrapped.append(a)
+        return args_unwrapped
+
+    def wrap_outs(outs_unwrapped):
+        outs_wrapped = []
+        highest_accessed_idx = -1
+        for info in out_infos:
+            if isinstance(info, int):
+                highest_accessed_idx = info
+                assert highest_accessed_idx < len(outs_unwrapped)
+                outs_wrapped.append(outs_unwrapped[info])
+                continue
+            assert isinstance(info, SubclassCreationMeta)
+            start_idx = info.flat_tensor_start_idx
+            end_idx = info.flat_tensor_start_idx + info.arg_count
+            highest_accessed_idx = end_idx - 1
+            assert highest_accessed_idx < len(outs_unwrapped)
+            lambda_args = outs_unwrapped[info.flat_tensor_start_idx:info.flat_tensor_start_idx + info.arg_count]
+            wrapped_out = info.creation_lambda(lambda_args)
+            outs_wrapped.append(wrapped_out)
+        # Note [TorchDispatch + Autograd Partitioning]
+        # This is subtle + an annoying layering violation.
+        # Ideally, our layering for autograd all happens above AOTDispatch.
+        # There's one problem though:
+        # (a) The final graph that we produce to be compiled is a graph on **dense** tensors.
+        # (b) When we run min-cut partitioning, it needs to run on our dense tensor graph
+        #     (after desugaring any TorchDispatch modes/subclasses)
+        # (c) Partitioning is intimately tied with the logic in our autograd layer,
+        #     because the output of partitioning tells us how many tensors we need to save
+        #     for the backward pass.
+        #
+        # The problem here is that our "out_infos" object tells us how to wrap dense tensor
+        # outputs into tensor subclasses, but it doesn't account for any extra tensors
+        # returned from the forward graph that we need to save for backward.
+        # Assumption: any remaining dense tensor outputs are activations produced by our partitioner,
+        # so we return them as well.
+        # They do *not* need to be wrapped into subclasses, becuase they aren't user-visible.
+        # Instead, they are direct inputs into the (dense) backward graph.
+        remaining_dense_outs = outs_unwrapped[highest_accessed_idx + 1:]
+        return outs_wrapped + remaining_dense_outs
+
+    @wraps(compiled_fn)
+    def wrapped_compiled_fn(args):
+        unwrapped_args = unwrap_args(args)
+        args.clear()
+        unwrapped_outs = call_func_with_args(compiled_fn, unwrapped_args)
+        return wrap_outs(unwrapped_outs)
+
+    wrapped_compiled_fn._boxed_call = True  # type: ignore[attr-defined]
+    return wrapped_compiled_fn
+
+
 def describe_input(i, aot_config):
     if i < aot_config.num_params_buffers:
         return f"parameter/buffer {i}"
@@ -2221,7 +2566,18 @@ def create_runtime_wrapper(
 # are no duplicate arguments in flat_args (e.g., the same Tensor
 # object never shows up twice.  However, two tensor inputs MAY alias
 # the same storage, so long as they have separate TensorImpls.)
-def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, *, fw_metadata: ViewAndMutationMeta):
+def aot_dispatch_autograd(
+    flat_fn,
+    flat_args: List[Any],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+    # inner_fn takes in the joint function that we want to trace, and produces a flat FX graph on dense tensors
+    inner_fn: Callable[[Callable, Sequence[Any], AOTConfig, ViewAndMutationMeta, bool], torch.fx.GraphModule],
+    # Produes a runtime wrapper that wraps the compiled function
+    # It provides the glue from (subclass_inp -> dense_inp -> dense_out -> subclass_out)
+    inner_runtime_wrapper: Callable[[Callable, List[Union[int, SubclassCreationMeta]]], Callable],
+):
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -2241,11 +2597,12 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
     joint_fn_to_trace = create_joint(fn_prepared_for_autograd)
 
     if config.use_functionalize:
-        fx_g = create_functionalized_graph(
+        fx_g, maybe_subclass_metadata = inner_fn(
             joint_fn_to_trace,
             joint_inputs,
-            meta=fw_metadata,
+            flat_fn_for_metadata=flat_fn,
             aot_config=aot_config,
+            meta=fw_metadata,
             trace_joint=True,
         )
 
@@ -2269,9 +2626,19 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
 
     with torch.no_grad():
         with track_graph_compiling(aot_config, "joint"):
-            num_inner_fwd_outputs = fw_metadata.num_mutated_inputs + fw_metadata.num_outputs + fw_metadata.num_intermediate_bases
+            # If we ran AOTDispatch, we need our patitioning to take into account
+            # the **dense** tensors, and not the subclass tensors we used.
+            if maybe_subclass_metadata is not None:
+                subclass_m = maybe_subclass_metadata.meta
+                num_inner_fwd_outputs = subclass_m.num_mutated_inputs + subclass_m.num_outputs + subclass_m.num_intermediate_bases
+                joint_inputs_ = maybe_subclass_metadata.maybe_joint_inputs
+            else:
+                num_inner_fwd_outputs = fw_metadata.num_mutated_inputs + fw_metadata.num_outputs + \
+                    fw_metadata.num_intermediate_bases
+                joint_inputs_ = joint_inputs
+
             fw_module, bw_module = aot_config.partition_fn(
-                fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
+                fx_g, joint_inputs_, num_fwd_outputs=num_inner_fwd_outputs
             )
             fw_outs = [n for n in fw_module.graph.nodes if n.op == "output"][0].args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
@@ -2289,11 +2656,18 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             compiled_fw_func = aot_config.fw_compiler(
                 fw_module, flat_args
             )
+        if maybe_subclass_metadata is None:
+            compiled_fw_func_wrapper = make_boxed_func(compiled_fw_func)
+        else:
+            assert maybe_subclass_metadata.fw_output_infos is not None
+            assert maybe_subclass_metadata.bw_output_infos is not None
+            compiled_fw_func_wrapper = inner_runtime_wrapper(compiled_fw_func, out_infos=maybe_subclass_metadata.fw_output_infos)
 
     class CompiledFunction(torch.autograd.Function):
-        compiled_fw = compiled_fw_func
+        compiled_fw = compiled_fw_func_wrapper
         compiled_bw = None
         metadata = fw_metadata
+        subclass_meta = maybe_subclass_metadata
         num_symints_saved_for_bw = _num_symints_saved_for_bw
 
         @staticmethod
@@ -2468,6 +2842,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
             contiguous_args = [
                 t.contiguous() if torch.is_tensor(t) else t for t in flat_bw_args
             ]
+            num_contiguous_args = len(contiguous_args)
 
             all_args = (
                 list(ctx.symints) + list(ctx.saved_tensors) + list(contiguous_args)
@@ -2479,7 +2854,7 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                     assert all(a is not None for a in all_args)
                     if aot_config.dynamic_shapes:
                         all_args_list = list(all_args)
-                        CompiledFunction.compiled_bw = create_aot_dispatcher_function(
+                        compiled_bw = create_aot_dispatcher_function(
                             bw_module, all_args_list, AOTConfig(
                                 aot_config.bw_compiler, aot_config.bw_compiler, aot_config.partition_fn,
                                 aot_config.decompositions, 0, aot_config.aot_id,
@@ -2493,9 +2868,24 @@ def aot_dispatch_autograd(flat_fn, flat_args: List[Any], aot_config: AOTConfig, 
                         if disable_amp:
                             context = disable_autocast_manager
                         with context(), track_graph_compiling(aot_config, "backward"):
-                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                            compiled_bw = aot_config.bw_compiler(
                                 bw_module, all_args
                             )
+                    if CompiledFunction.subclass_meta is not None:
+                        assert len(CompiledFunction.subclass_meta.fw_output_types) == num_contiguous_args
+                        grad_output_types = [type(x) for x in all_args[-num_contiguous_args:]]
+                        # In general, we can add more asserts here for when we partitioned
+                        # with incorrect assumptions about the grad_outputs.
+                        assert grad_output_types == CompiledFunction.subclass_meta.fw_output_types, f"""\
+We incorrectly attempted to compile the backward with incorrect subclass metadata.
+If you run into this error, please file an issue.
+Expected grad_output types: {str(CompiledFunction.subclass_meta.fw_output_types)}
+Got grad_output types: {str(str(grad_output_types))}
+"""
+                        CompiledFunction.compiled_bw = inner_runtime_wrapper(
+                            make_boxed_func(compiled_bw), out_infos=CompiledFunction.subclass_meta.bw_output_infos)
+                    else:
+                        CompiledFunction.compiled_bw = compiled_bw
 
                 ctx.maybe_clear_saved_tensors()
                 out = call_func_with_args(
@@ -2678,9 +3068,17 @@ def create_aot_dispatcher_function(
         else:
             compiler_fn = aot_dispatch_base
 
+        # The ordering here follows the ordering we want in the dispatcher:
+        # (1) (maybe) dedupe inputs
+        # (2) (maybe) create synthetic bases
+        # (3) (maybe) run autograd <--- also performs partitioning, runs the fw + bw compiler
+        # (4) (maybe) run __torch_dispatch__
+        # (5) run functionalization, and trace the entire thing into an fx graph
+        inner_trace_fn = partial(aot_dispatch_subclass, trace_fn=create_functionalized_graph)
+        inner_runtime_wrapper = aot_dispatch_subclass_runtime_wrapper
+        compiler_fn = partial(compiler_fn, inner_fn=inner_trace_fn, inner_runtime_wrapper=inner_runtime_wrapper)
         compiler_fn = partial(aot_wrapper_synthetic_base, compiler_fn=compiler_fn, needs_autograd=needs_autograd)
         compiler_fn = partial(aot_wrapper_dedupe, compiler_fn=compiler_fn)
-        # You can put more passes here
 
         compiled_fn = compiler_fn(flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata)
 

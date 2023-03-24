@@ -126,3 +126,17 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
         return func(*args, **kwargs)
+
+def supports_mode_tracing(t):
+    # In order for a tensor subclass to support TorchDispatchMode-style tracing in PT2,
+    # It must implement two magic methods: __tensor_flatten__ and __tensor_unflatten__.
+    return type(t) != torch.Tensor and hasattr(t, "__tensor_flatten__") and hasattr(t, "__tensor_unflatten__")
+
+def transform_subclass(t, callback):
+    assert supports_mode_tracing(t)
+    # convert the tensor subclass into its constituent dense tensors,
+    # and apply a transformation to each dense tensor.
+    from torch.utils._pytree import tree_map_only
+    flattened_tensors, ctx = type(t).__tensor_flatten__(t)
+    transformed_tensors = tree_map_only(torch.Tensor, callback, flattened_tensors)
+    return type(t).__tensor_unflatten__(transformed_tensors, ctx)

@@ -1629,6 +1629,18 @@ import torch.fx.experimental.symbolic_shapes
 from torch import func as func
 from torch.func import vmap
 
+# This is a util for functionalization;
+# Given a functional tensor, syncs any pending updates on it
+def _sync(t):
+    from torch.utils._python_dispatch import supports_mode_tracing
+    if supports_mode_tracing(t):
+        tensors_to_sync, _ = t.__tensor_flatten__(t)
+    else:
+        tensors_to_sync = [t]
+    for t in tensors_to_sync:
+        torch._sync_functional_tensor(t)
+
+
 # The function _sparse_coo_tensor_unsafe is removed from PyTorch
 # Python API (v. 1.13), here we temporarily provide its replacement
 # with a deprecation warning.
