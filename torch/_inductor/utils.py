@@ -797,6 +797,14 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         )
 
 
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
 @contextlib.contextmanager
 def maybe_profile(should_profile, *args, **kwargs):
     if should_profile:

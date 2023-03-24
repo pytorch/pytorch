@@ -248,8 +248,6 @@ CI_SKIP[CI("inductor", training=True, dynamic=True)] = [
     # *CI_SKIP[CI("aot_eager", training=True, dynamic=True)],
     *CI_SKIP[CI("inductor", training=False, dynamic=True)],
     *CI_SKIP[CI("inductor", training=True)],
-    # torchbench
-    "pytorch_unet",  # TypeError: unhashable type: 'SymInt'
     # timm_models
     "tf_efficientnet_b0",  # NameError: name 's1' is not defined
 ]
@@ -576,13 +574,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
 
     import contextlib
 
-    @contextlib.contextmanager
-    def maybe_profile(*args, **kwargs):
-        if kwargs.pop("enabled", True):
-            with torch.profiler.profile(*args, **kwargs) as p:
-                yield p
-        else:
-            yield
+    from torch._inductor.utils import maybe_profile
 
     @contextlib.contextmanager
     def maybe_mark_profile(*args, **kwargs):
@@ -601,7 +593,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     tolerance = args.xla_tolerance if args.trace_on_xla else 1e-4
     torch._dynamo.config.repro_tolerance = tolerance
 
-    with maybe_profile(enabled=args.export_profiler_trace) as p:
+    with maybe_profile(args.export_profiler_trace) as p:
         frozen_model_iter_fn = torch._dynamo.run(model_iter_fn)
         for rep in range(args.repeat):
             inputs = (
@@ -2136,6 +2128,15 @@ def run(runner, args, original_dir=None):
         output_filename = "overheads.csv"
     elif args.inductor:
         inductor_config.debug = args.verbose
+        if (
+            args.ci
+            and args.accuracy
+            and args.training
+            and args.only in {"dla102", "gernet_l"}
+        ):
+            # Log generated code for flaky tests, to check if there is any codegen difference
+            inductor_config.debug = True
+
         if args.threads:
             inductor_config.cpp.threads = args.threads
 
