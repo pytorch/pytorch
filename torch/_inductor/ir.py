@@ -3392,14 +3392,15 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise_.binary",
+        cpp_kernel="mkldnn::_convolution_pointwise_",
         cpp_constant_args=(),
     ):
         # TODO: fix me
         # Due to constrain of op.call, other (Tensor&) should be at input[0]
         reordered_inputs = [inputs[1], inputs[0]] + inputs[2:]
-        super().__init__(kernel_layout, reordered_inputs, constant_args)
-        self.kernel = kernel
-        self.cpp_kernel = "mkldnn::_convolution_pointwise_"
+        super().__init__(
+            kernel_layout, reordered_inputs, constant_args, None, kernel, cpp_kernel
+        )
         self.cpp_kernel_overlad_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary_"
         # TODO: op.call: input[0] should be at::Tensor&
