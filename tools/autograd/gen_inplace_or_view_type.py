@@ -488,7 +488,7 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
         # Add a statement to materialize any copy on write tensors. Because autograd is
         # in a unique position to know which tensors are getting mutated in an operator,
         # we insert this check here.
-        materialize_statement = f'torch::autograd::simulate_materialize_copies_on_write({{{", ".join(modified_args)}}});'
+        materialize_statement = f'torch::autograd::materialize_copies_on_write({{{", ".join(modified_args)}}});'
         inplace_view_body = [materialize_statement] + inplace_view_body
     else:
         assert get_view_info(f) is not None

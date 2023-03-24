@@ -1368,6 +1368,10 @@
   self: grad.reshape_symint(self.sym_sizes())
   result: auto_linear
 
+- name: _reshape_copy_on_write(Tensor self, SymInt[] size, SymInt[] stride) -> Tensor
+  self: grad.reshape_symint(self.sym_sizes())
+  result: auto_linear
+
 - name: round(Tensor self) -> Tensor
   self: zeros_like(grad)
   result: auto_element_wise

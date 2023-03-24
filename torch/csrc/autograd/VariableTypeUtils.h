@@ -130,9 +130,8 @@ inline void rebase_history(
   }
 }
 
-// Simulates materializing any tensors that have copy on write
-// storage.
-void simulate_materialize_copies_on_write(
+// Materialize any tensors that have copy on write storage.
+void materialize_copies_on_write(
     c10::ArrayRef<std::reference_wrapper<const at::TensorBase>> tensors);
 
 inline void increment_version(const at::Tensor& t) {

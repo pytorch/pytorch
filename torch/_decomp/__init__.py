@@ -281,6 +281,7 @@ def core_aten_decompositions() -> Dict[OpOverload, Callable]:
             aten._prelu_kernel,
             aten._prelu_kernel_backward,
             aten._reshape_alias,
+            aten._reshape_copy_on_write,
             aten.rot90,
             aten.rsub.Scalar,
             aten.rsub.Tensor,

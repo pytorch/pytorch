@@ -1,52 +1,31 @@
 # Owner(s): ["module: viewing and reshaping", "module: internals"]
 
-import warnings
-
-import pytest
-
 import torch
-
-def test_copy_on_write_warns():
-    t = torch.ones(4)
-    u = t.reshape(2, 2)
-
-    # Writing any number of times to just one of the "views" is fine.
-    with warnings.catch_warnings():
-        warnings.simplefilter('error')
-        # Writing once to t is fine.
-        t.add_(torch.arange(4))
-        # Even writing twice to t is fine.
-        t.add_(torch.ones(4))
-
-    # But writing to (or reading from) u after we've written to t is a problem, because
-    # u is still sharing t's storage.
-    with pytest.warns(UserWarning, match='You have written through to both aliases created by calling reshape().'):
-        u.add_(torch.ones(4).view(2, 2))
 
 def test_copy_on_write():
     t = torch.ones(4)
-    assert torch._C._get_copy_on_write_storage_generation(t) is None
-    assert torch._C._get_storage_generation(t) == 0
-
-    u = t.reshape(2, 2)  # this will be a copy in the future
-    assert not torch._C._has_same_copy_on_write_storage(t, u)
-    assert torch._C._get_copy_on_write_storage_generation(u) == 0
-    assert torch._C._get_storage_generation(u) == 0
+    u = t.reshape(2, 2)  # this is a lazy copy
+    assert torch._C._storage_id(t) != torch._C._storage_id(u)  # different storages
+    assert t.data_ptr() == u.data_ptr()                        # but same data
 
     v = t.view(2, 2)
-    assert torch._C._has_same_copy_on_write_storage(t, v)
-    assert not torch._C._has_same_copy_on_write_storage(u, v)
-    assert torch._C._get_copy_on_write_storage_generation(v) is None
-    assert torch._C._get_storage_generation(v) == 0
+    assert torch._C._storage_id(t) == torch._C._storage_id(v)  # same storages
+    assert t.data_ptr() == u.data_ptr() == v.data_ptr()
+    assert torch.equal(u, v)
 
     # Write to t: t and u alias, so they both see bumps.
     t.add_(torch.ones(4))
-    assert torch._C._get_copy_on_write_storage_generation(t) is None
-    assert torch._C._get_storage_generation(t) == 1
-    assert torch._C._get_copy_on_write_storage_generation(v) is None
-    assert torch._C._get_storage_generation(v) == 1
+    # No longer aliasing.
+    assert t.data_ptr() != u.data_ptr()  # u is no longer an alias
+    assert t.data_ptr() == v.data_ptr()  # but v still is
 
-    # But u will not alias in the future, so its copy-on-write generation will not
-    # change.
-    assert torch._C._get_copy_on_write_storage_generation(u) == 0
-    assert torch._C._get_storage_generation(u) == 1
+    assert not torch.equal(u, v)  # u sees the write, but not v
+
+
+def test_grad():
+    t = torch.arange(4.0, requires_grad=True)
+
+    # Copies never share the same storage.
+    u = t.reshape(2, 2)  # u is a lazy copy of t
+
+    u.sum().backward()

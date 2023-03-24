@@ -1,41 +1,41 @@
 def define_targets(rules):
     rules.cc_library(
-        name = "simulator",
-        srcs = ["simulator.cpp"],
-        hdrs = ["simulator.h"],
+        name = "context",
+        srcs = ["context.cpp"],
+        hdrs = ["context.h"],
+        visibility = ["//c10/test/core/impl/cow:__pkg__"],
         deps = [
-            "//c10/macros",
+            "//c10/core:base",
             "//c10/util:base",
-        ],
-        visibility = [
-            "//c10/core:__pkg__",
-            "//c10/test/core/impl/cow:__pkg__",
         ],
     )
 
     rules.cc_library(
-        name = "spy",
-        srcs = ["spy.cpp"],
-        hdrs = ["spy.h"],
+        name = "materialize",
+        srcs = ["materialize.cpp"],
+        hdrs = ["materialize.h"],
         deps = [
-            ":simulator",
+            ":context",
+            "//c10/core:base",
+            "//c10/macros",
+        ],
+        visibility = [
+            "//:__pkg__",
+        ],
+    )
+
+    rules.cc_library(
+        name = "try_ensure",
+        srcs = ["try_ensure.cpp"],
+        hdrs = ["try_ensure.h"],
+        deps = [
+            ":context",
             "//c10/core:base",
             "//c10/macros",
             "//c10/util:base",
         ],
-        visibility = ["//:__pkg__"],
-    )
-
-    rules.cc_library(
-        name = "state",
-        srcs = ["state.cpp"],
-        hdrs = ["state.h"],
-        deps = [
-            ":simulator",
-            "//c10/util:base",
-        ],
         visibility = [
-            "//c10/core:__pkg__",
+            "//:__pkg__",
             "//c10/test/core/impl/cow:__pkg__",
         ],
     )

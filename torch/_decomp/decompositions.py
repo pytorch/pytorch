@@ -2815,6 +2815,11 @@ def _reshape_alias(x, shape, *args):
     return aten.view(x, shape)
 
 
+@register_decomposition(aten._reshape_copy_on_write)
+def _reshape_copy_on_write(x, shape, *args):
+    return aten.view(aten.clone(x), shape)
+
+
 @register_decomposition(aten.nll_loss_forward)
 def nll_loss_forward(
     self: Tensor,
