@@ -157,6 +157,10 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             log.info(f"Using FallbackKernel: {name}")
 
+    def add_device_idx(self, idx: Optional[int]):
+        if idx is not None:
+            self.device_idxs.add(idx)
+
     @property
     def fake_mode(self):
         return V.fake_mode
@@ -322,8 +326,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
         self.device_types.add(example.device.type)
-        if example.device.type == "cuda":
-            self.device_idxs.add(example.device.index)
+        self.add_device_idx(example.device.index)
         return tensor
 
     def call_function(self, target, args, kwargs):
