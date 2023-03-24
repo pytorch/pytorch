@@ -1223,7 +1223,7 @@ def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
 
 
 def symbol_type(x: sympy.Symbol) -> Type:
-    if x.is_integer:
+    if x.is_integer:  # type: ignore[attr-defined]
         return int
     else:
         # NB: Not strictly correct, but we don't support SymPy complex or bool.

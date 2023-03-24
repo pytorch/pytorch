@@ -1099,15 +1099,10 @@ endif()
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
 if(BUILD_SHARED_LIBS)
   configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       @ONLY)
   install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
