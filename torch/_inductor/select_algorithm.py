@@ -491,7 +491,6 @@ class ExternKernelChoice:
         return getattr(extern_kernels, self.name)
 
     def call_name(self):
-        5//0
         return f"extern_kernels.{self.name}"
 
     @functools.lru_cache(None)

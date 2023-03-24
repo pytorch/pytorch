@@ -84,7 +84,6 @@ def draw_buffers(nodes, print_graph=False, fname=None):
         print(graph)
 
     gm = GraphModule({}, graph)
-    legalize_graph(gm)
     gm.graph.lint()
     draw_graph(gm, fname, clear_meta=False)
 
@@ -166,7 +165,8 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
                 with graph.inserting_before(first_node):
                     dep_node = graph.placeholder(dep.name)
                     buf_to_fx_node[dep.name] = dep_node
-            new_args.append(dep_node)
+            if dep_node != fx_node:
+                new_args.append(dep_node)
 
         fx_node.args = tuple(new_args)
 

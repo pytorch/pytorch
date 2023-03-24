@@ -1181,6 +1181,36 @@ class Scheduler:
 
     @dynamo_timed
     def codegen(self):
+        from .debug import create_fx_from_snodes
+        fx_graph = create_fx_from_snodes(self.nodes)
+        def get_topo_ordering(fx_graph):
+            new_nodes = [node for node in fx_graph.nodes if 'fusion_meta' in node.meta]
+            indeg = {k: 0 for k in new_nodes}
+            for node in new_nodes:
+                for user in node.users:
+                    if user in indeg:
+                        indeg[user] += 1
+            result = []
+            while len(indeg) > 0:
+                import random
+                import time
+                keys = list(indeg.keys())
+                random.seed(time.time())
+                random.shuffle(keys)
+                for k in keys:
+                    if indeg[k] == 0:
+                        result.append(k)
+                        for user in k.users:
+                            if user in indeg:
+                                indeg[user] -= 1
+                        del indeg[k]
+                        break
+            return [node.meta['fusion_meta'].snodes[0] for node in result]
+        new_nodes = get_topo_ordering(fx_graph)
+        # print(new_nodes)
+        self.nodes = new_nodes
+        self.compute_last_usage()
+        # breakpoint()
         for node in self.nodes:
             self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
@@ -1224,3 +1254,4 @@ class Scheduler:
             self.available_buffer_names.update(node.get_names())
 
         self.flush()
+        print("             ")

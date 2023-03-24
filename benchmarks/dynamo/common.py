@@ -671,6 +671,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         ]
         row.append(kwargs["compilation_latency"])
         row.append(kwargs["compression_ratio"])
+        print(kwargs["eager_peak_mem"], kwargs["dynamo_peak_mem"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
     if "dynamo_stats" in kwargs:
