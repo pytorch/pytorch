@@ -63,6 +63,7 @@ class JobCheckState(NamedTuple):
     url: str
     status: Optional[str]
     classification: Optional[str]
+    job_id: Optional[int]
 
 JobNameToStateDict = Dict[str, JobCheckState]
 
@@ -120,6 +121,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
           name
           conclusion
           detailsUrl
+          databaseId
         }
         pageInfo {
           endCursor
@@ -300,6 +302,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cs_cursor: String, $cr_c
                     name
                     conclusion
                     detailsUrl
+                    databaseId
                   }
                   pageInfo {
                     endCursor
@@ -454,6 +457,7 @@ def get_check_run_name_prefix(workflow_run: Any) -> str:
 def is_passing_status(status: Optional[str]) -> bool:
     return status is not None and status.upper() in ["SUCCESS", "SKIPPED", "NEUTRAL"]
 
+
 def add_workflow_conclusions(
     checksuites: Any,
     get_next_checkruns_page: Callable[[List[Dict[str, Dict[str, Any]]], int, Any], Any],
@@ -503,7 +507,8 @@ def add_workflow_conclusions(
                             checkrun_name,
                             checkrun_node["detailsUrl"],
                             checkrun_node["conclusion"],
-                            None
+                            None,
+                            checkrun_node["databaseId"],
                         )
 
                 if bool(checkruns["pageInfo"]["hasNextPage"]):
@@ -531,7 +536,8 @@ def add_workflow_conclusions(
                 workflow.name,
                 workflow.url,
                 workflow.status,
-                None
+                None,
+                None,
             )
     for job_name, job in no_workflow_obj.jobs.items():
         res[job_name] = job
@@ -819,7 +825,13 @@ class GitHubPR:
         if orig_last_commit["status"] and orig_last_commit["status"]["contexts"]:
             for status in orig_last_commit["status"]["contexts"]:
                 name = status["context"]
-                self.conclusions[name] = JobCheckState(name, status["targetUrl"], status["state"], None)
+                self.conclusions[name] = JobCheckState(
+                    name,
+                    status["targetUrl"],
+                    status["state"],
+                    None,
+                    None,
+                )
 
         return self.conclusions
 
@@ -1404,6 +1416,7 @@ def get_classifications(
     merge_base_jobs: Dict[str, Dict[str, Any]] = {}
 
     if merge_base is not None:
+
         def insert(d: Dict[str, Dict[str, Any]], key: str, val: Dict[str, Any]) -> None:
             if key not in d:
                 d[key] = val
@@ -1424,7 +1437,13 @@ def get_classifications(
         if check.status == "SUCCESS":
             continue
         if ignore_current_checks is not None and name in ignore_current_checks:
-            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "IGNORE_CURRENT_CHECK")
+            checks_with_classifications[name] = JobCheckState(
+                check.name,
+                check.url,
+                check.status,
+                "IGNORE_CURRENT_CHECK",
+                check.job_id,
+            )
             continue
         head_sha_job = head_sha_jobs.get(name)
         merge_base_job = merge_base_jobs.get(name)
@@ -1434,9 +1453,13 @@ def get_classifications(
             and head_sha_job["conclusion"] == merge_base_job["conclusion"]
             and head_sha_job["failure_captures"] == merge_base_job["failure_captures"]
         ):
-            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "BROKEN_TRUNK")
+            checks_with_classifications[name] = JobCheckState(
+                check.name, check.url, check.status, "BROKEN_TRUNK", check.job_id
+            )
         elif any([rule.matches(head_sha_job) for rule in flaky_rules]):
-            checks_with_classifications[name] = JobCheckState(check.name, check.url, check.status, "FLAKY")
+            checks_with_classifications[name] = JobCheckState(
+                check.name, check.url, check.status, "FLAKY", check.job_id
+            )
     return checks_with_classifications
 
 
