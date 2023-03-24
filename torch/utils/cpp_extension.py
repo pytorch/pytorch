@@ -723,6 +723,7 @@ class BuildExtension(build_ext):
                             cflags = ['-Xcompiler', flag] + cflags
                         for ignore_warning in MSVC_IGNORE_CUDAFE_WARNINGS:
                             cflags = ['-Xcudafe', '--diag_suppress=' + ignore_warning] + cflags
+                        append_std17_if_no_std_present(cflags)
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
@@ -802,6 +803,7 @@ class BuildExtension(build_ext):
                     cuda_post_cflags = extra_postargs['nvcc']
                 else:
                     cuda_post_cflags = list(extra_postargs)
+                append_std17_if_no_std_present(cuda_post_cflags)
                 cuda_post_cflags = win_cuda_flags(cuda_post_cflags)
 
             cflags = _nt_quote_args(cflags)
