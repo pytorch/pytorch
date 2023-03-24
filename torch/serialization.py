@@ -782,6 +782,11 @@ def load(
         if pickle_module is not None:
             raise RuntimeError("Can not safely load weights when explicit pickle_module is specified")
     else:
+        warnings.warn(
+            "Loading data with 'weights_only=False' can be unsafe, as it may execute arbitrary code "
+            "during unpickling. Use this option only when loading data from trusted sources.",
+            UserWarning,
+        )
         if pickle_module is None:
             pickle_module = pickle
 
