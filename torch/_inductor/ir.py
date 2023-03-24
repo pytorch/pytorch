@@ -3300,11 +3300,10 @@ class ConvolutionBinary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise.binary",
+        cpp_kernel="mkldnn::_convolution_pointwise",
         cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
-        self.cpp_kernel = "mkldnn::_convolution_pointwise"
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
         self.cpp_kernel_overlad_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
         self.cpp_op_schema = """
