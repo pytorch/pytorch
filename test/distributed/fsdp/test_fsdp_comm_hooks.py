@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_WITH_ROCM,
 )
 
 if not dist.is_available():
@@ -34,7 +35,7 @@ BFLOAT16_AVAILABLE = (
     torch.cuda.is_available()
     and torch.version.cuda is not None
     and int(torch.version.cuda.split(".")[0]) >= 11
-)
+) or TEST_WITH_ROCM
 
 
 class Net(nn.Module):
@@ -435,7 +436,6 @@ class TestCommunicationHooks(FSDPTest):
         "BFloat16 is only supported by CUDA 11+",
     )
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm
     @parametrize("has_wrapping", [True, False])
     @parametrize(
         "sharding_strategy",
