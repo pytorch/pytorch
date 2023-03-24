@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .triton_backend import get_triton_backend
+from .triton_backend import all_triton_backend_name, get_triton_backend
 from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
@@ -1142,7 +1142,7 @@ class Scheduler:
 
     def create_backend(self, device: torch.device):
         assert (
-            device.type != "cuda" or device.index is not None
+            device.type not in all_triton_backend_name() or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
         if device.type == "cpu":
@@ -1198,10 +1198,13 @@ class Scheduler:
                 ):
                     self.flush()
                 if device != self.current_device:
-                    if self.current_device and self.current_device.type != "cpu":
+                    if (
+                        self.current_device
+                        and self.current_device.type in all_triton_backend_name()
+                    ):
                         V.graph.wrapper_code.codegen_device_guard_exit(device)
 
-                    if device.type != "cpu":
+                    if device.type in all_triton_backend_name():
                         # The device should be a accelerator device like CUDA
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device)

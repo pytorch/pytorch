@@ -75,9 +75,8 @@ class EnterDeviceContextManagerLine:
         _triton_backend = get_triton_backend(self.device.type)
         assert _triton_backend
         assert self.device.index is not None
-        code.writeline(
-            f"with {_triton_backend.nms()}._DeviceGuard({self.device.index}):"
-        )
+        package_name, attr_fn = _triton_backend.gen_codegen_string("_DeviceGuard")
+        code.writeline(f"with {package_name}.{attr_fn}({self.device.index}):")
 
 
 class ExitDeviceContextManagerLine:
@@ -252,7 +251,8 @@ class WrapperCodeGen(CodeGen):
     def write_sync_for_device(self, indented_buffer: IndentedBuffer):
         for device_backend in triton_backends:
             if device_backend:
-                indented_buffer.writeline(f"{device_backend.nms()}.synchronize()")
+                package_name, attr_fn = device_backend.gen_codegen_string("synchronize")
+                indented_buffer.writeline(f"{package_name}.{attr_fn}()")
 
     def write_prefix(self):
         self.prefix.splice(
@@ -356,10 +356,13 @@ class WrapperCodeGen(CodeGen):
                 elif isinstance(line, EnterDeviceContextManagerLine):
                     _triton_backend = get_triton_backend(line.device.type)
                     assert _triton_backend
+                    package_name, attr_fn = _triton_backend.gen_codegen_string(
+                        "set_device"
+                    )
                     line.codegen(self.wrapper_call)
                     device_cm_stack.enter_context(self.wrapper_call.indent())
                     self.wrapper_call.writeline(
-                        f"{_triton_backend.nms()}.set_device({line.device.index}) # no-op to ensure context"
+                        f"{package_name}.{attr_fn}({line.device.index}) # no-op to ensure context"
                     )
                 elif isinstance(line, ExitDeviceContextManagerLine):
                     device_cm_stack.close()

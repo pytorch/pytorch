@@ -159,8 +159,9 @@ def gen_gm_and_inputs(target, args, kwargs):
 
 
 def synchronize():
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    for _triton_backend in triton_backends:
+        assert _triton_backend
+        _triton_backend.synchronize()
 
 
 def timed(model, example_inputs, times=1):

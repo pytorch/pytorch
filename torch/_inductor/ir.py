@@ -20,6 +20,7 @@ import torch._dynamo.config as dynamo_config
 
 import torch.fx
 import torch.utils._pytree as pytree
+from torch._inductor.triton_backend import all_triton_backend_name
 from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
@@ -313,7 +314,7 @@ def get_device_type(x):
 
 
 def is_triton(x):
-    return get_device_type(x) == "cuda"
+    return get_device_type(x) in all_triton_backend_name()
 
 
 def is_cpu(x):

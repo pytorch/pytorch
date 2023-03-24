@@ -1216,12 +1216,16 @@ class TritonKernel(Kernel):
         extra_args_str = None
         index = V.graph.scheduler.current_device.index
         with result.indent():
-            result.writeline(
-                f"with {self._triton_backend.nms()}._DeviceGuard({index}):"
+            package_name, attr_fn = self._triton_backend.gen_codegen_string(
+                "_DeviceGuard"
             )
+            result.writeline(f"with {package_name}.{attr_fn}({index}):")
             with result.indent():
+                package_name, attr_fn = self._triton_backend.gen_codegen_string(
+                    "set_device"
+                )
                 result.writeline(
-                    f"{self._triton_backend.nms()}.set_device({index})"
+                    f"{package_name}.{attr_fn}({index})"
                 )  # no-op to ensure context
                 for tree in self.range_trees:
                     expr = pexpr(tree.numel)
@@ -1242,12 +1246,16 @@ class TritonKernel(Kernel):
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
         with result.indent():
-            result.writeline(
-                f"with {self._triton_backend.nms()}._DeviceGuard({index}):"
+            package_name, attr_fn = self._triton_backend.gen_codegen_string(
+                "_DeviceGuard"
             )
+            result.writeline(f"with {package_name}.{attr_fn}({index}):")
             with result.indent():
+                package_name, attr_fn = self._triton_backend.gen_codegen_string(
+                    "set_device"
+                )
                 result.writeline(
-                    f"{self._triton_backend.nms()}.set_device({index})"
+                    f"{package_name}.{attr_fn}.set_device({index})"
                 )  # no-op to ensure context
                 result.writeline(
                     f"return triton_.benchmark_all_configs(*args, {extra_args_str}grid=grid({', '.join(grid)}))"
@@ -1299,13 +1307,18 @@ class TritonKernel(Kernel):
                 """
             )
             if config.benchmark_kernel:
+                package_name, attr_fn = self._triton_backend.gen_codegen_string(
+                    "getCurrentRawStream"
+                )
                 code.splice(
                     """
                         from torch._dynamo.testing import rand_strided
-                        from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
+                        from {} import {} as get_{}_stream
                         import torch
                         from torch._inductor.triton_ops.autotune import grid
-                    """
+                    """.format(
+                        package_name, attr_fn, self._triton_backend.name()
+                    )
                 )
 
         argdefs, _, signature = self.args.python_argdefs()
@@ -1720,7 +1733,8 @@ class TritonScheduling:
         self.scheduler.free_buffers()
 
     def codegen_sync(self):
-        V.graph.wrapper_code.writeline(f"{self._triton_backend.nms()}.synchronize()")
+        package_name, attr_fn = self._triton_backend.gen_codegen_string("synchronize")
+        V.graph.wrapper_code.writeline(f"{package_name}.{attr_fn}()")
 
     @staticmethod
     @functools.lru_cache(32)

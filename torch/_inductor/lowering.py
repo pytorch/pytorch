@@ -24,7 +24,6 @@ from torch.fx.experimental.symbolic_shapes import magic_methods, method_to_opera
 from .._dynamo.utils import import_submodule
 
 from . import config, ir, overrides, test_operators  # NOQA: F401
-from .cuda_properties import current_device
 from .decomposition import decompositions, get_decompositions
 from .ir import (
     ExpandView,
@@ -37,6 +36,7 @@ from .ir import (
     validate_ir,
     View,
 )
+from .triton_backend import all_triton_backend_name, get_triton_backend
 from .utils import ceildiv, developer_warning, pad_list, sympy_product
 from .virtualized import ops, V
 
@@ -136,8 +136,10 @@ def decode_device(device):
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         device = torch.device(device)
-    if device.type == "cuda" and device.index is None:
-        return torch.device("cuda", index=current_device())
+    if device.type in all_triton_backend_name() and device.index is None:
+        triton_backend = get_triton_backend(device)
+        assert triton_backend
+        return torch.device(device.type, index=triton_backend.current_device())
     return device
 
 
@@ -331,7 +333,9 @@ def make_pointwise(
         loaders = [x.make_loader() for x in inputs]
         ranges = inputs[0].get_size()
         dtype = override_return_dtype or inputs[0].get_dtype()
-        is_cuda = decode_device(inputs[0].get_device()).type == "cuda"
+        is_triton_device = (
+            decode_device(inputs[0].get_device()).type in all_triton_backend_name()
+        )
 
         for other in inputs[1:]:
             assert isinstance(other, ir.BaseConstant) or len(ranges) == len(
@@ -342,7 +346,11 @@ def make_pointwise(
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
             if dtype == torch.bool and override_fn_when_input_bool is not None:
                 return override_fn_when_input_bool(*[load(index) for load in loaders])
-            elif override_fn_when_cuda_float64 and is_cuda and dtype == torch.float64:
+            elif (
+                override_fn_when_cuda_float64
+                and is_triton_device
+                and dtype == torch.float64
+            ):
                 return override_fn_when_cuda_float64(*[load(index) for load in loaders])
             else:
                 return fn(*[load(index) for load in loaders])
@@ -350,7 +358,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if i.get_device().type in all_triton_backend_name():
                     device = i.get_device()
                     break
             if not device:
@@ -3524,8 +3532,11 @@ def pow_native(a, b):
     return ops.pow(a, b)
 
 
-def _is_ir_node_and_cuda(x):
-    if isinstance(x, ir.IRNode) and decode_device(x.get_device()).type == "cuda":
+def _is_ir_node_and_triton_device(x):
+    if (
+        isinstance(x, ir.IRNode)
+        and decode_device(x.get_device()).type in all_triton_backend_name()
+    ):
         return True
 
     return False
@@ -3533,7 +3544,7 @@ def _is_ir_node_and_cuda(x):
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if _is_ir_node_and_cuda(a) and _is_ir_node_and_cuda(b):
+    if _is_ir_node_and_triton_device(a) and _is_ir_node_and_triton_device(b):
         assert a.get_dtype() in (
             torch.float16,
             torch.float32,

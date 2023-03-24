@@ -1,7 +1,7 @@
 import functools
 import threading
 from abc import ABC, abstractmethod
-from typing import Union
+from typing import Tuple, Union
 
 import torch
 
@@ -63,13 +63,9 @@ class TritonBackend(ABC):
     def is_available(self) -> bool:
         pass
 
-    @abstractmethod
-    def _DeviceGuard(self, index):
-        pass
-
     # Utility function
     @abstractmethod
-    def nms(self) -> str:
+    def namespace(self) -> str:
         pass
 
     @abstractmethod
@@ -92,6 +88,16 @@ class TritonBackend(ABC):
     def mem_alignment(self):
         pass
 
+    @abstractmethod
+    def codegen_check(self):
+        # This function is used to check whether the Triton backend
+        # can generate code for Triton.
+        pass
+
+    @abstractmethod
+    def gen_codegen_string(self, attr: str) -> Tuple[str, str]:
+        pass
+
     def __str__(self):
         return self.name()
 
@@ -99,7 +105,7 @@ class TritonBackend(ABC):
         return hash(self.name())
 
     def __bool__(self):
-        return self.is_available()
+        return self.is_available() and self.codegen_check()
 
 
 class _CUDABackend(TritonBackend):
@@ -108,6 +114,12 @@ class _CUDABackend(TritonBackend):
         self.properties = {
             idx: torch.cuda.get_device_properties(torch.device(idx))
             for idx in range(self.device_count())
+        }
+        self.codegen_check_properties = {
+            "_DeviceGuard": torch.cuda,
+            "set_device": torch.cuda,
+            "synchronize": torch.cuda,
+            "_cuda_getCurrentRawStream": torch._C,
         }
 
     def create_stream(self):
@@ -154,14 +166,11 @@ class _CUDABackend(TritonBackend):
     def is_available(self) -> bool:
         return torch.cuda.is_available()
 
-    def nms(self) -> str:
+    def namespace(self) -> str:
         return "torch.cuda"
 
     def device_name(self, device: torch.device) -> str:
         return self.get_device_capability(device).name
-
-    def _DeviceGuard(self, index):
-        return torch.cuda._DeviceGuard(index)
 
     def name(self) -> str:
         return "cuda"
@@ -177,6 +186,18 @@ class _CUDABackend(TritonBackend):
     def compatible_with_triton(self, device=0):
         device_props = self.get_device_properties(device)
         return device_props.major >= 7
+
+    @functools.lru_cache(None)
+    def codegen_check(self):
+        return all(hasattr(v, k) for k, v in self.codegen_check_properties.items())
+
+    def gen_codegen_string(self, attr: str) -> Tuple[str, str]:
+        if attr in self.codegen_check_properties:
+            return self.namespace(), attr
+        elif attr == "getCurrentRawStream":
+            return "torch._C", f"_{self.name()}_getCurrentRawStream"
+        else:
+            raise f"The Triton backend {self.name()} has not supported {attr} the for Triton code generation"
 
 
 _triton_cuda_backend = _CUDABackend()

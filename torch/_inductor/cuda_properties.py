@@ -38,12 +38,6 @@ def set_compiler_worker_current_device(device):
     _compile_worker_current_device = device
 
 
-def current_device():
-    if _compile_worker_current_device is not None:
-        return _compile_worker_current_device
-    return torch.cuda.current_device()
-
-
 def _device(device):
     assert device is not None
     assert isinstance(device, torch.device)

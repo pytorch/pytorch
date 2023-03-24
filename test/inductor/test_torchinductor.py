@@ -5740,7 +5740,7 @@ class CommonTemplate:
             def is_available(self) -> bool:
                 return True
 
-            def nms(self):
+            def namespace(self):
                 return "torch.mock"
 
             def _DeviceGuard(self, index):
@@ -5760,6 +5760,12 @@ class CommonTemplate:
 
             def target_version(self):
                 return 11
+
+            def codegen_check(self):
+                return True
+
+            def gen_codegen_string(self, attr: str):
+                return "", ""
 
         triton_backends_copy = list(triton_backends)
         triton_backends.clear()
