@@ -69,7 +69,7 @@ def _aot_capture(mod, flat_args):
     out_spec = None
 
     with enable_python_dispatcher():
-        fw_metadata, _ = run_functionalized_fw_and_collect_metadata(
+        fw_metadata = run_functionalized_fw_and_collect_metadata(
             lambda *args: pytree.tree_flatten(functional_call(*args))[0],
             keep_input_mutations=False,
         )(*copy.deepcopy(full_args))  # type: ignore[operator]
@@ -116,18 +116,8 @@ def _aot_capture(mod, flat_args):
         num_params_buffers=params_len,
         aot_id=-1,
         keep_inference_input_mutations=False,
+        dynamic_shapes=True,
     )
-
-    @contextlib.contextmanager
-    def setup_dynamic_shape():
-        prev, torch._functorch.config.use_dynamic_shapes = (
-            torch._functorch.config.use_dynamic_shapes,
-            True,
-        )
-        try:
-            yield
-        finally:
-            torch._functorch.config.use_dynamic_shapes = prev
 
     def exported_call(*args):
         state_args = args[:params_len]
@@ -141,7 +131,7 @@ def _aot_capture(mod, flat_args):
         outputs, out_spec = pytree.tree_flatten(outputs)
         return outputs
 
-    with torch.enable_grad(), setup_dynamic_shape():
+    with torch.enable_grad():
         create_aot_dispatcher_function(
             exported_call,
             full_args,
@@ -192,7 +182,7 @@ def _aot_capture(mod, flat_args):
 @patch.object(torchdynamo.config, "dynamic_shapes", True)
 @patch.object(torchdynamo.config, "capture_scalar_outputs", True)
 @patch.object(torchdynamo.config, "guard_nn_modules", True)
-@patch.object(torchdynamo.config, "specialize_int_float", True)
+@patch.object(torchdynamo.config, "specialize_int", True)
 @patch.object(torchdynamo.config, "allow_rnn", True)
 @patch.object(torchdynamo.config, "verbose", True)
 def do_not_use_experimental_export(f: Callable, args: Tuple, training=False):
