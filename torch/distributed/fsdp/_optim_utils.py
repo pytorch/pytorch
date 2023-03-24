@@ -248,7 +248,8 @@ def _unflatten_communicated_optim_state(
         unflattened parameter IDs.
     """
     fsdp_state = fsdp_param_info.state
-    flat_param = fsdp_param_info.handle.flat_param
+    handle = fsdp_param_info.handle
+    flat_param = handle.flat_param
     unflat_param_state: List[Dict[str, Any]] = []
     flat_param_views: Dict[str, Iterator] = {}
     num_unflat_params = flat_param._num_params
@@ -264,11 +265,22 @@ def _unflatten_communicated_optim_state(
         for state_name, flat_tensor in sorted_items(tensor_state):
             views_generated = state_name in flat_param_views
             if not views_generated:
-                views = FlatParamHandle._get_unflat_views(flat_param, flat_tensor)
+                views = handle._get_unflat_views(flat_tensor)
                 flat_param_views[state_name] = views
             else:
                 views = flat_param_views[state_name]
-            optim_state: Union[torch.Tensor, ShardedTensor] = next(views)
+            optim_state: Optional[Union[torch.Tensor, ShardedTensor]] = next(views)
+            # Skip any alignment padding -- `views` should never be exhausted
+            # before the outer for loop completes
+            try:
+                while optim_state is None:
+                    optim_state = next(views)
+            except StopIteration as e:
+                print(
+                    f"Rank {dist.get_rank()} exhausted views early while "
+                    "unflattening optimizer state. Please report a bug."
+                )
+                raise e
             if shard_state:
                 assert fsdp_state.process_group is not None
                 optim_state = _ext_chunk_tensor(
@@ -426,13 +438,14 @@ def _flatten_optim_state(
         part will map a key to this returned value.
     """
     fsdp_state = fsdp_param_info.state
-    flat_param = fsdp_param_info.handle.flat_param
+    handle = fsdp_param_info.handle
+    flat_param = handle.flat_param
     num_unflat_params = len(unflat_param_names)
     assert num_unflat_params > 0, (
         "Expects at least one unflattened parameter corresponding to the "
         "flat parameter"
     )
-    unflat_param_shapes = flat_param._shapes
+    unflat_param_shapes = [shape for shape in flat_param._shapes if shape is not None]
     num_unflat_param_shapes = len(unflat_param_shapes)
     assert (
         num_unflat_params == num_unflat_param_shapes
@@ -500,7 +513,7 @@ def _flatten_optim_state(
                 state_values,
                 unflat_param_names,
                 unflat_param_shapes,
-                flat_param,
+                handle,
             )
             if shard_state:
                 # Shard the flattened tensor immediately to minimize max memory
@@ -535,12 +548,12 @@ def _flatten_tensor_optim_state(
     pos_dim_tensors: List[torch.Tensor],
     unflat_param_names: List[str],
     unflat_param_shapes: Sequence[torch.Size],
-    flat_param: FlatParameter,
+    handle: FlatParamHandle,
 ) -> torch.Tensor:
     """
     Flattens the positive-dimension tensor optimizer state given by the values
     ``tensors`` for the state ``state_name`` for a single flat parameter
-    ``flat_param`` corresponding to the unflattened parameter names
+    from ``handle`` corresponding to the unflattened parameter names
     ``unflat_param_names`` and unflatted parameter shapes
     ``unflat_param_shapes``. This flattens each unflattened parameter's tensor
     state into one tensor.
@@ -560,7 +573,7 @@ def _flatten_tensor_optim_state(
             parameter names corresponding to the single flat parameter.
         unflat_param_shapes (List[torch.Size]): Unflattened parameter shapes
             corresponding to the single flat parameter.
-        flat_param (FlatParameter): The flat parameter.
+        handle (FlatParamHandle): The flat parameter's handle.
 
     Returns:
         torch.Tensor: A flat tensor containing the optimizer state
@@ -568,6 +581,7 @@ def _flatten_tensor_optim_state(
         unflattened parameter tensor states in ``pos_dim_tensors`` (using zero
         tensors for any unflattened parameters without the state).
     """
+    flat_param = handle.flat_param
     non_none_tensors = [t for t in pos_dim_tensors if t is not None]
     # Check that all are tensors with the same dtype
     dtypes = {t.dtype for t in non_none_tensors}
@@ -588,11 +602,12 @@ def _flatten_tensor_optim_state(
                 "Tensor optimizer state does not have same shape as its "
                 f"parameter: {tensor.shape} {shape}"
             )
-    # Flatten the tensor states: we do not need to add any padding since the
-    # flat optimizer state tensor sharded via `_get_shard()`, which pads the
-    # shard as needed (just like for the flat parameter)
+    # Flatten the tensor states: we do not need to add any right-hand-side
+    # padding since the flat optimizer state tensor is sharded via
+    # `_get_shard()`, which pads the shard as needed (just like for the flat
+    # parameter)
     cpu_device = torch.device("cpu")
-    tensors = [
+    tensors_to_flatten = [
         torch.flatten(state_value.to(cpu_device))
         if state_value is not None
         else torch.flatten(
@@ -604,7 +619,7 @@ def _flatten_tensor_optim_state(
         )
         for state_value, shape in zip(pos_dim_tensors, unflat_param_shapes)
     ]
-    flat_tensor = torch.cat(tensors)
+    flat_tensor = handle.flatten_tensors(tensors_to_flatten, handle._aligned_numel)
     flat_param_shape = flat_param._unpadded_unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, (
         f"tensor optim state: {flat_tensor.shape} "
@@ -1526,12 +1541,18 @@ def _get_fqn_to_fsdp_param_info(model: nn.Module) -> Dict[str, FSDPParamInfo]:
             return
         _lazy_init(fsdp_state, module)
         handles = _module_handles(fsdp_state, module)
+        assert (
+            len(handles) < 2
+        ), f"Assumes at most 1 FlatParamHandle but {len(handles)} handles"
         if not handles:
             return
         handle = handles[0]
         flat_param = handle.flat_param
         fsdp_param_info = FSDPParamInfo(fsdp_state, handle, {})
         for idx, local_fqn in enumerate(flat_param._fqns):
+            is_padding = local_fqn is None
+            if is_padding:
+                continue
             fqn = clean_tensor_name(prefix + local_fqn)
             if fqn in fqn_to_param_info:
                 assert fqn_to_param_info[fqn].handle.flat_param == flat_param

@@ -549,21 +549,25 @@ def _sharded_pre_load_state_dict_hook(
     if not _has_fsdp_params(fsdp_state, module):
         return
 
-    if not _module_handles(fsdp_state, module)[0].uses_sharded_strategy:
+    handle = _module_handles(fsdp_state, module)[0]
+    if not handle.uses_sharded_strategy:
         raise RuntimeError(
             "load_sharded_state_dict can only be called when parameters "
             "are flattened and sharded."
         )
 
-    nonsharded_tensors: List[torch.Tensor] = []
+    tensors_to_flatten: List[torch.Tensor] = []
     shared_param_fqns = [
         fqn for fqn, _, _ in _shared_param_name_infos(module, fsdp_state)
     ]
     loaded_shapes: List[torch.Size] = []
+    device = fsdp_state.compute_device
     for fqn, _, _ in _param_name_infos(module, fsdp_state):
         fqn_from_global_root = f"{prefix}{FSDP_PREFIX}{fqn}"
         param = state_dict.pop(fqn_from_global_root)
         if fqn in shared_param_fqns:
+            # This shared parameter does not own the storage, so there is no
+            # need to flatten it into the `FlatParameter`
             continue
         # All-gather the param (ShardedTensor)
         param, shards = _ext_pre_load_state_dict_transform(param)
@@ -585,20 +589,19 @@ def _sharded_pre_load_state_dict_hook(
             if num_padding > 0:
                 local_tensor = F.pad(local_tensor, [0, num_padding])
         else:
-            local_tensor = torch.zeros(chunk_size, dtype=param.dtype).cuda()
+            local_tensor = torch.zeros(chunk_size, dtype=param.dtype, device=device)
         tensor = torch.empty(
-            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype
-        ).cuda()
+            chunk_size * fsdp_state.world_size, dtype=local_tensor.dtype, device=device
+        )
         dist.all_gather_into_tensor(
             tensor, local_tensor, group=fsdp_state.process_group
         )
         tensor = tensor.narrow(0, 0, param_numel).reshape(param.size())
-        nonsharded_tensors.append(tensor)
+        tensors_to_flatten.append(tensor)
 
     # Create a new flat_param from the loaded, non-sharded tensors.
-    flat_param = _module_handles(fsdp_state, module)[0].flat_param
-    loaded_flat_param = FlatParamHandle.flatten_params(
-        nonsharded_tensors, requires_grad=False
+    loaded_flat_param = handle.flatten_tensors_into_flat_param(
+        tensors_to_flatten, handle._aligned_numel, requires_grad=False
     )
 
     # Get the chunk from the loaded flat_param for the local rank.
@@ -607,9 +610,11 @@ def _sharded_pre_load_state_dict_hook(
         fsdp_state.rank,
         fsdp_state.world_size,
     )
+    flat_param = handle.flat_param
     loaded_flat_tensor.to(flat_param.device)
-    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, flat_param._shapes)), (
-        f"The original shapes in FSDP are {flat_param._shapes}. "
+    expected_shapes = [shape for shape in flat_param._shapes if shape is not None]
+    assert all(s1 == s2 for s1, s2 in zip(loaded_shapes, expected_shapes)), (
+        f"The original shapes in FSDP are {expected_shapes}. "
         f"The loaded shapes are {loaded_shapes}. "
         f"FSDP extension is {'NOT' if _user_extensions is not None else ''} None."
     )
