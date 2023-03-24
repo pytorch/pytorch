@@ -7616,6 +7616,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         self.assertEqual(z.size(), (2 * 10 ** 8, 3, 4 * 10 ** 8))
         self.assertRaises(RuntimeError, lambda: z[0][0][0].item())
 
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/97414")
     def test_upsample_nearest2d_meta(self):
         # TODO: the out tests cannot be triggered by test_nn.py because
         # we don't actually do out= arguments for nn functions, so there

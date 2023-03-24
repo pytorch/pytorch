@@ -5197,6 +5197,7 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: split_with_sizes
+    NestedTensorCPU, NestedTensorCUDA: split_with_sizes_nested
 
 - func: hsplit.int(Tensor(a -> *) self, int sections) -> Tensor(a)[]
   variants: function, method
