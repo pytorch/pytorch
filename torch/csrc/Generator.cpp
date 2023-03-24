@@ -4,6 +4,7 @@
 #include <ATen/CPUGeneratorImpl.h>
 #include <structmember.h>
 
+#include <ATen/core/GeneratorForPrivateuseone.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/THP.h>
@@ -68,7 +69,9 @@ static PyObject* THPGenerator_pynew(
     self->cdata = make_generator<MPSGeneratorImpl>();
   }
 #endif
-  else {
+  else if (device.type() == at::kPrivateUse1) {
+    self->cdata = at::GetGeneratorForPrivateuse1(device.index());
+  } else {
     AT_ERROR(
         "Device type ",
         c10::DeviceTypeName(device.type()),

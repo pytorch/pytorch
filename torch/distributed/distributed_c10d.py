@@ -124,6 +124,32 @@ logger = logging.getLogger(__name__)
 global _c10d_error_logger
 _c10d_error_logger = _get_or_create_logger()
 
+def exception_handler(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as error:
+            if is_initialized():
+                error_msg_dict = {
+                    "func_name": f"{func.__name__}",
+                    "args": f"{args}, {kwargs}",
+                    "backend": f"{get_backend(kwargs.get('group'))}",
+                    "world_size": f"{get_world_size(kwargs.get('group'))}",
+                    "global_rank": f"{get_rank()}",
+                    "local_rank": f"{get_rank(kwargs.get('group'))}",
+                    "error": f"{error}",
+                }
+            else:
+                error_msg_dict = {
+                    "func_name": f"{func.__name__}",
+                    "args": f"{args}, {kwargs}",
+                    "error": f"{error}",
+                }
+            _c10d_error_logger.debug(error_msg_dict)
+            raise
+    return wrapper
+
 PG_WRAPPER_STORE_PREFIX = "pg_wrapper"
 
 
@@ -226,7 +252,6 @@ class BackendConfig:
 
     def __init__(self, backend: Union[str, Backend]):
         self.device_backend_map: Dict[torch.device, Backend] = {}
-        # error check to make sure the config string is valid
 
         # Cases for when backend is a single string (without device types)
         if backend == Backend.UNDEFINED:
@@ -243,13 +268,24 @@ class BackendConfig:
                 "cuda": backend_val,
             }
         else:
-            # custom backend string in format of "{device_type1}:{backend1},{device_type2}:{backend2}"
-            # TODO
-            pass
+            # make sure the backend string is in the correct format
+            # "{device_type1}:{backend1},{device_type2}:{backend2}"
+            # e.g. "cpu:gloo,cuda:nccl"
+            backend_str_error_message = f"""The custom backend string argument is invalid: {backend}.
+                Custom backend string is an experimental feature where the backend string must be in the format:
+                "<device_type1>:<backend1>,<device_type2>:<backend2>...". e.g. 'cpu:gloo,cuda:nccl'"""
 
-        required_devices = ["cpu", "cuda"]
-        for device in required_devices:
-            assert device in self.device_backend_map
+            # parse the backend string and populate the device_backend_map
+            for device_backend_pair_str in backend.lower().split(","):
+                device_backend_pair = device_backend_pair_str.split(":")
+                if len(device_backend_pair) != 2:
+                    raise ValueError(f"Invalid device:backend pairing: \
+                                     {device_backend_pair_str}. {backend_str_error_message}")
+                device, backend = device_backend_pair
+                if device in self.device_backend_map:
+                    raise ValueError(f"Duplicate device type {device} \
+                                     in backend string: {backend}. {backend_str_error_message}")
+                self.device_backend_map[device] = Backend(backend)
 
     def __repr__(self):
         # string with all the device:backend pairs separared by commas
@@ -763,7 +799,7 @@ def get_backend(group: Optional[ProcessGroup] = None) -> str:
     assert pg_store is not None
     return pg_store[0]
 
-
+@exception_handler
 def init_process_group(
     backend: Union[str, Backend] = None,
     init_method: Optional[str] = None,
@@ -847,7 +883,9 @@ def init_process_group(
     .. note:: Support for multiple backends is experimental. Currently when no backend is
         specified, both ``gloo`` and ``nccl`` backends will be created. The ``gloo`` backend
         will be used for collectives with CPU tensors and the ``nccl`` backend will be used
-        for collectives with CUDA tensors.
+        for collectives with CUDA tensors. A custom backend can be specified by passing in
+        a string with format "<device_type>:<backend_name>,<device_type>:<backend_name>", e.g.
+        "cpu:gloo,cuda:custom_backend".
 
     """
     global _world
@@ -1088,15 +1126,15 @@ def _new_process_group_helper(
                         timeout=timeout,
                     )
 
-        # only create single backend pg when backend is set to gloo, nccl, mpi, and ucc
-        if backend in [Backend.GLOO, Backend.NCCL, Backend.UCC, Backend.MPI]:
+        # register only a single backend when all get_device_backend_map values are the same
+        if len(set(backend_config.get_device_backend_map().values())) == 1:
             for device in backend_config.get_device_backend_map().keys():
                 pg._register_backend(torch.device(device), backend_type, backend_class)
 
             # break out of outer loop to not create any more backends
             break
-        else:
-            pg._register_backend(torch.device(device), backend_type, backend_class)
+
+        pg._register_backend(torch.device(device), backend_type, backend_class)
 
     # update global state
     _world.pg_map[pg] = (backend, prefix_store)
@@ -1294,7 +1332,7 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
             group_src_rank = get_group_rank(pg, src)
             return pg.recv([tensor], group_src_rank, tag)
 
-
+@exception_handler
 def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, tag: int = 0) -> None:
     """
     Sends a tensor synchronously.
@@ -1326,7 +1364,7 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         group_dst_rank = get_group_rank(group, dst)
         group.send([tensor], group_dst_rank, tag).wait()
 
-
+@exception_handler
 def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[ProcessGroup] = None, tag: int = 0) -> int:
     """
     Receives a tensor synchronously.
@@ -1471,33 +1509,6 @@ def batch_isend_irecv(p2p_op_list):
             if ret is not None:
                 reqs.append(ret)
     return reqs
-
-
-def exception_handler(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as error:
-            if is_initialized():
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "backend": f"{get_backend(kwargs.get('group'))}",
-                    "world_size": f"{get_world_size(kwargs.get('group'))}",
-                    "global_rank": f"{get_rank()}",
-                    "local_rank": f"{get_rank(kwargs.get('group'))}",
-                    "error": f"{error}",
-                }
-            else:
-                error_msg_dict = {
-                    "func_name": f"{func.__name__}",
-                    "args": f"{args}, {kwargs}",
-                    "error": f"{error}",
-                }
-            _c10d_error_logger.debug(error_msg_dict)
-            raise
-    return wrapper
 
 
 @exception_handler
@@ -3314,7 +3325,7 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
     else:
         work.wait()
 
-
+@exception_handler
 def barrier(group=GroupMember.WORLD, async_op=False, device_ids=None):
 
     """

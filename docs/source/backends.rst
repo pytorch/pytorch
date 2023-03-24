@@ -40,19 +40,20 @@ torch.backends.cuda
 
 .. attribute::  torch.backends.cuda.cufft_plan_cache
 
-    ``cufft_plan_cache`` caches the cuFFT plans
+    ``cufft_plan_cache`` contains the cuFFT plan caches for each CUDA device.
+    Query a specific device `i`'s cache via `torch.backends.cuda.cufft_plan_cache[i]`.
 
     .. attribute::  size
 
-        A readonly :class:`int` that shows the number of plans currently in the cuFFT plan cache.
+        A readonly :class:`int` that shows the number of plans currently in a cuFFT plan cache.
 
     .. attribute::  max_size
 
-        A :class:`int` that controls cache capacity of cuFFT plan.
+        A :class:`int` that controls the capacity of a cuFFT plan cache.
 
     .. method::  clear()
 
-        Clears the cuFFT plan cache.
+        Clears a cuFFT plan cache.
 
 .. autofunction:: torch.backends.cuda.preferred_linalg_library
 
