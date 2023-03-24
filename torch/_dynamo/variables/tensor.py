@@ -251,9 +251,8 @@ class TensorVariable(VariableTracker):
 
             if "dim" in kwargs:
                 dim = kwargs.pop("dim")
-                constant_result = constant_result.call_method(
-                    tx, "__getitem__", [dim], {}
-                )
+                constant_result = constant_result.getitem_const(dim)
+
         elif name == "size" and self.size is not None:
             sizes = [variables.ConstantVariable(x) for x in self.size]
             constant_result = SizeVariable(sizes, **options)
