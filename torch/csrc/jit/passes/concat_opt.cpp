@@ -296,7 +296,7 @@ class ConcatExpander {
     auto cat_dim_value = maybe_cat_dim.value();
     auto cat_dim = node->input(1);
 
-    // Set the insertion point to the curent `cat` node.
+    // Set the insertion point to the current `cat` node.
     WithInsertPoint guard(node);
     auto none = graph_->insertConstant(IValue());
     auto one = graph_->insertConstant(1);
@@ -504,7 +504,7 @@ size_t determineUsageIdx(Value* value, Node* user) {
   const auto idx =
       std::find(user->inputs().begin(), user->inputs().end(), value) -
       user->inputs().begin();
-  TORCH_CHECK(idx != user->inputs().size());
+  TORCH_CHECK(idx != static_cast<decltype(idx)>(user->inputs().size()));
   return idx;
 }
 

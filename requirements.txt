@@ -13,4 +13,5 @@ sympy
 filelock
 networkx
 jinja2
+fsspec
 optree>=0.7.0

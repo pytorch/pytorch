@@ -108,6 +108,7 @@ def get_conda_packages(run_lambda):
                 "mkl",
                 "magma",
                 "mkl",
+                "triton",
                 "optree",
             }
         )
@@ -387,6 +388,7 @@ def get_pip_packages(run_lambda):
                     "torch",
                     "numpy",
                     "mypy",
+                    "triton",
                     "optree",
                 }
             )

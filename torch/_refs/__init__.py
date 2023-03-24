@@ -276,6 +276,7 @@ __all__ = [
     "arange",
     "empty",
     "empty_like",
+    "empty_permuted",
     "empty_strided",
     "eye",
     "full",
@@ -377,6 +378,7 @@ from torch._decomp import register_decomposition
 #
 
 infer_aten_op = object()
+
 
 # TODO: add type promotion support
 def _make_elementwise_unary_reference(
@@ -555,7 +557,6 @@ def exp2(a):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-
     assert isinstance(a, TensorLike)
     assert isinstance(value, Number)
 
@@ -1117,7 +1118,6 @@ def float_power(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
 ) -> Tensor:
-
     if isinstance(a, Number) and isinstance(b, Number):
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
@@ -1166,6 +1166,7 @@ def float_power(
 #
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+
 
 # TODO: add docstring
 @_make_elementwise_binary_reference(
@@ -1445,12 +1446,27 @@ def le(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_rhs_python_scalar=False,
 )
 def logaddexp(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
-    # Nb. this implementation does nto distribute the gradients evenly when a == b
-    mask = a >= b
+    # Nb. this implementation does not distribute the gradients evenly when a == b
+    mask = torch.real(a) >= torch.real(b)
     max_ = torch.where(mask, a, b)
     min_ = torch.where(mask, b, a)
-    inf_mask = torch.logical_and(torch.isinf(a), a == b)
-    return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
+    inf_mask = torch.logical_and(
+        torch.logical_not(torch.isfinite(torch.real(a))), torch.real(a) == torch.real(b)
+    )
+    if utils.is_complex_dtype(a.dtype) or utils.is_complex_dtype(b.dtype):
+        # are you wondering what this bunch of codes are for? edge cases!
+        neg_min_mask = torch.real(min_) < 0
+        inf_vals = torch.where(
+            neg_min_mask, min_, torch.log(torch.exp(min_) + torch.exp(max_))
+        )
+        non_nan_vals = torch.where(
+            inf_mask, inf_vals, max_ + torch.log1p(torch.exp(min_ - max_))
+        )
+        # the type for full_like does not include tensor yet
+        nan_mask = torch.isnan(min_)
+        return torch.where(nan_mask, complex(float("nan"), float("nan")), non_nan_vals)  # type: ignore[call-overload]
+    else:
+        return torch.where(inf_mask, a, max_ + torch.log1p(torch.exp(min_ - max_)))
 
 
 # TODO: add docstring
@@ -1603,7 +1619,13 @@ def sub(
                 )
             )
             raise ValueError(msg)
-        b = prims.mul(b, alpha)
+        if isinstance(b, torch.Tensor):
+            b = prims.mul(b, alpha)
+        else:
+            # Carefully not to use prims.mul if b is a scalar / symint.
+            # prims.mul always returns a tensor,
+            # which will mess with type promotion.
+            b = b * alpha
 
     return prims.sub(a, b)
 
@@ -1778,6 +1800,7 @@ def clamp_max(
 #
 # Conditional references
 #
+
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
@@ -4055,9 +4078,7 @@ def empty_permuted(
         shape,
         physical_layout,
         dtype=dtype,
-        layout=layout,
         device=device,
-        pin_memory=pin_memory,
         requires_grad=requires_grad,
     )
 
@@ -4072,7 +4093,6 @@ def new_empty(
     device: Optional[torch.device] = None,
     pin_memory: bool = False,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4223,7 +4243,7 @@ def new_ones(
 def new_full(
     a: TensorLikeType,
     size: ShapeType,
-    fill_value: Union[int, float, bool],
+    fill_value: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
@@ -4255,7 +4275,6 @@ def empty_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> TensorLikeType:
-
     dtype = a.dtype if dtype is None else dtype
     layout = a.layout if layout is None else layout
     device = a.device if device is None else device
@@ -4274,10 +4293,13 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(a)
-    return torch.empty_strided(
+    logical_to_physical_perm = (
+        utils.compute_elementwise_output_logical_to_physical_perm(a)
+    )
+    # identity perm is [2, 1, 0]
+    return torch.empty_permuted(
         a.shape,
-        strides,
+        logical_to_physical_perm,
         dtype=dtype,
         layout=layout,
         device=device,
@@ -4343,7 +4365,9 @@ def arange(
     # For int64 we truncate arguments to int before calculating length, but
     # other integral dtypes we don't. Weird... but needed to match ATen shapes.
     if dtype == torch.int64:
-        length = math.ceil((xend - xstart) / xstep)
+        # Uses floordiv to avoid ceil in inductor.
+        sgn = bool(xstep > 0) - bool(xstep < 0)
+        length = (xend - xstart + xstep - sgn) // xstep
     else:
         length = math.ceil((end - start) / step)
 

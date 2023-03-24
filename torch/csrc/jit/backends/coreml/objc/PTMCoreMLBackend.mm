@@ -104,12 +104,17 @@ GenericList pack_outputs(const std::vector<TensorSpec>& output_specs, id<MLFeatu
     for (int i = 0; i < val.multiArrayValue.shape.count; ++i) {
       output_shape.emplace_back(val.multiArrayValue.shape[i].integerValue);
     }
-    auto tensor = at::empty(IntArrayRef(output_shape), spec.dtype);
+    TORCH_CHECK(val.multiArrayValue.dataType == MLMultiArrayDataTypeFloat32, "Core ML backend unexpected output data type");
     int64_t count = val.multiArrayValue.count;
-    memcpy(
-      tensor.data_ptr<float>(),
-      (float*)val.multiArrayValue.dataPointer,
-      count * sizeof(float));
+    float* temp = static_cast<float*>(std::malloc(count * sizeof(float)));
+    if (@available(iOS 15.4, *)) {
+      [val.multiArrayValue getBytesWithHandler:^(const void * _Nonnull bytes, NSInteger size) {
+        memcpy(temp, (float *)bytes, count * sizeof(float));
+      }];
+    } else {
+      memcpy(temp, (float *)val.multiArrayValue.dataPointer, count * sizeof(float));
+    }
+    auto tensor = at::from_blob(temp, output_shape, [&](void* ptr) { std::free(ptr); }, TensorOptions().dtype(at::kFloat));
     outputs.push_back(std::move(tensor));
   }
   if(output_specs.size() > 1){
@@ -183,18 +188,20 @@ class CoreMLBackend: public torch::jit::PyTorchBackendInterface {
   }
 
   GenericList execute(IValue handle, GenericList inputs) override {
-    const auto model_wrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
+    @autoreleasepool {
+      const auto model_wrapper = c10::static_intrusive_pointer_cast<MLModelWrapper>(handle.toCapsule());
 
-    PTMCoreMLExecutor *executor = model_wrapper->executor;
-    [executor setInputs:inputs];
+      PTMCoreMLExecutor *executor = model_wrapper->executor;
+      [executor setInputs:inputs];
 
-    NSError *error;
-    id<MLFeatureProvider> outputsProvider = [executor forward:&error];
-    if (!outputsProvider) {
-      COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
+      NSError *error;
+      id<MLFeatureProvider> outputsProvider = [executor forward:&error];
+      if (!outputsProvider) {
+        COREML_THROW_IF_ERROR(error, "Error running CoreML inference", tensorListToShapesStr(inputs));
+      }
+
+      return pack_outputs(model_wrapper->outputs, outputsProvider);
     }
-
-    return pack_outputs(model_wrapper->outputs, outputsProvider);
   }
 
   bool is_available() override {
