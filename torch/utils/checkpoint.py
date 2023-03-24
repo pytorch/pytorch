@@ -413,7 +413,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=True, **kwar
 # with retain_graph=True, we would store recomputed variables as the values of a
 # WeakKeyDictionary and pack strong references to the keys, so that as we
 # backward, those packed keys would be cleared as long as retain_graph=False.
-# Clearing the packed key clears the corresonding entry in the WKD.
+# Clearing the packed key clears the corresponding entry in the WKD.
 #
 # If we wish recomputed variables to be immediately cleared as we unpack them in
 # the retain_graph=True case, we cannot rely on the packed keys to be cleared by
