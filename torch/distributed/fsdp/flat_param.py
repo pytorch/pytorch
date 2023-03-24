@@ -186,8 +186,8 @@ class FlatParameter(nn.Parameter):
             units of numel) giving this rank's part of each flattened original
             module parameter; for any parameter ``p`` that is not sharded
             across ranks, this will be [0, ``p.numel()``-1].
-        _shard_indices (Tuple[int, int]): [start, end] indices (in units of
-            parameters) for this rank's shard of the original model parameters,
+        _shard_param_indices (Tuple[int, int]): [start, end] indices (in units
+            of numel) for this rank's shard of the original model parameters,
             where the parameters follow the order in which they were originally
             flattened; this indexes appropriately into any data structure that
             follows the flattening order (e.g. ``_param_infos``, ``_numels``,
@@ -595,7 +595,7 @@ class FlatParamHandle:
         """
         Initializes shard-related metadata for this rank's shard of the flat
         parameter: ``_sharded_size``, ``_shard_param_offsets``,
-        ``_shard_indices``, and ``_shard_numel_padded``.
+        ``_shard_param_indices``, and ``_shard_numel_padded``.
 
         Args:
             numel_padded (int): Numel padded for this rank's sharded flat
@@ -619,7 +619,7 @@ class FlatParamHandle:
         )
         (
             self.flat_param._shard_param_offsets,  # type: ignore[attr-defined]
-            self.flat_param._shard_indices,  # type: ignore[attr-defined]
+            self.flat_param._shard_param_indices,  # type: ignore[attr-defined]
         ) = self._get_shard_metadata(start, end)
         self.flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
 
@@ -641,7 +641,7 @@ class FlatParamHandle:
 
         Return:
             Tuple[Tuple[Tuple[int, int], ...], Tuple[int, int]]: See
-            ``_shard_param_offsets`` and ``_shard_indices`` in
+            ``_shard_param_offsets`` and ``_shard_param_indices`` in
             :class:`FlatParameter` 's docstring.
         """
         flat_param_offsets = self._get_flat_param_offsets()
@@ -759,11 +759,11 @@ class FlatParamHandle:
         Returns shard-related metadata specific to this rank's shard of the
         flat parameter.
         """
-        assert hasattr(self.flat_param, "_shard_indices") and hasattr(
+        assert hasattr(self.flat_param, "_shard_param_indices") and hasattr(
             self.flat_param, "_shard_param_offsets"
         ), "Shard metadata has not been initialized"
-        shard_param_start_index = self.flat_param._shard_indices[0]  # type: ignore[attr-defined]
-        shard_param_end_index = self.flat_param._shard_indices[1]  # type: ignore[attr-defined]
+        shard_param_start_index = self.flat_param._shard_param_indices[0]  # type: ignore[attr-defined]
+        shard_param_end_index = self.flat_param._shard_param_indices[1]  # type: ignore[attr-defined]
         sl = (
             slice(shard_param_start_index, shard_param_end_index + 1)
             if shard_param_start_index <= shard_param_end_index
@@ -1563,7 +1563,7 @@ class FlatParamHandle:
             self._use_unsharded_views(as_params=True)
             return
         self._check_sharded(self.flat_param)
-        start, end = self.flat_param._shard_indices
+        start, end = self.flat_param._shard_param_indices
         offset = 0
         # Construct once and reuse for all parameters not in the local shard
         size_0_empty_tensor = torch.empty(
@@ -1625,7 +1625,7 @@ class FlatParamHandle:
                 param.grad = None
             return
         self._check_sharded(grad)
-        start, end = flat_param._shard_indices  # type: ignore[attr-defined]
+        start, end = flat_param._shard_param_indices  # type: ignore[attr-defined]
         offset = 0
         assert flat_param._params is not None
         for i, param in enumerate(flat_param._params):
@@ -1687,7 +1687,7 @@ class FlatParamHandle:
             # For `NO_SHARD`, we may still need to writeback
             return False
         flat_param = self.flat_param
-        start, end = flat_param._shard_indices
+        start, end = flat_param._shard_param_indices
         offset = 0
         assert flat_param._params is not None
         wroteback = False
@@ -1929,7 +1929,7 @@ class FlatParamHandle:
     def _fqns_in_shard(self) -> List[str]:
         """Returns the FQNs of the parameters present in this rank's shard."""
         fqns_in_shard: List[str] = []
-        start, end = self.flat_param._shard_indices  # type: ignore[attr-defined]
+        start, end = self.flat_param._shard_param_indices  # type: ignore[attr-defined]
         for i in range(len(self.flat_param._fqns)):
             if i >= start and i <= end and self.flat_param._shard_param_offsets:  # type: ignore[attr-defined]
                 fqns_in_shard.append(self.flat_param._fqns[i])
