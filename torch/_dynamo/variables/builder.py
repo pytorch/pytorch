@@ -671,13 +671,9 @@ class VariableBuilder:
             #
             # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
             # guard source.  This behavior is gated on config.skip_fsdp_guards.
-            guard_create_fns = [GuardBuilder.TYPE_MATCH]
-            if torch._dynamo.config.skip_fsdp_guards:
-                guard_create_fns = [GuardBuilder.ID_MATCH]
-
             return FSDPManagedNNModuleVariable(
                 value,
-                guards=self.make_guards(*guard_create_fns),
+                guards=self.make_guards(GuardBuilder.TYPE_MATCH),
                 source=self.get_source(),
             )
         else:
