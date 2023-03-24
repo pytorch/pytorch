@@ -1318,7 +1318,7 @@ def save_merge_record(
         # Prepare the record to be written into Rockset
         data = [
             {
-                "id": comment_id,
+                "comment_id": comment_id,
                 "pr_num": pr_num,
                 "owner": owner,
                 "project": project,
