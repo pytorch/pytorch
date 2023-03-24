@@ -3048,11 +3048,10 @@ class MultiOutput(ExternKernel):
 
 
 def _string(shape: tuple):
-    # return V.graph.sizevars.codegen_shape_tuple(shape)
-    from .sizevars import CppSizeVarAllocator
+    from .codegen.wrapper import CppWrapperCodeGen
 
-    sizevars = CppSizeVarAllocator()
-    return sizevars.codegen_shape_tuple(shape)
+    cpp_wrapper_codegen = CppWrapperCodeGen()
+    return cpp_wrapper_codegen.codegen_shape_tuple(shape)
 
 
 def _prepare_convolution_fusion_create(
@@ -3202,11 +3201,10 @@ class ConvolutionUnary(ExternKernelAlloc):
         inputs,
         constant_args=(),
         kernel="torch.ops.mkldnn._convolution_pointwise",
+        cpp_kernel="mkldnn::_convolution_pointwise",
         cpp_constant_args=(),
     ):
-        super().__init__(layout, inputs, constant_args)
-        self.kernel = kernel
-        self.cpp_kernel = "mkldnn::_convolution_pointwise"
+        super().__init__(layout, inputs, constant_args, None, kernel, cpp_kernel)
         self.cpp_kernel_key = "convolution_pointwise"
         self.cpp_op_schema = """
             at::Tensor(
