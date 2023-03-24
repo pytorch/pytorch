@@ -72,12 +72,22 @@ CI_SKIP = collections.defaultdict(list)
 
 # Skips for dynamic=False
 
-CI_SKIP[CI("aot_eager", training=False)] = [
+# Here eager really means dynamo+eager
+CI_SKIP[CI("eager", training=False)] = [
     # TorchBench
     "DALLE2_pytorch",  # AttributeError: text_encodings
-    "demucs",  # OOM
+    # TypeError: pad_center() takes 1 positional argument but 2 were given
+    "tacotron2",
     # torchrec_dlrm requires gcc-11, https://github.com/pytorch/benchmark/pull/1427
     "torchrec_dlrm",
+    # Huggingface
+    "DebertaV2ForQuestionAnswering",  # OOM
+]
+
+CI_SKIP[CI("aot_eager", training=False)] = [
+    *CI_SKIP[CI("eager", training=False)],
+    # TorchBench
+    "demucs",  # OOM
     # all dynamic shapes errors for detectron variants
     "detectron2_fasterrcnn_r_101_c4",
     "detectron2_fasterrcnn_r_101_dc5",

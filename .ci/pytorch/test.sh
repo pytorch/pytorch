@@ -869,14 +869,6 @@ elif [[ "$TEST_CONFIG" == deploy ]]; then
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   install_huggingface
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  test_without_numpy
-  install_torchvision
-  test_dynamo_shard 1
-  test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
-  install_torchvision
-  test_dynamo_shard 2
 elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   install_huggingface
@@ -907,6 +899,14 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
   install_torchvision
   test_inductor
   test_inductor_distributed
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  test_without_numpy
+  install_torchvision
+  test_dynamo_shard 1
+  test_aten
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+  install_torchvision
+  test_dynamo_shard 2
 elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_without_numpy
   install_torchvision
