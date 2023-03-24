@@ -16,7 +16,7 @@ from torch.distributed._spmd.api import (
     compile,
 )
 from torch.distributed._spmd.comm_tensor import CommTensor
-from torch.distributed._tensor import DTensor, DeviceMesh, Replicate
+from torch.distributed._tensor import DeviceMesh, Replicate
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.placement_types import DTensorSpec
@@ -562,6 +562,7 @@ class TraceTrainStepTest(DTensorTestBase):
     @with_comms
     def test_train_step_override(self):
         transform_targets = []
+
         class DDMOverride(Override):
             def replacement(
                 self, orig_submodule: torch.nn.Module

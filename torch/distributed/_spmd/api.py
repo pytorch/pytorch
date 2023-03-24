@@ -1,8 +1,18 @@
 from abc import ABC, abstractmethod
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from copy import copy
 from functools import wraps, partial
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Type
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Sequence,
+    Tuple,
+    Type,
+    Union,
+    cast,
+)
 
 import torch
 import torch.distributed as dist
@@ -16,7 +26,6 @@ from torch.distributed._spmd.distribute import (
 )
 from torch.distributed._spmd.distributed_graph import DistributedGraph
 from torch.distributed._tensor import (
-    DTensor,
     DeviceMesh,
     Placement,
     Replicate,
@@ -24,10 +33,7 @@ from torch.distributed._tensor import (
 )
 from torch.nn.utils import stateless
 from functorch import make_fx
-from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
-from torch._functorch.eager_transforms import functionalize
-from torch._subclasses.fake_tensor import FakeTensorMode
 
 
 class SPMD(nn.Module):
@@ -173,19 +179,17 @@ def _dtensor_expand(
 
 @contextmanager
 def _rematerialize_optimizer(
-    opt: Optional[torch.optim.Optimizer],
+    opt: torch.optim.Optimizer,
     named_states: Dict[str, Any],
     params: Dict[str, nn.Parameter],
 ):
-    if opt is None:
-        try:
-            yield
-        finally:
-            return
+    assert opt is not None
 
+    # update opt.state with proxy tensors
     orig_states: Dict[str, Any] = copy(opt.state)
     for n in named_states:
-        opt.state[params[n]] = named_states[n]
+        # opt.state's key type is string, but optimizer uses Parameter as keys
+        opt.state[params[n]] = named_states[n]  # type: ignore[index]
 
     # FIXME: support multiple parameter groups
     param_group = opt.param_groups[0]
@@ -205,7 +209,9 @@ def _enable_compile():
     # The return value of torch._utils.is_compiling changes optimizer behavior.
     # We need that function to return True to include optimizer in the graph.
     # See: https://github.com/pytorch/pytorch/blob/a524123c91ab399c9dd6882c1189596dd77e7734/torch/optim/optimizer.py#L41
-    f_true = lambda: True
+    def f_true():
+        return True
+
     orig_is_compiling_code = torch._utils.is_compiling.__code__
     torch._utils.is_compiling.__code__ = f_true.__code__
     try:
@@ -247,9 +253,9 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                     assert opt is None, "Only support single Optimizer for now"
                     opt = arg
 
-            assert mod is not None, (
-                "Couldn't find nn.Module instances from the arguments."
-            )
+            assert (
+                mod is not None
+            ), "Couldn't find nn.Module instances from the arguments."
 
             # 2. Override target submodules (e.g., MoE) with dummy replacements
             if module_override:
@@ -263,7 +269,7 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                             )
 
             # 3. Trace statelss version of the train_step
-            params_and_buffers = {
+            params_and_buffers: Dict[str, Union[torch.Tensor, nn.Parameter]] = {
                 **dict(mod.named_parameters(remove_duplicate=False)),
                 **dict(mod.named_buffers(remove_duplicate=False)),
             }
@@ -271,13 +277,15 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
             named_states = {}
             if opt is not None:
                 opt_states, spec = pytree.tree_flatten(dict(opt.state))
+
                 # Pass named_states instead of opt.state to stateless_func, because
                 # the later uses nn.Parameter as key. During tracing, we need to
                 # make sure optimizers can find the states using proxy tensors.
-
                 for n, p in params_and_buffers.items():
                     if p in opt.state:
-                        named_states[n] = opt.state[p]
+                        # opt.state's key type is string, but optimizer uses
+                        # Parameter as keys
+                        named_states[n] = opt.state[p]  # type: ignore[index]
 
             # Lift states and parameters as function arguments so that make_fx
             # can trace operations applied to them.
@@ -285,19 +293,21 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                 func, args, kwargs, named_states, params_and_buffers
             ):
                 with stateless._reparametrize_module(
-                    mod, params_and_buffers
+                    cast(nn.Module, mod), params_and_buffers
                 ), _rematerialize_optimizer(
                     opt, named_states, params_and_buffers
-                ):
+                ) if opt else nullcontext():
                     ret = func(*args, **kwargs)
                     # make sure updated parameters are returned
-                    return ret, list(mod.parameters())
+                    return ret, list(mod.parameters())  # type: ignore[union-attr]
 
             # FIXME: Using symbolic tracing to work around. Otherwise it hits
             # shape mismatch error, as we use local inputs to trace local graph
             # and use DTensor to expand operators, where DTensor's shape is the
             # global shape.
             with _enable_compile():
+                # FIXME: functionalize crashes with
+                # "UnsupportedFakeTensorException: meta converter nyi"
                 gm = make_fx(
                     partial(stateless_func, func),
                     tracing_mode="symbolic",
