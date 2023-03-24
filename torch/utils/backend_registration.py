@@ -4,6 +4,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     r"""
     rename_privateuse1_backend(backend_name) -> None
 
+    Note: support the custom device with privateuse1
     This is a registration API for external backends that would like to register their
     own device and C++ kernels out of tree.
 
@@ -17,7 +18,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     Note: this API can only be called once per process. Attempting to change
     the external backend after it's already been set will result in an error.
 
-    Note: and if you want to support AMP on your device, you can register a custom backend module.
+    Note(AMP): If you want to support AMP on your device, you can register a custom backend module.
     The backend must register a custom backend module with `torch._register_device_module("foo", BackendModule)`.
     BackendModule needs to have the following API's:
 
@@ -37,6 +38,14 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (5) set_autocast_foo_dtype(dtype) -> None
         set the supported dtype on your `foo` device in AMP, and the dtype be contained in the dtypes got
         from `get_amp_supported_dtype`.
+
+    Note(random): If you want to support to set seed for your device, BackendModule needs to have the following API's:
+
+    (1) _is_in_bad_fork() -> bool
+        Return `True` if now it is in bad_fork, else return `False`.
+
+    (2) manual_seed_all(seed: int) -> None
+        Sets the seed for generating random numbers for your devices.
 
     For more details, see https://pytorch.org/tutorials/advanced/extend_dispatcher.html#get-a-dispatch-key-for-your-backend
     For an existing example, see https://github.com/bdhirsh/pytorch_open_registration_example
