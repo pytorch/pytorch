@@ -506,7 +506,11 @@ class FlatParamHandle:
                 f"`params` were not found in `module`'s tree"
                 f"params: {params}\nmodule: {module}"
             )
-        if self.rank == 0 and aligned_numel > 0 and total_numel != total_numel_without_padding:
+        if (
+            self.rank == 0
+            and aligned_numel > 0
+            and total_numel != total_numel_without_padding
+        ):
             logging.info(
                 f"FSDP FlatParameter address alignment created "
                 f"{total_numel - total_numel_without_padding} "
