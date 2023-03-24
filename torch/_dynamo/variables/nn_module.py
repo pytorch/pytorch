@@ -677,7 +677,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return super().call_method(tx, name, args, kwargs)
 
 
-class FSDPNNModuleVariable(UnspecializedNNModuleVariable):
+class FSDPManagedNNModuleVariable(UnspecializedNNModuleVariable):
     """
     Tracing behavior: trace into submodules and treat them as Unspecialized, do not
     register parameters to the top-level, treat them as function inputs.
@@ -690,8 +690,12 @@ class FSDPNNModuleVariable(UnspecializedNNModuleVariable):
     """
 
     def __init__(self, value, **kwargs):
+        source = kwargs.get("source", None)
+        assert source is not None
+
         super().__init__(value=value, **kwargs)
         if torch._dynamo.config.skip_fsdp_guards:
-            self.source = FSDPNNModuleSource(self.source)
+            self.source = FSDPNNModuleSource(source)
         else:
-            self.source = NotNNModuleSource(self.source)
+            # this makes us behave like a usual UnspecializedNNModuleVariable for guarding purposes
+            self.source = NotNNModuleSource(source)

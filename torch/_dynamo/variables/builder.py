@@ -85,7 +85,7 @@ from .misc import (
     SkipFilesVariable,
     TypingVariable,
 )
-from .nn_module import UnspecializedNNModuleVariable
+from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
 from .tensor import (
     SymNodeVariable,
     TensorVariable,
@@ -642,28 +642,40 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(
                 self.source, value, result
             )
-        elif getattr(value, "_is_fsdp_managed_module", False) or issubclass(
+        elif issubclass(
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
             return UnspecializedNNModuleVariable(
                 value, guards=self.make_guards(GuardBuilder.TYPE_MATCH)
             )
         elif getattr(value, "_is_fsdp_managed_module", False):
-            # Note: we can't do this assert inside FSDP constructor,
+            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
+            # in fully_sharded_data_parallel.py for more information
+
+            # we can't do this assert inside FSDP constructor,
             # since we don't know yet whether dynamo will be used
             assert getattr(
                 value, "_fsdp_use_orig_params", False
             ), "Dynamo only supports FSDP with use_orig_params=True"
 
+            # Note on FSDP guarding
+            # 1. We expect FSDP wrapping mutates an nn module irreversably (no way to de-wrap).
+            # 2. Eager FSDP already assumes (requires, but without enforcement) that users don't mutate their
+            #    model parameters/structure after FSDP wrapping, becuase FSDP wouldn't notice or update its FlatParams.
+            #
+            # Due to (1), once we enter this path we expect not to go back nor have to guard on type
+            # or _is_fsdp_managed_module.
+            #
+            # TODO(whc) We could add a guard on the opposite case, where a user compiled/ran
+            # pre-FSDP-wrapped model, then wrapped, to ensure that we recompile with the FSDP handling.
+            #
+            # Due to (2), we skip guards on inner contents of fsdp_managed modules, by using FSDPNNModuleSource as the
+            # guard source.  This behavior is gated on config.skip_fsdp_guards.
             guard_create_fns = [GuardBuilder.TYPE_MATCH]
             if torch._dynamo.config.skip_fsdp_guards:
                 guard_create_fns = [GuardBuilder.ID_MATCH]
 
-            # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
-            # in fully_sharded_data_parallel.py for more information
-
-            # Todo(whc) rename FSDPWrappedNNModuleVariable
-            return FSDPNNModuleVariable(
+            return FSDPManagedNNModuleVariable(
                 value,
                 guards=self.make_guards(*guard_create_fns),
                 source=self.get_source(),

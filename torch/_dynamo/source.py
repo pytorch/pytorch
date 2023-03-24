@@ -9,7 +9,8 @@ from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr, rename_implicit
 
-# it seems to not make sense to allow FSDP->NN so it is not handled
+# It shouldn't be supported to construct an NNModule inside and FSDP module,
+# so those cases are omitted intentionally
 _GUARD_SOURCE_NN_MODULE = {
     GuardSource.LOCAL: GuardSource.LOCAL_NN_MODULE,
     GuardSource.GLOBAL: GuardSource.GLOBAL_NN_MODULE,
