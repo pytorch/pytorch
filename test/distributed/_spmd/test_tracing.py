@@ -431,7 +431,7 @@ class DummyModel(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        assert len(x.size()) == 2 and x.size(0) == 1
+        assert len(x.size()) == 2
 
         return self.relu(self.l2(self.ddm(self.l1(x))))
 
@@ -497,6 +497,7 @@ class TraceTrainStepTest(DTensorTestBase):
         @compile()
         def train_step(mod, inp):
             mod(inp).sum().backward()
+            return [p.grad for p in mod.parameters()]
 
         rank = torch.distributed.get_rank()
         inp = torch.randn(2, 10).cuda(rank)
@@ -508,11 +509,13 @@ class TraceTrainStepTest(DTensorTestBase):
         ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
         ddp_inp = deepcopy(inp)
 
-        train_step(mod, inp)
+        grads = train_step(mod, inp)
         ddp_mod(ddp_inp).sum().backward()
 
-        for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
+        for g1, p2 in zip(grads, ddp_mod.parameters()):
+            # FIXME(@mrshenli): DDP by default divides gradients by world size.
+            # Should we match that behavior?
+            self.assertEqual(g1 / self.world_size, p2.grad)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -558,6 +561,7 @@ class TraceTrainStepTest(DTensorTestBase):
     @skip_if_lt_x_gpu(2)
     @with_comms
     def test_train_step_override(self):
+        transform_targets = []
         class DDMOverride(Override):
             def replacement(
                 self, orig_submodule: torch.nn.Module
@@ -567,11 +571,13 @@ class TraceTrainStepTest(DTensorTestBase):
             def transform(
                 self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
             ) -> fx.Graph:
+                nonlocal transform_targets
                 for node in gm.graph.nodes:
                     if node.target in [
                         torch.ops.dummy.ddm.default,
                         torch.ops.dummy.ddm_backward.default,
                     ]:
+                        transform_targets.append(node.target)
                         # N.B.: this is not a complete subgraph representing
                         # original logic, as we are testing the ability to
                         # modify graph after DTensor expansion.
@@ -586,15 +592,20 @@ class TraceTrainStepTest(DTensorTestBase):
 
                 return gm
 
-        @compile(override_map={DataDependentModule: DDMOverride()})
-        def train_step(mod, inp):
+        @compile(module_override={DataDependentModule: DDMOverride()})
+        def train_step(mod, opt, inp):
             mod(inp).sum().backward()
+            opt.step()
 
         rank = torch.distributed.get_rank()
         mod = DummyModel(self.world_size).cuda(rank)
+        opt = torch.optim.SGD(mod.parameters(), lr=0.01, foreach=False)
         # FIXME: symbolic tracing treats bs=1 as constant, have to use bs > 1.
         inp = torch.randn(4, 10).cuda(rank)
-        train_step(mod, inp)
+        train_step(mod, opt, inp)
+
+        # checking transforms are indeed invoked.
+        self.assertEqual(transform_targets, [torch.ops.dummy.ddm.default, torch.ops.dummy.ddm_backward.default])
 
 
 if __name__ == "__main__":
