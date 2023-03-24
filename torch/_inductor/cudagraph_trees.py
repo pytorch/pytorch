@@ -258,14 +258,22 @@ def cudagraphify_impl(
     device_index: int,
     is_backward: bool,
     is_inference: bool,
+    stack_traces: Optional[StackTraces] = None,
 ):
     manager = get_container(device_index).get_tree_manager()
+    assert not (is_backward and is_inference)
+    mode = (
+        CompilationMode.BACKWARD
+        if is_backward
+        else (CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD)
+    )
+
     return manager.add_function(
         model,
         inputs,
         static_input_idxs,
-        is_backward,
-        is_inference,
+        stack_traces,
+        mode,
     )
 
 
@@ -351,6 +359,8 @@ PathOutputIndex = Tuple[int, int]
 # For each node in the path, for each output, is the output alive
 PathLiveness = List[List[bool]]
 
+StackTraces = List[Optional[str]]
+
 
 class CUDAWarmupNode:
     """
@@ -378,6 +388,7 @@ class CUDAWarmupNode:
         cuda_graphs_pool: Tuple[int, int],
         existing_cuda_graph: torch.cuda.Graph,
         device_index: int,
+        stack_traces: Optional[StackTraces],
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -386,6 +397,7 @@ class CUDAWarmupNode:
         self.existing_cuda_graph = existing_cuda_graph
         self.has_run = False
         self.device_index = device_index
+        self.stack_traces = stack_traces
 
     def run(self, new_inputs):
         assert not self.has_run, "Wrapped function should never be run twice"
@@ -403,7 +415,7 @@ class CUDAWarmupNode:
             ):
                 non_cudagraph_inps.add(new_inputs[i].untyped_storage().data_ptr())
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             refs = list(self.path_live_weakrefs())
             check_memory_pool(self.cuda_graphs_pool, refs)
 
@@ -425,7 +437,7 @@ class CUDAWarmupNode:
             ]
         )
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             out_refs = self.path_live_weakrefs()
             new_storages = [
                 t for t in out_refs if t.data_ptr() not in non_cudagraph_inps
@@ -436,6 +448,12 @@ class CUDAWarmupNode:
 
     def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
         "Returns all live storages weakrefs that created by nodes in this path"
+        for stor_ref, _ in self.path_live_weakrefs_and_stacktraces():
+            yield stor_ref
+
+    def path_live_weakrefs_and_stacktraces(
+        self,
+    ) -> Generator[Tuple[StorageWeakRefWrapper, Optional[str]]]:
         nodes = []
         node = self
         while node:
@@ -443,9 +461,9 @@ class CUDAWarmupNode:
             node = node.parent
 
         for node in reversed(nodes):
-            for output in node.outputs_weakrefs:
+            for i, output in enumerate(node.outputs_weakrefs):
                 if is_live(output):
-                    yield output
+                    yield output, (node.stack_traces[i] if node.stack_traces else None)
 
     def all_outputs_are_dead(self):
         return not list(self.path_live_weakrefs())
@@ -486,12 +504,14 @@ class CUDAGraphNode:
         inputs: List[Tensor],
         cuda_graphs_pool: Tuple[int, int],
         device_index: int,
+        stack_traces: Optional[StackTraces],
     ):
         assert isinstance(inputs, (list, tuple))
 
         self.wrapped_function = wrapped_function
         self.id = id
         self.device = device_index
+        self.stack_traces = stack_traces
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -509,6 +529,9 @@ class CUDAGraphNode:
         self.outputs_weakrefs: OutputList[Optional[StorageWeakRefWrapper]] = []
         self.path_weakrefs: LevelList[OutputList[Optional[StorageWeakRefWrapper]]] = [
             node.outputs_weakrefs for node in self._path_from_root
+        ]
+        self.path_stacktraces: LevelList[StackTraces] = [
+            node.stack_traces for node in self._path_from_root
         ]
 
         # tensors which are outputs of previous graphs in the tree
@@ -616,7 +639,7 @@ class CUDAGraphNode:
         self.checkpointed_caching_state: Optional[AllocatorState] = None
 
     def run(self, new_inputs):
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.slow_cudagraph_asserts:
             self.debug_check_invariants_before_invocation()
 
         assert len(self.static_input_data_ptrs) == len(new_inputs)
@@ -677,7 +700,7 @@ class CUDAGraphNode:
     def _record(self, model, stream, inputs):
         "Record the model"
 
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             # need to use parent live weakrefs because live_indices isnt set yet
             memory = (
                 [] if self.parent is None else list(self.parent.path_live_weakrefs())
@@ -720,6 +743,13 @@ class CUDAGraphNode:
                 and o.untyped_storage().data_ptr() in self.static_input_storage_ptrs
             )
 
+        if self.stack_traces is None:
+            self.stack_traces = [None for _ in range(len(outputs))]
+        else:
+            assert len(self.stack_traces) == len(
+                outputs
+            ), "Wrong number of stack traces passed in"
+
         self._add_replayed_outputs(outputs)
         self.recorded_liveness_after_graph = self._get_liveness(self.path_weakrefs)
 
@@ -734,7 +764,7 @@ class CUDAGraphNode:
                     self.live_indices_after_graph.append((depth, output_index))
 
         self.debug_check_invariants_after_invocation()
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             check_memory_pool(self.cuda_graphs_pool, list(self.path_live_weakrefs()))
 
     def _add_replayed_outputs(self, outputs):
@@ -816,7 +846,7 @@ class CUDAGraphNode:
     def debug_assert_invariants(
         self, expected_liveness: List[List[bool]], newly_dead: List[PathOutputIndex]
     ):
-        if not config.triton.debug_cudagraph_trees:
+        if not config.triton.slow_cudagraph_asserts:
             return
 
         for i, node in enumerate(self._path_from_root):
@@ -1066,6 +1096,8 @@ class CUDAGraphTreeManager:
         # mapping from function id to wrapped function
         self.ids_to_funcs: Dict[FunctionID, WrappedFunction] = {}
 
+        self.ids_to_stack_traces: Dict[FunctionID, StackTraces] = {}
+
         self.warmed_up_functions: Set[FunctionID] = set()
 
         with torch.cuda.device(device_index):
@@ -1194,6 +1226,7 @@ class CUDAGraphTreeManager:
             new_inputs,
             self.cuda_graphs_thread_pool,
             self.device_index,
+            self.ids_to_stack_traces[function_id],
         )
         if self.current_node is None:
             self.roots[function_id].append(node)
@@ -1220,6 +1253,7 @@ class CUDAGraphTreeManager:
             self.cuda_graphs_thread_pool,
             self.graph,
             self.device_index,
+            self.ids_to_stack_traces[function_id],
         )
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
@@ -1240,22 +1274,15 @@ class CUDAGraphTreeManager:
         model,
         inputs,
         static_input_idxs,
-        is_backward,
-        is_inference,
+        stack_traces,
+        mode,
     ) -> Callable:
         id = self.new_func_id()
+        self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
             model, remove_unaligned_input_idxs(inputs, static_input_idxs), id
         )
-        self.id_to_mode[id] = (
-            CompilationMode.BACKWARD
-            if is_backward
-            else (
-                CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD
-            )
-        )
-
-        comp_context = torch._functorch.aot_autograd.get_graph_being_compiled()
+        self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies
@@ -1345,9 +1372,21 @@ class CUDAGraphTreeManager:
     def dealloc_current_path_weakrefs(self):
         # TODO: we could also allow the these weak refs to continue to be allocated,
         # but that adds some complications.
-        for t in self.current_node.path_live_weakrefs():
+        for t, stack_trace in self.current_node.path_live_weakrefs_and_stacktraces():
+            # TODO: dont need to test t(), but would need to deduplicate storages
             if t():
                 torch._C._free_And_Remove_DeleterFn(t())
+                stack_trace = (
+                    stack_trace.strip()
+                    if stack_trace
+                    else "[Could not find stack trace]"
+                )
+                warnings.warn(
+                    f"CUDAGraphTrees triggered deallocating tensor output from {stack_trace}. "
+                    "Subsequent use of this storage may return garbage result. "
+                    "Outside of torch.compile(), clone the corresponding tensor for safety, or "
+                    "deallocate the corresponding output no longer in use."
+                )
 
     def clear_current_node_outputs_and_set_to_none(self):
         self.current_node.clear_path_outputs()
@@ -1377,7 +1416,7 @@ class CUDAGraphTreeManager:
             torch._C._cuda_cudaCachingAllocator_raw_delete(ptr)
 
         # Now the live blocks should be exactly equal to the live storages in private pool
-        if config.triton.debug_cudagraph_trees:
+        if config.triton.fast_cudagraph_asserts:
             check_memory_pool(self.cuda_graphs_thread_pool, live_storages_wrappers)
 
     def live_cudagraph_pool_storages_in_curr_execution(
