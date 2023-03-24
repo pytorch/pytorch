@@ -2089,7 +2089,7 @@ class CppKernelProxy(CppKernel):
                             to_type_node_args = to_type_node.args
                             _node.replace_all_uses_with(to_type_node)
                             to_type_node.args = to_type_node_args
-                            metrics.to_dtype_count += 1
+                            metrics.cpp_to_dtype_count += 1
                 elif _node.target == "store":
                     if is_bf16_mem_copy(_node):
                         continue
@@ -2101,7 +2101,7 @@ class CppKernelProxy(CppKernel):
                                 "to_dtype", args=(ops, value_var, torch.bfloat16)
                             )
                             _node.replace_input_with(value_var, to_type_node)
-                            metrics.to_dtype_count += 1
+                            metrics.cpp_to_dtype_count += 1
                 elif _node.target == "reduction":
                     (
                         ops,
