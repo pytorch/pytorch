@@ -18,7 +18,7 @@ else
   amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
 fi
 for arch in $amdgpu_targets; do
-  echo "DEVCCFLAGS += --amdgpu-target=$arch" >> make.inc
+  echo "DEVCCFLAGS += --offload-arch=$arch" >> make.inc
 done
 # hipcc with openmp flag may cause isnan() on __device__ not to be found; depending on context, compiler may attempt to match with host definition
 sed -i 's/^FOPENMP/#FOPENMP/g' make.inc
