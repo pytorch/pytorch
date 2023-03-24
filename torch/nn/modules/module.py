@@ -1494,15 +1494,7 @@ class Module:
                 tracing_state.pop_scope()
         return result
 
-    def _call_impl(self, *args, **kwargs):
-        print("SOMETHING IS HAPPENING")
-        # Not sure how deep this needs to be so we don't mess up all the hooks
-        print(self._optimized_module)
-
-        # This is triggering an infinite recursion
-        if self._optimized_module:
-            return self._optimized_module(*args, **kwargs)
-        
+    def _call_impl(self, *args, **kwargs):        
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
@@ -1583,7 +1575,8 @@ class Module:
 
         return result
 
-    __call__ : Callable[..., Any] = _call_impl
+    def __call__(self, *args, **kwargs):
+        return self._optimized_module.forward(*args, **kwargs) if self._optimized_module else self._call_impl 
 
     def __getstate__(self):
         state = self.__dict__.copy()

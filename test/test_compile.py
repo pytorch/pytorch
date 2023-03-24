@@ -22,7 +22,7 @@ def test_compiled_model_can_be_saved():
     toc = time.time()
     compilation_duration = toc - tic 
 
-    # assert compilation_duration > first_inference_duration
+    assert compilation_duration > first_inference_duration
 
     # assert that this doesn't crash
     torch.save(model, "model.pt")
