@@ -16,6 +16,11 @@ on:
         required: true
         type: string
         description: Branch to fetch commit of
+      pin-folder:
+        type: string
+        description: Path to file with commit pin
+        required: false
+        default: .github/ci_commit_pins
     secrets:
       MERGEBOT_TOKEN:
         required: true
@@ -28,7 +33,7 @@ env:
   NEW_BRANCH_NAME: update-${{ inputs.repo-name }}-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
 
 jobs:
-  update-xla-commit-hash:
+  update-commit-hash:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -48,6 +53,7 @@ jobs:
         env:
           REPO_NAME: ${{ inputs.repo-name }}
           BRANCH: ${{ inputs.branch }}
+          PIN_FOLDER: ${{ inputs.pin-folder }}
           MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           PYTORCHBOT_TOKEN: ${{ secrets.PYTORCHBOT_TOKEN }}
         run: |
@@ -55,4 +61,4 @@ jobs:
           git config --global user.name "PyTorch MergeBot"
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
 
-          python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}"
+          python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}" --pin-path "${PIN_FOLDER}"
