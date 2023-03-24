@@ -10,7 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
-from typing import Callable
+from typing import Callable, Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -5860,7 +5860,13 @@ class CommonTemplate:
         self.common(fn, ())
 
 
-def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
+@dataclasses.dataclass
+class TestFailure:
+    suffixes: Tuple[str]
+    is_skip: bool = False
+
+
+def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use lambdas here to
@@ -5868,12 +5874,17 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
-            skips = test_skips and test_skips.get(name)
-            if skips and suffix in skips:
+            tf = test_failures and test_failures.get(name)
+            if tf is not None and suffix in tf.suffixes:
+                skip_func = (
+                    unittest.skip("Skipped!")
+                    if tf.is_skip
+                    else unittest.expectedFailure
+                )
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
+                    skip_func(lambda self, value=value: value(self)),
                 )
             else:
                 setattr(
