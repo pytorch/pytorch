@@ -145,7 +145,7 @@ def decode_device(device):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, Number):
+        if isinstance(inp, (Number, sympy.Symbol)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -292,11 +292,18 @@ def broadcast_symbolic_shapes(a, b):
 def promote_constants(inputs, override_return_dtype=None):
     if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Symbol)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
         )
-        return [ir.Constant(x, dtype, decode_device(None)) for x in inputs]
+
+        def const_func(x):
+            if isinstance(x, sympy.Symbol):
+                return ir.IndexingConstant(x, dtype, decode_device(None))
+            else:
+                return ir.Constant(x, dtype, decode_device(None))
+
+        return [const_func(x) for x in inputs]
     ex = next(x for x in inputs if isinstance(x, (TensorBox, ExpandView)))
     out = []
     for x in inputs:
