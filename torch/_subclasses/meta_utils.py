@@ -248,9 +248,10 @@ class MetaConverter:
         if self.get_tensor_memo(t) is None:
             with torch.inference_mode(t.is_inference()):
                 if t.is_sparse:
-                    assert all(
-                        [d is DimDynamic.STATIC for d in dynamic_dims]
-                    ), "symbolic on sparse NYI"
+                    if dynamic_dims:
+                        assert all(
+                            [d is DimDynamic.STATIC for d in dynamic_dims]
+                        ), "symbolic on sparse NYI"
                     is_leaf = safe_is_leaf(t)
                     r = callback(
                         lambda: torch.ops.aten._sparse_coo_tensor_with_dims(
