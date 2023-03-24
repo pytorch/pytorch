@@ -2775,8 +2775,19 @@ class ExternKernelOut(ExternKernel):
 
 class ExternKernelAlloc(ExternKernel):
     def codegen(self, wrapper):
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
-        wrapper.writeline(f"{self.get_name()} = {self.kernel}({', '.join(args)})")
+        # TODO: put the below codegen inside wrapper
+        from torch._inductor.codegen.wrapper import CppWrapperCodeGen
+
+        if isinstance(wrapper, CppWrapperCodeGen):
+            # kwargs is already included in cpp_constant_args
+            args = self.cpp_wrapper_codegen_args()
+            wrapper.writeline(
+                f"auto {self.get_name()} = {self.cpp_kernel}({', '.join(args)});"
+            )
+        else:
+            args = [*self.codegen_args(), *self.codegen_kwargs()]
+            wrapper.writeline(f"{self.get_name()} = {self.kernel}({', '.join(args)})")
+
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
@@ -2789,12 +2800,14 @@ class ExternKernelAlloc(ExternKernel):
         kernel=None,
         cpp_kernel=None,
         ordered_kwargs_for_cpp_kernel=(),
+        cpp_constant_args=(),
     ):
         super().__init__(
             None, layout, self.unwrap_storage(inputs), constant_args, kwargs or {}
         )
         self.cpp_kernel = cpp_kernel
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
+        self.cpp_constant_args = cpp_constant_args
         self.name = V.graph.register_buffer(self)
         if kernel is not None:
             self.kernel = kernel
