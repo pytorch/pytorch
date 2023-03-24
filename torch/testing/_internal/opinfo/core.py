@@ -151,7 +151,7 @@ class SampleInput:
                 not var_args and not var_kwargs
             ), """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" paremeters, but the two
+explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
@@ -1829,7 +1829,7 @@ def generate_elementwise_binary_with_scalar_samples(
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
 
-# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+# Returns a generator of pairs of contiguous tensors and 0d tensors and scalars and type promotion
 def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
     op, *, device, dtype, requires_grad=False
 ):
@@ -2541,17 +2541,40 @@ class ShapeFuncInfo(OpInfo):
 
 
 def sample_inputs_foreach(
-    self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None
+    self,
+    device,
+    dtype,
+    N,
+    *,
+    noncontiguous=False,
+    same_size=False,
+    low=None,
+    high=None,
+    zero_size: bool,
 ):
+    if zero_size:
+        return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
         return [
-            make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
+            make_tensor(
+                (N, N),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+            )
             for _ in range(N)
         ]
     else:
         return [
             make_tensor(
-                (N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
             )
             for i in range(N)
         ]
