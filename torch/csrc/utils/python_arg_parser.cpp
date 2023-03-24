@@ -1387,8 +1387,8 @@ bool FunctionSignature::parse(
         ((int_list_overload
               ? is_int_list(args, param.size, &failed_idx)
               : is_int_or_symint_list(args, param.size, &failed_idx)) ||
-          // allow tensor when varargs_eligible is true
-          THPVariable_Check(obj))) {
+         // allow fake tensor when varargs_eligible is true
+         THPVariable_Check(obj))) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
