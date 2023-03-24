@@ -299,7 +299,7 @@ def check_compiler_ok_for_platform(compiler: str) -> bool:
     env['LC_ALL'] = 'C'  # Don't localize output
     version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
     if IS_LINUX:
-        # Check for 'gcc' or 'g++' for sccache warpper
+        # Check for 'gcc' or 'g++' for sccache wrapper
         pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
         results = re.findall(pattern, version_string)
         if len(results) != 1:
@@ -1906,7 +1906,7 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
         _, error, _ = sys.exc_info()
         # error.output contains the stdout and stderr of the build attempt.
         message = error_prefix
-        # `error` is a CalledProcessError (which has an `ouput`) attribute, but
+        # `error` is a CalledProcessError (which has an `output`) attribute, but
         # mypy thinks it's Optional[BaseException] and doesn't narrow
         if hasattr(error, 'output') and error.output:  # type: ignore[union-attr]
             message += f": {error.output.decode(*SUBPROCESS_DECODE_ARGS)}"  # type: ignore[union-attr]
