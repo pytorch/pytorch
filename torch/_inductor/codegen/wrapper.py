@@ -721,7 +721,7 @@ class CppWrapperCodeGen(WrapperCodeGen):
             #include <assert.h>
 
             typedef at::BFloat16 bfloat16;
-            
+
             void assert_size_stride(at::Tensor tensor, std::vector<int64_t> size, std::vector<int64_t> stride) {
                 int64_t ndim = tensor.ndimension();
                 if (size.size() != ndim || stride.size() != ndim) {
@@ -903,7 +903,6 @@ class CppWrapperCodeGen(WrapperCodeGen):
             f"{self.codegen_shape_tuple(stride)}, "
             f"{DTYPE_TO_ATEN[dtype]}){self.ending}"
         )
-
 
     def generate_fusion_ops_code(
         self,
