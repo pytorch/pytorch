@@ -59,7 +59,8 @@ class Sampler(Generic[T_co]):
         if data_source is not None:
             import warnings
 
-            warnings.warn("`data_source` argument is not used and will be removed in 2.2.0. You may still have custom implementation that utilizes it.")
+            warnings.warn("`data_source` argument is not used and will be removed in 2.2.0."
+                                      "You may still have custom implementation that utilizes it.")
 
     def __iter__(self) -> Iterator[T_co]:
         raise NotImplementedError
