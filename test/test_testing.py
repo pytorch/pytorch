@@ -1505,8 +1505,6 @@ class TestMakeTensor(TestCase):
         with self.assertRaisesRegex(ValueError, "`low` and `high` cannot be NaN"):
             torch.testing.make_tensor(dtype=dtype, device=device, low=low, high=high)
 
-    # FIXME this fails for all dtypes
-    @unittest.expectedFailure
     @supported_dtypes
     def test_low_high_outside_valid_range(self, dtype, device):
         make_tensor = functools.partial(torch.testing.make_tensor, dtype=dtype, device=device)
