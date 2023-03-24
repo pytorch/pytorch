@@ -1168,6 +1168,18 @@ class DeterministicGuard:
             self.deterministic_restore,
             warn_only=self.warn_only_restore)
 
+class AlwaysWarnTypedStorageRemoval:
+    def __init__(self, always_warn):
+        assert isinstance(always_warn, bool)
+        self.always_warn = always_warn
+
+    def __enter__(self):
+        self.always_warn_restore = torch.storage._get_always_warn_typed_storage_removal()
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.storage._set_always_warn_typed_storage_removal(self.always_warn_restore)
+
 # Context manager for setting cuda sync debug mode and reset it
 # to original value
 # we are not exposing it to the core because sync debug mode is
@@ -1595,7 +1607,7 @@ class CudaMemoryLeakCheck():
 
             discrepancy_detected = True
 
-            # Query memory multiple tiems to ensure leak was not transient
+            # Query memory multiple items to ensure leak was not transient
             for n in range(3):
                 caching_allocator_mem_allocated = torch.cuda.memory_allocated(i)
                 bytes_free, bytes_total = torch.cuda.mem_get_info(i)
@@ -1659,7 +1671,7 @@ def skip_exception_type(exc_type):
     except exc_type as e:
         raise unittest.SkipTest(f"not implemented: {e}") from e
 
-#  "min_satisfying_examples" setting has been deprecated in hypythesis
+#  "min_satisfying_examples" setting has been deprecated in hypothesis
 #  3.56.0 and removed in hypothesis 4.x
 try:
     import hypothesis
@@ -2343,7 +2355,7 @@ class TestCase(expecttest.TestCase):
         we'll find a maximal window in (n_rows + 1, n_cols + 1)-grid
         that is able to hold a sequence of sawteeth and so-called
         final correction, while the external part of the window is
-        filled with counts to meet the nnz contraint exactly.
+        filled with counts to meet the nnz constraint exactly.
         """
         assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
@@ -4179,7 +4191,7 @@ def clone_input_helper(input):
 
 @contextmanager
 def custom_op(opname, symbolic_fn, opset_version):
-    """Context manager/decorator to test ONNX export with custom oeprator"""
+    """Context manager/decorator to test ONNX export with custom operator"""
     try:
         register_custom_op_symbolic(opname, symbolic_fn, opset_version)
         yield
