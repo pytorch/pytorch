@@ -422,6 +422,13 @@ class TestPySymInt(TestCase):
         assert a0 == a1
         self.assertEqual(len(shape_env.guards), 1)
 
+    def test_int_bool(self):
+        # See https://github.com/pytorch/pytorch/issues/95981
+        shape_env = ShapeEnv(duck_shape=True)
+        a0 = create_symint(shape_env, 5)
+        assert a0
+        self.assertEqual(len(shape_env.guards), 0)
+
     def test_symint_as_scalar(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)

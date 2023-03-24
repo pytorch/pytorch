@@ -26,3 +26,11 @@ class NeuralNetwork(nn.Module):
 if __name__ == '__main__':
     jit_module = torch.jit.script(NeuralNetwork())
     torch.jit.save(jit_module, sys.argv[1])
+    orig_module = nn.Sequential(
+        nn.Linear(28 * 28, 512),
+        nn.ReLU(),
+        nn.Linear(512, 512),
+        nn.ReLU(),
+        nn.Linear(512, 10),
+    )
+    torch.save(orig_module, sys.argv[1] + ".orig")

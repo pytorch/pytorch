@@ -316,38 +316,6 @@ std::tuple<Tensor,optional<int64_t>> _log_softmax_backward_batch_rule(
   return std::make_tuple(at::_log_softmax_backward_data(grad_output_, output_, dim, input_dtype), 0);
 }
 
-// aminmax has divergent behavior for 0-d tenosrs.
-// reference: https://github.com/pytorch/pytorch/issues/64008
-// TODO: Once the divergent behavior for 0-d scalar is fixed, we should use REDUCTION_BOXED_ARGS
-std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> aminmax_batching_rule(
-    const Tensor &self, optional<int64_t> self_bdim, optional<int64_t> dim, bool keep_dim)
-{
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto logical_rank = rankWithoutBatchDim(self_, self_bdim);
-  if (logical_rank == 0) {
-    self_ = self_.unsqueeze(-1);
-  }
-
-  if (dim.has_value()) {
-    dim = maybe_wrap_dim(dim.value(), logical_rank) + 1;
-  } else {
-    // flatten the input except for batch-dim
-    auto bsize = self_.size(0);
-    self_ = self_.view({bsize, -1});
-    dim = 1;
-  }
-
-  Tensor min, max;
-  std::tie(min, max) = at::aminmax(self_, dim, keep_dim);
-
-  if (logical_rank == 0 && self_.device().is_cuda()) {
-    // behaviour diverges between cpu and cuda
-    min = min.squeeze(-1);
-    max = max.squeeze(-1);
-  }
-  return std::make_tuple(min, 0, max, 0);
-}
-
 std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     const Tensor& sorted_sequence,
     optional<int64_t> sorted_sequence_bdim,
@@ -466,6 +434,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_NO_KEEPDIM_ARG(_fft_c2c);
   REDUCTION_WITH_KEEPDIM_ARG(amax);
   REDUCTION_WITH_KEEPDIM_ARG(amin);
+  REDUCTION_WITH_KEEPDIM_ARG(aminmax);
   m.impl("all", all_decomp);
   REDUCTION_WITH_KEEPDIM_ARG(all.dim);
   m.impl("any", any_decomp);
@@ -511,7 +480,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   REDUCTION_BOXED_ARGS(var_mean.correction, 1, KEEPDIM_CASE_VARIABLE, 3);
   REDUCTION_NO_KEEPDIM_ARG(_log_softmax);
   REDUCTION_BOXED_ARGS(rot90, 2, KEEPDIM_CASE_TRUE, -1);
-  VMAP_SUPPORT(aminmax, aminmax_batching_rule);
   VMAP_SUPPORT(_log_softmax_backward_data, _log_softmax_backward_batch_rule);
   VMAP_SUPPORT(_softmax_backward_data, _softmax_backward_batch_rule);
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);

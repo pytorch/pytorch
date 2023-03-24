@@ -6,6 +6,7 @@
 #include <functional>
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/ScalarType.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -258,18 +259,7 @@ Reducer::Reducer(
 // be specified by calling `register_builtin_comm_hook` from Python API.
 
 Reducer::~Reducer() noexcept(false) {
-  // Remove all hooks on variables registered by this Reducer. This is necessary
-  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
-  // (from recoveries) will add their hooks to the original model, and those
-  // hooks will try to invoke methods on a deleted Reducer objects.
-  for (auto& hook : hooks_) {
-    auto& key = hook.first;
-    auto& grad_accumulator = hook.second;
-
-    TORCH_INTERNAL_ASSERT(
-        grad_accumulator->del_post_hook(key),
-        "Reducer attempts to delete a non-existing hook.");
-  }
+  remove_autograd_hooks();
 }
 
 bool Reducer::dynamic_graph_find_unused() {
@@ -308,11 +298,16 @@ void Reducer::initialize_local_used_map() {
 void Reducer::check_grad_layout(
     const at::Tensor& grad,
     const at::Tensor& bucket_view) {
-  // Ensure that the gradient type matches the bucket type.
+  // Ensure that the gradient type matches the bucket type, or mixed precision
+  // type if we are training with mixed precision.
+  auto type = mixed_precision_param_dtype_
+      ? *mixed_precision_param_dtype_
+      : bucket_view.options().dtype().toScalarType();
   REDUCER_CHECK(
-      grad.options().type_equal(bucket_view.options()),
+      grad.options().dtype().toScalarType() == type,
       logger_,
-      c10::str("Expected ", bucket_view.toString(), ", got ", grad.toString()));
+      c10::str(
+          "Expected ", type, ", got ", grad.options().dtype().toScalarType()));
 
   TORCH_INTERNAL_ASSERT(grad.device() == bucket_view.device());
   TORCH_INTERNAL_ASSERT(grad.numel() == bucket_view.numel());
@@ -369,6 +364,9 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
           if (!grad.requires_grad()) {
             // Divides while copying into the bucket view to save one scan over
             // all the input parameters.
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::mul_out",
+                std::vector<c10::IValue>({bucket_view}))
             at::mul_out(bucket_view, grad, wrapped);
           } else {
             // If DDP is running with create_graph=True, gradients require_grad
@@ -383,9 +381,15 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
                 << " DDP to work with higher-order gradients for your use case, "
                 << " please ping https://github.com/pytorch/pytorch/issues/63929";
             auto div_result = at::mul(grad, wrapped);
+            RECORD_FUNCTION(
+                "torch::distributed::reducer::copy_",
+                std::vector<c10::IValue>({bucket_view}))
             bucket_view.copy_(div_result);
           }
         } else {
+          RECORD_FUNCTION(
+              "torch::distributed::reducer::copy_",
+              std::vector<c10::IValue>({bucket_view}))
           bucket_view.copy_(grad);
         }
 
@@ -517,6 +521,15 @@ void Reducer::set_divide_factor() {
       at::Tensor& res = results.front();
       div_factor_ = res.item().to<int>();
     }
+  }
+}
+
+// This is called before training and converts the gradients to the dtype they
+// should be reduced in.
+void Reducer::set_mixed_precision_param_dtype(c10::ScalarType dtype) {
+  mixed_precision_param_dtype_ = dtype;
+  for (auto& bucket : buckets_) {
+    bucket.gradients = bucket.gradients.to(dtype);
   }
 }
 
@@ -1081,6 +1094,12 @@ void Reducer::initialize_buckets(
       }
 
       // Allocate the bucket's flattened `gradients` tensor.
+      // Make gradient type in the reduced precision if mixed precision is
+      // enabled. This ensures that the type is correct when e.g. rebuilding
+      // buckets.
+      if (mixed_precision_param_dtype_) {
+        options = options.dtype(*mixed_precision_param_dtype_);
+      }
       bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
@@ -1178,7 +1197,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
         if (grad.defined() && !grad.is_alias_of(bucket_view)) {
           bucket_view.copy_(grad);
           grad = bucket_view;
-          // The grad is modefied and needs to be written back.
+          // The grad is modified and needs to be written back.
           return true;
         }
         // The grad is not modified and does not need to be written back.
@@ -2119,7 +2138,7 @@ void verify_params_across_processes(
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back();
   auto world_size = process_group->getSize();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (C10_UNUSED const auto i : c10::irange(world_size)) {
     param_size_output_tensors.front().emplace_back(
         at::empty_like(param_size_tensor));
   }
@@ -2127,10 +2146,10 @@ void verify_params_across_processes(
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
   process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
-  for (size_t i = 0; i < world_size; ++i) {
+  for (const auto i : c10::irange(world_size)) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();
     TORCH_CHECK(
-        param_size_for_rank == params.size(),
+        static_cast<size_t>(param_size_for_rank) == params.size(),
         c10::str(
             "DDP expects same model across all ranks, but Rank ",
             process_group->getRank(),
@@ -2208,6 +2227,22 @@ void verify_params_across_processes(
       }
     }
   }
+}
+
+void Reducer::remove_autograd_hooks() {
+  // Remove all hooks on variables registered by this Reducer. This is necessary
+  // to make DDP failure recoverable. Otherwise, multiple Reducer instances
+  // (from recoveries) will add their hooks to the original model, and those
+  // hooks will try to invoke methods on a deleted Reducer objects.
+  for (auto& hook : hooks_) {
+    auto& key = hook.first;
+    auto& grad_accumulator = hook.second;
+
+    TORCH_INTERNAL_ASSERT(
+        grad_accumulator->del_post_hook(key),
+        "Reducer attempts to delete a non-existing hook.");
+  }
+  hooks_.clear();
 }
 
 } // namespace c10d

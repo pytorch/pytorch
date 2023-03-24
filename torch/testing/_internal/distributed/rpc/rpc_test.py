@@ -34,7 +34,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     load_tests,
-    sandcastle_skip_if,
+    skip_but_pass_in_sandcastle_if,
     get_cycles_per_ms,
 )
 
@@ -1849,7 +1849,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             return
 
         # Spawn multiple threads that send RPCs to ensure keys are correctly
-        # prefixied when there are multiple RPCs being created/in flight at the
+        # prefixed when there are multiple RPCs being created/in flight at the
         # same time.
         dst_ranks = [rank for rank in range(0, self.world_size) if rank != self.rank]
 
@@ -3074,7 +3074,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     @dist_init(setup_rpc=True)
     def test_call_method_on_rref(self):
         """
-        Tests that it is possible to call an instance method on a remote objet
+        Tests that it is possible to call an instance method on a remote object
         by using rref.owner() as destination of the call.
         """
         vals = [10, 2, 5, 7]
@@ -3327,7 +3327,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             self.assertIn(key, expected.keys())
 
     @dist_init(setup_rpc=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         IS_MACOS,
         "Test is flaky on MacOS since libuv error handling is not as robust as TCP",
     )
@@ -4314,7 +4314,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         wait_until_owners_and_forks_on_rank(1, 1, rank=1)
 
     @dist_init(setup_rpc=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_pg_then_rpc does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -4345,7 +4345,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @dist_init(setup_rpc=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "init_rpc_then_pg does not work with TCP init, see https://github.com/pytorch/pytorch/issues/41614."
     )
@@ -4398,7 +4398,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
             ret = torch.futures.wait_all(futs)
 
     @dist_init(setup_rpc=False)
-    @sandcastle_skip_if(
+    @skip_but_pass_in_sandcastle_if(
         os.environ.get("RPC_INIT_WITH_TCP", None) == "1",
         "Test does not work with TCP init, see https://github.com/pytorch/pytorch/issues/46491",
     )
@@ -6116,7 +6116,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             options.set_device_map(input_src, {remote_device: local_device})
         elif self.rank == 2:
             # worker2 will get the out RRef and call to_here() and hence, needs
-            # to configure devcie map.
+            # to configure device map.
             options.set_device_map(model_dst, {local_device: remote_device})
 
         rpc.init_rpc(
