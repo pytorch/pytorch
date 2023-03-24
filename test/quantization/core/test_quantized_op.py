@@ -2337,6 +2337,13 @@ class TestQuantizedOps(TestCase):
         self.assertEqual(qX.equal(qX), equal_ref(qX, qX))
         self.assertEqual(qX.equal(qX2), equal_ref(qX, qX2))
 
+    """Tests quantized equal op with input of non-quantized tensor."""
+    def test_quantized_equal(self,):
+        x = torch.rand(1)
+        y = torch.quantize_per_tensor(x, scale=0.5, zero_point=0, dtype=torch.qint8)
+        self.assertTrue(not torch.equal(x, y))
+        self.assertTrue(not torch.equal(y, x))
+
     @skipIfNoFBGEMM
     def test_group_norm(self):
         # hypothesis is flaky for this test, create test cases manually
