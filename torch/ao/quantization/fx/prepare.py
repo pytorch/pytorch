@@ -130,12 +130,12 @@ _OBS_OR_FQ_ANNO_TYPE = Union[_OBS_OR_FQ_TYPE, Tuple[_OBS_OR_FQ_TYPE, ...]]
 
 # note: the following default target dtype info dicts are temporary,
 # should be moved to the new programmable API class soon
-_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
+_DEFAULT_FP32_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation,
     "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation
 }
 
-_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
+_DEFAULT_QUINT8_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
     "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
@@ -499,7 +499,7 @@ def _get_target_activation_dtype_for_node(
             "_input_obs_or_fq_ctr_for_kwargs": {"weight": qconfig.weight, "bias": BIAS_OBS_OR_FQ_CTR},
             "output_obs_or_fq_ctrs": qconfig.activation,
         }
-    return copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
+    return copy.copy(_DEFAULT_FP32_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO)
 
 def _get_arg_target_dtype_as_output(
     arg: Node,
@@ -1224,7 +1224,7 @@ def insert_observers_for_model(
     processed_nodes: Set[Node] = set()
     # initalize target_dtype_info
     for node in model.graph.nodes:
-        node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO)
+        node.meta["target_dtype_info"] = copy.copy(_DEFAULT_FP32_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO)
 
     inputs_seen_counter = 0
     outputs_seen_counter = 0
@@ -1267,7 +1267,7 @@ def insert_observers_for_model(
             # this is OK because we are using this as a way to encode the dtypes of input
             # tensor, we won't actually insert these observers in the graph and won't
             # actually call calculate_qparams
-            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
+            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO)
         elif node.op in ("call_module", "call_method", "call_function"):
             args_have_no_tensors = \
                 all_node_args_have_no_tensors(
@@ -1278,7 +1278,7 @@ def insert_observers_for_model(
                     "output_obs_or_fq_ctrs": None,
                 }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
-            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO)
+            node.meta["target_dtype_info"] = copy.copy(_DEFAULT_QUINT8_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO)
 
     # Step 2.2, for nodes with known input dtypes, propagate them throughout the
     # graph. For example, if there is a call such as
