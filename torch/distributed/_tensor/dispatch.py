@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
-from typing import Callable, cast, Dict, Tuple, Union, Optional, Sequence, List
+from typing import Callable, cast, Dict, Tuple, Union, Sequence, List
 
 import torch
 

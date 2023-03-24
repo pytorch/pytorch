@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import warnings
-from typing import Callable, cast, Dict, Optional, Sequence, Tuple
+from typing import Callable, cast, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
