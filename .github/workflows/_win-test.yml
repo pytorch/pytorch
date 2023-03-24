@@ -231,6 +231,15 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Uninstall PyTorch
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          # This step removes PyTorch installed by the test to give a clean slate
+          # to the next job
+          python3 -mpip uninstall -y torch
+
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win
         if: always()

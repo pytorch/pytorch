@@ -1745,7 +1745,9 @@ void jitModuleToPythonCodeAndConstants(
     class_deps.add(class_type);
   }
 
-  for (const auto i : c10::irange(class_deps.size())) {
+  for (size_t i = 0; i < class_deps.size(); ++i) {
+    // note: PythonPrint may extend class_deps, so re-checking .size() is
+    // necessary
     auto type = class_deps[i];
     auto qualname = uniquer.getUniqueName(type);
     std::string qualifier = qualname.prefix();
