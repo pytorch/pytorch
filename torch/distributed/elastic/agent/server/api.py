@@ -36,7 +36,7 @@ __all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'E
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
-log = get_logger()
+log = get_logger(__name__)
 
 
 @dataclass

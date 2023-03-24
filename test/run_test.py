@@ -162,40 +162,6 @@ TESTS = TESTS + ['doctests']
 
 FSDP_TEST = [test for test in TESTS if test.startswith("distributed/fsdp")]
 
-# Tests need to be run with pytest.
-USE_PYTEST_LIST = [
-    "distributed/pipeline/sync/skip/test_api",
-    "distributed/pipeline/sync/skip/test_gpipe",
-    "distributed/pipeline/sync/skip/test_inspect_skip_layout",
-    "distributed/pipeline/sync/skip/test_leak",
-    "distributed/pipeline/sync/skip/test_portal",
-    "distributed/pipeline/sync/skip/test_stash_pop",
-    "distributed/pipeline/sync/skip/test_tracker",
-    "distributed/pipeline/sync/skip/test_verify_skippables",
-    "distributed/pipeline/sync/test_balance",
-    "distributed/pipeline/sync/test_bugs",
-    "distributed/pipeline/sync/test_checkpoint",
-    "distributed/pipeline/sync/test_copy",
-    "distributed/pipeline/sync/test_deferred_batch_norm",
-    "distributed/pipeline/sync/test_dependency",
-    "distributed/pipeline/sync/test_inplace",
-    "distributed/pipeline/sync/test_microbatch",
-    "distributed/pipeline/sync/test_phony",
-    "distributed/pipeline/sync/test_pipe",
-    "distributed/pipeline/sync/test_pipeline",
-    "distributed/pipeline/sync/test_stream",
-    "distributed/pipeline/sync/test_transparency",
-    "distributed/pipeline/sync/test_worker",
-    "distributions/test_constraints",
-    "distributions/test_transforms",
-    "distributions/test_utils",
-    "test_typing",
-    "distributed/elastic/events/lib_test",
-    "distributed/elastic/agent/server/test/api_test",
-    "test_deploy",
-    "distributed/test_c10d_error_logger"
-]
-
 WINDOWS_BLOCKLIST = [
     "distributed/nn/jit/test_instantiator",
     "distributed/rpc/test_faulty_agent",
@@ -232,15 +198,10 @@ WINDOWS_BLOCKLIST = [
     "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/ops/test_chunk",
-    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_math_ops",
-    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
-    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
 ] + FSDP_TEST
 
@@ -255,15 +216,10 @@ ROCM_BLOCKLIST = [
     "distributed/_shard/sharding_plan/test_sharding_plan",
     "distributed/_shard/sharded_tensor/test_sharded_tensor",
     "distributed/_shard/sharded_tensor/test_sharded_tensor_reshard",
-    "distributed/_shard/sharded_tensor/ops/test_chunk",
-    "distributed/_shard/sharded_tensor/ops/test_elementwise_ops",
     "distributed/_shard/sharded_tensor/ops/test_embedding",
     "distributed/_shard/sharded_tensor/ops/test_embedding_bag",
     "distributed/_shard/sharded_tensor/ops/test_binary_cmp",
     "distributed/_shard/sharded_tensor/ops/test_init",
-    "distributed/_shard/sharded_tensor/ops/test_math_ops",
-    "distributed/_shard/sharded_tensor/ops/test_matrix_ops",
-    "distributed/_shard/sharded_tensor/ops/test_softmax",
     "distributed/_shard/sharded_optim/test_sharded_optim",
     "test_determination",
     "test_jit_legacy",
@@ -313,6 +269,8 @@ CI_SERIAL_LIST = [
     'test_dataloader',  # frequently hangs for ROCm
     'test_serialization',   # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     '_nvfuser/test_torchscript',  # OOM on test_issue_1785
+    'test_schema_check',  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
+    'functorch/test_memory_efficient_fusion',   # Cause CUDA OOM on ROCm
 ]
 
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
@@ -461,6 +419,11 @@ def run_test(
             ci_args.append("--rerun-disabled-tests")
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(ci_args)
+    if test_module in PYTEST_SKIP_RETRIES:
+        if not options.pytest:
+            raise RuntimeError("A test running without pytest cannot skip retries using "
+                               "the PYTEST_SKIP_RETRIES set.")
+        unittest_args = [arg for arg in unittest_args if "--reruns" not in arg]
 
     # Extra arguments are not supported with pytest
     executable = get_executable_command(options)
@@ -812,7 +775,8 @@ def get_pytest_args(options):
     pytest_args = [
         "--use-pytest",
         "-vv",
-        "-rfEX"
+        "-rfEX",
+        "-p", "no:xdist",
     ]
     pytest_args.extend(rerun_options)
     return pytest_args
@@ -895,12 +859,9 @@ CUSTOM_HANDLERS = {
 }
 
 
-PYTEST_BLOCKLIST = [
-    "profiler/test_profiler",
-    "dynamo/test_repros",  # skip_if_pytest
-    "dynamo/test_optimizers",  # skip_if_pytest
-    "dynamo/test_dynamic_shapes",  # needs change to check_if_enable for disabled test issues
-]
+PYTEST_SKIP_RETRIES = {
+    'test_public_bindings'
+}
 
 
 def parse_test_module(test):
@@ -942,8 +903,8 @@ def parse_args():
         action="store_true",
         help=(
             "If this flag is present, we will only run functorch tests. "
-            "If this flag is not present, we will not run any functorch tests. "
-            "This requires functorch to already be installed."
+            "If this flag is not present, we will run all tests "
+            "(including functorch tests)."
         )
     )
     parser.add_argument(
@@ -1152,7 +1113,7 @@ def must_serial(file: str) -> bool:
 
 
 def can_run_in_pytest(test):
-    return (test not in PYTEST_BLOCKLIST) and (os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0')
+    return os.getenv('PYTORCH_TEST_DO_NOT_USE_PYTEST', '0') == '0'
 
 
 def get_selected_tests(options):
@@ -1177,11 +1138,9 @@ def get_selected_tests(options):
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = [tname for tname in selected_tests if tname in FUNCTORCH_TESTS]
-    else:
-        # Exclude all functorch tests otherwise
-        options.exclude.extend(FUNCTORCH_TESTS)
 
     if options.mps:
         selected_tests = ['test_mps', 'test_metal']

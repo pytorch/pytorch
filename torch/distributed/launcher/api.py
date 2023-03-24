@@ -22,7 +22,7 @@ from torch.distributed.elastic.utils.logging import get_logger
 
 __all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
-logger = get_logger()
+logger = get_logger(__name__)
 
 
 @dataclass

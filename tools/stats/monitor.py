@@ -134,7 +134,6 @@ def rocm_get_per_process_gpu_info() -> List[Dict[str, Any]]:
 
 
 if __name__ == "__main__":
-
     handle = None
     try:
         pynvml.nvmlInit()

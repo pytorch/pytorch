@@ -12,7 +12,7 @@ import torch
 
 from torch import SymInt
 from torch._guards import GuardSource
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.immutable_collections import immutable_list
 
@@ -27,7 +27,6 @@ from ..source import (
     GetItemSource,
     GlobalWeakRefSource,
     is_constant_source,
-    LocalInputSource,
     LocalSource,
     RandomValueSource,
     Source,
@@ -96,7 +95,7 @@ from .tensor import (
 from .torch import (
     tensor_dunder_fns,
     torch_special_class_types,
-    TorchPyOperator,
+    TorchHigherOrderOperator,
     TorchVariable,
 )
 from .user_defined import UserDefinedClassVariable, UserDefinedObjectVariable
@@ -124,11 +123,6 @@ class GraphArg:
             assert isinstance(
                 self.fake_tensor, torch._subclasses.fake_tensor.FakeTensor
             )
-            # Mapping for downstream systems to remap back into dynamo arg positions
-            if isinstance(self.source, LocalInputSource):
-                if "graph_arg_pos" not in self.fake_tensor.__dict__:
-                    self.fake_tensor.__dict__["graph_arg_pos"] = []
-                self.fake_tensor.__dict__["graph_arg_pos"].append(self.source.pos)
         if isinstance(self.example, torch._subclasses.fake_tensor.FakeTensor):
             raise AssertionError("Fake Tensor observed in TorchDynamo Fx graph inputs")
 
@@ -468,8 +462,8 @@ class VariableBuilder:
             return HFPretrainedConfigVariable(
                 value, guards=make_guards(GuardBuilder.TYPE_MATCH)
             )
-        elif isinstance(value, PyOperator):
-            return TorchPyOperator(
+        elif isinstance(value, HigherOrderOperator):
+            return TorchHigherOrderOperator(
                 value,
                 guards=self.make_guards(
                     GuardBuilder.TYPE_MATCH, GuardBuilder.NAME_MATCH
@@ -831,6 +825,14 @@ class VariableBuilder:
             )
             self.tx.output.unspec_variable_map[self.name] = unspec_var
             if not is_constant_source(self.get_source()):
+                if self.tx.export and not isinstance(
+                    self.get_source(), LocalInputSource
+                ):
+                    raise AssertionError(
+                        "Dynamo attempts to add additional input during export: value={}, source={}".format(
+                            wrapped_value, self.get_source()
+                        )
+                    )
                 fake_tensor_value = None
                 example_value = unspec_var.proxy.node.meta["example_value"]
                 if isinstance(example_value, torch._subclasses.fake_tensor.FakeTensor):
@@ -1069,7 +1071,8 @@ def wrap_to_fake_tensor_and_record(
     if type(e) in (torch.Tensor, torch.nn.Parameter) or (
         ignore_subclass and isinstance(e, torch.Tensor)
     ):
-        static_shapes, reason = tensor_always_has_static_shape(e, source, is_tensor)
+        assert source is not None
+        static_shapes, reason = tensor_always_has_static_shape(e, is_tensor)
 
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
