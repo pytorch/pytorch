@@ -1487,15 +1487,15 @@ class TestMakeTensor(TestCase):
         low, high = [value_type(value) for value, value_type in zip(low_high, value_types)]
 
         if low == high and (dtype.is_floating_point or dtype.is_complex):
-            # FIXME: assert that a deprecation warning is raised here
-            t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low, high=high)
+            with self.assertWarnsRegex(
+                    FutureWarning,
+                    "Passing `low==high` to `torch.testing.make_tensor` for floating or complex types is deprecated",
+            ):
+                t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low, high=high)
             self.assertEqual(t, torch.full_like(t, complex(low, low) if dtype.is_complex else low))
         else:
-            # FIXME: use self.assertRaisesRegex with a proper message here
-            try:
+            with self.assertRaisesRegex(ValueError, "`low` must be less than `high`"):
                 torch.testing.make_tensor(dtype=dtype, device=device, low=low, high=high)
-            except (RuntimeError, ValueError):
-                pass
 
     @supported_dtypes
     @parametrize("low_high", [(None, torch.nan), (torch.nan, None), (torch.nan, torch.nan)])
