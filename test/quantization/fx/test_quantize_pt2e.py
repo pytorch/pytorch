@@ -7,6 +7,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skip_if_no_torchvision,
     skipIfNoQNNPACK,
+    skipIfNoX86,
 )
 from torch.testing._internal.common_quantization import NodeSpec as ns
 from torch.testing._internal.common_quantized import (
@@ -21,6 +22,7 @@ from torch.ao.quantization.backend_config import (
     get_qnnpack_backend_config,
 )
 from torch.ao.quantization.backend_config._qnnpack_pt2e import get_qnnpack_pt2e_backend_config
+from torch.ao.quantization.backend_config._x86_inductor_pt2e import get_x86_inductor_pt2e_backend_config
 from torch.ao.quantization.quantize_fx import prepare_fx, convert_to_reference_fx
 from torch.ao.quantization._quantize_pt2e import prepare_pt2e, convert_pt2e
 from torch.ao.ns.fx.utils import (
@@ -189,6 +191,76 @@ class TestQuantizePT2E(QuantizationTestCase):
             m.recompile()
             code_after_recompile = m.code
             self.assertTrue(code_before_recompile == code_after_recompile, error_msg)
+
+@skipIfNoQNNPACK
+class TestQuantizePT2EX86Inductor(QuantizationTestCase):
+    @skipIfNoX86
+    @xfailIfPython311
+    def test_inductor_backend_config_conv(self):
+        class M(torch.nn.Module):
+            def __init__(self, use_relu: bool = False, inplace_relu: bool = False):
+                super().__init__()
+                self.use_relu = use_relu
+                self.conv1 = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1))
+                self.relu = nn.ReLU(inplace=inplace_relu)
+
+            def forward(self, x):
+                x = self.conv1(x)
+                return self.relu(x) if self.use_relu else x
+
+        use_relu_list = [True, False]
+        inplace_relu_list = [True, False]
+        with override_quantized_engine("x86"):
+            with torch.no_grad():
+                for use_relu, inplace_relu in itertools.product(use_relu_list, inplace_relu_list):
+                    m = M(use_relu=use_relu, inplace_relu=inplace_relu).eval()
+                    example_inputs = (torch.randn(2, 3, 4, 4),)
+                    # program capture
+                    # **TODO** Add testcase for tracing_mode="symbolic" after fix issue:
+                    # https://github.com/pytorch/pytorch/issues/96274
+                    export_module, guards = torchdynamo.export(
+                        m,
+                        *copy.deepcopy(example_inputs),
+                        aten_graph=True,
+                        tracing_mode="real",
+                    )
+
+                    qconfig = get_default_qconfig("x86")
+                    qconfig_mapping = QConfigMapping().set_global(qconfig)
+                    backend_config = get_x86_inductor_pt2e_backend_config()
+                    prepare_module = prepare_pt2e(export_module, qconfig_mapping, example_inputs, backend_config)
+                    prepare_module(*example_inputs)
+                    convert_module = convert_pt2e(prepare_module)
+                    convert_module(*example_inputs)
+
+                    # Fake quant should only be inserted at start and end
+                    node_occurrence = {
+                        # one for input and weight of the conv, one for output for the conv
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor): 2,
+                        ns.call_function(torch.ops.quantized_decomposed.quantize_per_channel): 1,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_channel): 1,
+                        ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor): 2,
+                    }
+                    if use_relu:
+                        node_list = [
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.aten.convolution.default),
+                            ns.call_function(torch.ops.aten.relu_.default if inplace_relu else torch.ops.aten.relu.default),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ]
+                    else:
+                        node_list = [
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                            ns.call_function(torch.ops.aten.convolution.default),
+                            ns.call_function(torch.ops.quantized_decomposed.quantize_per_tensor),
+                            ns.call_function(torch.ops.quantized_decomposed.dequantize_per_tensor),
+                        ]
+                    self.checkGraphModuleNodes(convert_module,
+                                               expected_node_occurrence=node_occurrence,
+                                               expected_node_list=node_list)
 
 class TestQuantizePT2EModels(QuantizationTestCase):
     @skip_if_no_torchvision
