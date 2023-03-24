@@ -9,11 +9,10 @@ from torch.distributed._tensor.placement_types import Shard
 
 from torch.distributed.distributed_c10d import (
     get_global_rank,
+    get_process_group_ranks,
     get_world_size,
     is_initialized,
-    new_group,
     ProcessGroup,
-    get_process_group_ranks,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -83,75 +82,18 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
-    @with_comms
-    def test_device_mesh_2d_from_dim_groups(self):
-        # construct a two dimension subgroups
-        dim_groups = []
-        expected_ranks_by_dim = [[[0, 2], [1, 3]], [[0, 1], [2, 3]]]
-        for dim_group_ranks in expected_ranks_by_dim:
-            for subgroup_ranks in dim_group_ranks:
-                subgroup = new_group(ranks=subgroup_ranks)
-                if self.rank in subgroup_ranks:
-                    dim_groups.append(subgroup)
-
-        # construct a device mesh from the subgroups
-        mesh = DeviceMesh(self.device_type, [[0, 1], [2, 3]], dim_groups=dim_groups)
-
-        # check all dim groups
-        dim_to_subgroups = mesh.get_dim_groups()
-        for dim, dim_group in enumerate(dim_to_subgroups):
-            self.assertTrue(dim < 2)
-            dim_ranks = expected_ranks_by_dim[dim]
-
-            dim_group_size = get_world_size(dim_group)
-            self.assertIsInstance(dim_group, ProcessGroup)
-            self.assertEqual(dim_group_size, 2)
-            global_ranks = [
-                get_global_rank(dim_group, i) for i in range(dim_group_size)
-            ]
-            current_rank_expected_group_ranks = (
-                dim_ranks[0] if self.rank in dim_ranks[0] else dim_ranks[1]
-            )
-            self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
     @with_comms
-    def test_device_mesh_dim_groups_error(self):
-        # construct a two dimension subgroups
-        dim_groups = []
-        expected_ranks_by_dim = [[[0, 2], [1, 3]], [[0, 1], [2, 3]]]
-        for dim_group_ranks in expected_ranks_by_dim:
-            for subgroup_ranks in dim_group_ranks:
-                subgroup = new_group(ranks=subgroup_ranks)
-                if self.rank in subgroup_ranks:
-                    dim_groups.append(subgroup)
+    def test_lazy_init_device_mesh(self):
+        mesh = DeviceMesh(self.device_type, [1], _init_process_groups=False)
 
-        if len(dim_groups) > 0:
-            # dim_groups is not a list
-            self.assertRaises(
-                RuntimeError,
-                DeviceMesh,
-                self.device_type,
-                [[0, 1], [2, 3]],
-                dim_groups=dim_groups[0],
-            )
+        with self.assertRaisesRegex(RuntimeError, "process groups not initialized!"):
+            mesh.get_dim_groups()
 
-            # dim_groups is a list, but not a list of ProcessGroup
-            self.assertRaises(
-                RuntimeError,
-                DeviceMesh,
-                self.device_type,
-                [[0, 1], [2, 3]],
-                dim_groups=[dim_groups[0], "dummy"],
-            )
-
-            # dim_groups has incorrect length
-            self.assertRaises(
-                RuntimeError,
-                DeviceMesh,
-                self.device_type,
-                [[0, 1], [2, 3]],
-                dim_groups=[dim_groups[0]],
-            )
+        if self.rank == 1:
+            assert mesh.get_coordinate() is not None
+        else:
+            assert mesh.get_coordinate() is None
 
 
 class DeviceMeshTestNDim(DTensorTestBase):
