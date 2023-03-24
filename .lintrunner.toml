@@ -679,7 +679,6 @@ exclude_patterns = [
     'cmake/Modules_CUDA_fix/**',
     'cmake/Caffe2Config.cmake.in',
     'aten/src/ATen/ATenConfig.cmake.in',
-    'cmake/Caffe2ConfigVersion.cmake.in',
     'cmake/TorchConfig.cmake.in',
     'cmake/TorchConfigVersion.cmake.in',
     'cmake/cmake_uninstall.cmake.i',

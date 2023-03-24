@@ -1,6 +1,7 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("@pybind11_bazel//:build_defs.bzl", "pybind_extension")
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("@pytorch//third_party:substitution.bzl", "header_template_rule")
 load("@pytorch//:tools/bazel.bzl", "rules")
 load("@pytorch//tools/rules:cu.bzl", "cu_library")
@@ -444,14 +445,24 @@ CAFFE2_COPTS = COMMON_COPTS + [
     "-fno-trapping-math",
 ]
 
+proto_library(
+    name = "caffe2_proto_source",
+    srcs = glob([
+        "caffe2/proto/*.proto",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+cc_proto_library(
+    name = "caffe2_protos",
+    deps = [":caffe2_proto_source"],
+)
+
 header_template_rule(
     name = "caffe2_core_macros_h",
     src = "caffe2/core/macros.h.in",
     out = "caffe2/core/macros.h",
     substitutions = {
-        "@CAFFE2_VERSION_MAJOR@": "1",
-        "@CAFFE2_VERSION_MINOR@": "3",
-        "@CAFFE2_VERSION_PATCH@": "0",
         "cmakedefine": "define",
         "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
         "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
@@ -1277,13 +1288,13 @@ cc_library(
         "caffe2/utils/cpuid.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
+        "caffe2/proto/*.h",
     ]),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2_protos",
         ":caffe2_core_macros_h",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:caffe2_protos",
         "//c10:headers",
     ],
 )
@@ -1337,6 +1348,7 @@ cc_library(
         "caffe2/perfkernels/*.h",
         "caffe2/predictor/*.h",
         "caffe2/predictor/emulator/*.h",
+        "caffe2/proto/*.h",
         "caffe2/quantization/server/*.h",
         "caffe2/queue/*.h",
         "caffe2/serialize/*.h",
@@ -1359,8 +1371,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:caffe2_protos",
+        ":caffe2_protos",
     ],
 )
 
@@ -1421,6 +1432,7 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
+        ":caffe2_protos",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -1429,8 +1441,6 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:caffe2_protos",
     ] + if_cuda(
         [
             ":caffe2_cuda_cpp",

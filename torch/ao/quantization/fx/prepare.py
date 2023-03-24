@@ -17,6 +17,7 @@ from ..observer import (
     ObserverBase,
     _is_activation_post_process
 )
+from ..fake_quantize import FakeQuantizeBase
 from ..qconfig import (
     _is_reuse_input_qconfig,
     QConfigAny,
@@ -116,6 +117,17 @@ __all__ = [
 # list of dtypes to not add observers to
 _DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
+_OBS_OR_FQ_TYPE = Union[ObserverBase, FakeQuantizeBase, Any]
+# type for annotations for argument or output for node, either a observer/fake_quantize
+# constructor (e.g. observer.with_args(...)), or a tuple of constructors, each one
+# corresponds to an argument for node or a output for node, the tuple can also be nested
+# the requirement is that it matches the structure of input and output
+# e.g. node.meta["target_dtype_info"] = {
+#    "input_obs_or_fq_ctr_for_args": (obs1, obs2),
+#    "output_obs_or_fq_ctrs": (obs3, obs4)
+# }
+_OBS_OR_FQ_ANNO_TYPE = Union[_OBS_OR_FQ_TYPE, Tuple[_OBS_OR_FQ_TYPE, ...]]
+
 # note: the following default target dtype info dicts are temporary,
 # should be moved to the new programmable API class soon
 _DEFAULT_FP32_QCONFIG_FOR_TARGET_DTYPE_INFO = {
@@ -131,6 +143,16 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         _is_activation_post_process(named_modules[str(node.target)])
+
+def _get_arg_to_obs_or_fq_ctr(node):
+    assert "target_dtype_info" in node.meta
+    assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
+    input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
+    arg_to_ctr: Dict[Argument, Any] = {}
+    _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
+    if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
+        _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
+    return arg_to_ctr
 
 def _get_dtype_and_is_dynamic(obs_or_fq_ctr: Optional[Callable]) -> Tuple[Optional[torch.dtype], bool]:
     """ Given a constructor for observer or fake quant module, returns
@@ -159,12 +181,8 @@ def _is_input_arg_dtype_supported_by_backend(
             dtype_config, backend_config) for a in arg)
     if not isinstance(arg, Node):
         return True
-    assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
-    arg_to_ctr = {}
-    _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
-    if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
-        _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
+
+    arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
 
     # TODO: support check for standalone module
     # TODO: remove the need to do weight/bias/act specific check after refactoring
@@ -376,7 +394,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
         # and set output_obs_or_fq_ctr based on qconfig.output_act
         # this also requires we extend the structure of QConfig to support more fine
         # grained configurations
-        target_dtype_info: Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]] = (
+        target_dtype_info: Dict[str, _OBS_OR_FQ_ANNO_TYPE] = (
             _get_target_activation_dtype_for_node(
                 node,
                 qconfig,
@@ -393,7 +411,7 @@ def _get_target_activation_dtype_for_node(
     named_modules: Dict[str, torch.nn.Module],
     cache_for_no_tensor_check: Dict[Node, bool],
     backend_config: BackendConfig,
-) -> Dict[str, Optional[Tuple[Union[torch.dtype, type], bool]]]:
+) -> Dict[str, _OBS_OR_FQ_ANNO_TYPE]:
     """
     For each op attribute in the op's input activation, output activation,
     weight, bias - returns the settings of dtype and is_dynamic we expect
@@ -526,11 +544,13 @@ def _populate_arg_to_ctr_for_args(
         elif isinstance(arg_or_args, Node):
             arg_to_ctr[arg_or_args] = input_obs_or_fq_ctr_for_args
     else:
+        assert isinstance(arg_or_args, tuple)
         for arg, input_obs_or_fq_ctr in zip(arg_or_args, input_obs_or_fq_ctr_for_args):
             if isinstance(arg, tuple):
                 if isinstance(input_obs_or_fq_ctr, tuple):
                     # TODO: have a separate validation pass for this
-                    assert len(arg) == len(input_obs_or_fq_ctr), "Expected input_obs_or_fq_ctr_for_args to match the structure of node.args"
+                    assert len(arg) == len(input_obs_or_fq_ctr), \
+                        "Expected input_obs_or_fq_ctr_for_args to match the structure of node.args"
                     for inner_arg, inner_ctr in zip(arg, input_obs_or_fq_ctr):
                         _populate_arg_to_ctr_for_args(inner_arg, inner_ctr, arg_to_ctr)
                 else:
@@ -559,13 +579,7 @@ def _get_arg_target_dtype_as_input_to_node(
     to node `node`
     """
     assert isinstance(arg, Node)
-    assert "target_dtype_info" in node.meta
-    assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
-    arg_to_ctr = {}
-    _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
-    if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
-        _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
+    arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
     obs_or_fq_ctr = arg_to_ctr[arg]
     qconfig_dtype, _ = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
     return qconfig_dtype
@@ -580,13 +594,7 @@ def _get_arg_target_is_dynamic_as_input_to_node(
     to node `node`
     """
     assert isinstance(arg, Node)
-    assert "target_dtype_info" in node.meta
-    assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    input_obs_or_fq_ctr_for_args = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
-    arg_to_ctr = {}
-    _populate_arg_to_ctr_for_args(node.args, input_obs_or_fq_ctr_for_args, arg_to_ctr)
-    if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
-        _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
+    arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
     obs_or_fq_ctr = arg_to_ctr[arg]
     _, qconfig_is_dynamic = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
     return qconfig_is_dynamic

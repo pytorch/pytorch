@@ -726,9 +726,11 @@ class BuildExtension(build_ext):
                         cmd = [nvcc, '-c', src, '-o', obj] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = COMMON_MSVC_FLAGS + self.cflags['cxx']
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
                     elif isinstance(self.cflags, list):
                         cflags = COMMON_MSVC_FLAGS + self.cflags
+                        append_std17_if_no_std_present(cflags)
                         cmd += cflags
 
                 return original_spawn(cmd)
