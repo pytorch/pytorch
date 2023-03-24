@@ -71,6 +71,8 @@ RTYPE_TO_CPP = {
     "any": "||",
 }
 
+OP_WEIGHT = {"default": 1, "exp": 2, "sigmoid": 3}
+
 
 def reduction_init(reduction_type, dtype):
     if dtype in (torch.float16, torch.bfloat16):
@@ -1067,7 +1069,7 @@ class CppKernel(Kernel):
         self.codegen_loops_impl(loop_nest, code, worksharing)
 
     def decide_parallel_depth(self, ranges, threads):
-        seq = self.size_hint()
+        seq = self.size_hint() * self.chunk_workload
         par = 1
         depth = 0
         for expr in ranges:
@@ -2028,6 +2030,7 @@ class CppKernelProxy(CppKernel):
         self.loop_nest = None
         self.call_ranges = None
         self.picked_vec_isa: codecache.VecISA = codecache.pick_vec_isa()
+        self.chunk_workload = 1
 
     def legalize_bf16(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -2162,6 +2165,16 @@ class CppKernelProxy(CppKernel):
         _, (group, reduction_group) = max(
             nodes, key=lambda x: int(x.is_reduction())
         ).group
+
+        self.chunk_workload = 0
+        for _node in nodes:
+            for n in _node._body.root_block.graph.nodes:
+                if n.op == "call_method":
+                    self.chunk_workload += (
+                        OP_WEIGHT[n.name]
+                        if n.name in OP_WEIGHT
+                        else OP_WEIGHT["default"]
+                    )
 
         def codegen_kernel(cls, *args):
             with kernel_group.new_kernel(cls, *args) as kernel:

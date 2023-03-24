@@ -169,7 +169,7 @@ class cpp:
     dynamic_threads = False
 
     simdlen = None
-    min_chunk_size = 4096
+    min_chunk_size = 8192
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
         # "g++-12",
