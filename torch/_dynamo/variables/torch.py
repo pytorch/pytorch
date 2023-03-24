@@ -773,7 +773,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchPyOperator(VariableTracker):
+class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -1022,7 +1022,7 @@ class TorchPyOperator(VariableTracker):
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
         else:
-            unimplemented(f"PyOperator {self.value.__name__}")
+            unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(

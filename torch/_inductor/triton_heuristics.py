@@ -15,10 +15,10 @@ from typing import List
 import torch
 from torch._dynamo.utils import dynamo_timed
 
-from .. import config
-from ..codecache import cache_dir
-from ..ir import ReductionHint, TileHint
-from ..utils import (
+from . import config
+from .codecache import cache_dir
+from .ir import ReductionHint, TileHint
+from .utils import (
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -100,6 +100,7 @@ class CachingAutotuner(KernelInterface):
                 self.fn,
                 **compile_meta,
             )
+            binary._init_handles()
 
         call_args = [
             arg
@@ -133,8 +134,6 @@ class CachingAutotuner(KernelInterface):
 
         launcher = scope["launcher"]
         launcher.config = cfg
-
-        binary._init_handles()
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = getattr(binary, "shared", None)
@@ -159,7 +158,7 @@ class CachingAutotuner(KernelInterface):
 
     @dynamo_timed
     def benchmark_all_configs(self, *args, **kwargs):
-        from ..compile_fx import clone_preserve_strides
+        from .compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
