@@ -32,7 +32,15 @@ from torch.distributed.elastic.multiprocessing import (
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-__all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'ElasticAgent', 'SimpleElasticAgent']
+__all__ = [
+    "WorkerSpec",
+    "Worker",
+    "WorkerState",
+    "WorkerGroup",
+    "RunResult",
+    "ElasticAgent",
+    "SimpleElasticAgent",
+]
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
@@ -930,7 +938,11 @@ class SimpleElasticAgent(ElasticAgent):
         except SignalException as e:
             log.warning(f"Got termination signal: {e.sigval}")
             raise
-        except Exception:
-            log.exception(
+        except Exception as ex:
+            message = (
                 f"Error waiting on exit barrier. Elapsed: {time.time() - start} seconds"
             )
+            if "timeout" in str(ex).lower():
+                log.warning(message)
+            else:
+                log.exception(message)
