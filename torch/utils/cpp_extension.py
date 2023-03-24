@@ -1996,7 +1996,7 @@ def _write_ninja_file_to_build_library(path,
     common_cflags += ['-D_GLIBCXX_USE_CXX11_ABI=' + str(int(torch._C._GLIBCXX_USE_CXX11_ABI))]
 
     if IS_WINDOWS:
-        cflags = common_cflags + COMMON_MSVC_FLAGS + extra_cflags
+        cflags = common_cflags + COMMON_MSVC_FLAGS + ['/std:c++17'] + extra_cflags
         cflags = _nt_quote_args(cflags)
     else:
         cflags = common_cflags + ['-fPIC', '-std=c++17'] + extra_cflags
