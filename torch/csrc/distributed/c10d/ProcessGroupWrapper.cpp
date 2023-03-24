@@ -464,8 +464,10 @@ void ProcessGroupWrapper::runCollectiveChecks(
   // TODO: we should use wrapped backend_'s timeout here, but C++ ProcessGroup
   // API does not expose timeout.
   auto seq = getSequenceNumberForGroup();
-  auto finger_print =
-      CollectiveFingerPrint(op_type, tensors, seq);
+  auto finger_print = CollectiveFingerPrint(op_type, tensors, seq);
+
+  LOG(INFO) << "[Rank " << getRank() << "] "
+            << "Running collective: " << finger_print;
   try {
     glooBackend_->monitoredBarrier(options, /* waitAllRanks */ true);
   } catch (const std::runtime_error& e) {
