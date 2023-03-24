@@ -10,7 +10,7 @@ import sys
 import typing
 import unittest
 import weakref
-from typing import Callable
+from typing import Callable, Tuple
 from unittest.mock import patch
 
 import numpy as np
@@ -2484,7 +2484,7 @@ class CommonTemplate:
         self.common(fn, (torch.randn(4), torch.randn(4)), check_lowp=False)
 
     @requires_multigpu()
-    def test_recompile_on_index(self):
+    def test_multi_gpu_recompile_on_index(self):
         torch.set_float32_matmul_precision("high")
 
         def gemm(x, y):
@@ -5840,8 +5840,33 @@ class CommonTemplate:
         self.common(fn1, (torch.tensor([[4.0]]), torch.tensor([5.0])))
         self.common(fn2, ())
 
+    def test_argmax_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97127
+        def fn():
+            a = torch.zeros([2, 2])
+            b = a.argmax(0)
+            return b.float().mean()
 
-def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
+        self.common(fn, ())
+
+    def test_const_int32_to_float(self):
+        # https://github.com/pytorch/pytorch/issues/97124
+        def fn():
+            a = torch.zeros([1, 2], dtype=torch.int32)
+            a = a + a
+            b = a.to(dtype=torch.float32)
+            return b * 0.8
+
+        self.common(fn, ())
+
+
+@dataclasses.dataclass
+class TestFailure:
+    suffixes: Tuple[str]
+    is_skip: bool = False
+
+
+def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
     for name, value in my_cls.__dict__.items():
         if name.startswith("test_"):
             # You cannot copy functions in Python, so we use lambdas here to
@@ -5849,12 +5874,17 @@ def copy_tests(my_cls, other_cls, suffix, test_skips=None):  # noqa: B902
             # would modify all methods sharing the same object id. Also, by
             # using a default argument in a lambda, we create a copy instead of
             # a reference. Otherwise, we would lose access to the value.
-            skips = test_skips and test_skips.get(name)
-            if skips and suffix in skips:
+            tf = test_failures and test_failures.get(name)
+            if tf is not None and suffix in tf.suffixes:
+                skip_func = (
+                    unittest.skip("Skipped!")
+                    if tf.is_skip
+                    else unittest.expectedFailure
+                )
                 setattr(
                     other_cls,
                     f"{name}_{suffix}",
-                    unittest.skip("Skipped!")(lambda self, value=value: value(self)),
+                    skip_func(lambda self, value=value: value(self)),
                 )
             else:
                 setattr(
@@ -6428,7 +6458,16 @@ if HAS_CPU:
                     torch.double,
                 ),
             )
-            _graph.output((b, c))
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    b,
+                    b,
+                ),
+            )
+            _graph.output((d, c))
 
             def get_index():
                 return ""
@@ -6514,7 +6553,16 @@ if HAS_CPU:
                     torch.int64,
                 ),
             )
-            _graph.output(c)
+            d: torch.fx.Node = _graph.create_node(
+                "call_method",
+                "ge",
+                args=(
+                    a,
+                    c,
+                    c,
+                ),
+            )
+            _graph.output(d)
 
             def get_index():
                 return ""
@@ -6657,6 +6705,25 @@ if HAS_CPU:
                     compiled = compile_fx_inner(traced, [x])
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
+
+        @unittest.skipIf(
+            not codecache.valid_vec_isa_list(), "Does not support vectorization"
+        )
+        @patch("torch.cuda.is_available", lambda: False)
+        def test_reduction_cpu_only(self):
+            def fn(x):
+                return (torch.argmax(x, -1),)
+
+            for dtype in vec_dtypes:
+                x = torch.randn((10, 10), dtype=dtype)
+
+                with config.patch({"cpp.simdlen": None}):
+                    torch._dynamo.reset()
+                    metrics.reset()
+                    traced = make_fx(fn)(x)
+                    compiled = compile_fx_inner(traced, [x])
+                    assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
+                    assert metrics.generated_cpp_vec_kernel_count == 0
 
         # Currently, we enabled AVX2 and AVX512 for vectorization. If the platform is not
         # supported, the vectorization will not work and skip this test case. For ARM or
@@ -7137,6 +7204,33 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert compiled([])[0].device.type == "cuda"
 
         @config.patch({"triton.cudagraphs": True})
+        def test_no_device_idx_repro_cudagraphs(self):
+            class Repro(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self):
+                    full = torch.ops.aten.full.default(
+                        [8, 512],
+                        1,
+                        dtype=torch.float32,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    full_1 = torch.ops.aten.full.default(
+                        [8, 512],
+                        0,
+                        dtype=torch.int64,
+                        layout=torch.strided,
+                        device=torch.device(type="cuda", index=0),
+                        pin_memory=False,
+                    )
+                    return (full_1, full)
+
+            self.common(Repro(), ())
+
+        @config.patch({"triton.cudagraphs": True})
         def test_expanded_inputs_cudagraphs(self):
             @torch._dynamo.optimize("inductor")
             def fn(x, y):
@@ -7276,7 +7370,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             https://github.com/pytorch/torchdynamo/issues/1670
             """
             from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-            from torch._inductor.triton_ops.autotune import CachingAutotuner, grid
+            from torch._inductor.triton_heuristics import CachingAutotuner, grid
             from torch._inductor.utils import instance_descriptor
 
             def autotune(configs, meta):
@@ -7381,7 +7475,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             assert same(fn(a, b), fn_optimized(a, b))
 
     class TritonCodeGenTests(TestCase):
-        from torch._inductor.triton_ops.autotune import CachingAutotuner
+        from torch._inductor.triton_heuristics import CachingAutotuner
 
         class NoOpCompilerBackend:
             def __init__(self):
@@ -7433,7 +7527,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
                 for val in mod.__dict__.values():
                     if isinstance(
-                        val, torch._inductor.triton_ops.autotune.CachingAutotuner
+                        val, torch._inductor.triton_heuristics.CachingAutotuner
                     ):
                         kernels.append(val)
 
