@@ -250,9 +250,23 @@ def get_container(device_index: int):
         return container_dict[device_index]
 
 
-def cudagraphify_impl(model, inputs, static_input_idxs=(), *, device_index: int):
+def cudagraphify_impl(
+    model,
+    inputs,
+    static_input_idxs=(),
+    *,
+    device_index: int,
+    is_backward: bool,
+    is_inference: bool,
+):
     manager = get_container(device_index).get_tree_manager()
-    return manager.add_function(model, inputs, static_input_idxs)
+    return manager.add_function(
+        model,
+        inputs,
+        static_input_idxs,
+        is_backward,
+        is_inference,
+    )
 
 
 def is_live(weak_ref):
@@ -848,11 +862,19 @@ class CUDAGraphNode:
         return ptrs_to_deallocate
 
     def path_live_weakrefs(self) -> Generator[StorageWeakRefWrapper]:
-        "Returns all live storages weakrefs that created by nodes in this path"
         for i, j in self.live_indices_after_graph:
             out = self.path_weakrefs[i][j]
             if is_live(out):
                 yield out
+
+    def path_live_weakrefs_and_stacktraces(
+        self,
+    ) -> Generator[Tuple[StorageWeakRefWrapper, Optional[str]]]:
+        "Returns all live storages weakrefs that created by nodes in this path"
+        for i, j in self.live_indices_after_graph:
+            out = self.path_weakrefs[i][j]
+            if is_live(out):
+                yield out, self.path_stacktraces[i][j]
 
     def clear_path_outputs(self):
         "Clear the output lists of all nodes in the path"
@@ -1003,6 +1025,12 @@ class ExecutionState(Enum):
     EXECUTION = auto()
 
 
+class CompilationMode(Enum):
+    FORWARD = auto()
+    BACKWARD = auto()
+    INFERENCE = auto()
+
+
 class CUDAGraphTreeManager:
     """
     Groups individual recordings or executions of cuda graphs into a tree of recordings,
@@ -1083,7 +1111,18 @@ class CUDAGraphTreeManager:
         # number of instances we had to checkpoint the function
         self.debug_checkpointing_counter = 0
 
+        self.id_to_mode: Dict[int, CompilationMode] = {}
+
+        # forwards that have been invoked without invocation of their corresponding backwards
+        self.forwards_with_pending_backwards: int = 0
+
     def run(self, new_inputs: List[Tensor], function_id: FunctionID):
+        mode = self.id_to_mode[function_id]
+        if mode == CompilationMode.FORWARD:
+            self.forwards_with_pending_backwards += 1
+        elif mode == CompilationMode.BACKWARD:
+            self.forwards_with_pending_backwards -= 1
+
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
         # on the hot path, but both recording and warmup only happen once
@@ -1196,11 +1235,27 @@ class CUDAGraphTreeManager:
     def new_func_id(self) -> FunctionID:
         return FunctionID(next(self.func_counter))
 
-    def add_function(self, model, inputs, static_input_idxs) -> Callable:
+    def add_function(
+        self,
+        model,
+        inputs,
+        static_input_idxs,
+        is_backward,
+        is_inference,
+    ) -> Callable:
         id = self.new_func_id()
         self.ids_to_funcs[id] = WrappedFunction(
             model, remove_unaligned_input_idxs(inputs, static_input_idxs), id
         )
+        self.id_to_mode[id] = (
+            CompilationMode.BACKWARD
+            if is_backward
+            else (
+                CompilationMode.INFERENCE if is_inference else CompilationMode.FORWARD
+            )
+        )
+
+        comp_context = torch._functorch.aot_autograd.get_graph_being_compiled()
         fn = functools.partial(self.run, function_id=id)
 
         # container needs to set clean up when fn dies
@@ -1234,6 +1289,12 @@ class CUDAGraphTreeManager:
     def get_curr_generation() -> int:
         return GenerationTracker.generation
 
+    def can_start_new_generation(self) -> bool:
+        if self.forwards_with_pending_backwards != 0:
+            return False
+
+        return self.current_gen != self.get_curr_generation()
+
     def try_end_curr_recording(self) -> None:
         """
         Check if the current recording can be terminated, either because all outputs of the
@@ -1244,7 +1305,7 @@ class CUDAGraphTreeManager:
         assert self.current_node is not None
 
         # multiple invocations, allow overwriting the previous generation
-        if self.current_gen != self.get_curr_generation():
+        if self.can_start_new_generation():
             self.dealloc_current_path_weakrefs()
             self.clear_current_node_outputs_and_set_to_none()
             return
@@ -1264,7 +1325,7 @@ class CUDAGraphTreeManager:
         if self.current_node is None:
             return
 
-        if self.current_gen != self.get_curr_generation():
+        if self.can_start_new_generation():
             self.clear_current_node_outputs_and_set_to_none()
             return
 
@@ -1272,7 +1333,7 @@ class CUDAGraphTreeManager:
             self.clear_current_node_outputs_and_set_to_none()
 
     def try_end_curr_warmup(self):
-        if self.current_gen != self.get_curr_generation():
+        if self.can_start_new_generation():
             self.dealloc_current_path_weakrefs()
             self.current_node = None
             return

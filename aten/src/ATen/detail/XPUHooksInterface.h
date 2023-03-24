@@ -51,7 +51,7 @@ struct TORCH_API XPUHooksInterface {
         false,
         "Cannot get XPU device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  };
+  }
 
   virtual DLDevice getDLPackDeviceFromATenDevice(
       const Device& aten_device,
@@ -60,7 +60,7 @@ struct TORCH_API XPUHooksInterface {
         false,
         "Cannot get XPU DL device without Intel Extension for Pytorch. ",
         XPU_HELP);
-  };
+  }
 };
 
 struct TORCH_API XPUHooksArgs {};
