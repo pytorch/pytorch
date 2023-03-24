@@ -170,8 +170,11 @@ conv2d_template = TritonTemplate(
 """,
 )
 
+# TODO: fix at::convolution codegen
 aten_convolution = ExternKernelChoice(
-    torch.convolution, "at::convolution", has_out_variant=False
+    # torch.convolution, "at::convolution", has_out_variant=False
+    torch.convolution,
+    has_out_variant=False,
 )
 
 
