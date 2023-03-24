@@ -86,12 +86,12 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             from torch._dynamo.source import ConstantSource
 
-            from torch._dynamo.utils import dynamic_dims_from_tensor
+            from torch._dynamo.utils import dynamic_dims_from_tensor, expand
 
             # TODO: this should not be needed once #93059 lands
             # https://github.com/pytorch/pytorch/pull/94031#discussion_r1096044816
             # TODO: make a dedicated UnknownSource for this?
-            constraint_dims = None
+            constraint_dims = expand(ex, constraint_dims=None)
             dynamic_dims = dynamic_dims_from_tensor(ex, constraint_dims)
             source = ConstantSource(
                 f"__unknown_tensor_{len(self._shape_env.var_to_val)}"

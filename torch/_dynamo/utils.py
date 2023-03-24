@@ -1441,7 +1441,7 @@ def expand(
 ) -> DimList[DimConstraint]:
     constraint_dims_exhaustive = []
     if constraint_dims is None:
-        constraint_dims_exhaustive = [None] * e.dim()
+        constraint_dims_exhaustive = [RelaxedUnspecConstraint()] * e.dim()
     else:
         for idx in range(0, e.dim()):
             if idx in constraint_dims:

@@ -2060,8 +2060,11 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(
             torch._dynamo.exc.InternalTorchDynamoError,
-        ):
+        ) as ite:
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
+        inner_e = ite.exception.__cause__
+        self.assertTrue(isinstance(inner_e, RuntimeError))
+        self.assertTrue("Constraints violated" in str(inner_e))
 
     @config.patch(dynamic_shapes=True)
     def test_export_no_raise_on_relationship(self):
@@ -2112,10 +2115,6 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         constraints = [dynamic_dim(x, 0), dynamic_dim(y, 0), dynamic_dim(z, 0)]
         torch._dynamo.export(my_dyn_fn, x, y, z, constraints=constraints)
 
-    # This should not fail, but it does, because
-    # symbolic_shapes simplification _maybe_evaluate_static removes this guard
-    # see https://docs.google.com/document/d/16VPOa3d-Liikf48teAOmxLc92rgvJdfosIy-yoT38Io/edit#
-    @unittest.expectedFailure
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_not_1(self):
         x = torch.randn([1, 1, 1])
@@ -2268,6 +2267,7 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         res = gm(input_tensor, input_tensor2)
         self.assertTrue(torch._dynamo.utils.same(ref, res))
 
+    @config.patch(dynamic_shapes=True)
     def test_export_mark_dynamic_conflict_dynamic_dim(self):
         y = torch.randn([3, 3, 3])
 
@@ -2278,25 +2278,10 @@ class ExportTests(torch._dynamo.test_case.TestCase):
 
         torch._dynamo.mark_dynamic(y, 0)
         with self.assertRaisesRegex(
-            RuntimeError, "Illegal to export tensor already marked dynamic"
+            AssertionError,
+            "Illegal to mix mark_dynamic on tensors with export constraints",
         ):
             torch._dynamo.export(my_dyn_fn, y, constraints=[dynamic_dim(y, 0)])
-
-    def test_export_dynamic_dim_unknown_tensor(self):
-        y = torch.randn([3, 3, 3])
-        z = torch.randn([3, 3, 3])
-
-        def my_dyn_fn(x):
-            if x.shape[0] > 3:
-                return x.sin()
-            return x.cos()
-
-        with self.assertRaisesRegex(
-            RuntimeError, "User specified dynamic dim for unknown tensors"
-        ):
-            torch._dynamo.export(
-                my_dyn_fn, y, constraints=[dynamic_dim(z, 0), dynamic_dim(y, 0)]
-            )
 
     @config.patch(dynamic_shapes=True)
     def test_export_dynamic_dim_cleanup(self):

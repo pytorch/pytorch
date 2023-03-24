@@ -1813,7 +1813,7 @@ class ShapeEnv:
                     source = symbol_to_source[symbol][0]
                     constraints = symbol_to_constraints[symbol]
                     for c in constraints:
-                        if isinstance(c, StrictMinMaxConstraint):
+                        if isinstance(c, StrictMinMaxConstraint) or (c is not None and strict_mark_dyn):
                             record_constraint_violation(lambda: (
                                 f"Could not validate (strict) constraint {c.render(source)} as "
                                 f"we generated a guard on this size variable: {guard_expr}.  Guard "

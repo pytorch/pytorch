@@ -1869,7 +1869,7 @@ def aot_wrapper_dedupe(
             if 'graph_arg_pos' in dupe_arg_dict and 'graph_arg_pos' in kept_arg_dict:
                 d_positions = dupe_arg_dict['graph_arg_pos']
                 k_positions = kept_arg_dict['graph_arg_pos']
-                assert(d_positions == k_positions)
+                assert d_positions == k_positions
                 if len(d_positions) > 1:
                     for i in range(1, len(d_positions)):
                         pos = d_positions[i]
