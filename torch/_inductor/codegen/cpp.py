@@ -1146,7 +1146,7 @@ class CppVecKernel(CppKernel):
         var_expr = (
             f"{var}[{cexpr_index(index)}]"
             if is_broadcast
-            else f"{var} + {cexpr(new_index)}"
+            else f"{var} + {cexpr_index(new_index)}"
         )
 
         if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
@@ -1179,9 +1179,9 @@ class CppVecKernel(CppKernel):
         new_index = self.scale_index_with_offset(index, self.tiling_factor)
         assert new_index != expanded_index
         if V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
+            line = f"store_float_as_bf16({var} + {cexpr_index(new_index)}, {value});"
         else:
-            line = f"{value}.store({var} + {cexpr(new_index)});"
+            line = f"{value}.store({var} + {cexpr_index(new_index)});"
         self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -1296,9 +1296,9 @@ class CppTile2DKernel(CppVecKernel):
             new_index, factor, itervar_idx=self.outer_tiling_idx
         )
 
-        src = f"{var} + {cexpr(new_index)}"
+        src = f"{var} + {cexpr_index(new_index)}"
         dst = "__place_holder__"
-        ld_src = f"{cexpr(self.stride_at(self.itervars[-1], index))}"
+        ld_src = f"{cexpr_index(self.stride_at(self.itervars[-1], index))}"
         ld_dst = f"{factor}"
         if is_store:
             src, dst = dst, src
@@ -1337,7 +1337,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=False
             )
             # vector load inside the kernel inner loop
-            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr(inner * self.tiling_factor)})"
+            line = f"at::vec::Vectorized<float>::loadu({tile_var} + {cexpr_index(inner * self.tiling_factor)})"
             return self.cse.generate(self.loads, line)
         else:
             new_index = self.scale_index_with_offset(
@@ -1362,7 +1362,7 @@ class CppTile2DKernel(CppVecKernel):
                 name, var, expanded_index, is_store=True
             )
             # vector store inside the kernel inner loop
-            line = f"{value}.store({tile_var} + {cexpr(inner * self.tiling_factor)});"
+            line = f"{value}.store({tile_var} + {cexpr_index(inner * self.tiling_factor)});"
             self.stores.writeline(name, line)
         else:
             new_index = self.scale_index_with_offset(
