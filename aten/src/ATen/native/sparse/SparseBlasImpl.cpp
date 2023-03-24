@@ -219,6 +219,7 @@ Tensor& _compressed_row_strided_addmm_out(
 
 namespace cpu {
 #if !AT_USE_MKL_SPARSE()
+namespace {
 template<typename scalar_t, typename idx_t>
 void addmv_sparse_csr(
     const scalar_t* mat_values,
@@ -268,6 +269,38 @@ void addmv_sparse_bsr(
     }
   });
 }
+
+template<typename scalar_t, typename idx_t>
+void addmv_out_sparse_csr(
+    const Tensor& mat,
+    const Tensor& vec,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& result) {
+  auto cont_values = mat.values().contiguous();
+  if (mat.layout() == kSparseBsr) {
+    addmv_sparse_bsr(cont_values.template data<scalar_t>(),
+        mat.crow_indices().template data<idx_t>(),
+        mat.col_indices().template data_ptr<idx_t>(),
+        mat.size(0),
+        mat.values().size(1),
+        mat.values().size(2),
+        vec.template data<scalar_t>(),
+        alpha.template to<scalar_t>(),
+        beta.template to<scalar_t>(),
+        result.template data<scalar_t>());
+  } else {
+    addmv_sparse_csr(cont_values.template data<scalar_t>(),
+        mat.crow_indices().template data<idx_t>(),
+        mat.col_indices().template data_ptr<idx_t>(),
+        mat.size(0),
+        vec.template data<scalar_t>(),
+        alpha.template to<scalar_t>(),
+        beta.template to<scalar_t>(),
+        result.template data<scalar_t>());
+  }
+}
+} // anonymous namespace
 #endif // !AT_USE_MKL_SPARSE()
 
 /*
@@ -287,54 +320,13 @@ void addmv_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
 #if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(mat.layout() == kSparseBsr || mat.layout() == kSparseCsr, "Unexpected layout", mat.layout());
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
-        if (mat.layout() == kSparseBsr) {
-          if (mat.crow_indices().scalar_type() == kLong) {
-            addmv_sparse_bsr(mat.values().data<scalar_t>(),
-                mat.crow_indices().data<int64_t>(),
-                mat.col_indices().data_ptr<int64_t>(),
-                mat.size(0),
-                mat.values().size(1),
-                mat.values().size(2),
-                vec.data<scalar_t>(),
-                alpha.to<scalar_t>(),
-                beta.to<scalar_t>(),
-                result.data<scalar_t>());
-          } else {
-            addmv_sparse_bsr(mat.values().data<scalar_t>(),
-                mat.crow_indices().data<int32_t>(),
-                mat.col_indices().data_ptr<int32_t>(),
-                mat.size(0),
-                mat.values().size(1),
-                mat.values().size(2),
-                vec.data<scalar_t>(),
-                alpha.to<scalar_t>(),
-                beta.to<scalar_t>(),
-                result.data<scalar_t>());
-          }
-        } else if (mat.layout() == kSparseCsr) {
-          if (mat.crow_indices().scalar_type() == kLong) {
-            addmv_sparse_csr(mat.values().data<scalar_t>(),
-                mat.crow_indices().data<int64_t>(),
-                mat.col_indices().data_ptr<int64_t>(),
-                mat.size(0),
-                vec.data<scalar_t>(),
-                alpha.to<scalar_t>(),
-                beta.to<scalar_t>(),
-                result.data<scalar_t>());
-          } else {
-            addmv_sparse_csr(mat.values().data<scalar_t>(),
-                mat.crow_indices().data<int32_t>(),
-                mat.col_indices().data_ptr<int32_t>(),
-                mat.size(0),
-                vec.data<scalar_t>(),
-                alpha.to<scalar_t>(),
-                beta.to<scalar_t>(),
-                result.data<scalar_t>());
-          }
+        if (mat.crow_indices().scalar_type() == kLong) {
+          addmv_out_sparse_csr<scalar_t, int64_t>(mat, vec, beta, alpha, result);
         } else {
-          TORCH_CHECK(false, "Unexpected layout ", mat.layout());
+          addmv_out_sparse_csr<scalar_t, int32_t>(mat, vec, beta, alpha, result);
         }
       });
 #else
