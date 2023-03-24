@@ -205,12 +205,13 @@ class MPSNotSupportedTest(torch._dynamo.test_case.TestCase):
     def test_default_mps_to_aot_eager(self):
         model = Seq().to("mps")
         example_input = torch.randn(1, 10).to("mps")
-        
+
         # Not sure yet if there's a better way to test this
         a = torch.compile(model, backend="inductor")(example_input)
         torch._dynamo.reset()
         b = torch.compile(model, backend="aot_eager")(example_input)
         assert a == b
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
