@@ -46,9 +46,9 @@ class FakeTensorProp(torch.fx.Interpreter):
         return result
 
     def propagate(self, *args):
+        args = [self._mode.from_tensor(a) if isinstance(a, torch.Tensor) else a for a in args]
+        return self.propagate_dont_convert_inputs(*args)
+
+    def propagate_dont_convert_inputs(self, *args):
         with self._mode:
-            fake_args = [
-                self._mode.from_tensor(a) if (isinstance(a, torch.Tensor) and not isinstance(a, FakeTensor))
-                else a for a in args
-            ]
-            return super().run(*fake_args)
+            return super().run(*args)

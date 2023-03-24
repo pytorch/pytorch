@@ -169,11 +169,14 @@ def compile_fx_inner(
         example_inputs
     ) or torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
 
+    FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(*example_inputs)
+    # pattern matcher passes might not preserve striding information
+    # on node.meta["val"]. if in the future we rely on these being
+    # correct we will need to fix.
+
     with V.set_fake_mode(fake_mode):
         pattern_matcher.fx_passes(gm)
         V.debug.fx_graph_transformed(gm, example_inputs)
-
-    FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
 
     with V.set_fake_mode(fake_mode):
         graph = GraphLowering(
