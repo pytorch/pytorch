@@ -204,7 +204,7 @@ void AccessInfo::dumpDOT(std::ostream& os) const {
     os << "n" << id_ << " [\n";
     os << "label = \"" << AccessToString(type_) << " (#" << id_ << ")\\n";
     os << "buf : " << *var_ << "\\n";
-    os << "bounds : \[";
+    os << "bounds : [";
     if (!bounds_.empty()) {
       for (size_t i = 0; i < bounds_.size() - 1; ++i) {
         os << "(" << *bounds_[i].start << ", " << *bounds_[i].end << "), ";

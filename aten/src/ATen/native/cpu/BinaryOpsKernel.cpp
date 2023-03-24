@@ -11,6 +11,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/Math.h>
+#include <ATen/native/cpu/LogAddExp.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/copysign.h>
@@ -315,6 +316,10 @@ void lshift_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
+          constexpr scalar_t max_shift = sizeof(scalar_t) * CHAR_BIT;
+          if ((static_cast<std::make_signed_t<scalar_t>>(b) < 0) || (b >= max_shift)) {
+            return 0;
+          }
           return static_cast<std::make_unsigned_t<scalar_t>>(a) << b;
         },
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -384,6 +389,11 @@ void rshift_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
     cpu_kernel_vec(iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
+          // right shift value to retain sign bit for signed and no bits for unsigned
+          constexpr scalar_t max_shift = sizeof(scalar_t) * CHAR_BIT - std::is_signed_v<scalar_t>;
+          if ((static_cast<std::make_signed_t<scalar_t>>(b) < 0) || (b >= max_shift)) {
+            return a >> max_shift;
+          }
           return a >> b;
         },
         [](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
@@ -893,6 +903,14 @@ void logaddexp_kernel(TensorIteratorBase& iter) {
               (a1 == b1) & (a1.abs() == inf));
           return convert_float_bfloat16(a0, a1);
         });
+  } else if (isComplexType(iter.dtype())) {
+    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
+      cpu_kernel(
+        iter,
+        [=](scalar_t a, scalar_t b) -> scalar_t {
+          return _log_add_exp_helper(a, b);
+        });
+    });
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.dtype(), "logaddexp_cpu", [&]() {
       cpu_kernel_vec(

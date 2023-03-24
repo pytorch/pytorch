@@ -16,7 +16,7 @@ from torch._dynamo.utils import dynamo_timed
 from . import config, dependencies, ir, metrics
 from .dependencies import StarDep, WeakDep
 from .sizevars import SimplifyIndexing
-from .utils import cache_on_self, cmp, has_triton
+from .utils import cache_on_self, cmp, free_symbol_has, has_triton
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -270,7 +270,6 @@ class BaseSchedulerNode:
                                 V.kernel.mutations.add(input_node.get_name())
                                 V.kernel.mutations.add(self.get_name())
                         return
-
         V.graph.wrapper_code.codegen_allocation(self.node)
 
     def can_free(self):
@@ -675,6 +674,10 @@ class Scheduler:
         self.buffer_names_to_free = set()
         self.buffer_names_no_longer_needed = set()
 
+        # fx graph node to the position it appears in the graph
+        # for debug attribution
+        self.origin_to_index = {}
+
     def debug_draw_graph(self):
         """Generate an image of the graph for debugging"""
         if os.environ.get("INDUCTOR_WRITE_SCHEDULER_GRAPH", None) == "1":
@@ -1002,9 +1005,12 @@ class Scheduler:
                 # StarDep doesn't match MemoryDep, different indices don't match
                 # However, broadcasting sometimes strips dimensions, and if that's the case
                 # we still can match unmet dep
+                # if there's indirect indexing, don't match it
                 if (
                     rd.name == cd.name
                     and type(rd) == type(cd)
+                    and not free_symbol_has(rd.index, "tmp")
+                    and not free_symbol_has(cd.index, "tmp")
                     and rd.index == cd.index
                     and len(rd.size) >= len(cd.size)
                     and rd.size[: len(cd.size)] == cd.size
@@ -1138,6 +1144,8 @@ class Scheduler:
             device.type != "cuda" or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.device_types.add(device.type)
+        V.graph.add_device_idx(device.index)
+
         if device.type == "cpu":
             from .codegen.cpp import CppScheduling
 
@@ -1162,9 +1170,21 @@ class Scheduler:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
 
+    def enter_context(self, node):
+        def get_order(n):
+            if n not in self.origin_to_index:
+                self.origin_to_index.update({n: i for i, n in enumerate(n.graph.nodes)})
+            return self.origin_to_index[n]
+
+        origins = [(get_order(e), e) for n in node.get_nodes() for e in n.node.origins]
+        if origins:
+            _, last = max(origins)
+            V.graph.wrapper_code.enter_context(last)
+
     @dynamo_timed
     def codegen(self):
         for node in self.nodes:
+            self.enter_context(node)
             self.buffer_names_no_longer_needed.update(node.last_usage)
 
             if not isinstance(node, NopKernelSchedulerNode):
