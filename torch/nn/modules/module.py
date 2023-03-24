@@ -433,11 +433,14 @@ class Module:
     _load_state_dict_post_hooks: Dict[int, Callable]
     _modules: Dict[str, Optional['Module']]
     call_super_init: bool = False
+    _optimized_module = None
+
 
     def __init__(self, *args, **kwargs) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
         """
+
         torch._C._log_api_usage_once("python.nn_module")
 
         # Backward compatibility: no args used to be allowed when call_super_init=False
@@ -1492,6 +1495,14 @@ class Module:
         return result
 
     def _call_impl(self, *args, **kwargs):
+        print("SOMETHING IS HAPPENING")
+        # Not sure how deep this needs to be so we don't mess up all the hooks
+        print(self._optimized_module)
+
+        # This is triggering an infinite recursion
+        if self._optimized_module:
+            return self._optimized_module(*args, **kwargs)
+        
         forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
@@ -1574,8 +1585,20 @@ class Module:
 
     __call__ : Callable[..., Any] = _call_impl
 
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state.pop("_optimized_module", None)
+        return state 
+    
     def __setstate__(self, state):
-        self.__dict__.update(state)
+        # Alban's idea so we can autoatically compile a model as we load it
+        # self.__dict__.update(state)
+        # self._optimized_module = None
+        # if self.autocompile:
+        #     self.compile()
+
+        # del self.__dict__["_optimized_module"]
+        
         # Support loading old checkpoints that don't have the following attrs:
         if '_forward_pre_hooks' not in self.__dict__:
             self._forward_pre_hooks = OrderedDict()
@@ -2422,3 +2445,7 @@ class Module:
         replica._is_replica = True  # type: ignore[assignment]
 
         return replica
+
+    def compile(self, *args, **kwargs):
+        optimized_module = torch.compile(self, *args, **kwargs)
+        super().__setattr__("_optimized_module", optimized_module)
