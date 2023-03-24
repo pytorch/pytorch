@@ -224,6 +224,10 @@ class SizeVarAllocator:
         return [x for x in sizes if x is not None], reindex, prune
 
     def guard_equals(self, left: Expr, right: Expr) -> Expr:
+        if isinstance(left, Expr):
+            left = sympy_subs(left, self.inv_precomputed_replacements)
+        if isinstance(right, Expr):
+            right = sympy_subs(right, self.inv_precomputed_replacements)
         assert self.shape_env.evaluate_expr(sympy.Eq(left, right))
         return left
 
@@ -315,7 +319,15 @@ class SizeVarAllocator:
         return self.shape_env.duck_int(val)
 
     def size_hint(self, expr: Expr) -> int:
-        out = sympy_subs(sympy.expand(expr), self.var_to_val)
+        if not isinstance(expr, Expr):
+            return int(expr)
+        free_symbols = expr.free_symbols
+        if not free_symbols:
+            return int(expr)
+        while any(s.name.startswith("ps") for s in free_symbols):
+            expr = sympy_subs(expr, self.inv_precomputed_replacements)
+            free_symbols = expr.free_symbols
+        out = sympy_subs(expr, self.var_to_val)
         return int(out)
 
     def size_hints(self, exprs: List[Expr]) -> int:
