@@ -1293,7 +1293,7 @@ class DistributedDataParallelTest(
         self._test_fp16()
 
     @requires_nccl()
-    @requires_nccl_version((2,17), "Need NCCL 2.17+ for configuring NCCL Communicators")
+    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
     @skip_if_lt_x_gpu(2)
     def test_ddp_default_cga(self):
         nccl_debug_file = tempfile.NamedTemporaryFile()
@@ -2756,7 +2756,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         self._test_pass_nccl_options(pg_opts)
 
     @requires_nccl()
-    @requires_nccl_version((2,17), "Need NCCL 2.17+ for configuring NCCL Communicators")
+    @requires_nccl_version((2, 17), "Need NCCL 2.17+ for configuring NCCL communicators")
     @skip_if_lt_x_gpu(2)
     def test_pass_nccl_options_config(self):
         pg_opts = c10d.ProcessGroupNCCL.Options()

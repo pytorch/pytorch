@@ -2135,8 +2135,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "is_ucc_available", &::c10d::ProcessGroupNCCL::isUCCAvailable);
 
 #ifdef ENABLE_NCCL_RANK_CONFIG
-  py::class_<ncclConfig_t>(processGroupNCCL, "NCCLConfig",
-  R"(
+  py::class_<ncclConfig_t>(
+      processGroupNCCL,
+      "NCCLConfig",
+      R"(
 ncclConfig_t data type for configuring NCCL communicators.
 See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
 for details.
@@ -2186,9 +2188,7 @@ Example::
       .def_readwrite(
           "is_high_priority_stream",
           &::c10d::ProcessGroupNCCL::Options::is_high_priority_stream)
-      .def_readwrite(
-          "config",
-          &::c10d::ProcessGroupNCCL::Options::config);
+      .def_readwrite("config", &::c10d::ProcessGroupNCCL::Options::config);
 #else
       .def_readwrite(
           "is_high_priority_stream",
