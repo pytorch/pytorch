@@ -180,7 +180,7 @@ class Shard(Placement):
         is replicated on the previously sharded mesh dimension
         """
         my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(dim=self.dim)
+        num_chunks = mesh.size(mesh_dim)
         # TODO: what should happen if rank is not in the mesh?
         # see issue https://github.com/pytorch/tau/pull/492
         assert (
