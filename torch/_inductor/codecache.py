@@ -131,7 +131,7 @@ class PersistentCache:
 
         def check_cache(cache, callback=None):
             """Check if `cache` contains data for all the choices"""
-            return False # TODO
+            # return False # TODO
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()

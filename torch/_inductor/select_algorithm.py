@@ -704,6 +704,9 @@ class AlgorithmSelectorCache(PersistentCache):
         if make_benchmark_fn.cache_info().currsize:
             counters["inductor"]["select_algorithm_autotune"] += 1
             self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+        else:
+            self.log_results(choices[0].name, input_nodes, timings, autotune_elapse)
+
         return builtins.min(timings, key=timings.__getitem__).output_node()
 
     @classmethod
@@ -805,15 +808,18 @@ class AlgorithmSelectorCache(PersistentCache):
         top_k = sorted(timings, key=timings.__getitem__)[:10]
         best = top_k[0]
         best_time = timings[best]
+        print(f"Best bmreq {getattr(best, 'bmreq', None)}\n")
         sys.stderr.write(f"AUTOTUNE {name}({sizes})\n")
         for choice in top_k:
             result = timings[choice]
-            sys.stderr.write(f"  {choice.name} {result:.4f}s {best_time/result:.1%}\n")
+            sys.stderr.write(
+                f"  {choice.name} {result:.4f} ms {best_time/result:.1%}\n"
+            )
 
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse} seconds\n")
+        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
 
     @staticmethod
     def benchmark_example_value(node):

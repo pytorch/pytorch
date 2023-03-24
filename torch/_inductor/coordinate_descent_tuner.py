@@ -23,10 +23,13 @@ def set_field(config, name, value):
         config.kwargs[name] = value
 
 
+NITER = 0
+
 class CoordescTuner:
     """
     The coordinate descent tuner.
     """
+
 
     def __init__(self, is_mm=False):
         self.is_mm = is_mm  # we will tune num_stages for mm
@@ -73,6 +76,12 @@ class CoordescTuner:
         return test is not None and test < baseline * (1 - threshold)
 
     def autotune(self, func: Callable[triton.Config, float], baseline_config: triton.Config, baseline_timing: Optional[float]=None):
+        return # TODO
+        global NITER
+        NITER += 1
+        if NITER != 17:
+            return
+
         if baseline_timing is None:
             baseline_timing = func(baseline_config)
         print(f"Baselien Config {baseline_config}, baseline timing {baseline_timing}")
@@ -80,6 +89,21 @@ class CoordescTuner:
         best_config = baseline_config
         best_timing = baseline_timing
         tunable_fields = self.tunable_fields
+
+        # TODO
+        skip_config = {
+            str(triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 64}, num_warps=8, num_stages=2)),
+            str(triton.Config({"BLOCK_M": 16, "BLOCK_N": 32, "BLOCK_K": 64}, num_warps=4, num_stages=2)),
+            str(triton.Config({"BLOCK_M": 32, "BLOCK_N": 16, "BLOCK_K": 64}, num_warps=4, num_stages=2)),
+            str(triton.Config({"BLOCK_M": 16, "BLOCK_N": 32, "BLOCK_K": 64}, num_warps=4, num_stages=3)),
+            # str(triton.Config({"BLOCK_M": 64, "BLOCK_N": 64, "BLOCK_K": 128}, num_warps=4, num_stages=3)), # out of shared memory
+            # str(triton.Config({"BLOCK_M": 128, "BLOCK_N": 64, "BLOCK_K": 64}, num_warps=4, num_stages=4)), # out of shared memory
+            str(triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 32}, num_warps=8, num_stages=3)), # IMA
+            str(triton.Config({"BLOCK_M": 32, "BLOCK_N": 32, "BLOCK_K": 32}, num_warps=8, num_stages=2)), # IMA
+            # str(triton.Config({"BLOCK_M": 64, "BLOCK_N": 128, "BLOCK_K": 64}, num_warps=4, num_stages=4)), # out of shared memory
+
+
+        }
         while improved:
             improved = False
 
@@ -95,7 +119,15 @@ class CoordescTuner:
                 for next_val in candidate_values:
                     candidate_config = copy.deepcopy(best_config)
                     set_field(candidate_config, name, next_val)
-                    candidate_timing = func(candidate_config)
+                    print(f"Try config {candidate_config}") # TODO
+                    if str(candidate_config) in skip_config:
+                        print("Skip")
+                        continue
+                    try:
+                        candidate_timing = func(candidate_config)
+                    except Exception as e:
+                        print(f"Got exception {e}")
+                        continue
                     
                     if self.has_improvement(best_timing, candidate_timing):
                         improved = True

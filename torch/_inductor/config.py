@@ -224,7 +224,8 @@ class triton:
     # Note: This is orthogonal to descriptive_names - this is deciding whether
     # our triton kernel names should all be `triton_` (to maximize caching) or
     # whether they should be unique.
-    unique_kernel_names = False
+    # unique_kernel_names = False
+    unique_kernel_names = True
 
     # should we put op names in kernel names
     # False: No special names (just triton__1, triton__2, etc.)

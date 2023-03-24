@@ -109,7 +109,23 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 )
             )
 
-    return autotune_select_algorithm(choices, [mat1, mat2], layout)
+    def func(config):
+        choice = mm_template.generate(
+            (mat1, mat2),
+            layout,
+            **mm_options(config, k, layout),
+        )
+        benchmark_fn = AlgorithmSelectorCache.make_benchmark_fn(
+            [choice], [mat1, mat2], layout
+        )
+        timing = benchmark_fn(choice)
+        return timing
+
+    out = autotune_select_algorithm(choices, [mat1, mat2], layout)
+
+    tuner = CoordescTuner(is_mm=True)
+    tuner.autotune(func, list(mm_configs(m, n, k))[0])
+    return out
 
 
 @register_lowering(aten.addmm)
