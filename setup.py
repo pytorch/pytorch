@@ -1022,7 +1022,7 @@ def main():
     ]
 
     extras_require = {
-        'optree': ['optree>=0.7'],
+        'optree': ['optree>=0.9'],
         'opt-einsum': ['opt-einsum>=3.3']
     }
     if platform.system() == 'Linux':

@@ -426,6 +426,7 @@ FnAny = Callable[[Any], R]
 
 MapOnlyFn = Callable[[T], Callable[[Any], Any]]
 
+
 # These specializations help with type inference on the lambda passed to this
 # function
 @overload
@@ -675,7 +676,7 @@ def broadcast_prefix(
     >>> broadcast_prefix([1, 2, 3], [1, 2, 3, 4])
     Traceback (most recent call last):
         ...
-    ValueError: List arity mismatch: 4 != 3; list: [1, 2, 3, 4].
+    ValueError: list arity mismatch; expected: 3, got: 4; list: [1, 2, 3, 4].
     >>> broadcast_prefix([1, 2, 3], [1, 2, (3, 4)])
     [1, 2, 3, 3]
     >>> broadcast_prefix([1, 2, 3], [1, 2, {'a': 3, 'b': 4, 'c': (None, 5)}])
