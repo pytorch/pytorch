@@ -37,7 +37,7 @@ from .ir import (
     validate_ir,
     View,
 )
-from .utils import ceildiv, developer_warning, sympy_product
+from .utils import ceildiv, developer_warning, pad_list, sympy_product
 from .virtualized import ops, V
 
 log = logging.getLogger(__name__)
@@ -81,7 +81,6 @@ add_needs_realized_inputs(
         aten.upsample_bilinear2d,
         aten.upsample_nearest2d,
         aten.upsample_bicubic2d,
-        aten._int_mm,
     ]
 )
 
@@ -121,6 +120,8 @@ def decode_dtype(dtype: int):
 def is_integer_type(x):
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
+    elif isinstance(x, sympy.Symbol):
+        return x.is_integer is True
     else:
         return isinstance(x, int)
 
@@ -1240,10 +1241,16 @@ make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 make_fallback(aten.cumsum, require_dense, warn=False)
 make_fallback(aten._embedding_bag, require_contiguous)
 make_fallback(aten._embedding_bag_forward_only, require_contiguous)
+make_fallback(aten._flash_attention_forward)
+make_fallback(aten._flash_attention_backward)
 make_fallback(aten._fused_moving_avg_obs_fq_helper)
 make_fallback(aten._fused_moving_avg_obs_fq_helper_functional)
 make_fallback(aten.grid_sampler_2d_backward, require_dense)
 make_fallback(aten.randperm)
+make_fallback(aten._scaled_dot_product_efficient_attention.default)
+make_fallback(aten._scaled_dot_product_efficient_attention_backward.default)
+make_fallback(aten._scaled_dot_product_flash_attention)
+make_fallback(aten._scaled_dot_product_flash_attention_backward)
 make_fallback(aten.sort)
 make_fallback(aten.sort.stable)
 make_fallback(aten._sparse_coo_tensor_with_dims_and_tensors)
@@ -1262,7 +1269,7 @@ make_fallback(aten._adaptive_avg_pool3d)
 make_fallback(aten.adaptive_max_pool2d)
 make_fallback(aten.adaptive_max_pool3d)
 make_fallback(aten.addbmm)
-make_fallback(aten.addmv)
+make_fallback(aten.addmv, warn=False)
 make_fallback(aten.avg_pool3d)
 make_fallback(aten.block_diag)
 make_fallback(aten._cdist_forward)
@@ -1401,68 +1408,6 @@ make_fallback(aten.triangular_solve)
 make_fallback(aten.gcd.default, warn=False)
 make_fallback(aten._linalg_eigh)
 make_fallback(aten.zeros.names)
-
-
-add_layout_constraint(aten.convolution, constrain_to_fx_strides)
-
-
-@register_lowering(aten.convolution)
-def convolution(
-    x: TensorBox,
-    weight: TensorBox,
-    bias: TensorBox,
-    stride: List[int],
-    padding: List[int],
-    dilation: List[int],
-    transposed: bool,
-    output_padding: List[int],
-    groups: int,
-):
-    is_cpu = all(
-        input.get_device().type == "cpu"
-        for input in (x, weight, bias)
-        if input is not None
-    )
-    result = TensorBox.create(
-        ir.Convolution.create(
-            x,
-            weight,
-            bias if is_cpu else None,  # For cpu path, bias can always be fused
-            stride,
-            padding,
-            dilation,
-            transposed,
-            output_padding,
-            groups,
-        )
-    )
-    if not is_cpu and bias is not None:
-        kernel_dims = len(weight.get_size()) - 2
-        out_chan = result.get_size()[-1 - kernel_dims]
-        bias = view(bias, [out_chan] + kernel_dims * [1])
-        result = add(result, bias)
-    return result
-
-
-@register_lowering(aten._convolution)
-def _convolution(
-    x,
-    weight,
-    bias,
-    stride,
-    padding,
-    dilation,
-    transposed,
-    output_padding,
-    groups,
-    benchmark,
-    deterministic,
-    cudnn_enabled,
-    allow_tf32,
-):
-    return convolution(
-        x, weight, bias, stride, padding, dilation, transposed, output_padding, groups
-    )
 
 
 @register_lowering(aten.clone)
@@ -2051,7 +1996,10 @@ def index_put_(self, indices, values, accumulate=False):
         and len(indices) == 1
         and indices[0].get_dtype() in {torch.bool, torch.uint8}
     ):
-        return index_put_as_masked_fill(self, indices, values, accumulate)
+        mask = indices[0]
+        for _ in range(len(mask.get_size()), len(self.get_size())):
+            mask = unsqueeze(mask, -1)
+        return index_put_as_masked_fill(self, [mask], values, accumulate)
 
     # Fallback if there is a boolean index
     for index in indices:
@@ -2144,7 +2092,6 @@ def scatter(x, dim: int, index, src, **kwargs):
 def scatter_fallback(
     fn, self, dim: int, index, src, *, reduce: str = None, include_self: bool = True
 ):
-
     if reduce not in {None, "sum"} or (
         reduce == "sum" and self.get_dtype() in {torch.bool, torch.int64}
     ):
@@ -2158,7 +2105,6 @@ def scatter_fallback(
 
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: str = None):
-
     if reduce == "add":
         reduce = "sum"
     elif reduce == "multiply":
@@ -2601,10 +2547,19 @@ def constant_pad_nd(x, padding, fill_value=0):
     bounds = list(reversed(list(zip(padding[::2], padding[1::2]))))
     n = len(sizes) - len(bounds)
 
+    # if padding is a complicated expression, hoist it
+    bounds_precomp = []
+    for l, h in bounds:
+        l_precomp = (
+            V.graph.sizevars.lookup_precomputed_size(l)
+            if isinstance(l, sympy.Expr) and l.free_symbols
+            else l
+        )
+        bounds_precomp.append((l_precomp, h))
+
     output_size = list(sizes[:n])
     mask_sizes = []
     for (low, high), size in zip(bounds, sizes[n:]):
-        size = V.graph.sizevars.guard_static_shape(size)
         mask_sizes.append(size)
         output_size.append(sympy.expand(size + low + high))
     assert len(output_size) == len(sizes)
@@ -2622,7 +2577,7 @@ def constant_pad_nd(x, padding, fill_value=0):
 
     def offset_fn(index):
         new_index = list(index[:n])
-        for idx, (low, high) in zip(index[n:], bounds):
+        for idx, (low, high) in zip(index[n:], bounds_precomp):
             new_index.append(idx - low)
         assert len(new_index) == len(index)
         return mask(new_index)
@@ -2674,7 +2629,6 @@ def constant_boundary_condition_2d(x, fill_value, padding):
 
 
 def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
-
     x_out = ir.FloorDiv(
         x + 2 * padding[i] - (kernel_size[i] - 1) + (stride[i] - 1), stride[i]
     )
@@ -2707,6 +2661,9 @@ def max_pool2d_with_indices(
         padding = [0, 0]
     if not stride:
         stride = kernel_size
+    kernel_size = pad_list(kernel_size)
+    stride = pad_list(stride)
+    padding = pad_list(padding)
 
     assert dilation == 1 or all(d == 1 for d in dilation)
     assert isinstance(x, TensorBox)
@@ -3117,6 +3074,9 @@ def avg_pool2d(
         stride = kernel_size
     if not padding:
         padding = [0, 0]
+    kernel_size = pad_list(kernel_size)
+    stride = pad_list(stride)
+    padding = pad_list(padding)
 
     assert isinstance(x, TensorBox)
     assert len(kernel_size) == 2
@@ -3206,7 +3166,6 @@ def avg_pool2d_backward(
     count_include_pad,
     divisor_override=None,
 ):
-
     assert not divisor_override
     if not stride:
         stride = kernel_size

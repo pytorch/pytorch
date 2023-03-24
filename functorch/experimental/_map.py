@@ -4,7 +4,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch._functorch.eager_transforms import _unwrap_all_tensors_from_functional, _wrap_all_tensors_to_functional, functionalize
-from torch._ops import PyOperator
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
@@ -21,7 +21,7 @@ from torch.utils._pytree import tree_flatten
 from ._cond import _has_potential_branch_input_alias, _has_potential_branch_input_mutation, UnsupportedAliasMutationException
 
 
-map = PyOperator("map")
+map = HigherOrderOperator("map")
 
 
 def trace_map(proxy_mode, func_overload, f, xs, *args):
