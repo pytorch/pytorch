@@ -300,8 +300,8 @@ class _NamedOptimizer(optim.Optimizer):
 
     def _pre_load_state_dict(self, state_dict) -> Dict[str, Any]:
         if isinstance(self.module, FSDP):
-            return FSDP.load_optim_state_dict_pre_hook(
-                self.module, self._optimizer, state_dict
+            return FSDP.optim_state_dict_to_load(
+                self.module, self._optimizer, state_dict, is_named_optimizer=True
             )
         return state_dict
 
