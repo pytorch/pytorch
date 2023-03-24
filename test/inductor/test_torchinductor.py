@@ -31,7 +31,7 @@ from torch._inductor.utils import run_and_get_triton_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
-from torch.testing import make_tensor, FileCheck
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import all_types
 from torch.testing._internal.common_utils import (
     IS_CI,
@@ -6417,7 +6417,6 @@ if HAS_CPU:
                 # constant needs to be propagated on fallback
                 def f(x):
                     return x[torch.tensor(1) :] * 2
-
 
                 f_opt = torch.compile()(f)
                 code = run_and_get_cpp_code(f_opt, (inps[0],))

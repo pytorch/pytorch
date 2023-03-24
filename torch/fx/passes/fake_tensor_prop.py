@@ -35,6 +35,8 @@ class FakeTensorProp(torch.fx.Interpreter):
         def extract_val(obj):
             if isinstance(obj, FakeTensor):
                 return snapshot_fake(obj)
+            elif isinstance(obj, torch.Tensor):
+                return obj
             elif isinstance(obj, py_sym_types):
                 return obj
             else:
