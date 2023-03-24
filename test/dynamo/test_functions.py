@@ -863,6 +863,24 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         # note that returning a tuple with a.T will give a tensor for a.T.
         return a.T
 
+    @make_test
+    @requires_numpy_pytorch_interop
+    def test_ndarray_method(x):
+        import numpy as np
+        a = x.numpy()
+        return a.astype(np.float64), a.copy()
+
+    @make_test
+    @requires_numpy_pytorch_interop
+    def test_ndarray_transpose(x):
+        a = x.numpy()
+        return a.transpose(0, 1)
+
+    @make_test
+    @requires_numpy_pytorch_interop
+    def test_ndarray_reshape(x):
+        a = x.numpy()
+        return a.reshape([1, a.size])
 
 def global_func_with_default_tensor_args(
     x=torch.zeros((2, 2)), *, kw_x=torch.zeros((1, 2))

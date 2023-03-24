@@ -729,7 +729,7 @@ class NumpyTensorVariable(TensorVariable):
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         if result is None:
-            unimplemented(f"ndarray.{name} not supported")
+            raise NotImplementedError()
         return result
 
     def call_method(
@@ -739,7 +739,63 @@ class NumpyTensorVariable(TensorVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented(f"numpy_ndarray.{name}()")
+        kwargs = dict(kwargs)
+        options = VariableTracker.propagate(self, args, kwargs.values())
+
+        if name == "astype" and len(args) == 1:
+            # converts ndarray to another dtype
+            from torch_np import _dtypes
+            from .builder import TupleVariable, wrap_fx_proxy_cls
+
+            torch_dtype = getattr(_dtypes, args[0].as_python_constant().__name__).torch_dtype
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyTensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "to",
+                    *proxy_args_kwargs([self, ConstantVariable(torch_dtype)], {}),
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name == "copy" and len(args) <= 1:
+            from .builder import wrap_fx_proxy_cls
+
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyTensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_method",
+                    "clone",
+                    *proxy_args_kwargs([self], {}),
+                ),
+                example_value=None,
+                **options,
+            )
+        elif name in ["transpose", "reshape"]:
+            from torch_np._detail import implementations
+            from .builder import wrap_fx_proxy_cls, TupleVariable
+            func = getattr(implementations, name)
+
+            if args in [(), None, (None,)]:
+                args = TupleVariable([])
+            elif isinstance(args, (list, tuple)):
+                args = TupleVariable(args)
+            else:
+                unimplemented(f"Unrecognized arguments: {args} for ndarray.{name}()")
+            return wrap_fx_proxy_cls(
+                target_cls=NumpyTensorVariable,
+                tx=tx,
+                proxy=tx.output.create_proxy(
+                    "call_function",
+                    func,
+                    *proxy_args_kwargs([self, args], kwargs),
+                ),
+                example_value=None,
+                **options,
+            )
+        unimplemented(f"ndarray method {name}() is not supported")
 
 
 class UnspecializedPythonVariable(TensorVariable):
