@@ -445,7 +445,7 @@ def _convert_to_distributed(
             )
 
         elif isinstance(node.target, torch._ops.OpOverload):
-            if not node.target.__name__.rpartition('.')[0][-1] == "_":
+            if not node.target._schema.name[-1] == "_":
                 node_replacements[node] = _get_dtensor_dispatch_graph(
                     node, node_to_obj
                 )
