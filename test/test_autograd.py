@@ -348,7 +348,7 @@ class TestAutograd(TestCase):
             t3.sum().backward()
 
     def test_custom_function_raises_if_input_returned_as_is_and_saved(self):
-        for save_inputs, mark_dirty in product(*([(True, False)] * 2)):
+        for save_inputs, mark_dirty, requires_grad in product(*([(True, False)] * 3)):
             class Func(torch.autograd.Function):
                 @staticmethod
                 def forward(x):
@@ -368,7 +368,7 @@ class TestAutograd(TestCase):
                 def backward(ctx, grad_output, grad_x):
                     pass
 
-            a = torch.tensor(1., requires_grad=True).clone()
+            a = torch.tensor(1., requires_grad=requires_grad).clone()
 
             if mark_dirty:
                 _unused, b = Func.apply(a)

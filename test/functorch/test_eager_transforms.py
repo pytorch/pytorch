@@ -1035,6 +1035,63 @@ class TestAutogradFunction(TestCase):
         grad(f)(y, x)
         grad(grad(f))(y, x)
 
+    @parametrize("inner_requires_grad", (True, False))
+    def test_function_returns_input(self, device, inner_requires_grad):
+        for save_tensors in ("input", "output", "neither"):
+            class A(torch.autograd.Function):
+                @staticmethod
+                def forward(x):
+                    return x
+
+                @staticmethod
+                def setup_context(ctx, inputs, output):
+                    if save_tensors == "input":
+                        ctx.save_for_backward(inputs[0])
+                    elif save_tensors == "output":
+                        ctx.save_for_backward(output)
+                    elif save_tensors == "neither":
+                        pass
+
+                @staticmethod
+                def backward(ctx, grad_output):
+                    return grad_output
+
+            x = torch.tensor(2., device=device, requires_grad=inner_requires_grad)
+            if save_tensors in ("input", "output"):
+                with self.assertRaisesRegex(RuntimeError, "A input that has been returned as-is"):
+                    grad(A.apply)(x)
+            else:
+                grad(A.apply)(x)
+
+    def test_function_returns_input_jvp(self, device):
+        class A(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_forward(output, inputs[0])
+
+            @staticmethod
+            def jvp(ctx, x_t):
+                out, inp = ctx.saved_tensors
+                out_x, out_t = fwAD.unpack_dual(out)
+                inp_x, inp_t = fwAD.unpack_dual(inp)
+                # It does not matter whether you save the input or the output
+                # because custom jvp is always run while forward AD is disabled
+                # and tangents are thus always observed to be None.
+                # However, this may change if we ever decide to provide an API
+                # to allow users to reeanble forward AD.
+                self.assertIsNone(out_t)
+                self.assertIsNone(inp_t)
+                self.assertIsNot(out_x, inp_x)
+                return x_t
+
+        x = torch.tensor(2., device=device)
+        x_t = torch.tensor(2., device=device)
+        jvp(A.apply, (x,), (x_t,))
+
     def test_needs_input_grads(self, device):
         class A(torch.autograd.Function):
             @staticmethod

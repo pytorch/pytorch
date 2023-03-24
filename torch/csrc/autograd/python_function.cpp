@@ -488,7 +488,8 @@ static void _get_tensors_to_save(
     THPFunction* self,
     std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
     std::vector<c10::optional<at::Tensor>>& tensors_to_save,
-    bool overridden_setup_context) {
+    bool overridden_setup_context,
+    bool is_executable) {
   if (!self->to_save)
     return;
   THPFunction_assert(
@@ -507,7 +508,9 @@ static void _get_tensors_to_save(
       if (overridden_setup_context) {
         to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
       }
-      tensors_to_save.push_back(tensor);
+      if (is_executable) {
+        tensors_to_save.push_back(tensor);
+      }
     } else {
       throw torch::TypeError(
           "save_for_backward can only save variables, but argument %ld is of "
@@ -801,12 +804,13 @@ PyObject* process_outputs(
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
   std::vector<c10::optional<at::Tensor>> tensors_to_save{};
-  if (is_executable && grad_fn->to_save) {
+  if (grad_fn->to_save) {
     _get_tensors_to_save(
-        grad_fn,
-        to_save_if_setup_context,
-        tensors_to_save,
-        overridden_setup_context);
+      grad_fn,
+      to_save_if_setup_context,
+      tensors_to_save,
+      overridden_setup_context,
+      is_executable);
   }
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
