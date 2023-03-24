@@ -45,6 +45,8 @@ __all__ = [
     "HandleShardingStrategy",
 ]
 
+log = logging.getLogger(__name__)
+
 
 """
 [Note: Fully Sharded Module]
@@ -511,7 +513,7 @@ class FlatParamHandle:
             and aligned_numel > 0
             and total_numel != total_numel_without_padding
         ):
-            logging.info(
+            log.info(
                 f"FSDP FlatParameter address alignment created "
                 f"{total_numel - total_numel_without_padding} "
                 f"numel of padding ({total_numel} vs. {total_numel_without_padding})"
@@ -1864,21 +1866,24 @@ class FlatParamHandle:
         for i, (param, param_info) in enumerate(
             zip(flat_param._params, flat_param._param_infos)
         ):
-            is_padding = param_info is None
-            if is_padding:
-                continue
-            param_name, module, _ = param_info
-            if not hasattr(module, param_name):
-                # Do not writeback if original parameters are deregistered
-                # (e.g. during model checkpointing)
-                continue
             in_sharded_flat_param = (
                 i >= start and i <= end and self.flat_param._shard_param_offsets
             )
+            is_padding = param_info is None
+            if not is_padding:
+                param_name, module, _ = param_info
+                if not hasattr(module, param_name):
+                    # Do not writeback if original parameters are deregistered
+                    # (e.g. during model checkpointing)
+                    continue
+            if in_sharded_flat_param:
+                param_start, param_end = flat_param._shard_param_offsets[i - start]
+                numel_in_shard = param_end - param_start + 1
             if not in_sharded_flat_param:
                 continue
-            param_start, param_end = flat_param._shard_param_offsets[i - start]
-            numel_in_shard = param_end - param_start + 1
+            if is_padding:
+                offset += numel_in_shard
+                continue
 
             # Check for parameter writeback
             param_changed = getattr(module, param_name) is not param
