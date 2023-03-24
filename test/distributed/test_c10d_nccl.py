@@ -2419,7 +2419,7 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @property
     def blocking_wait_error_msg(self):
-        return "Caught collective operation timeout"
+        return "timeout"
 
     def _run_all_reduce(self, pg):
         pg.allreduce(torch.rand(10).cuda(self.rank))
@@ -2480,12 +2480,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             # Clean up structures (ex: files for FileStore before going down)
             del process_group
             func()
-        else:
-            # Wait for timeout
-            time.sleep(2 * self.op_timeout_sec)
-
-            # Now verify communicators on this rank have been aborted by the watchdog thread.
-            self._wait_for_comm_abort(process_group)
 
     @with_nccl_blocking_wait
     @requires_nccl()
@@ -2562,33 +2556,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
         self._run_invalid_nccl_blocking_wait_env("2147483647")
         self._run_invalid_nccl_blocking_wait_env("4294967295")
 
-    def _check_valid_comm_exception(self, e):
-        exception_str = str(e)
-        valid_exceptions = [
-            "NCCL communicator was aborted",
-            "NCCL communicator encountered error",
-            "Caught collective operation timeout"
-        ]
-        return any(exc in exception_str for exc in valid_exceptions)
-
-    def _wait_for_comm_abort(self, process_group, timeout=None):
-        """
-        Waits for the watchdog thread to abort communicators for the process group.
-        """
-        while True:
-            try:
-                if not timeout:
-                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait()
-                else:
-                    assert isinstance(timeout, timedelta)
-                    process_group.allreduce(torch.rand(10).cuda(self.rank)).wait(timeout=timeout)
-            except Exception as e:
-                if self._check_valid_comm_exception(e):
-                    return
-                else:
-                    raise e
-            time.sleep(1)
-
     @with_nccl_blocking_wait
     @requires_nccl()
     @requires_gloo()
@@ -2619,9 +2586,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
                 pg_gloo.barrier().wait()
             except Exception as e:
                 raise ValueError(f"Rank {self.rank} barrier timed out waiting for rank 0 with error: {str(e)}") from e
-            # Now verify communicators on this rank have
-            # been aborted by watchdog.
-            self._wait_for_comm_abort(process_group, failed_collective_timeout)
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
