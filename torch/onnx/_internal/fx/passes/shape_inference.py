@@ -47,6 +47,7 @@ class ShapeInferenceWithFakeTensor(_pass.Transform):
         }
 
         # Shape inference via FakeTensorProp
+        # NOTE: This doesn't mutate GraphModule
         with stateless._reparametrize_module(module, fake_parameters_and_buffers):
             # Assign output types and shapes to each node without meta values.
             fake_tensor_prop.FakeTensorProp(module, fake_tensor_mode).propagate(*args)
