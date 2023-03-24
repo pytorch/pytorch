@@ -8,7 +8,6 @@ import signal
 import sys
 import tempfile
 import threading
-import time
 from contextlib import contextmanager
 from datetime import timedelta
 from itertools import product
