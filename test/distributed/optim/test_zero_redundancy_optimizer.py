@@ -100,7 +100,7 @@ class TestZeroRedundancyOptimizer(common_distributed.MultiProcessTestCase):
         )
 
 
-# TODO: sandcastle_skip_if does not work here.
+# TODO: skip_but_pass_in_sandcastle_if does not work here.
 @unittest.skipIf(TEST_WITH_ASAN or TEST_WITH_DEV_DBG_ASAN, "CUDA + ASAN does not work.")
 class TestZeroRedundancyOptimizerSingleRank(TestZeroRedundancyOptimizer):
     def test_state_dict(self):

@@ -73,10 +73,11 @@ class BackwardPrefetch(Enum):
     This configures explicit backward prefetching, which can improve throughput
     but may slightly increase peak memory usage.
 
-    For NCCL backend, any collectives, even if issued in different streams,
-    contend for the same per-device NCCL stream, which is why the relative
-    order in which the collectives are issued matters for overlapping. The
-    different backward prefetching settings correspond to different orderings.
+    For a single process group using NCCL backend, any collectives, even if
+    issued in different streams, contend for the same per-device NCCL stream,
+    which is why the relative order in which the collectives are issued matters
+    for overlapping. The different backward prefetching settings correspond to
+    different orderings.
 
     - ``BACKWARD_PRE``: This prefetches the next set of parameters before the
       current set of parameter's gradient computation. This improves backward
