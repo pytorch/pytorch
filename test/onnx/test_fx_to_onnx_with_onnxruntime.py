@@ -7,36 +7,35 @@ import io
 import os
 import tempfile
 
-from typing import Any, Callable, Sequence, Tuple, Union
+from typing import Any, Callable, Generator, Sequence, Tuple, Union
+
+import numpy as np
 
 import onnx.reference
 import onnx_test_common
 
 import onnxruntime  # type: ignore[import]
-
 import torch
 import transformers  # type: ignore[import]
 from torch import nn
-from torch._subclasses.fake_tensor import FakeTensorMode
-from torch.onnx._internal import diagnostics, fx as fx_onnx
+
+from torch._subclasses import fake_tensor
+from torch.onnx._internal import _beartype, diagnostics, fx as fx_onnx
 from torch.testing._internal import common_utils
+from torch.types import Number
 from torch.utils import _pytree as pytree
 
-
-def _run_onnx_reference_runtime(
-    onnx_model: Union[str, io.BytesIO],
-    pytorch_inputs: Tuple[Any, ...],
-    verbose: int = 10,
-) -> Sequence[Any]:
-    session = onnx.reference.ReferenceEvaluator(onnx_model, verbose=verbose)
-    return session.run(
-        None, {k: v.cpu().numpy() for k, v in zip(session.input_names, pytorch_inputs)}
-    )
+_NumericType = Union[Number, torch.Tensor, np.ndarray]
+_ModelType = Union[torch.nn.Module, Callable]
+_ONNXModelType = Union["onnx.ModelProto", bytes, str, io.BytesIO]
+_InputArgsType = Union[torch.Tensor, Tuple[Any, ...]]
+_OutputsType = Sequence[_NumericType]
 
 
+@_beartype.beartype
 def _run_ort(
-    onnx_model: Union[str, io.BytesIO], pytorch_inputs: Tuple[Any, ...]
-) -> Sequence[Any]:
+    onnx_model: _ONNXModelType, pytorch_inputs: Union[_InputArgsType, Generator]
+) -> _OutputsType:
     session = onnxruntime.InferenceSession(
         onnx_model, providers=["CPUExecutionProvider"]
     )
@@ -46,9 +45,10 @@ def _run_ort(
     )
 
 
+@_beartype.beartype
 def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
-    model: Union[torch.nn.Module, Callable],
-    input_args,
+    model: _ModelType,
+    input_args: _InputArgsType,
     rtol: float = 1e-3,
     atol: float = 1e-7,
     opset_version: int = 18,
@@ -62,6 +62,7 @@ def _run_test_with_fx_to_onnx_exporter_and_onnx_runtime(
         *input_args,
         opset_version=opset_version,
         use_binary_format=True,
+        enable_dynamic_axes=True,
         **input_kwargs,
     )
 
@@ -210,8 +211,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
+        # FIXME(titaiwang): SegFault when symbolic tracing is used
+        # https://github.com/microsoft/onnx-script/issues/523
         onnx_model = fx_onnx.export_after_normalizing_args_and_kwargs(
-            model, use_binary_format=True, opset_version=self.opset_version, **inputs
+            model,
+            use_binary_format=True,
+            opset_version=self.opset_version,
+            enable_dynamic_axes=False,
+            **inputs,
         )
 
         ref_outputs, _ = pytree.tree_flatten(model(**inputs, return_dict=False))
@@ -221,12 +228,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         for ref_output, ort_output in zip(ref_outputs, ort_outputs):
             torch.testing.assert_close(ref_output, torch.tensor(ort_output))
 
+    @_beartype.beartype
     def _test_large_scale_exporter(
         self,
-        model_name,
+        model_name: str,
         create_model: Callable,
         create_args: Callable,
         create_pytorch_only_kwargs: Callable,
+        enable_dynamic_axes: bool = True,
     ):
         """Test helper for large-scale exporter.
 
@@ -235,6 +244,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             create_model: A function that creates a model. It should always create the same model.
             create_args: A function that creates random input arguments for the model.
             create_pytorch_only_kwargs: A function that creates kwargs for calling PyTorch model with real tensors.
+            enable_dynamic_axes: Whether to export the model with dynamic axes. This would set
+                the shape of input and nodes all to dynamic by following symbolic fx graph.
+                op_level_debug is not supported when dynamic axes is on.
 
         This test contains several steps.
 
@@ -261,16 +273,16 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # The file will be loaded via .load_state_dict(...)
             torch.save(model.state_dict(), tmp_file.name)
 
-            ftm = FakeTensorMode(
+            ftm = fake_tensor.FakeTensorMode(
                 allow_non_fake_inputs=True, allow_fallback_kernels=False
             )
             ctx = fx_onnx.FxToOnnxContext()
-
+            # NOTE: FakeTensorMode disallows symbolic shape of fx graph
             # The following coed block does several things.
             #  1. Create a model whose parameters and buffers are all FakeTensor's.
             #  2. Convert nn.Module into ONNX model without initializers.
             #  3. Record the file paths to find real initializers.
-            with ftm, ctx:
+            with ctx, ftm:
                 # Toy model with parameters and buffers as FakeTensor's.
                 fake_model = create_model()
                 fake_model.load_state_dict(torch.load(tmp_file.name))
@@ -283,6 +295,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     *fake_args,
                     use_binary_format=False,
                     opset_version=self.opset_version,
+                    enable_dynamic_axes=enable_dynamic_axes,
                 )
 
             # Tasks done by the following block.
@@ -310,9 +323,10 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             # Original outputs.
             ref_outputs, _ = pytree.tree_flatten(model(*args, **kwargs))
             # ORT outputs.
+            args_not_none = (arg for arg in args if arg is not None)
             ort_outputs = _run_ort(
                 os.path.join(tmp_folder, onnx_model_location),
-                (arg for arg in args if arg is not None),
+                args_not_none,
             )
 
             assert len(ref_outputs) == len(ort_outputs)
@@ -339,7 +353,7 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                 output = self.fc3(tensor_x)
                 return output
 
-        def create_model():
+        def create_model() -> nn.Module:
             return MLPModel()
 
         def create_args():
@@ -349,13 +363,17 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             return {}
 
         self._test_large_scale_exporter(
-            "toy_mlp1", create_model, create_args, create_pytorch_only_extra_kwargs
+            "toy_mlp1",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+            enable_dynamic_axes=False,
         )
 
     def test_large_scale_exporter_with_tiny_gpt2(self):
         model_name = "sshleifer/tiny-gpt2"
 
-        def create_model():
+        def create_model() -> nn.Module:
             return transformers.AutoModel.from_pretrained(model_name)
 
         def create_args():
@@ -368,8 +386,14 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         def create_pytorch_only_extra_kwargs():
             return {"return_dict": False}
 
+        # FIXME(titaiwang): SegFault when symbolic tracing is used
+        # https://github.com/microsoft/onnx-script/issues/523
         self._test_large_scale_exporter(
-            "tiny_gpt2", create_model, create_args, create_pytorch_only_extra_kwargs
+            "tiny_gpt2",
+            create_model,
+            create_args,
+            create_pytorch_only_extra_kwargs,
+            enable_dynamic_axes=False,
         )
 
 
