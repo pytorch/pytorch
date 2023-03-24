@@ -1119,8 +1119,7 @@ class DistributedDataParallelTest(
             try:
                 pg.allreduce([torch.ones(2).cuda(self.rank)]).wait()
             except RuntimeError as e:
-                self.assertTrue("timed out in call to wait()" in str(e))
-                self.assertTrue("TensorShape=[1]" in str(e))
+                self.assertTrue("aborted" in str(e))
             else:
                 self.fail("Expected error to be raised!")
 
