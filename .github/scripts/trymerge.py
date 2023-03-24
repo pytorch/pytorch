@@ -416,6 +416,7 @@ CIFLOW_TRUNK_LABEL = re.compile(r"^ciflow/trunk")
 MERGE_RULE_PATH = Path(".github") / "merge_rules.yaml"
 ROCKSET_MERGES_COLLECTION = "merges"
 ROCKSET_MERGES_WORKSPACE = "commons"
+REMOTE_MAIN_BRANCH = "origin/master"
 
 
 def gh_graphql(query: str, **kwargs: Any) -> Dict[str, Any]:
@@ -661,7 +662,7 @@ class GitHubPR:
             return self.merge_base
         self.fetch()
         gitrepo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        self.merge_base = gitrepo.get_merge_base("origin/master", self.last_commit()['oid'])
+        self.merge_base = gitrepo.get_merge_base(REMOTE_MAIN_BRANCH, self.last_commit()['oid'])
         return self.merge_base
 
     def get_changed_files(self) -> List[str]:
@@ -984,6 +985,10 @@ class GitHubPR:
                 pr.add_numbered_label("merged")
 
         if comment_id and self.pr_num:
+            # When the merge process reaches this part, we can assume that the commit
+            # has been successfully pushed to trunk
+            merge_commit_sha = repo.rev_parse(name=REMOTE_MAIN_BRANCH)
+
             # Finally, upload the record to Rockset. The list of pending and failed
             # checks are at the time of the merge
             save_merge_record(
@@ -997,6 +1002,7 @@ class GitHubPR:
                 failed_checks=failed_checks,
                 last_commit_sha=self.last_commit().get("oid", ""),
                 merge_base_sha=self.get_merge_base(),
+                merge_commit_sha=merge_commit_sha,
                 is_failed=False,
                 dry_run=dry_run,
                 skip_mandatory_checks=skip_mandatory_checks,
@@ -1329,8 +1335,8 @@ def save_merge_record(
         return
 
     except Exception as e:
-        print(f"Could not upload to Rockset: {e}")
         if num_retries > 0:
+            print(f"Could not upload to Rockset ({num_retries - 1} tries left): {e}")
             return save_merge_record(
                 collection=collection,
                 comment_id=comment_id,
@@ -1351,6 +1357,7 @@ def save_merge_record(
                 workspace=workspace,
                 num_retries=num_retries - 1,
             )
+        print(f"Could not upload to Rockset ({num_retries} tries left): {e}")
 
 
 def get_rockset_results(head_sha: str, merge_base: str, num_retries: int = 3) -> List[Dict[str, Any]]:
