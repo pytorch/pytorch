@@ -4741,8 +4741,8 @@ def fn():
 
         def create_test_code(jump_opname, target_idx):
             targets = [
-                new_inst("LOAD_CONST", 1),
-                new_inst("LOAD_CONST", 3),
+                new_inst("LOAD_CONST", argval=1),
+                new_inst("LOAD_CONST", argval=3),
             ]
             jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
             """
@@ -4767,13 +4767,13 @@ def fn():
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 jump_to_target_inst,
-                new_inst("LOAD_CONST", 2),
+                new_inst("LOAD_CONST", argval=2),
                 load_global("print", False),
                 new_inst("POP_TOP"),
                 new_inst("RETURN_VALUE"),
                 targets[1],
                 new_inst("RETURN_VALUE"),
-                new_inst("LOAD_CONST", 4),
+                new_inst("LOAD_CONST", argval=4),
                 new_inst("RETURN_VALUE"),
             ]
             code_options = collections.OrderedDict(
