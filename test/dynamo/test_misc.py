@@ -22,8 +22,8 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+from torch._C import FileCheck
 from torch._dynamo import bytecode_transformation, graph_break
-from torch._dynamo.eval_frame import enable_cache_lookup_profiler
 from torch._dynamo.output_graph import OutputGraph
 from torch._dynamo.testing import (
     CompileCounter,
@@ -32,11 +32,12 @@ from torch._dynamo.testing import (
     unsupported,
 )
 
-from torch._dynamo.utils import ifunspec
+from torch._dynamo.utils import CompileProfiler, ifunspec
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.qconfig import QConfig
 from torch.ao.quantization.quantize_fx import prepare_qat_fx
+from torch.autograd.profiler import _enable_dynamo_cache_lookup_profiler
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_SDPA,
@@ -1800,6 +1801,17 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(same(ref, res))
 
+    def test_size_dim(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, dim):
+            return x.size(dim=dim)
+
+        opt_fn = torch._dynamo.optimize(cnts, nopython=True)(fn)
+        x = torch.empty([4, 9, 8])
+        self.assertTrue(opt_fn(x, 1) == 9)
+        self.assertTrue(opt_fn(x, -2) == 9)
+
     def test_torch_seed(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -2032,40 +2044,46 @@ class MiscTests(torch._dynamo.test_case.TestCase):
             z = y**3
             return z
 
-        x = torch.randn((2, 2), requires_grad=True)
-        ref = fn(x)
-        opt_fn = torch.compile(fn, backend="aot_eager")
+        for profiler, get_events in (
+            (torch.autograd.profiler.profile, lambda prof: prof.function_events),
+            (torch.profiler.profiler.profile, lambda prof: prof.events()),
+        ):
+            x = torch.randn((2, 2), requires_grad=True)
+            ref = fn(x)
+            opt_fn = torch.compile(fn, backend="aot_eager")
 
-        # warmup
-        opt_fn(x)
+            # warmup
+            opt_fn(x)
 
-        enable_cache_lookup_profiler(True)
-        with torch.autograd.profiler.profile() as prof:
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            # whenver we enter the profiler context, hooks are automatically registered
+            with profiler() as prof:
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(
-            len(events) == 1, "Expected one lookup profiler event for one opt_fn run"
-        )
-
-        enable_cache_lookup_profiler(False)
-        with torch.autograd.profiler.profile() as prof:
-            res = opt_fn(x)
-        events = list(
-            filter(
-                lambda event: event.name == "TorchDynamo Cache Lookup",
-                prof.function_events,
+            self.assertTrue(same(ref, res))
+            self.assertTrue(
+                len(events) == 1,
+                "Expected one lookup profiler event for one opt_fn run",
             )
-        )
 
-        self.assertTrue(same(ref, res))
-        self.assertTrue(len(events) == 0, "Expected disabled profiling")
+            with profiler() as prof:
+                # just make sure the disable functionality works
+                _enable_dynamo_cache_lookup_profiler(False)
+                res = opt_fn(x)
+            events = list(
+                filter(
+                    lambda event: event.name == "TorchDynamo Cache Lookup",
+                    get_events(prof),
+                )
+            )
+
+            self.assertTrue(same(ref, res))
+            self.assertTrue(len(events) == 0, "Expected disabled profiling")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_context_manager1(self):
@@ -4393,6 +4411,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         )
         # Contrived property so as not to have it be None
         graph.nn_modules = {}
+        graph.nn_modules_sources = {}
         # Contrived generation timestamp
         graph.timestamp = 4
         # Contrived guards
@@ -5008,7 +5027,7 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         model.training_step()
 
-    def test_torch_guards_stack_frame_register(self):
+    def test_torch_guards_stack_frame_register_inlining_disable(self):
         y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
         x = torch.tensor([0.5, 0.5])
 
@@ -5041,8 +5060,50 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(e)(x)
 
+        self.assertEqual(len(seen_frames), 0)
+
+    def test_torch_guards_stack_frame_register_inlining_partially_disable(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
+        x = torch.tensor([0.5, 0.5])
+
+        class encoder(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.register_parameter("param", y)
+
+            @torch._dynamo.disable
+            def helper_disabled(self, x, y):
+                return x * y
+
+            def helper(self, x, y):
+                return x * y
+
+            def forward(self, a, *args):
+                x = a + a
+                return self.helper(x, self.param) + self.helper_disabled(x, self.param)
+
+        e = encoder(y)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(e)(x)
+
         self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].line, "def forward(self, a, *args):")
+        self.assertEqual(seen_frames[0].name, "forward")
+        self.assertEqual(
+            seen_frames[0].line,
+            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
+        )
 
     def test_torch_guards_stack_frame_register_inlining(self):
         x = torch.tensor([0.5, 0.5])
@@ -5072,9 +5133,91 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(fn)(x, y, z)
 
-        self.assertEqual(len(seen_frames), 2)
+        self.assertEqual(len(seen_frames), 1)
         self.assertEqual(seen_frames[0].name, "fn")
-        self.assertEqual(seen_frames[1].line, "def uwu_inline_me(x, y, z):")
+        self.assertEqual(seen_frames[0].line, "r, r2 = uwu_inline_me(x, y, z)")
+
+    def test_torch_guards_stack_frame_register_inlining_deep(self):
+        x = torch.tensor([0.5, 0.5])
+        y = torch.tensor([0.75, 0.75, 0.75, 0.75])
+        z = torch.tensor([0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
+
+        def uwu_inline_me_deep(x, y):
+            return torch.cat((x, x)) + y
+
+        def uwu_inline_me(x, y, z):
+            r = uwu_inline_me_deep(x, y)
+            r2 = uwu_inline_me_deep(y, z)
+            return r, r2
+
+        def fn(x, y, z):
+            r, r2 = uwu_inline_me(x, y, z)
+            return torch.mul(r, r), torch.mul(r2, r2)
+
+        seen_frames = []
+        import contextlib
+
+        @contextlib.contextmanager
+        def global_context_capture_fn(frame_summary):
+            seen_frames.append(frame_summary)
+            yield
+
+        with mock.patch(
+            "torch._guards.TracingContext.current_frame",
+            side_effect=global_context_capture_fn,
+        ):
+            torch._dynamo.optimize("eager")(fn)(x, y, z)
+
+        self.assertEqual(len(seen_frames), 3)
+        self.assertEqual(seen_frames[0].name, "fn")
+        self.assertEqual(seen_frames[1].name, "uwu_inline_me")
+        self.assertEqual(seen_frames[2].line, "r2 = uwu_inline_me_deep(y, z)")
+
+    def test_compile_profiler(self):
+        class Model(torch.nn.Module):
+            def forward(self, input):
+                return input + input
+
+        model = Model()
+        prof = CompileProfiler()
+        compiled = torch.compile(model, backend=prof)
+        base_checker = (
+            lambda: FileCheck()
+            .check("Torchdynamo Profiler Report")
+            .check("Graph Breaks")
+            .check("No graph breaks detected.")
+            .check("Recompilation")
+        )
+        input = torch.rand((2, 3, 4))
+        _ = compiled(input)
+        base_checker().check("No recompilation detected.").run(prof.report())
+
+        new_shape_input = torch.rand((3, 3, 4))
+        _ = compiled(new_shape_input)
+
+        # Not an exhaustive test of dynamic shapes behavior, but some sanity
+        if (
+            not torch._dynamo.config.dynamic_shapes
+            or torch._dynamo.config.assume_static_by_default
+        ):
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "cache_size_limit to 1"
+            ).run(prof.report())
+        else:
+            base_checker().check("No recompilation detected.").run(prof.report())
+
+        # Ensure correct guard fail message is selected to show to user
+        if not torch._dynamo.config.dynamic_shapes:
+            new_shape_input = torch.rand((4, 3, 4))
+            _ = compiled(new_shape_input)
+
+            base_checker().check("Recompile Reasons").check("'forward'").check(
+                "tensor 'input' size mismatch at index 0. expected 2, actual 3"
+            ).check(
+                "tensor 'input' size mismatch at index 0. expected 3, actual 4"
+            ).run(
+                prof.report()
+            )
 
 
 class CustomFunc1(torch.autograd.Function):

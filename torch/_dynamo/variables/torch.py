@@ -73,6 +73,7 @@ constant_fold_functions = [
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
 
+
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
     return torch._C._TensorBase.__radd__(*args)
@@ -772,7 +773,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchPyOperator(VariableTracker):
+class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -822,6 +823,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    param_name_to_source=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
@@ -873,7 +875,13 @@ class TorchPyOperator(VariableTracker):
             tx.output.graph = graph_checkpoint
             tx.restore_graphstate(checkpoint)
 
-            return output, graph, guards, nn_modules, comparable_state
+            return (
+                output,
+                graph,
+                guards,
+                nn_modules,
+                comparable_state,
+            )
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -1014,7 +1022,7 @@ class TorchPyOperator(VariableTracker):
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
         else:
-            unimplemented(f"PyOperator {self.value.__name__}")
+            unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(
