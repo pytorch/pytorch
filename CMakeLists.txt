@@ -197,7 +197,6 @@ cmake_dependent_option(
 cmake_dependent_option(
     BUILD_NVFUSER "Build NVFUSER" ON
     "USE_CUDA OR USE_ROCM" OFF)
-option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
 cmake_dependent_option(
@@ -1100,15 +1099,10 @@ endif()
 # https://cmake.org/pipermail/cmake/2016-May/063400.html
 if(BUILD_SHARED_LIBS)
   configure_file(
-      ${PROJECT_SOURCE_DIR}/cmake/Caffe2ConfigVersion.cmake.in
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
-      @ONLY)
-  configure_file(
       ${PROJECT_SOURCE_DIR}/cmake/Caffe2Config.cmake.in
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       @ONLY)
   install(FILES
-      ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)

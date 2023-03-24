@@ -151,7 +151,7 @@ class SampleInput:
                 not var_args and not var_kwargs
             ), """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
-explicitly setting the "args" and "kwargs" paremeters, but the two
+explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
         elif len(var_args) or len(var_kwargs):
             assert (
@@ -614,6 +614,7 @@ class AliasInfo:
 # In the future we expect OpInfo coverage to improve and cover
 #   the great majority of PyTorch's (public) operators.
 #
+
 
 # Classes and methods for the operator database
 @dataclass
@@ -1549,6 +1550,7 @@ def make_error_inputs_elementwise_binary(error_inputs_func):
 
 # The following functions and classes are for testing elementwise binary operators.
 
+
 # Returns a generator of pairs of contiguous tensors on the requested device
 #   and with the requested dtype.
 #
@@ -1827,7 +1829,7 @@ def generate_elementwise_binary_with_scalar_samples(
         yield SampleInput(lhs_scalar, args=(rhs_scalar,))
 
 
-# Returns a generator of pairs of contiguous tensors and 0d tensos and scalars and type promotion
+# Returns a generator of pairs of contiguous tensors and 0d tensors and scalars and type promotion
 def generate_elementwise_binary_with_scalar_and_type_promotion_samples(
     op, *, device, dtype, requires_grad=False
 ):
@@ -1997,7 +1999,6 @@ class BinaryUfuncInfo(OpInfo):
         supports_two_python_scalars=False,  # Whether the operator allows scalar x scalar inputs
         **kwargs,
     ):
-
         self._original_binary_ufunc_args = locals().copy()
 
         # Elementwise binary operations perform the equivalent of test_numpy_refs
@@ -2144,7 +2145,6 @@ def _filter_unary_elementwise_tensor(a, *, op):
 
 
 def generate_elementwise_unary_tensors(op, *, device, dtype, requires_grad, **kwargs):
-
     # Special-cases bool
     if dtype is torch.bool:
         tensors = (
@@ -2491,7 +2491,6 @@ class SpectralFuncInfo(OpInfo):
         decorators=None,
         **kwargs,
     ):
-
         self._original_spectral_func_args = dict(locals()).copy()
         self._original_spectral_func_args.update(kwargs)
 
@@ -2542,17 +2541,40 @@ class ShapeFuncInfo(OpInfo):
 
 
 def sample_inputs_foreach(
-    self, device, dtype, N, *, noncontiguous=False, same_size=False, low=None, high=None
+    self,
+    device,
+    dtype,
+    N,
+    *,
+    noncontiguous=False,
+    same_size=False,
+    low=None,
+    high=None,
+    zero_size: bool,
 ):
+    if zero_size:
+        return [torch.empty(0, dtype=dtype, device=device) for _ in range(N)]
     if same_size:
         return [
-            make_tensor((N, N), dtype=dtype, device=device, noncontiguous=noncontiguous)
+            make_tensor(
+                (N, N),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
+            )
             for _ in range(N)
         ]
     else:
         return [
             make_tensor(
-                (N - i, N - i), dtype=dtype, device=device, noncontiguous=noncontiguous
+                (N - i, N - i),
+                dtype=dtype,
+                device=device,
+                noncontiguous=noncontiguous,
+                low=low,
+                high=high,
             )
             for i in range(N)
         ]

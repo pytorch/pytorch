@@ -10,7 +10,6 @@
 #include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/ScalarOps.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
@@ -20,6 +19,7 @@
 #include <ATen/native/Activation.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/SparseTensorUtils.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
@@ -1871,6 +1871,14 @@ Tensor split_with_sizes_backward(
 
   auto ret = at::cat(grads_all_defined, dim);
   return ret;
+}
+
+Tensor _nested_split_with_sizes_backward(
+    const std::vector<torch::autograd::Variable>& grads,
+    c10::SymIntArrayRef split_sizes,
+    int64_t dim,
+    const Tensor& self) {
+  return not_implemented("aten::split_with_sizes");
 }
 
 Tensor split_backward(

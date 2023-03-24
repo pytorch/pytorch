@@ -64,11 +64,15 @@ constant_fold_functions = [
     torch.finfo,
     torch.get_default_dtype,
     torch.iinfo,
+    torch.is_autocast_cache_enabled,
+    torch.is_autocast_cpu_enabled,
+    torch.is_autocast_enabled,
     torch.is_floating_point,
     torch.nn.functional._Reduction.get_enum,
 ]
 if torch.distributed.is_available():
     constant_fold_functions.append(torch.distributed.is_initialized)
+
 
 # TODO(voz): perhaps a decorator? This is rather readable for now tho, and not a public API.
 def remap_as_fn___radd__(*args):
@@ -324,6 +328,13 @@ class TorchVariable(VariableTracker):
             )
         elif self.value is torch.amp.autocast_mode.autocast:
             return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
+        elif self.value in [torch.cuda.amp.autocast, torch.cpu.amp.autocast]:
+            assert "device_type" not in kwargs
+            if self.value is torch.cuda.amp.autocast:
+                kwargs.update({"device_type": ConstantVariable("cuda")})
+            else:
+                kwargs.update({"device_type": ConstantVariable("cpu")})
+            return AutocastModeVariable.create(target_values=args, kwargs=kwargs)
         elif self.value in (
             torch.profiler.profile,
             torch.profiler.record_function,
@@ -559,7 +570,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         return False
 
                 # NB: OK to pass torch.tensor(tensor), this will trace fine
-                if isinstance(args[0], ListVariable) and check_any_unspec(args[0]):
+                # TODO: But torch.tensor(unspec) would not trace fine.  Not
+                # handled right now.
+                data_arg = None
+                if args:
+                    data_arg = args[0]
+                elif "data" in kwargs:
+                    data_arg = kwargs["data"]
+
+                if isinstance(data_arg, ListVariable) and check_any_unspec(data_arg):
                     unimplemented("torch.tensor call with list of unspec")
 
             tensor_variable = wrap_fx_proxy(
@@ -754,7 +773,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             return handle_ntuple(args[0])
 
 
-class TorchPyOperator(VariableTracker):
+class TorchHigherOrderOperator(VariableTracker):
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -804,6 +823,7 @@ class TorchPyOperator(VariableTracker):
                 output=state.output._replace(
                     guard_state=GuardsCheckpointState(set()),
                     nn_modules=None,
+                    param_name_to_source=None,
                     # Timestamp is monotonically increasing so we don't
                     # care about divergence
                     timestamp=0,
@@ -855,7 +875,13 @@ class TorchPyOperator(VariableTracker):
             tx.output.graph = graph_checkpoint
             tx.restore_graphstate(checkpoint)
 
-            return output, graph, guards, nn_modules, comparable_state
+            return (
+                output,
+                graph,
+                guards,
+                nn_modules,
+                comparable_state,
+            )
 
         if self.value.__name__ == "cond":
             # TODO(voz): Support fake tensor dispatch for recursive
@@ -916,8 +942,9 @@ class TorchPyOperator(VariableTracker):
                 false_cmp,
             ) = speculate_branch(False)
 
-            if true_cmp != false_cmp:
-                unimplemented(true_cmp.diff(false_cmp))
+            true_tracked_fakes = true_cmp.output.tracked_fakes
+            false_tracked_fakes = false_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*false_tracked_fakes, *true_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= false_guards
@@ -977,11 +1004,9 @@ class TorchPyOperator(VariableTracker):
 
             # We don't support side effects inside a map loop body for simplicity.
             parent_cmp = get_comparable_state(checkpoint)
-            if parent_cmp != body_cmp:
-                diff = parent_cmp.diff(body_cmp)
-                raise unimplemented(
-                    f"Graph state change detected in map() loop body. Diagnostics: {diff}"
-                )
+            parent_tracked_fakes = parent_cmp.output.tracked_fakes
+            body_tracked_fakes = body_cmp.output.tracked_fakes
+            tx.output.tracked_fakes = list({*parent_tracked_fakes, *body_tracked_fakes})
 
             # Add guards
             tx.output.tracing_context.guards_context.dynamo_guards |= body_guards
@@ -997,7 +1022,7 @@ class TorchPyOperator(VariableTracker):
                 [get_fake_value(args[1].as_proxy().node, tx).shape[0], *r.shape]
             )
         else:
-            unimplemented(f"PyOperator {self.value.__name__}")
+            unimplemented(f"HigherOrderOperator {self.value.__name__}")
 
         # Store the invocation as a call
         return wrap_fx_proxy(
