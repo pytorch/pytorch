@@ -490,33 +490,52 @@ static void _get_tensors_to_save(
     std::vector<c10::optional<at::Tensor>>& tensors_to_save,
     bool overridden_setup_context,
     bool is_executable) {
-  if (!self->to_save)
-    return;
-  THPFunction_assert(
-      PyTuple_Check(self->to_save),
-      "autograd internal "
-      "error: to_save attribute is expected to be a tuple but is %s",
-      THPUtils_typename(self->to_save));
-  Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
-  for (const auto i : c10::irange(num_saved)) {
-    PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
-    if (obj == Py_None) {
-      tensors_to_save.push_back(c10::nullopt);
-      continue;
-    } else if (THPVariable_Check(obj)) {
-      const auto& tensor = THPVariable_Unpack(obj);
-      if (overridden_setup_context) {
+  if (self->saved_for_forward) {
+    // We look at saved_for_forward here purely for the purpose of populating
+    // to_save_if_setup_context, the actual saving is not done here.
+    THPFunction_assert(
+        PyTuple_Check(self->saved_for_forward),
+        "autograd internal "
+        "error: saved_for_forward attribute is expected to be a tuple but is %s",
+        THPUtils_typename(self->saved_for_forward));
+    Py_ssize_t num_saved_for_forward =
+        PyTuple_GET_SIZE(self->saved_for_forward);
+    for (const auto i : c10::irange(num_saved_for_forward)) {
+      PyObject* obj = PyTuple_GET_ITEM(self->saved_for_forward, i);
+      if (THPVariable_Check(obj) && overridden_setup_context) {
+        const auto& tensor = THPVariable_Unpack(obj);
         to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
       }
-      if (is_executable) {
-        tensors_to_save.push_back(tensor);
+    }
+  }
+  if (self->to_save) {
+    THPFunction_assert(
+        PyTuple_Check(self->to_save),
+        "autograd internal "
+        "error: to_save attribute is expected to be a tuple but is %s",
+        THPUtils_typename(self->to_save));
+
+    Py_ssize_t num_saved = PyTuple_GET_SIZE(self->to_save);
+    for (const auto i : c10::irange(num_saved)) {
+      PyObject* obj = PyTuple_GET_ITEM(self->to_save, i);
+      if (obj == Py_None) {
+        tensors_to_save.push_back(c10::nullopt);
+        continue;
+      } else if (THPVariable_Check(obj)) {
+        const auto& tensor = THPVariable_Unpack(obj);
+        if (overridden_setup_context) {
+          to_save_if_setup_context.insert(tensor.unsafeGetTensorImpl());
+        }
+        if (is_executable) {
+          tensors_to_save.push_back(tensor);
+        }
+      } else {
+        throw torch::TypeError(
+            "save_for_backward can only save variables, but argument %ld is of "
+            "type %s",
+            i,
+            Py_TYPE(obj)->tp_name);
       }
-    } else {
-      throw torch::TypeError(
-          "save_for_backward can only save variables, but argument %ld is of "
-          "type %s",
-          i,
-          Py_TYPE(obj)->tp_name);
     }
   }
 }
@@ -804,14 +823,12 @@ PyObject* process_outputs(
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
   std::vector<c10::optional<at::Tensor>> tensors_to_save{};
-  if (grad_fn->to_save) {
-    _get_tensors_to_save(
+  _get_tensors_to_save(
       grad_fn,
       to_save_if_setup_context,
       tensors_to_save,
       overridden_setup_context,
       is_executable);
-  }
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(

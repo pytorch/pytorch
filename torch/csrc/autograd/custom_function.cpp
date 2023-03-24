@@ -293,7 +293,8 @@ optional_variable_list _process_backward_mode_ad(
     if (!is_differentiable) {
       if (!var.requires_grad()) {
         if (is_input && !is_modified) {
-          TORCH_CHECK(!is_saved_and_setup_context, error_msg_input_returned_as_is)
+          TORCH_CHECK(
+              !is_saved_and_setup_context, error_msg_input_returned_as_is)
           var = _view_as_self_with_no_grad(var);
         }
         return;
