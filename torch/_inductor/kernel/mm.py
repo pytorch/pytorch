@@ -73,6 +73,7 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
+# TODO: use cpp_constant_args instead of ordered_kwargs_for_cpp_kernel
 aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out", ("beta", "alpha"))
 
 
