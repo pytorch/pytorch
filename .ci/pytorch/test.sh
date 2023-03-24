@@ -264,7 +264,9 @@ test_inductor() {
 # and .github/workflows/inductor.yml
 DYNAMO_BENCHMARK_FLAGS=()
 
-if [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
+if [[ "${TEST_CONFIG}" == *dynamo_eager* ]]; then
+  DYNAMO_BENCHMARK_FLAGS+=(--backend eager)
+elif [[ "${TEST_CONFIG}" == *aot_eager* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--backend aot_eager)
 elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
   DYNAMO_BENCHMARK_FLAGS+=(--inductor)
@@ -288,14 +290,7 @@ test_perf_for_dashboard() {
   shift
 
   for dtype in amp float32; do
-    # Run accuracy test
     # All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-    for backend in eager aot_eager; do
-      python "benchmarks/dynamo/$suite.py" \
-          --accuracy --"$dtype" --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_${suite}_${dtype}_training_cuda_accuracy.csv"
-    done
-
     # Run accuracy test for inductor with different configs
     # --disable-cudagraphs is the default inductor behavior
     # TODO: update here once cudagraphs is turned on as default
