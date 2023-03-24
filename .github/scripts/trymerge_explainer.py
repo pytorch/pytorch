@@ -46,7 +46,7 @@ class TryMergeExplainer(object):
         self.project = project
         self.ignore_current = ignore_current
 
-    def _get_flag_msg(self, ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None) -> str:
+    def _get_flag_msg(self, ignore_current_checks: Optional[List[Tuple[str, Optional[str], Optional[int]]]] = None) -> str:
         if self.force:
             return "Your change will be merged immediately since you used the force (-f) flag, " + \
                 "**bypassing any CI checks** (ETA: 1-5 minutes)."
@@ -60,7 +60,7 @@ class TryMergeExplainer(object):
 
     def get_merge_message(
         self,
-        ignore_current_checks: Optional[List[Tuple[str, Optional[str]]]] = None
+        ignore_current_checks: Optional[List[Tuple[str, Optional[str], Optional[int]]]] = None
     ) -> str:
         title = "### Merge started"
         main_message = self._get_flag_msg(ignore_current_checks)

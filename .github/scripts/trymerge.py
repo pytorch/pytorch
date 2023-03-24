@@ -1116,7 +1116,7 @@ def find_matching_merge_rule(
     skip_mandatory_checks: bool = False,
     skip_internal_checks: bool = False,
     ignore_current_checks: Optional[List[str]] = None,
-) -> Tuple[MergeRule, List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
+) -> Tuple[MergeRule, List[Tuple[str, Optional[str], Optional[int]]], List[Tuple[str, Optional[str], Optional[int]]]]:
     """
     Returns merge rule matching to this pr together with the list of associated pending
     and failing jobs OR raises an exception.
@@ -1268,7 +1268,9 @@ def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
     return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 
-def checks_to_markdown_bullets(checks: List[Tuple[str, Optional[str]]]) -> List[str]:
+def checks_to_markdown_bullets(
+    checks: List[Tuple[str, Optional[str], Optional[int]]]
+) -> List[str]:
     return [f"- [{c[0]}]({c[1]})" if c[1] is not None else f"- {c[0]}" for c in checks[:5]]
 
 
@@ -1289,8 +1291,8 @@ def save_merge_record(
     owner: str,
     project: str,
     author: str,
-    pending_checks: List[Tuple[str, Optional[str]]],
-    failed_checks: List[Tuple[str, Optional[str]]],
+    pending_checks: List[Tuple[str, Optional[str], Optional[int]]],
+    failed_checks: List[Tuple[str, Optional[str], Optional[int]]],
     last_commit_sha: str,
     merge_base_sha: str,
     merge_commit_sha: str = "",
@@ -1562,10 +1564,10 @@ def categorize_checks(
     check_runs: JobNameToStateDict,
     required_checks: List[str],
     ok_failed_checks_threshold: int = 3,
-) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
-    pending_checks: List[Tuple[str, Optional[str]]] = []
-    failed_checks: List[Tuple[str, Optional[str]]] = []
-    ok_failed_checks: List[Tuple[str, Optional[str]]] = []
+) -> Tuple[List[Tuple[str, Optional[str], Optional[int]]], List[Tuple[str, Optional[str], Optional[int]]]]:
+    pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
+    ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -1576,17 +1578,23 @@ def categorize_checks(
 
     for checkname in required_checks:
         if all([checkname not in x for x in check_runs.keys()]):
-            pending_checks.append((checkname, None))
+            pending_checks.append((checkname, None, None))
+
     for checkname in relevant_checknames:
-        if check_runs[checkname].status is None:
-            pending_checks.append((checkname, check_runs[checkname].url))
+        status = check_runs[checkname].status
+        url = check_runs[checkname].url
+        classification = check_runs[checkname].classification
+        job_id = check_runs[checkname].job_id
+
+        if status is None:
+            pending_checks.append((checkname, url, job_id))
         elif not is_passing_status(check_runs[checkname].status):
-            if check_runs[checkname].classification == "IGNORE_CURRENT_CHECK":
+            if classification == "IGNORE_CURRENT_CHECK":
                 pass
-            elif check_runs[checkname].classification in ("BROKEN_TRUNK", "FLAKY"):
-                ok_failed_checks.append((checkname, check_runs[checkname].url))
+            elif classification in ("BROKEN_TRUNK", "FLAKY"):
+                ok_failed_checks.append((checkname, url, job_id))
             else:
-                failed_checks.append((checkname, check_runs[checkname].url))
+                failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
         print(
