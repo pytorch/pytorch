@@ -923,8 +923,17 @@ class TestNestedTensorDeviceType(TestCase):
     @dtypes(torch.float, torch.float16)
     @skipMeta
     @torch.inference_mode()
-    def test_nested_tensor_add(self, device, dtype):
-        (nt1, nt2) = self.random_nt_pair(device, dtype, 4, (4, 4))
+    @parametrize("transpose", [True, False])
+    def test_nested_tensor_add(self, device, dtype, transpose):
+        if transpose:
+            a = torch.randn(2, 2, 2, device=device, dtype=dtype)
+            b = torch.rand(2, 2, 2, device=device, dtype=dtype)
+            c = a.transpose(-1, -2).contiguous()
+            d = b.transpose(-1, -2).contiguous()
+            nt1 = torch.nested.nested_tensor([a, b, a, b])
+            nt2 = torch.nested.nested_tensor([c, d, c, d]).transpose(-1, -2)
+        else:
+            (nt1, nt2) = self.random_nt_pair(device, dtype, 4, (4, 4))
         ref = torch.nested.nested_tensor([t1 + t2 for (t1, t2) in zip(nt1.unbind(), nt2.unbind())])
         out = nt1 + nt2
         self.assertEqual(ref, out)
@@ -2017,6 +2026,15 @@ class TestNestedTensorAutograd(TestCase):
         # d/dnt_1 (nt + nt_1) = 1*grad_output
         self.assertEqual(nt_1.grad, grad_output)
 
+    def test_backward_add_strided(self, device):
+        a = torch.nested.nested_tensor([torch.randn(9, 2, 4), torch.randn(12, 2, 4)], requires_grad=True, device=device)
+        b = torch.nested.nested_tensor([torch.randn(9, 4, 2), torch.randn(12, 4, 2)], requires_grad=True, device=device)
+        c = a + b.transpose(-1, -2)
+        grad_output = c.clone()
+        c.backward(grad_output)
+        self.assertEqual(a.grad, grad_output)
+        self.assertEqual(b.grad, grad_output.transpose(-1, -2))
+
     # Test Factory Functions
     def test_nested_tensor_to_padded_tensor(self, device):
         for padding_val in [0, 1]:
@@ -2426,6 +2444,19 @@ class TestNestedTensorAutograd(TestCase):
         nt_layer_norm = torch.nn.LayerNorm(nt.size(-1), device=device, dtype=torch.float64)
         out = nt_layer_norm(nt)
         out.backward(out.clone())
+
+    def test_accumulate_grad_different_strides(self, device):
+        a = torch.rand(1, 4, 2, requires_grad=True, dtype=torch.float64, device=device)
+        b = torch.rand(1, 8, 2, requires_grad=True, dtype=torch.float64, device=device)
+
+        def grad_test_func(a, b):
+            nt_1 = torch.nested.as_nested_tensor([a, b])
+            nt_2 = nt_1.clone()
+            out = torch.nn.functional.scaled_dot_product_attention(nt_1, nt_2, nt_2)
+            return torch.nested.to_padded_tensor(out, 0)
+
+        data = (a, b)
+        assert gradcheck(grad_test_func, inputs=data, check_batched_grad=False)
 
     # TODO: OOM https://github.com/pytorch/pytorch/issues/95562
     @skipIfSlowGradcheckEnv

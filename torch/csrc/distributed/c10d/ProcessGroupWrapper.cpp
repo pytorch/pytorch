@@ -99,7 +99,7 @@ struct CollectiveFingerPrint {
     index++;
 
     if (index < serialized_tensor.size(0)) {
-      int64_t seq = serialized_tensor[index].item<int64_t>();
+      seq = serialized_tensor[index].item<int64_t>();
       index++;
       // 2. Num tensors
       int num_tensors = serialized_tensor[index].item<int>();
