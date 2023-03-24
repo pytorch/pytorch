@@ -2458,15 +2458,12 @@ class ExternKernel(InputsKernel):
 
     @staticmethod
     def copy_input(x):
-        try:
-            pw = Pointwise.create(
-                device=x.get_device(),
-                dtype=x.get_dtype(),
-                inner_fn=x.make_loader(),
-                ranges=x.get_size(),
-            )
-        except Exception as e:
-            breakpoint()
+        pw = Pointwise.create(
+            device=x.get_device(),
+            dtype=x.get_dtype(),
+            inner_fn=x.make_loader(),
+            ranges=x.get_size(),
+        )
         pw.realize()
         return pw
 
