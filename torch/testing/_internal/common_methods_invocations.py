@@ -10511,13 +10511,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: unsupported memory format option Preserve
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # RuntimeError: sparse_mask does not support automatic differentiation for outputs with complex dtype
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # RuntimeError: sparse_mask does not support automatic differentiation for outputs with complex dtype.
+               # RuntimeError: Sparse CSR tensors do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
            )),
     OpInfo('sparse.mm',
@@ -10550,15 +10552,15 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
                # RuntimeError: unsupported memory format option Preserve
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # RuntimeError: Sparse CSR tensors do not have is_contiguou
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_gradgrad'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # RuntimeError: Sparse CSR tensors do not have strides
                DecorateInfo(unittest.skip("Skipped!"), 'TestFwdGradients', 'test_forward_mode_AD'),
-               # GradcheckError: gradcheck expects all tensor inputs are dense when check_sparse_nnz is set to False
+               # ValueError: Sparse output is not supported at gradcheck yet. Please call to_dense(masked_grad=...) ...
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_fail_gradgrad'),
            )),
     UnaryUfuncInfo('i0',
@@ -11503,11 +11505,7 @@ op_db: List[OpInfo] = [
            decorators=(onlyNativeDeviceTypes,),
            supports_autograd=False,
            sample_inputs_func=sample_inputs_aminmax,
-           error_inputs_func=error_inputs_aminmax_amax_amin,
-           skips=(
-               # AssertionError: Resizing an out= argument with no elements threw a resize warning!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-           )),
+           error_inputs_func=error_inputs_aminmax_amax_amin),
     OpInfo('as_strided',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=False,
