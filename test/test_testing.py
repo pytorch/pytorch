@@ -1531,6 +1531,33 @@ class TestMakeTensor(TestCase):
         with self.assertRaisesRegex(ValueError, ""):
             make_tensor(low=highest_inclusive * 2, high=highest_inclusive * 4)
 
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_low_high_boolean_integral1(self, dtype, device):
+        shape = (10_000,)
+        eps = 1e-4
+
+        actual = torch.testing.make_tensor(shape, dtype=dtype, device=device, low=-(1 - eps), high=1 - eps)
+        expected = torch.zeros(shape, dtype=dtype, device=device)
+
+        torch.testing.assert_close(actual, expected)
+
+    @dtypes(torch.bool, torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_low_high_boolean_integral2(self, dtype, device):
+        shape = (10_000,)
+        if dtype is torch.bool:
+            low = 1
+        elif dtype is torch.int64:
+            # Due to its internals, `make_tensor` is not able to sample `torch.iinfo(torch.int64).max`
+            low = torch.iinfo(dtype).max - 1
+        else:
+            low = torch.iinfo(dtype).max
+        high = low + 1
+
+        actual = torch.testing.make_tensor(shape, dtype=dtype, device=device, low=low, high=high)
+        expected = torch.full(shape, low, dtype=dtype, device=device)
+
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestMakeTensor, globals())
 
