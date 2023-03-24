@@ -5,6 +5,7 @@ def define_targets(rules):
             ":core_tests",
             ":typeid_test",
             ":util_base_tests",
+            "//c10/test/core/impl/cow:test",
         ],
         visibility = ["//:__pkg__"],
     )

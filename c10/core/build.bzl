@@ -82,6 +82,8 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
+            "//c10/core/impl/cow:simulator",
+            "//c10/core/impl/cow:state",
             "//c10/macros:macros",
             "//c10/util:TypeCast",
             "//c10/util:base",
