@@ -383,13 +383,18 @@ def _export_fx_node_to_onnxscript(
             and node.target
             in function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
         ):
-            if not all(
-                node_arg.meta["val"] in (int, float, torch.SymInt, torch.SymFloat)  # type: ignore[union-attr]
-                for node_arg in node.args
-            ):
-                raise ValueError(
-                    f"Unsupported builtin function: {node.target}, only int/float/SymInt/SymFloat is supported with built-in ops!"
-                )
+            for node_arg in node.args:
+                if (not isinstance(node_arg, (torch.fx.Node, int, float))) or (
+                    isinstance(node_arg, torch.fx.Node)
+                    and not isinstance(
+                        node_arg.meta["val"], (torch.SymInt, torch.SymFloat)
+                    )
+                ):
+                    raise ValueError(
+                        f"Unsupported node arg: {node_arg} with builtin function: {node.target},"
+                        " only int/float/SymInt/SymFloat is supported with built-in ops!"
+                    )
+
             # symbolic fx.graph contains built-in functions to calculate python values.
             exporter_key = function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE[
                 node.target  # type: ignore[index]
