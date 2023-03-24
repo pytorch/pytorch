@@ -68,7 +68,8 @@ def convert_instruction(i: dis.Instruction):
 
 
 class _NotProvided:
-    pass
+    def __repr__(self):
+        return "_NotProvided"
 
 
 def create_instruction(name, arg=None, argval=_NotProvided, target=None):
@@ -688,6 +689,7 @@ def debug_checks(code):
 HAS_LOCAL = set(dis.haslocal)
 HAS_NAME = set(dis.hasname)
 HAS_FREE = set(dis.hasfree)
+HAS_CONST = set(dis.hasconst)
 
 
 def get_const_index(code_options, val):
@@ -698,6 +700,7 @@ def get_const_index(code_options, val):
 
 
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
+    # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
     if sys.version_info < (3, 11):
         assert varname_from_oparg is None
@@ -724,37 +727,35 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
         }
     for i in range(len(instructions)):
 
-        def check_argval():
-            assert instructions[i].argval is not _NotProvided
+        def should_compute_arg():
+            if instructions[i].arg is None:
+                assert instructions[i].argval is not _NotProvided
+                return True
+            return False
 
         if sys.version_info >= (3, 11) and instructions[i].opname == "LOAD_GLOBAL":
-            check_argval()
-            # LOAD_GLOBAL is in HAS_NAME, so instructions[i].arg will be overwritten.
-            # So we must compute push_null earlier.
+            # 3.11 LOAD_GLOBAL requires both arg and argval - see create_load_global
             assert instructions[i].arg is not None
-            shift = 1
-            push_null = instructions[i].arg % 2
-        else:
-            shift = 0
-            push_null = 0
-
-        if instructions[i].opcode in HAS_LOCAL:
-            check_argval()
-            instructions[i].arg = varnames[instructions[i].argval]
+            assert instructions[i].argval is not _NotProvided
+            instructions[i].arg = names[instructions[i].argval] << 1 + (
+                instructions[i].arg % 2
+            )
+        elif instructions[i].opcode in HAS_LOCAL:
+            if should_compute_arg():
+                instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
-            check_argval()
-            instructions[i].arg = names[instructions[i].argval]
+            if should_compute_arg():
+                instructions[i].arg = names[instructions[i].argval]
         elif instructions[i].opcode in HAS_FREE:
-            check_argval()
-            instructions[i].arg = freenames[instructions[i].argval]
-        elif instructions[i].opname in ("LOAD_CONST", "KW_NAMES"):
-            check_argval()
-            # cannot use a dictionary since consts may not be hashable
-            instructions[i].arg = get_const_index(code_options, instructions[i].argval)
-            assert instructions[i].arg >= 0
-
-        if instructions[i].arg is not None:
-            instructions[i].arg = (instructions[i].arg << shift) + push_null
+            if should_compute_arg():
+                instructions[i].arg = freenames[instructions[i].argval]
+        elif instructions[i].opcode in HAS_CONST:
+            if should_compute_arg():
+                # cannot use a dictionary since consts may not be hashable
+                instructions[i].arg = get_const_index(
+                    code_options, instructions[i].argval
+                )
+                assert instructions[i].arg >= 0
 
 
 def get_code_keys():
@@ -845,9 +846,16 @@ def clean_and_assemble_instructions(
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
+def populate_kw_names_argval(instructions, consts):
+    for inst in instructions:
+        if inst.opname == "KW_NAMES":
+            inst.argval = consts[inst.arg]
+
+
 def cleaned_instructions(code, safe=False):
     instructions = list(map(convert_instruction, dis.get_instructions(code)))
     if sys.version_info >= (3, 11):
+        populate_kw_names_argval(instructions, code.co_consts)
         virtualize_exception_table(code.co_exceptiontable, instructions)
     check_offsets(instructions)
     virtualize_jumps(instructions)
