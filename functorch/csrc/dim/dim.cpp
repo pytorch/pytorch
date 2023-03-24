@@ -223,10 +223,10 @@ std::ostream& operator<<(std::ostream& ss, DimEntry entry) {
 
 static int Dim_init(py::hdl<Dim> self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"name", "size", nullptr};
+    static constexpr const char* kwlist[] = {"name", "size", nullptr};
     py::handle name;
     py::handle size = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwlist, &name, &size)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", const_cast<char **>(kwlist), &name, &size)) {
         return -1;
     }
     self->init(py::object::borrow(name), (size.ptr() && !py::is_none(size)) ? py::to_int(size) : -1);
@@ -561,10 +561,10 @@ PyTypeObject DimList::Type = {
 
 static int DimList_init(DimList *self, PyObject *args, PyObject *kwds) {
     PY_BEGIN
-    static char* kwlist[] = {"len_or_dims", "name", nullptr};
+    static constexpr const char* kwlist[] = {"len_or_dims", "name", nullptr};
     py::handle len_or_dims = nullptr;
     PyObject* name = nullptr;
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", kwlist, &len_or_dims, &name)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "|OO", const_cast<char**>(kwlist), &len_or_dims, &name)) {
         return -1;
     }
     self->init(py::object::borrow(name ? name : Py_None));

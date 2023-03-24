@@ -299,6 +299,15 @@ def _apply_to_modules(
                             f"submodule_name = {submodule_name}"
                         )
                         new_prefix = prefix
+                    elif submodule_name == "module":
+                        warnings.warn(
+                            "An unexpected prefix is detected. This case "
+                            " should only happen when DDP wraps the outer "
+                            " modules while FSDP wraps the inner ones."
+                            f"prefix = {prefix}, "
+                            f"submodule_name = {submodule_name}"
+                        )
+                        new_prefix = prefix
             f(submodule, new_prefix, *args, **kwargs)
 
     f(root_module, "", *args, **kwargs)
