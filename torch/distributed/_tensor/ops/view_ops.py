@@ -483,9 +483,8 @@ def propagate_shape_and_sharding(
     assert len(in_shard) == len(mesh_sizes)
     sharded_in_dims: Set[int] = {s.dim for s in in_shard if isinstance(s, Shard)}
     # for each input dim, for each mesh dim, provides a list of possible shardable dimensions
-    shardable_dims: torch.Tensor = torch.ones(
-        (len(local_in_shape), len(mesh_sizes)), dtype=torch.bool
-    )
+    shardable_dims = [[False for _ in range(len(mesh_sizes))] for _ in range(len(local_in_shape))]
+
 
     # in case an input dimension disappears (e.g. collapsing, reduction)
     # we cannot shard in that dimension (we need a replication fall-back rule)
@@ -501,7 +500,7 @@ def propagate_shape_and_sharding(
     for cmd in rule:
         collect_used_inputs(cmd)
     for dim in range(len(local_in_shape)):
-        shardable_dims[dim, :] = dim in seen_input_dims
+        shardable_dims[dim][:] = [dim in seen_input_dims for _ in range(len(shardable_dims[dim])) ]
 
     def get_dim_size(cmd: DimSpec) -> Tuple[int, Optional[InputDim]]:
         if isinstance(cmd, InputDim):
@@ -513,7 +512,7 @@ def propagate_shape_and_sharding(
         elif isinstance(cmd, Flatten):
             for dim in cmd.input_dims[1:]:
                 if isinstance(dim, InputDim):
-                    shardable_dims[dim.input_dim, :] = False
+                    shardable_dims[dim.input_dim][:] = [False for _ in range(len(shardable_dims[dim.input_dim]))]
             dim0 = cmd.input_dims[0]
             return (
                 prod(get_dim_size(a)[0] for a in cmd.input_dims),
@@ -536,7 +535,7 @@ def propagate_shape_and_sharding(
 
                 # 1. is this dimension shardable on each individual mesh dim?
                 for mesh_dim, mesh_dim_size in enumerate(mesh_sizes):
-                    shardable_dims[in_dim.input_dim, mesh_dim] = (
+                    shardable_dims[in_dim.input_dim][mesh_dim] = (
                         out_size % mesh_dim_size == 0
                     )
 
@@ -560,7 +559,7 @@ def propagate_shape_and_sharding(
         elif isinstance(cmd, Repeat):
             size, in_dim = get_dim_size(cmd.input_dim)
             if in_dim is not None:
-                shardable_dims[in_dim.input_dim, :] = False
+                shardable_dims[in_dim.input_dim][:] = [False for _ in range(len(shardable_dims[in_dim.input_dim]))]
             return size * cmd.times, None
         else:
             raise RuntimeError(f"cmd not found: {cmd}, in rule: {rule}")
