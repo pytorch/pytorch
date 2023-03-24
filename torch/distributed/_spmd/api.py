@@ -80,14 +80,30 @@ class SPMD(nn.Module):
 
 class Override(ABC):
     r"""
-    This is system developer facing instead of model author facing.
+    Override the tracing and transformation behavior of :meth:`~torch.distributed._spmd.compile`.
+    This is useful when any part of the model is not traceable or if you prefer
+    to not trace it due to any reason. More specifically, users can implement
+    :meth:`torch.distributed._spmd.Override.replacement` to replace an original
+    submodule with the return new submodule. The new submodule contrains
+    operations that users preferred to be traced, which simply be a dummy
+    placeholder operator. After tracing, users can implement
+    :meth:`torch.distributed._spmd.Override.transform` to transform the traced
+    graph, where the dummy placeholder operator serves as an anchor to insert
+    new sub-graphs.
     """
 
     @abstractmethod
     def replacement(self, orig_submodule: torch.nn.Module) -> torch.nn.Module:
         r"""
-        Returns a new ``nn.Module`` instance to replace the ``orig_submodule``
-        in case ``orig_submodule`` is not traceable.
+        Implement this method to return a new :class:`nn.Module` instance to
+        replace the ``orig_submodule`` argument in the model. This helps if
+        ``orig_submodule`` is not traceable or should not be traced.
+
+        Args:
+            orig_submodule (class:`nn.Module`): original submodule instance to replace.
+
+        Returns:
+            A new :class:`nn.Module` instance to replace the original one.
         """
         pass
 
@@ -96,8 +112,18 @@ class Override(ABC):
         self, gm: fx.GraphModule, schema_map: Dict[str, Schema]
     ) -> fx.Graph:
         r"""
-        Given DTensor-expanded graph and shardig schema for every node, handle
-        custom fx.Node from ``replacement`` module.
+        Given a DTensor-expanded graph and shardig schema for every node,
+        conduct additional transformation for the sub-graph from the :class:`nn.Module`
+        returned by :meth:`torch.distributed._spmd.Override.replacement` if
+        necessary.
+
+        Args:
+            gm (:class:`fx.Graph`): a DTensor-expanded graph.
+            schema_map (Dict[str, :class:`Schema`]): a dictionary maps from node
+                name to DTensor schema.
+
+        Returns:
+            The :class:`fx.Graph` after transformation.
         """
         pass
 
@@ -147,10 +173,16 @@ def _dtensor_expand(
 
 @contextmanager
 def _rematerialize_optimizer(
-    opt: torch.optim.Optimizer,
+    opt: Optional[torch.optim.Optimizer],
     named_states: Dict[str, Any],
     params: Dict[str, nn.Parameter],
 ):
+    if opt is None:
+        try:
+            yield
+        finally:
+            return
+
     orig_states: Dict[str, Any] = copy(opt.state)
     for n in named_states:
         opt.state[params[n]] = named_states[n]
@@ -182,13 +214,19 @@ def _enable_compile():
         torch._utils.is_compiling.__code__ = orig_is_compiling_code
 
 
-def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
+def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
     r"""
+    Compile and optimize a callable, which can be a train step within a training
+    loop. This method will extract :class:`nn.Module` and :class:`torch.optim.Optimizer`
+    instances from the input arguments and trace operations applied to their
+    parameters and states.
+
     Args:
-        override_map (Dict[Type[Any], Override]): a map from target ``nn.Module``
-            type to ``Override`` implementation. The ``Override`` instance
-            provides an ``nn.Module`` replacement during tracing and a graph
-            transformation function after tracing.
+        module_override (Optional[Dict[Type[Any], Override]]): a dictionary maps
+            from target :class:`nn.Module` types to :class:`Override` objects.
+            The :class:`Override` objects provide :class:`nn.Module` replacements
+            during tracing and a graph transformation function after tracing.
+            (Default: ``None``)
     """
 
     def inner(func: Callable):
@@ -197,6 +235,7 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
             # 1. Extract nn.Module and Optimizer from args and kwargs
             # FIXME(@mrshenli): support multiple nn.Module instances
             # FIXME(@mrshenli): support multiple Optiimzer instances
+            # FIXME(@mrshenli): need to broadcast model to sync parameters
             mod, opt = None, None
             for arg in pytree.tree_flatten(list(args) + list(kwargs.values()))[
                 0
@@ -208,13 +247,15 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                     assert opt is None, "Only support single Optimizer for now"
                     opt = arg
 
-            assert mod is not None and opt is not None
+            assert mod is not None, (
+                "Couldn't find nn.Module instances from the arguments."
+            )
 
             # 2. Override target submodules (e.g., MoE) with dummy replacements
-            if override_map:
+            if module_override:
                 accessor = NamedMemberAccessor(mod)
 
-                for typ, override in override_map.items():
+                for typ, override in module_override.items():
                     for name, submodule in mod.named_modules():
                         if isinstance(submodule, typ):
                             accessor.swap_submodule(
@@ -227,12 +268,19 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                 **dict(mod.named_buffers(remove_duplicate=False)),
             }
 
-            opt_states, spec = pytree.tree_flatten(dict(opt.state))
             named_states = {}
-            for n, p in params_and_buffers.items():
-                if p in opt.state:
-                    named_states[n] = opt.state[p]
+            if opt is not None:
+                opt_states, spec = pytree.tree_flatten(dict(opt.state))
+                # Pass named_states instead of opt.state to stateless_func, because
+                # the later uses nn.Parameter as key. During tracing, we need to
+                # make sure optimizers can find the states using proxy tensors.
 
+                for n, p in params_and_buffers.items():
+                    if p in opt.state:
+                        named_states[n] = opt.state[p]
+
+            # Lift states and parameters as function arguments so that make_fx
+            # can trace operations applied to them.
             def stateless_func(
                 func, args, kwargs, named_states, params_and_buffers
             ):
@@ -245,9 +293,6 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                     # make sure updated parameters are returned
                     return ret, list(mod.parameters())
 
-            # parameters are at the end of placeholders
-            # FIXME(@mrshenli): let make_fx ignore nn.Module in args? or it should
-            # eliminate unused placeholders?
             # FIXME: Using symbolic tracing to work around. Otherwise it hits
             # shape mismatch error, as we use local inputs to trace local graph
             # and use DTensor to expand operators, where DTensor's shape is the
@@ -269,8 +314,8 @@ def compile(override_map: Optional[Dict[Type[Any], Override]] = None):
                 gm.graph.print_tabular()
 
             # 5. Replace previously inserted dummy ones with real graphs.
-            if override_map:
-                for _, override in override_map.items():
+            if module_override:
+                for _, override in module_override.items():
                     gm = override.transform(gm, name_to_spec)
 
             with torch.no_grad():

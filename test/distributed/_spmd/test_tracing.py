@@ -493,16 +493,26 @@ class TraceTrainStepTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @with_comms
-    def test_train_step_toy(self):
-        @_compile()
+    def test_train_step_simple(self):
+        @compile()
         def train_step(mod, inp):
             mod(inp).sum().backward()
 
         rank = torch.distributed.get_rank()
+        inp = torch.randn(2, 10).cuda(rank)
+        # FIXME(@mrshenli): remove manual seed once dist.compile can synchronize
+        # module parameters.
+        torch.manual_seed(0)
         mod = nn.Linear(10, 10).cuda(rank)
-        inp = torch.zeros(2, 10).cuda(rank)
+
+        ddp_mod = DDP(deepcopy(mod), device_ids=[rank])
+        ddp_inp = deepcopy(inp)
 
         train_step(mod, inp)
+        ddp_mod(ddp_inp).sum().backward()
+
+        for p1, p2 in zip(mod.parameters(), ddp_mod.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
     @skip_if_lt_x_gpu(2)
     @with_comms
@@ -521,6 +531,7 @@ class TraceTrainStepTest(DTensorTestBase):
         mod(inp).sum().backward()
         opt.step()
 
+        # FIXME(@mrshenli): inplace op + DTensor does not trigger allreduce
         train_step(mod, opt, inp)
 
     @skip_if_lt_x_gpu(2)
@@ -541,6 +552,7 @@ class TraceTrainStepTest(DTensorTestBase):
         mod(inp).sum().backward()
         opt.step()
 
+        # FIXME(@mrshenli): inplace op + DTensor does not trigger allreduce
         train_step(mod, opt, inp)
 
     @skip_if_lt_x_gpu(2)
