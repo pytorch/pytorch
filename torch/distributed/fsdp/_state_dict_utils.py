@@ -6,7 +6,6 @@ from typing import Any, Callable, cast, Dict, Iterator, no_type_check, Tuple
 import torch
 import torch.distributed as dist
 import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as checkpoint_wrapper
-import torch.distributed.fsdp._traversal_utils as traversal_utils
 
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,7 +27,7 @@ from torch.distributed.fsdp._common_utils import (
 from torch.distributed.fsdp._runtime_utils import (
     _cast_buffers_to_dtype_and_device,
     _clear_grads_if_needed,
-    _get_buffer_dtypes,
+    _get_orig_buffer_dtypes,
     _lazy_init,
 )
 from torch.distributed.fsdp.api import FullStateDictConfig, StateDictType
@@ -127,7 +126,7 @@ def _common_pre_state_dict_hook(
     _lazy_init(fsdp_state, module)
     # TODO: change to this call after pre_state_dict_hook is in `nn.Module`.
     if fsdp_state._is_root:
-        _clear_grads_if_needed(traversal_utils._get_fsdp_handles(module))
+        _clear_grads_if_needed(fsdp_state._all_handles)
 
 
 def _common_unshard_pre_state_dict_hook(
@@ -240,7 +239,7 @@ def _common_unshard_post_state_dict_hook(
             else (fsdp_state.mixed_precision.buffer_dtype is not None)
         )
         if mixed_precision_enabled_for_buffers:
-            buffer_dtypes = _get_buffer_dtypes(fsdp_state, buffer_clean_fqns)
+            buffer_dtypes = _get_orig_buffer_dtypes(fsdp_state, buffer_clean_fqns)
             _cast_buffers_to_dtype_and_device(
                 buffers, buffer_dtypes, fsdp_state.compute_device
             )

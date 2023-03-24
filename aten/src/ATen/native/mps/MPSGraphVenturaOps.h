@@ -138,4 +138,7 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
                                      nearestRoundingMode:(MPSGraphResizeNearestRoundingMode) nearestRoundingMode
                                            constantValue:(double) constantValue
                                                     name:(NSString * _Nullable) name;
+- (MPSGraphTensor * _Nonnull) truncateWithTensor:(MPSGraphTensor * _Nonnull) tensor
+                                            name:(NSString * _Nullable) name;
+
 @end
