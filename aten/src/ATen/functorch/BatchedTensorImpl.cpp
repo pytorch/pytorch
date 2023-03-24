@@ -118,7 +118,7 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
 }
 
 void BatchedTensorImpl::shallow_copy_from(const c10::intrusive_ptr<TensorImpl>& impl) {
-  TORCH_CHECK(false, "mutating directly with `.data` inside functorch transform is not allowed.");
+  TORCH_CHECK(false, "mutating directly with `.data` under vmap transform is not allowed.");
 }
 
 Tensor makeBatched(const Tensor& tensor, int64_t bdim, int64_t level) {
