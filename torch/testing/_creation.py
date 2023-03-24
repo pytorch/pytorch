@@ -133,7 +133,10 @@ def make_tensor(
         high = clamp(high, lowest_inclusive, highest_exclusive)
 
         if dtype in _BOOLEAN_OR_INTEGRAL_TYPES:
-            return math.floor(low), math.ceil(high)
+            # 1. `low` is ceiled to avoid creating values smaller than `low` and thus outside the specified interval
+            # 2. Following the same reasoning as for 1., `high` should be floored. However, the higher bound of
+            #    `torch.randint` is exclusive, and thus we need to ceil here as well.
+            return math.ceil(low), math.ceil(high)
 
         return low, high
 
@@ -172,7 +175,11 @@ def make_tensor(
                 low,
                 high,
                 lowest_inclusive=torch.iinfo(dtype).min,
-                highest_exclusive=torch.iinfo(dtype).max,
+                highest_exclusive=torch.iinfo(dtype).max
+                # In theory, `highest_exclusive` should always be the maximum value + 1. However, `torch.randint`
+                # internally converts the bounds to an int64 and would overflow. In other words: `torch.randint` cannot
+                # sample 2**63 - 1, i.e. the maximum value of `torch.int64` and we need to account for that here.
+                + (1 if dtype is not torch.int64 else 0),
                 # This is incorrect for `torch.uint8`, but since we clamp to `lowest`, i.e. 0 for `torch.uint8`,
                 # _after_ we use the default value, we don't need to special case it here
                 default_low=-9,
