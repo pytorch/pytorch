@@ -123,7 +123,7 @@ _OBS_OR_FQ_TYPE = Union[ObserverBase, FakeQuantizeBase, Any]
 # corresponds to an argument for node or a output for node, the tuple can also be nested
 # the requirement is that it matches the structure of input and output
 # e.g. node.meta["target_dtype_info"] = {
-#    "input_obs_or_fq_ctr_for_args": (obs1, obs2),
+#    "input_obs_or_fq_ctrs": (obs1, obs2),
 #    "output_obs_or_fq_ctrs": (obs3, obs4)
 # }
 _OBS_OR_FQ_ANNO_TYPE = Union[_OBS_OR_FQ_TYPE, Tuple[_OBS_OR_FQ_TYPE, ...]]
@@ -131,12 +131,12 @@ _OBS_OR_FQ_ANNO_TYPE = Union[_OBS_OR_FQ_TYPE, Tuple[_OBS_OR_FQ_TYPE, ...]]
 # note: the following default target dtype info dicts are temporary,
 # should be moved to the new programmable API class soon
 _DEFAULT_FP32_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO = {
-    "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation,
+    "input_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation,
     "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_fp32_placeholder_qconfig.activation
 }
 
 _DEFAULT_QUINT8_TENSOR_CONFIG_FOR_TARGET_DTYPE_INFO = {
-    "input_obs_or_fq_ctr_for_args": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
+    "input_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
     "output_obs_or_fq_ctrs": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation
 }
 
@@ -146,10 +146,10 @@ def _is_activation_post_process_node(node: Node, named_modules: Dict[str, torch.
 
 def _get_arg_to_obs_or_fq_ctr(node):
     assert "target_dtype_info" in node.meta
-    assert "input_obs_or_fq_ctr_for_args" in node.meta["target_dtype_info"]
-    input_ctr_config = node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"]
+    assert "input_obs_or_fq_ctrs" in node.meta["target_dtype_info"]
+    input_ctr_config = node.meta["target_dtype_info"]["input_obs_or_fq_ctrs"]
     arg_to_ctr: Dict[Argument, Any] = {}
-    _populate_arg_to_ctr_for_args(node.args, input_ctr_config, arg_to_ctr)
+    _populate_arg_to_ctrs(node.args, input_ctr_config, arg_to_ctr)
     if "_input_obs_or_fq_ctr_for_kwargs" in node.meta["target_dtype_info"]:
         _populate_arg_to_ctr_for_kwargs(node.kwargs, node.meta["target_dtype_info"]["_input_obs_or_fq_ctr_for_kwargs"], arg_to_ctr)
     return arg_to_ctr
@@ -430,7 +430,7 @@ def _get_target_activation_dtype_for_node(
     Then this function will return
 
       {
-        "input_obs_or_fq_ctr_for_args": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
+        "input_obs_or_fq_ctrs": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
         "output_obs_or_fq_ctrs": MinMaxObserver.with_args(dtype=torch.quint8, is_dynamic=False),
       }
 
@@ -442,7 +442,7 @@ def _get_target_activation_dtype_for_node(
             node, named_modules, cache_for_no_tensor_check)
     if args_have_no_tensors:
         return {
-            "input_obs_or_fq_ctr_for_args": None,
+            "input_obs_or_fq_ctrs": None,
             "output_obs_or_fq_ctrs": None,
         }
     # get qconfig to determine the eventual dtype of this node
@@ -481,19 +481,19 @@ def _get_target_activation_dtype_for_node(
             if bias_index is None or bias_index >= len(node.args):
                 bias_index = None
 
-        input_obs_or_fq_ctr_for_args = [qconfig.activation, qconfig.activation, qconfig.activation]
+        input_obs_or_fq_ctrs = [qconfig.activation, qconfig.activation, qconfig.activation]
 
         WEIGHT_OBS_OR_FQ_CTR = qconfig.weight if node.target not in NON_QUANTIZABLE_WEIGHT_OPS else None
         if weight_index is not None:
-            input_obs_or_fq_ctr_for_args[weight_index] = qconfig.weight
+            input_obs_or_fq_ctrs[weight_index] = qconfig.weight
 
 
         BIAS_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=bias_dtype)
         if bias_index is not None:
-            input_obs_or_fq_ctr_for_args[bias_index] = BIAS_OBS_OR_FQ_CTR
+            input_obs_or_fq_ctrs[bias_index] = BIAS_OBS_OR_FQ_CTR
 
         return {
-            "input_obs_or_fq_ctr_for_args": tuple(input_obs_or_fq_ctr_for_args),
+            "input_obs_or_fq_ctrs": tuple(input_obs_or_fq_ctrs),
             # this is kept for fx graph mode quantization use cases, not supposed
             # to be used for quantize_pt2e
             "_input_obs_or_fq_ctr_for_kwargs": {"weight": qconfig.weight, "bias": BIAS_OBS_OR_FQ_CTR},
@@ -532,29 +532,29 @@ def _get_arg_target_dtype_as_output(
     # TODO: should support is_dynamic here as well
     return output_act_dtype
 
-def _populate_arg_to_ctr_for_args(
+def _populate_arg_to_ctrs(
     arg_or_args: Union[Argument, Tuple[Argument, ...]],
-    input_obs_or_fq_ctr_for_args: Optional[Tuple[Any]],
+    input_obs_or_fq_ctrs: Optional[Tuple[Any]],
     arg_to_ctr: Dict[Argument, Any],
 ) -> None:
-    if not isinstance(input_obs_or_fq_ctr_for_args, tuple):
-        # if input_obs_or_fq_ctr_for_args is a single element,
+    if not isinstance(input_obs_or_fq_ctrs, tuple):
+        # if input_obs_or_fq_ctrs is a single element,
         # use the same obs_or_fq_ctr for all args
         if isinstance(arg_or_args, (tuple, list)):
             for inner_arg in arg_or_args:
-                _populate_arg_to_ctr_for_args(inner_arg, input_obs_or_fq_ctr_for_args, arg_to_ctr)
+                _populate_arg_to_ctrs(inner_arg, input_obs_or_fq_ctrs, arg_to_ctr)
         elif isinstance(arg_or_args, Node):
-            arg_to_ctr[arg_or_args] = input_obs_or_fq_ctr_for_args
+            arg_to_ctr[arg_or_args] = input_obs_or_fq_ctrs
     else:
         assert isinstance(arg_or_args, tuple)
-        for arg, input_obs_or_fq_ctr in zip(arg_or_args, input_obs_or_fq_ctr_for_args):
+        for arg, input_obs_or_fq_ctr in zip(arg_or_args, input_obs_or_fq_ctrs):
             if isinstance(arg, tuple):
                 if isinstance(input_obs_or_fq_ctr, tuple):
                     # TODO: have a separate validation pass for this
                     assert len(arg) == len(input_obs_or_fq_ctr), \
-                        "Expected input_obs_or_fq_ctr_for_args to match the structure of node.args"
+                        "Expected input_obs_or_fq_ctrs to match the structure of node.args"
                     for inner_arg, inner_ctr in zip(arg, input_obs_or_fq_ctr):
-                        _populate_arg_to_ctr_for_args(inner_arg, inner_ctr, arg_to_ctr)
+                        _populate_arg_to_ctrs(inner_arg, inner_ctr, arg_to_ctr)
                 else:
                     for inner_arg in arg:
                         arg_to_ctr[inner_arg] = input_obs_or_fq_ctr
@@ -987,7 +987,7 @@ def _maybe_propagate_dtype_for_node(
     is a general tensor shape op, also call this function recursively on
     the first argument, to propagate the dtype to the caller.
     """
-    node.meta["target_dtype_info"]["input_obs_or_fq_ctr_for_args"] = None
+    node.meta["target_dtype_info"]["input_obs_or_fq_ctrs"] = None
     node.meta["target_dtype_info"]["output_obs_or_fq_ctrs"] = None
     # if this is a copy node, propagate to first arg
     root_node, _, pattern, qhandler, qconfig = node_name_to_match_result_with_qconfig.get(
@@ -1206,7 +1206,7 @@ def insert_observers_for_model(
     # # conv2d = call_function[target=torch.nn.functional.conv2d](
     # #            args=(input, weight, bias))
     # conv2d.meta["target_dtype_info"] = {
-    #   'input_obs_or_fq_ctr_for_args': (qconfig.activation, qconfig.weight, PlaceholderObserver.with_args(dtype=torch.float32)),
+    #   'input_obs_or_fq_ctrs': (qconfig.activation, qconfig.weight, PlaceholderObserver.with_args(dtype=torch.float32)),
     #   '_input_obs_or_fq_ctr_for_kwargs': {"weight": qconfig.weight, "bias": PlaceholderObserver.with_args(dtype=torch.float32)},
     #   'output_obs_or_fq_ctrs': qconfig.activation,
     # }
@@ -1274,7 +1274,7 @@ def insert_observers_for_model(
                     node, named_modules, cache_for_no_tensor_check)
             if args_have_no_tensors:
                 node.meta["target_dtype_info"] = {
-                    "input_obs_or_fq_ctr_for_args": None,
+                    "input_obs_or_fq_ctrs": None,
                     "output_obs_or_fq_ctrs": None,
                 }
         elif node.op == "output" and output_node_to_output_index[node] in output_quantized_idxs:
