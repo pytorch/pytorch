@@ -174,7 +174,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
   // Now we loop
   int batchCounter = 0;
   int64_t offset = 0;
-  for (int i = 0; i < inputs.size() ; i += batch_size) {
+  for (unsigned i = 0; i < inputs.size() ; i += batch_size) {
     for (batchCounter = 0;
           batchCounter < batch_size &&
             (i+batchCounter) < inputs.size();

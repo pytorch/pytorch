@@ -228,6 +228,7 @@ def make_scalar_mismatch_msg(
     return _make_mismatch_msg(
         default_identifier="Scalars",
         identifier=identifier,
+        extra=f"Expected {expected} but got {actual}.",
         abs_diff=abs_diff,
         atol=atol,
         rel_diff=rel_diff,
@@ -1384,6 +1385,7 @@ def assert_close(
         ...
         AssertionError: Scalars are not equal!
         <BLANKLINE>
+        Expected 1e-10 but got 1e-09.
         Absolute difference: 9.000000000000001e-10
         Relative difference: 9.0
 
@@ -1455,6 +1457,7 @@ def assert_close(
         ...
         AssertionError: Scalars are not close!
         <BLANKLINE>
+        Expected nan but got nan.
         Absolute difference: nan (up to 1e-05 allowed)
         Relative difference: nan (up to 1.3e-06 allowed)
         >>> torch.testing.assert_close(actual, expected, equal_nan=True)
