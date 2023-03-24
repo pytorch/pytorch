@@ -15,7 +15,7 @@ from torch.testing._internal.inductor_utils import HAS_CPU
 def dummy_fn(x):
     return torch.sigmoid(x + math.pi) / 10.0
 
-
+@unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
 class TestInductorConfig(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -96,7 +96,6 @@ class TestInductorConfig(TestCase):
             dynamo_config.log_level = old
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
-    @unittest.skipIf(torch.backends.mps.is_available(), "default to aot_eager")
     def test_compile_api(self):
         # these are mostly checking config processing doesn't blow up with exceptions
         x = torch.randn(8)
