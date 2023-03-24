@@ -416,8 +416,9 @@ def _export_fx_node_to_onnxscript(
             and node.target
             in function_dispatcher._SYMINT_SYMFLOAT_BUILTIN_TO_EXPORTER_KEY_TABLE
         ):
-            if not isinstance(
-                node.meta["val"], (int, float, torch.SymInt, torch.SymFloat)
+            if not all(
+                node_arg.meta["val"] in (int, float, torch.SymInt, torch.SymFloat)  # type: ignore[union-attr]
+                for node_arg in node.args
             ):
                 raise ValueError(
                     f"Unsupported builtin function: {node.target}, only int/float/SymInt/SymFloat is supported with built-in ops!"
