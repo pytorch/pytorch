@@ -493,7 +493,7 @@ def compile_fx(
 
     if isinstance(model_, torch.fx.GraphModule):
         with overrides.patch_functions():
-            model_ = overrides.replace_fx(model_)
+            model_ = overrides.replace_fx(model_, example_inputs_)
             model_ = overrides.fuse_fx(model_, example_inputs_)
 
         if isinstance(model_.graph._codegen, _PyTreeCodeGen):
