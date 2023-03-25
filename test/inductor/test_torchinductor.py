@@ -5740,10 +5740,7 @@ class CommonTemplate:
             assert hasattr(self, test_name), "undefined function"
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
-            print("getting a code")
             code = run_and_get_cpp_code(func, [])
-            print("NAME", test_name)
-            print("CODE", code)
             self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
