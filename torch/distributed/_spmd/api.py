@@ -319,10 +319,6 @@ def compile(module_override: Optional[Dict[Type[Any], Override]] = None):
                 gm, args, kwargs, named_states, params_and_buffers
             )
 
-            # FIXME(@mrshenli): debug only
-            if dist.get_rank() == 0:
-                gm.graph.print_tabular()
-
             # 5. Replace previously inserted dummy ones with real graphs.
             if module_override:
                 for _, override in module_override.items():
