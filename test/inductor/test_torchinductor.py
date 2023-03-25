@@ -2141,7 +2141,7 @@ class CommonTemplate:
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = code(run, (v,))
+            code = run_and_get_cpp_code(run, (v,))
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
