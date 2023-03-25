@@ -54,7 +54,7 @@ MeshExprT = Union[
 ]
 
 
-class DeviceMesh:
+class DeviceMesh(object):
     """
     DeviceMesh represents a mesh of devices, where layout of devices could be
     represented as a n-d dimension array, and each value of the n-d dimensional
@@ -137,7 +137,7 @@ class DeviceMesh:
         # TODO: we should do allgather the mesh tensor to ensure every rank have the same mesh value
         # TODO: if user want to pass pg_options, offer a way to do it
         world_backend = get_backend()
-        if self.device_type == "cpu"
+        if self.device_type == "cpu":
             cpu_backends = ["gloo", "threaded"]
             assert world_backend in cpu_backends, f"Default PG backend: {world_backend} not supporting CPU!"
         elif self.device_type == "cuda":
