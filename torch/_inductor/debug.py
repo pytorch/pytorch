@@ -12,17 +12,11 @@ import sys
 from typing import Any, List
 from unittest.mock import patch
 
-from functorch.compile import (
-    config as functorch_config,
-    draw_graph,
-    get_aot_graph_name,
-    get_graph_being_compiled,
-)
+from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
 
 import torch
 from torch import fx as fx
 
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.debug_utils import save_graph_repro, wrap_compiler_debug
 from torch._dynamo.utils import get_debug_dir
 from torch.fx.graph_module import GraphModule

@@ -281,7 +281,7 @@ def add_file_handler():
     if not os.path.exists(log_path):
         os.makedirs(log_path)
 
-    log_file_handler= logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
     logger = logging.getLogger("torch._dynamo")
     logger.addHandler(log_file_handler)
 
