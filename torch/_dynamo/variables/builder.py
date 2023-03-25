@@ -803,7 +803,6 @@ class VariableBuilder:
                 config.dynamic_shapes
                 and isinstance(value, int)
                 and not is_constant_source(self.get_source())
-                and value >= 0
             ):
                 from torch.fx.experimental.symbolic_shapes import DimDynamic
 
@@ -812,7 +811,8 @@ class VariableBuilder:
                     shape_env.create_symbol(
                         value,
                         source=self.source,
-                        dynamic_dim=DimDynamic.DUCK,
+                        # This must be static, because `value` can be negative. Ex: a -1 dim.
+                        dynamic_dim=DimDynamic.STATIC,
                         constraint_dim=None,
                     ),
                     hint=value,

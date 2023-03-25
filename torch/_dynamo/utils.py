@@ -1501,5 +1501,4 @@ def dynamic_dims_from_tensor(
                 dynamic_dims.append(DimDynamic.DUCK)
         else:
             dynamic_dims.append(DimDynamic.DYNAMIC)
-    print(f"{constraint_dims_exhaustive}{constraint_dims} -> {dynamic_dims}")
     return dynamic_dims
