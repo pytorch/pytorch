@@ -90,6 +90,7 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        id: install-nvidia-driver
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
 
@@ -270,3 +271,35 @@ jobs:
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
+
+      - name: Check NVIDIA driver installation step
+        # if: failure() && steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure'
+        if: always()
+        shell: bash
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: |
+          .github/scripts/stop_runner_service.sh
+
+      - name: Check GPU health (run this last)
+        if: failure()
+        shell: bash
+        env:
+          RUNNER_WORKSPACE: ${{ runner.workspace }}
+        run: |
+          set +e
+
+          # NB: We are currently having an intermittent GPU crashing issue on G5 runners with
+          # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
+          # not seem to help. Here are some symptoms:
+          #   * Test fails with "No CUDA GPUs are available" error when initialize CUDA
+          #   * Calling nvidia-smi timeouts after 60 second
+          #
+          # As the root cause is unclear
+          grep -R -l "No CUDA GPUs are available" "${RUNNER_WORKSPACE}/../../_diag/pages"
+          RC=$?
+
+          # If GPU crashes, stop the runner to prevent it from receiving new jobs
+          if [[ "${RC}" == "0" ]]; then
+            .github/scripts/stop_runner_service.sh
+          fi
