@@ -76,10 +76,6 @@ void THCPModule_setDevice(int device) {
   c10::cuda::set_device(static_cast<c10::DeviceIndex>(device));
 }
 
-void THCPModule_maybeSetDevice(int device) {
-  c10::cuda::MaybeSetDevice(device);
-}
-
 PyObject* THCPModule_setDevice_wrap(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to setDevice");
@@ -121,7 +117,7 @@ PyObject* THCPModule_maybeExchangeDevice(PyObject* self, PyObject* arg) {
   torch::utils::cuda_lazy_init();
   auto current_device = c10::cuda::current_device();
   if (current_device != device) {
-    THCPModule_maybeSetDevice(device);
+    C10_CUDA_CHECK(c10::cuda::MaybeSetDevice(device));
   }
 
   return THPUtils_packInt32(static_cast<int>(current_device));
