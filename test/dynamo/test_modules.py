@@ -341,6 +341,20 @@ class Children(torch.nn.Module):
         return x
 
 
+class NamedChildren(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.l1 = torch.nn.Linear(10, 10)
+        self.l2 = torch.nn.ReLU()
+        self.l3 = torch.nn.Linear(10, 10)
+        self.l4 = torch.nn.ReLU()
+
+    def forward(self, x):
+        for _, block in self.named_children():
+            x = block(x)
+        return x
+
+
 class IntArg(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -750,6 +764,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
     test_super2 = make_test(SuperModule2())
     test_super_class_method = make_test(SuperChildCallsClassMethod())
     test_children = make_test(Children())
+    test_named_children = make_test(NamedChildren())
     test_densenet = make_test(DenseNetBlocks())
     test_parameters1 = make_test(ParametersModule1())
     test_parameters2 = make_test(ParametersModule2())
@@ -1291,6 +1306,44 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(compiled_func(inp), outer_func(inp))
         self.assertEqual(compiled_func(inp).item(), 16)
         self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
+
+    def test_hooks_allowed_modules(self):
+        class ToyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = nn.Sequential(
+                    *[nn.Linear(10, 10000), nn.ReLU()]
+                    + [nn.Linear(10000, 5), nn.ReLU()]
+                )
+
+            def forward(self, x):
+                return self.net(x)
+
+        model = ToyModel()
+        forward_handles = {}
+        for name, module in model.named_modules():
+            forward_handles[name] = module.register_forward_hook(
+                partial(save_activations, name)
+            )
+        activations = dict()
+
+        def save_activations(name, mod, inp, out):
+            activations[name] = inp
+
+        model = torch.compile(model, backend="aot_eager")
+
+        for i in range(2):
+            # second iteration is key, hooks would have fired during aot trace
+            # on first iter
+            activations.clear()
+            x = torch.randn((20, 10))
+            pred = model(x)
+            loss = pred.sum()
+            loss.backward()
+
+        print(f"Recorded Layers: {activations.keys()}\n\n")
+        print(f"Expected Layers: {forward_handles.keys()}")
+        self.assertTrue(activations.keys() == forward_handles.keys())
 
 
 if __name__ == "__main__":

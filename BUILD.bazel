@@ -463,9 +463,6 @@ header_template_rule(
     src = "caffe2/core/macros.h.in",
     out = "caffe2/core/macros.h",
     substitutions = {
-        "@CAFFE2_VERSION_MAJOR@": "1",
-        "@CAFFE2_VERSION_MINOR@": "3",
-        "@CAFFE2_VERSION_PATCH@": "0",
         "cmakedefine": "define",
         "#define CAFFE2_FORCE_FALLBACK_CUDA_MPI": "/* #undef CAFFE2_FORCE_FALLBACK_CUDA_MPI */",
         "#define CAFFE2_HAS_MKL_DNN": "/* #undef CAFFE2_HAS_MKL_DNN */",
@@ -1370,7 +1367,6 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1587,10 +1583,7 @@ cc_library(
             "torch/lib/libshm/*.h",
         ],
         exclude = [
-            "torch/csrc/autograd/generated/VariableType.h",
-            "torch/csrc/autograd/generated/RegistrationDeclarations.h",
-            "torch/csrc/autograd/generated/variable_factories.h",
-            "torch/csrc/autograd/generated/Functions.h",
+            "torch/csrc/*/generated/*.h",
         ] + torch_cuda_headers,
     ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [

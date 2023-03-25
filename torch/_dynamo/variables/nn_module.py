@@ -8,6 +8,7 @@ from typing import Dict, List
 import torch.nn
 
 from .. import skipfiles, variables
+from ..allowed_functions import is_allowed
 from ..exc import RestartAnalysis, unimplemented
 from ..guards import GuardBuilder
 from ..mutation_guard import GenerationTracker
@@ -18,6 +19,7 @@ from ..utils import (
     is_safe_constant,
     istensor,
     istype,
+    module_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
 )
@@ -222,6 +224,25 @@ class NNModuleVariable(VariableTracker):
                     )
                     arg = tx.pop()
                 return arg
+            elif is_allowed(mod.__class__):
+                if module_has_hooks(mod):
+                    unimplemented(
+                        "Can't support hooks on 'allowed' modules becuase allowed modules don't get traced through."
+                    )
+                # The module type will change after it is called
+                if is_lazy:
+                    self.module_type = mod.cls_to_become
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx=tx,
+                    proxy=tx.output.create_proxy(
+                        "call_module",
+                        self.module_key,
+                        *proxy_args_kwargs(args, kwargs),
+                    ),
+                    **options,
+                )
             else:
                 assert self.source, (
                     "Must provide a valid source in order to inline, "
@@ -369,9 +390,12 @@ class NNModuleVariable(VariableTracker):
                 source = AttrSource(source, x)
             return source
 
-        if name == "children":
+        if name == "named_children":
             assert not (args or kwargs)
-            return wrap_values(module.named_children())
+            result = []
+            for name, submod in module.named_children():
+                result.append(named_embed(name, submod))
+            return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
         elif name == "named_parameters":
             result = []
             for name, param in module.named_parameters(
@@ -393,6 +417,9 @@ class NNModuleVariable(VariableTracker):
             ):
                 result.append(named_embed(name, submod))
             return ListIteratorVariable(result, mutable_local=MutableLocal(), **options)
+        elif name == "children":
+            assert not (args or kwargs)
+            return wrap_values(module.named_children())
         elif name == "modules":
             return wrap_values(module.named_modules())
         elif name == "parameters":
