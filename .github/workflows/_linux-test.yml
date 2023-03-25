@@ -273,8 +273,7 @@ jobs:
         if: always()
 
       - name: Check NVIDIA driver installation step
-        # if: failure() && steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure'
-        if: always()
+        if: failure() && steps.install-nvidia-driver.conclusion && steps.install-nvidia-driver.conclusion == 'failure'
         shell: bash
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
