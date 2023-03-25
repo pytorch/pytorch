@@ -54,7 +54,7 @@ enum ErrorHandlingMode { NoHandling = 0, TearDown = 1, CleanUpOnly = 2 };
 // Instead, it stashes live references to those tensors until after
 // user-facing streams are synced with comm streams.
 // See stashed_for_allocator_safety_ below.
-constexpr const char* NCCL_AVOID_RECORD_STREAMS = "NCCL_AVOID_RECORD_STREAMS";
+constexpr const char* TORCH_NCCL_AVOID_RECORD_STREAMS = "TORCH_NCCL_AVOID_RECORD_STREAMS";
 
 // ProcessGroupNCCL implements NCCL bindings for c10d.
 //
@@ -227,7 +227,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // give a more descriptive message when representing the Work as a string.
     std::shared_ptr<std::vector<at::Tensor>> outputs_;
 
-    // NCCL_AVOID_RECORD_STREAMS implementation helper.
+    // TORCH_NCCL_AVOID_RECORD_STREAMS implementation helper.
     // Stores references to participating non-output tensors (ie inputs,
     // flattened intermediates).
     // We'll clear this list in synchronizeStreams, just after user-facing
@@ -695,7 +695,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
-  // Whether or not NCCL_AVOID_RECORD_STREAMS was set
+  // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
   // Set of communicators that this process group has aborted and their
