@@ -803,3 +803,11 @@ def is_ones(items):
 
 def is_zeros(items):
     return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )
