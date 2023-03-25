@@ -72,6 +72,12 @@ if sys.platform == 'win32':
 
     dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
 
+    if all([not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths]):
+        nvtoolsext_dll_path = os.path.join(
+            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+    else:
+        nvtoolsext_dll_path = ''
+
     from .version import cuda as cuda_version
     import glob
     if cuda_version and all([not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths]):
@@ -82,7 +88,7 @@ if sys.platform == 'win32':
     else:
         cuda_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [cuda_path]))
+    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
 
     kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
     with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
