@@ -1,6 +1,7 @@
 #!/bin/bash
 
 set +e
+set -x
 
 # Get the service name
 RUNNER_SERVICE=$(cat "${RUNNER_WORKSPACE}/../../.service")

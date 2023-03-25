@@ -288,6 +288,7 @@ jobs:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
         run: |
           set +e
+          set -x
 
           # NB: We are currently having an intermittent GPU crashing issue on G5 runners with
           # A10G GPU. Once this happens, trying to reset the GPU as done in setup-nvidia does
