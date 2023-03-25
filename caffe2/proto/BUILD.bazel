@@ -5,12 +5,12 @@ cc_library(
     name = "caffe2_pb",
     hdrs = ["caffe2_pb.h"],
     deps = [
-	":protos",
-	"//c10/core:base",
-	"//c10/util:base",
+        ":protos",
+        "//c10/core:base",
+        "//c10/util:base",
     ],
     visibility = [
-	"//:__pkg__",
+        "//:__pkg__",
     ],
 )
 
