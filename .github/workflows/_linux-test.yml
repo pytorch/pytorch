@@ -296,7 +296,8 @@ jobs:
           #   * Test fails with "No CUDA GPUs are available" error when initialize CUDA
           #   * Calling nvidia-smi timeouts after 60 second
           #
-          # As the root cause is unclear
+          # As both the root cause and recovery path are unclear, let's take the runner out of
+          # service so that it doesn't get any more jobs
           grep -R -l "No CUDA GPUs are available" "${RUNNER_WORKSPACE}/../../_diag/pages"
           RC=$?
 
