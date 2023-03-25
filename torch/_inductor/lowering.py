@@ -2467,6 +2467,8 @@ def reflection_pad2d_backward(grad_output, x, padding):
         def index_range_condition(index_range):
             i, lb, ub = index_range
             i = ops.index_expr(i, torch.int32)
+            lb = ops.index_expr(lb, torch.int64)
+            ub = ops.index_expr(ub, torch.int64)
             return ops.and_(ops.ge(i, lb), ops.le(i, ub))
 
         def accumulate(out_x, out_y, index_range1, index_range2=None):
