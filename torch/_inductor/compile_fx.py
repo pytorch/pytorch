@@ -589,6 +589,11 @@ def _shape_env_from_inputs(inputs):
     if fake_mode is not None:
         return fake_mode.shape_env
 
+    # When there are no tensor inputs, get shape_env from the first SymInt.
+    for input in inputs:
+        if isinstance(input, torch.SymInt):
+            return input.node.shape_env
+
     # TODO(voz): Should we always have one anyway?
     return None
 
