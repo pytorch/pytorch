@@ -2,6 +2,7 @@
 
 import types
 from copy import deepcopy
+from functools import partial
 from typing import Tuple
 from unittest.mock import patch
 
@@ -1308,12 +1309,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertTrue("check_obj_id(m._forward_hooks" in failure_reason)
 
     def test_hooks_allowed_modules(self):
-        class ToyModel(nn.Module):
+        class ToyModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.net = nn.Sequential(
-                    *[nn.Linear(10, 10000), nn.ReLU()]
-                    + [nn.Linear(10000, 5), nn.ReLU()]
+                self.net = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10000), torch.nn.ReLU()]
+                    + [torch.nn.Linear(10000, 5), torch.nn.ReLU()]
                 )
 
             def forward(self, x):
