@@ -183,6 +183,7 @@ def _is_input_arg_dtype_supported_by_backend(
         return True
 
     arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
+    obs_or_fq_ctr = arg_to_ctr.get(arg, None)
 
     # TODO: support check for standalone module
     # TODO: remove the need to do weight/bias/act specific check after refactoring
@@ -192,7 +193,6 @@ def _is_input_arg_dtype_supported_by_backend(
     is_activation = not is_weight and not is_bias
 
     if is_activation:
-        obs_or_fq_ctr = arg_to_ctr[arg]
         qconfig_dtype, qconfig_is_dynamic = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
         # TODO(future PR): remove the cast to bool below after figuring
         # out why backend_config has is_dynamic set to None in some cases.
@@ -202,7 +202,6 @@ def _is_input_arg_dtype_supported_by_backend(
             _qconfig_satisfies_dtype_config_constraints(qconfig, dtype_config.input_dtype_with_constraints)
         )
     elif is_weight:
-        obs_or_fq_ctr = arg_to_ctr[arg]
         qconfig_weight_dtype, _ = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
         dtype_matches = qconfig_weight_dtype == dtype_config.weight_dtype
@@ -210,7 +209,6 @@ def _is_input_arg_dtype_supported_by_backend(
             qconfig, dtype_config.weight_dtype_with_constraints, is_activation=False)
         return dtype_config.weight_dtype is None or (dtype_matches and qconfig_satisfies_constraints)
     else:  # bias
-        obs_or_fq_ctr = arg_to_ctr[arg]
         qconfig_bias_dtype, _ = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
         # TODO: move dtype check into `_qconfig_satisfies_dtype_config_constraints` as well
         return dtype_config.bias_dtype is None or qconfig_bias_dtype == dtype_config.bias_dtype
@@ -582,7 +580,7 @@ def _get_arg_target_dtype_as_input_to_node(
     """
     assert isinstance(arg, Node)
     arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
-    obs_or_fq_ctr = arg_to_ctr[arg]
+    obs_or_fq_ctr = arg_to_ctr.get(arg, None)
     qconfig_dtype, _ = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
     return qconfig_dtype
 
@@ -597,7 +595,7 @@ def _get_arg_target_is_dynamic_as_input_to_node(
     """
     assert isinstance(arg, Node)
     arg_to_ctr: Dict[Argument, Any] = _get_arg_to_obs_or_fq_ctr(node)
-    obs_or_fq_ctr = arg_to_ctr[arg]
+    obs_or_fq_ctr = arg_to_ctr.get(arg, None)
     _, qconfig_is_dynamic = _get_dtype_and_is_dynamic(obs_or_fq_ctr)
     return qconfig_is_dynamic
 
