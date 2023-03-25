@@ -28,6 +28,7 @@ For more information, see
 https://github.com/pytorch/pytorch/wiki/PyTorch-AutoLabel-Bot#why-categorize-for-release-notes-and-how-does-it-work.
 """
 
+
 # Modified from https://github.com/pytorch/pytorch/blob/b00206d4737d1f1e7a442c9f8a1cadccd272a386/torch/hub.py#L129
 def _read_url(url: Request) -> Tuple[Any, Any]:
     with urlopen(url) as r:

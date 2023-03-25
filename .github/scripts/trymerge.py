@@ -760,7 +760,7 @@ class GitHubPR:
                 )
                 info = rc["data"]["repository"]["pullRequest"]
         reviews = {}
-        for (author, state) in self._reviews:
+        for author, state in self._reviews:
             if state != "COMMENTED":
                 reviews[author] = state
         return list(reviews.items())

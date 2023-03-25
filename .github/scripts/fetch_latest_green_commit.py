@@ -123,7 +123,6 @@ def get_latest_green_commit(commits: List[str], results: List[Dict[str, Any]]) -
 
 
 def main() -> None:
-
     commits = get_latest_commits()
     results = query_commits(commits)
 

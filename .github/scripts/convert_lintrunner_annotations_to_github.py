@@ -6,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from typing import NamedTuple, Optional
 
+
 # From: https://docs.github.com/en/rest/reference/checks
 class GitHubAnnotationLevel(str, Enum):
     NOTICE = "notice"
