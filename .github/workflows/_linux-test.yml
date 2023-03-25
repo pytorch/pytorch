@@ -282,7 +282,7 @@ jobs:
           .github/scripts/stop_runner_service.sh
 
       - name: Check GPU health (run this last)
-        if: failure()
+        if: failure() && contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
         shell: bash
         env:
           RUNNER_WORKSPACE: ${{ runner.workspace }}
