@@ -16,6 +16,7 @@ import weakref
 from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
+import torch._logging
 
 import torch
 from torch._guards import Checkpointable, TracingContext
@@ -705,6 +706,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             else:
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
+
+        if inst.argval == "AssertionError":
+            unimplemented("assert with non-string message")
 
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
@@ -1472,6 +1476,9 @@ class InstructionTranslatorBase(Checkpointable[InstructionTranslatorGraphState])
             if sys.version_info < (3, 11):
                 self.push(ConstantVariable(False))
 
+    def LOAD_ASSERTION_ERROR(self, inst):
+        unimplemented("assert with non-string message")
+
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
     UNARY_NOT = stack_op(operator.not_)
@@ -1987,7 +1994,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
-        if config.output_code:
+        # TODO: mlazos, add support for enabling multiple artifact logs
+        # with a single alias
+        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         log.debug(f"INLINING {code}{suffix}")
 
