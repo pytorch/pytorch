@@ -182,7 +182,28 @@ bool hasPrimaryContext(int64_t device_index) {
   return _internal::hasPrimaryContext(device_index);
 }
 
-thread_local int targetDeviceID = -1;
+// This is a codepath for CUDA 12 that comes with a critical change in behavior
+// of `cudaSetDevice`. Unlike to previous CUDA versions that allocate context
+// lazily CUDA 12.x eagerly allocates primary context the moment `cudaSetDevice`
+// is called. This can lead to dramatic consequences and pollute the device
+// memory in distributed runs. To avoid unnecessary context creation a new
+// function called `MaybeSetDevice` was introduced. This function is to be
+// called in device guard destructor and at the exit of torch.cuda.device
+// context manager. The behavior of `MaybeSetDevice` is quite simple, it calls
+// to `cudaSetDevice` if context already exist or if context was not allocated
+// on targeted device it simply saves the device index. This way we can keep
+// PyTorch backward compatible for applications like this:
+//
+// ```
+// import torch
+// x = torch.empty(1, device=“cuda:1”) # no CUDA context on cuda:0 after this
+// call y = torch.empty(1, device=“cuda”) # CUDA context is created on cuda:0
+// ```
+//
+// That is why we also need to call `cudaSetDevice` at the constructors of
+// `OptionalCUDAGuard` and `OptionalCUDAStreamGuard`.
+
+thread_local int targetDeviceIndex = -1;
 
 // Wrappers for raw CUDA device management functions
 cudaError_t GetDeviceCount(int* dev_count) {
@@ -190,8 +211,8 @@ cudaError_t GetDeviceCount(int* dev_count) {
 }
 
 cudaError_t GetDevice(int* device) {
-  if (targetDeviceID >= 0) {
-    *device = targetDeviceID;
+  if (targetDeviceIndex >= 0) {
+    *device = targetDeviceIndex;
     return cudaSuccess;
   }
   return cudaGetDevice(device);
@@ -199,8 +220,8 @@ cudaError_t GetDevice(int* device) {
 
 cudaError_t SetDevice(int device) {
   TORCH_CHECK(device >= 0, "device id must be positive!");
-  targetDeviceID = -1;
   cudaError_t err = cudaSetDevice(device);
+  targetDeviceIndex = -1;
   C10_CUDA_CHECK(cudaFree(0));
   return err;
 }
@@ -209,7 +230,7 @@ cudaError_t MaybeSetDevice(int device) {
   if (hasPrimaryContext(device)) {
     return c10::cuda::SetDevice(device);
   }
-  targetDeviceID = device;
+  targetDeviceIndex = device;
   return cudaSuccess;
 }
 
