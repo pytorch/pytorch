@@ -36,11 +36,12 @@ class Model(nn.Module):
 
 
 # function to compare dense vs cusparselt linear for given m, k, n, batch_size
-def compare_linear(m, k, n, batch_size, alg_id=None):
+def compare_linear(m, k, n, batch_size, alg_id=None, suppress_stdout=True):
     # hack to get around extra printouts b/c engineering build
-    devnull = open("/dev/null", "w")
-    oldstdout_fno = os.dup(sys.stdout.fileno())
-    os.dup2(devnull.fileno(), 1)
+    if suppress_stdout:
+        devnull = open("/dev/null", "w")
+        oldstdout_fno = os.dup(sys.stdout.fileno())
+        os.dup2(devnull.fileno(), 1)
 
     # create input tensor
     input_tensor = torch.randn(batch_size, n, k, device=device, dtype=dtype)
@@ -76,7 +77,8 @@ def compare_linear(m, k, n, batch_size, alg_id=None):
     ).blocked_autorange()
 
     # end hack
-    os.dup2(oldstdout_fno, 1)
+    if suppress_stdout:
+        os.dup2(oldstdout_fno, 1)
 
     return {
         "m": m,
@@ -98,10 +100,11 @@ if __name__ == "__main__":
         choices=[
             "nvidia-bert",
             "nvidia-fixed-k",
-            "nvidia-fixed-nm",
+            "nvidia-fixed-mn",
             "distilbert-shapes",
             "compare-alg-id",
         ],
+        metavar="",
     )
     args = parser.parse_args()
 
@@ -114,9 +117,7 @@ if __name__ == "__main__":
             (1024, 1024, 16384),
             (1024, 4096, 16384),
         ]
-        results = pd.DataFrame.from_records(
-            compare_linear(m, k, n, 1) for (m, k, n) in tqdm(bert_shapes)
-        )
+        results = (compare_linear(m, k, n, 1) for (m, k, n) in tqdm(bert_shapes))
 
     elif args.mode == "nvidia-fixed-k":
         mn_vals = [
@@ -139,9 +140,7 @@ if __name__ == "__main__":
             19456,
             20480,
         ]
-        results = pd.DataFrame.from_records(
-            compare_linear(mn, 10240, mn, 1) for mn in tqdm(mn_vals)
-        )
+        results = (compare_linear(mn, 10240, mn, 1) for mn in tqdm(mn_vals))
 
     elif args.mode == "nvidia-fixed-mn":
         k_vals = [
@@ -161,9 +160,7 @@ if __name__ == "__main__":
             19200,
             20480,
         ]
-        results = pd.DataFrame.from_records(
-            compare_linear(10240, k, 10240, 1) for k in tqdm(k_vals)
-        )
+        results = (compare_linear(10240, k, 10240, 1) for k in tqdm(k_vals))
 
     elif args.mode == "distilbert-shapes":
         shapes = [
@@ -198,8 +195,8 @@ if __name__ == "__main__":
             # (2048, 1024, 1024),
             # (2048, 2048, 2048),
         ]
-        batch_sizes = list(range(4, 128 + 1, 4))
-        results = pd.DataFrame.from_records(
+        batch_sizes = list(range(16, 128 + 1, 16))
+        results = (
             compare_linear(m, k, n, batch_size)
             for (m, k, n), batch_size in tqdm(
                 product(shapes, batch_sizes), total=len(shapes) * len(batch_sizes)
@@ -208,14 +205,18 @@ if __name__ == "__main__":
 
     elif args.mode == "compare-alg-id":
         dim_range = list(range(128, 3072 + 1, 128))
-        batch_sizes = list(range(4, 128 + 1, 4))
-        results = pd.DataFrame.from_records(
+        batch_sizes = list(range(16, 128 + 1, 16))
+        results = (
             compare_linear(768, 3072, n, batch_size)
             for n, batch_size in tqdm(
                 product(dim_range, batch_sizes), total=len(dim_range) * len(batch_sizes)
             )
-        )
+
+            )
+    else:
+        raise ValueError(f"--mode set to unrecognized value {args.mode}")
 
     print(f"Finished benchmark: {args.mode} ")
-    results.to_csv(f"{args.mode}.csv")
-    print(results)
+    df = pd.DataFrame.from_records(results)
+    df.to_csv(f"{args.mode}.csv")
+    print(df)
