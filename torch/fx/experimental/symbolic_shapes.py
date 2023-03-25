@@ -1213,6 +1213,9 @@ class ShapeEnv:
         self.var_to_range: Dict["sympy.Symbol", ValueRanges] = {}
         self.var_to_sources: Dict["sympy.Symbol", List[Source]] = {}
         self.var_to_stack: Dict["sympy.Symbol", str] = {}
+        # Maps symbolic ints to the guards that refine ther lower/upper
+        # bound. If one of them is None, it means that there are no guards
+        # that refine that respective bound.
         self.var_to_guards: Dict["sympy.Symbol", Tuple[Optional[ShapeGuard], Optional[ShapeGuard]]] = {}
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
@@ -2005,56 +2008,72 @@ class ShapeEnv:
             """
             return self.maybe_simplify_floordiv(self.simplify(expr))
 
-        # First, try to simplify the guard.
-        # Since we do not guarantee that the function is monotonic,
-        # we set a maximum number of iterations.
-        max_iterations = 10
-        it = 0
-        expr = guard.expr
+        def simplify_until(expr: sympy.Expr, max_iterations: int = 10) -> sympy.Expr:
+            """
+            Calls 'simplify' either until it does not change or until it reaches the
+            maximum number of iterations.
+            """
+            max_iterations = 10
+            for _ in range(max_iterations):
+                previous, expr = expr, simplify(expr)
+                if expr == previous:
+                    break
+            return expr
 
-        while True:
-            it += 1
-            previous = expr
-            expr = simplify(previous)
-            if expr == previous or it >= max_iterations:
-                break
+        RELOP_MIRROR = {
+            sympy.Ge: sympy.Le,
+            sympy.Gt: sympy.Lt,
+            sympy.Le: sympy.Ge,
+            sympy.Lt: sympy.Gt,
+        }
 
-        # Filter the guards that:
-        #   1. are relational operations
-        #   2. have a symbol as the left-hand side
-        #   3. already have a range
-        if (
-            not isinstance(expr, sympy.Rel)
-            or not isinstance(expr.lhs, sympy.Symbol)
-            or expr.lhs not in self.var_to_range
-        ):
-            return
+        # List of expressions to be processed.
+        # Here, we try considering both LHS and RHS by mirroring the
+        # original expression: a < b ==> b > a
+        exprs = [guard.expr]
 
+        if type(guard.expr) in RELOP_MIRROR:
+            exprs.append(RELOP_MIRROR[type(guard.expr)](guard.expr.rhs, guard.expr.lhs))  # type: ignore
 
-        # Update the value range of the left-hand side, if the
-        # right-hand side provides a better range.
-        symbol = expr.lhs
+        for expr in exprs:
+            # First, try to simplify the left-hand side.
+            expr = simplify_until(expr)
 
-        vr = self.var_to_range[symbol]
-        lower, upper = vr.lower, vr.upper
+            # Filter the guards that:
+            #   1. are relational operations
+            #   2. have a symbol as the left-hand side
+            #   3. already have a range
+            if (
+                not isinstance(expr, sympy.Rel)
+                or not isinstance(expr.lhs, sympy.Symbol)
+                or expr.lhs not in self.var_to_range
+            ):
+                continue
 
-        rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore
-        lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
+            # Update the value range of the left-hand side, if the
+            # right-hand side provides a better range.
+            symbol = expr.lhs
 
-        if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
-            lower = rhs_vr.lower + (1 * isinstance(expr, sympy.Gt))
-            lower_guard = guard
-        if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
-            upper = rhs_vr.upper - (1 * isinstance(expr, sympy.Lt))
-            upper_guard = guard
+            vr = self.var_to_range[symbol]
+            lower, upper = vr.lower, vr.upper
 
-        # Do nothing if the new value range is no better than what we already have.
-        if vr == ValueRanges(lower, upper):
-            return
+            rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore
+            lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
-        self.var_to_range[symbol] = ValueRanges(lower, upper)
-        self.var_to_guards[symbol] = (lower_guard, upper_guard)
-        self._maybe_evaluate_static.cache_clear()
+            if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
+                lower = rhs_vr.lower + (1 * int(isinstance(expr, sympy.Gt)))
+                lower_guard = guard
+            if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
+                upper = rhs_vr.upper - (1 * int(isinstance(expr, sympy.Lt)))
+                upper_guard = guard
+
+            # Do nothing if the new value range is no better than what we already have.
+            if vr == ValueRanges(lower, upper):
+                return
+
+            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            self.var_to_guards[symbol] = (lower_guard, upper_guard)
+            self._maybe_evaluate_static.cache_clear()
 
 
 def _should_allocate(user_marked_dynamic, assume_static_by_default):
