@@ -52,10 +52,8 @@ test_failures = {
     #
     # These are from switching to specialize_int=False
     #
-    "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),  # StopIteration
     # NotImplementedError: argument of type: <class 'sympy.core.add.Add'>
     "test_reflection_pad2d_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_both_scalars_dynamic_shapes": TestFailure(("cpu", "cuda")),  # StopIteration
 }
 
 
