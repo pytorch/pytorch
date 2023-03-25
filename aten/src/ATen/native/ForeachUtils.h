@@ -3,6 +3,13 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ScalarType.h>
+#include <ATen/Device.h>
+#include <ATen/TypeDefault.h>
+#include <c10/util/ArrayRef.h>
+#include <ATen/native/utils/ParamsHash.h>
+#include <unordered_map>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -157,7 +164,7 @@ std::vector<c10::Scalar> convert_tensor_to_scalar_list(
             scalarList_.size(0),
             " instead.");
         for (int64_t i = 0; i < scalarList_.size(0); i++) {
-          scalarList.push_back(c10::Scalar(scalar_data[i]));
+          scalarList.emplace_back(c10::Scalar(scalar_data[i]));
         }
       });
   return scalarList;
@@ -173,5 +180,140 @@ bool can_use_fast_route(TensorList tensors1, TensorList tensors2, bool does_op_p
   return can_use_fast_route({tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }
 
+using nested_tensorvec_t = std::vector<std::vector<at::Tensor>>;
+using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nested_tensorvec_t>;
+using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
+using nested_tensorvec_t = std::vector<std::vector<at::Tensor>>;
+using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nested_tensorvec_t>;
+using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
+using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
+using IndicesT = std::vector<int>;
+using TensorsAndIndicesT = std::pair<nested_tensorvec_t, IndicesT>;
+using FlatMap = std::unordered_map<DeviceDtypeKey, TensorsAndIndicesT, ParamsHash<DeviceDtypeKey>>;
+
+FlatMap group_tensors_by_first_tensors_device_and_dtype(const std::vector<std::vector<Tensor>>& nested_tensorlist, const bool with_indices) {
+  FlatMap grouped_tensors_with_indices;
+
+  TORCH_CHECK_GT(nested_tensorlist.size(), 0);
+  TORCH_CHECK_GT(nested_tensorlist[0].size(), 0);
+  const auto num_lists = nested_tensorlist.size();
+  const auto num_tensors = nested_tensorlist[0].size();
+
+  TORCH_CHECK(std::all_of(nested_tensorlist.cbegin(), nested_tensorlist.cend(),
+    [&](const auto& tensorlist) -> bool {
+      // note(crcrpar): Allow empty tensorlists following
+      // ref: https://github.com/pytorch/pytorch/blob/85885301fd3c6adb8b9dc3cf7afadf6945566684/torch/utils/_foreach_utils.py#L21-L24
+      return tensorlist.size() == num_tensors || tensorlist.size() == 0;
+    }));
+
+  for (const auto& tensor_index : c10::irange(num_tensors)) {
+    const auto t = nested_tensorlist[0][tensor_index];
+    const DeviceDtypeKey key = {t.device(), t.scalar_type()};
+    if (!grouped_tensors_with_indices.count(key)) {
+      grouped_tensors_with_indices.insert(
+        {
+          key,
+          TensorsAndIndicesT{
+            [&]() -> nested_tensorvec_t {
+              nested_tensorvec_t nested_tensorvec;
+              nested_tensorvec.reserve(num_lists);
+             for (const auto& i : c10::irange(num_lists)) {
+                std::vector<Tensor> tensors;
+                if (!nested_tensorlist[i].empty()) {
+                  tensors.reserve(num_tensors);
+                }
+                nested_tensorvec.emplace_back(tensors);
+              }
+              return nested_tensorvec;
+            }(),
+            [&]() -> IndicesT {
+              if (!with_indices) {
+                return {};
+              } else {
+                IndicesT indices;
+                indices.reserve(num_tensors);
+                return indices;
+              }
+            }()
+          }
+        }
+      );
+    }
+    for (const auto& list_index : c10::irange(num_lists)) {
+      if (!nested_tensorlist[list_index].empty()) {
+        grouped_tensors_with_indices[key].first[list_index].emplace_back(nested_tensorlist[list_index][tensor_index]);
+      }
+    }
+    if (with_indices) {
+      grouped_tensors_with_indices[key].second.emplace_back(tensor_index);
+    }
+  }
+
+  return grouped_tensors_with_indices;
 }
+
+template<typename F>
+device_scalartype_nested_tensorvec_map_t _group_tensors_by_device_and_scalartype(
+    const std::vector<std::vector<at::Tensor>>& nested_tensorlists,
+    F check_tensor
+) {
+  TORCH_CHECK_GT(nested_tensorlists.size(), 0);
+  const auto num_lists{nested_tensorlists.size()};
+  const auto num_tensors{nested_tensorlists[0].size()};
+  for (const auto & i : c10::irange(num_lists)) {
+    TORCH_CHECK_EQ(num_tensors, nested_tensorlists[i].size());
+  }
+  device_scalartype_nested_tensorvec_map_t grouped_tensors;
+  for (const auto & tensor_index : c10::irange(num_tensors)) {
+    const auto & first_tensor = nested_tensorlists[0][tensor_index];
+    const auto device = first_tensor.device();
+    const auto scalar_type = first_tensor.scalar_type();
+    TORCH_CHECK(
+        std::all_of(
+          nested_tensorlists.cbegin(), nested_tensorlists.cend(),
+          [&](const auto tensorlist) { return check_tensor(first_tensor, tensorlist[tensor_index]); }
+          ));
+    const auto gen_initializer = [&]() -> scalartype_nested_tensorvec_map_t::value_type {
+      nested_tensorvec_t init_value;
+      init_value.reserve(num_lists);
+      for (const auto& tensorlist : nested_tensorlists) {
+        init_value.emplace_back(std::vector<at::Tensor>{tensorlist[tensor_index]});
+      }
+      return {scalar_type, init_value};
+    };
+    if (!grouped_tensors.count(device)) {
+      grouped_tensors[device] = {gen_initializer()};
+    } else {
+      if (!grouped_tensors[device].count(scalar_type)) {
+        grouped_tensors[device].insert(gen_initializer());
+      } else {
+        for (const auto & i : c10::irange(num_lists)) {
+          grouped_tensors[device][scalar_type][i].emplace_back(nested_tensorlists[i][tensor_index]);
+        }
+      }
+    }
+  }
+  return grouped_tensors;
+}
+
+
+device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
+    const std::vector<std::vector<Tensor>>& nested_tensorlists,
+    const bool has_state_steps
+) {
+  return _group_tensors_by_device_and_scalartype(
+      nested_tensorlists,
+      [&](const at::Tensor& first_tensor, const at::Tensor& tensor) -> bool {
+        return tensor.is_cuda() &&
+          tensor.scalar_type() == first_tensor.scalar_type() &&
+          tensor.device() == first_tensor.device() &&
+          tensor.layout() == at::kStrided &&
+          tensor.is_non_overlapping_and_dense() &&
+          tensor.sizes() == first_tensor.sizes() &&
+          tensor.strides() == first_tensor.strides();
+      }
+  );
+}
+
+} // namespace (anonymous)
 }} // at::native

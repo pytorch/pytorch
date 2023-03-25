@@ -2,6 +2,7 @@
 #include <ATen/Device.h>
 #include <ATen/ScalarType.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/MultiTensorApply.cuh>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/Pow.cuh>
@@ -195,7 +196,7 @@ c10::optional<at::Tensor> inline get_device_tensor(
   }
 }
 
-// TODO(crcrpar): Make this generic so that we can utilize in foreach ops (or even expose to `torch`?)
+
 using nested_tensorvec_t = std::vector<std::vector<at::Tensor>>;
 using scalartype_nested_tensorvec_map_t = std::unordered_map<at::ScalarType, nested_tensorvec_t>;
 using device_scalartype_nested_tensorvec_map_t = std::unordered_map<at::Device, scalartype_nested_tensorvec_map_t>;
@@ -220,15 +221,15 @@ device_scalartype_nested_tensorvec_map_t group_tensors_by_device_and_scalartype(
   };
   for (const auto & tensor_index : c10::irange(num_tensors)) {
     const auto & first_tensor = nested_tensorlists[0][tensor_index];
-    const auto device = nested_tensorlists[0][tensor_index].device();
-    const auto scalar_type = nested_tensorlists[0][tensor_index].scalar_type();
+    const auto device = first_tensor.device();
+    const auto scalar_type = first_tensor.scalar_type();
     for (const auto & i : c10::irange(num_lists)) {
       const auto only_device_check = has_state_steps && i == num_lists - 1;
       const auto & t = nested_tensorlists[i][tensor_index];
       if (only_device_check) {
         TORCH_CHECK(t.is_cuda() && device == t.device());
       } else {
-        TORCH_CHECK(is_tensor_okay(nested_tensorlists[0][tensor_index], nested_tensorlists[i][tensor_index]));
+        TORCH_CHECK(is_tensor_okay(first_tensor, t));
       }
     }
     const auto gen_initializer = [&]() -> scalartype_nested_tensorvec_map_t::value_type {

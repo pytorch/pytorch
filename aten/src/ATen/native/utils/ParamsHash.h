@@ -1,5 +1,7 @@
 #pragma once
 
+#include <c10/util/irange.h>
+
 #include <memory>
 #include <mutex>
 

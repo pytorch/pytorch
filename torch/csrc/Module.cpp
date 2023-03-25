@@ -16,6 +16,7 @@
 #include <ATen/core/Vitals.h>
 #include <ATen/dlpack.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/ForeachUtils.h>
 #include <c10/core/DispatchKeySet.h>
 #include <c10/util/Logging.h>
 #include <c10/util/irange.h>
@@ -1685,6 +1686,18 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
         return torch::should_allow_numbers_as_tensors(name);
+      });
+
+  py_module.def(
+      "_group_tensors_by_device_and_dtype",
+      [](const std::vector<std::vector<at::Tensor>>& nested_tensorlist,
+         const bool with_indices) {
+        // TODO(crcrpar): Need to map at::ScalarType to THPDtype so that repr
+        // works
+        auto cpp_grouped_tensors_with_indices =
+            at::native::group_tensors_by_first_tensors_device_and_dtype(
+                nested_tensorlist, with_indices);
+        return cpp_grouped_tensors_with_indices;
       });
 
   const auto& defaultGenerator = at::detail::getDefaultCPUGenerator();
