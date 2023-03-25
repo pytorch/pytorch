@@ -825,7 +825,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
 def handle_dynamo_export_graph(gm, inputs, compile_gm):
     """
-    `torch._dynamo.export` embeds pytrees in the FX graph codgen object,
+    `torch._dynamo.export` embeds pytrees in the FX graph codegen object,
     convert that to a normal FX graph so inductor can compile it.
     """
     codegen = gm.graph._codegen
