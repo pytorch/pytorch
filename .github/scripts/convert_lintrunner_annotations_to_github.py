@@ -24,7 +24,12 @@ class GitHubAnnotation(NamedTuple):
     title: Optional[str]
     raw_details: Optional[str]
 
-PYTORCH_ROOT = Path(subprocess.check_output(['git', 'rev-parse', '--show-toplevel']).decode('ascii').strip())
+
+PYTORCH_ROOT = Path(
+    subprocess.check_output(["git", "rev-parse", "--show-toplevel"])
+    .decode("ascii")
+    .strip()
+)
 
 annotations = []
 for line in sys.stdin:
@@ -32,7 +37,6 @@ for line in sys.stdin:
 
     path = lint_message.get("path")
     line = lint_message.get("line")
-
 
     code = lint_message["code"]
     severity = lint_message["severity"]
@@ -48,16 +52,18 @@ for line in sys.stdin:
     # normalize path relative to git root
     path = Path(path).relative_to(PYTORCH_ROOT)
 
-    annotations.append(GitHubAnnotation(
-        path=str(path),
-        start_line=int(line),
-        end_line=int(line),
-        start_column=None,
-        end_column=None,
-        annotation_level=GitHubAnnotationLevel.FAILURE,
-        message=description,
-        title=f"({code}) {name}",
-        raw_details=None,
-    )._asdict())
+    annotations.append(
+        GitHubAnnotation(
+            path=str(path),
+            start_line=int(line),
+            end_line=int(line),
+            start_column=None,
+            end_column=None,
+            annotation_level=GitHubAnnotationLevel.FAILURE,
+            message=description,
+            title=f"({code}) {name}",
+            raw_details=None,
+        )._asdict()
+    )
 
 print(json.dumps(annotations), flush=True)
