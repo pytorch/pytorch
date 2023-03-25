@@ -961,6 +961,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 6)
 
+    @unittest.skipIf(torch.backends.mps.is_available(), "requires mps")
     def test_func_default_torch_args(self):
         """
         Tests other types of torch types as function default (size, dtype, device)
