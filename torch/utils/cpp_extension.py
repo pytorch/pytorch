@@ -381,11 +381,15 @@ def _check_cuda_version(compiler_name: str, compiler_version: TorchVersion) -> N
     cuda_str_version = cuda_version.group(1)
     cuda_ver = packaging.version.parse(cuda_str_version)
     torch_cuda_version = packaging.version.parse(torch.version.cuda)
+    
     if cuda_ver != torch_cuda_version:
-        # major/minor attributes are only available in setuptools>=49.6.0
-        if getattr(cuda_ver, "major", float("nan")) != getattr(torch_cuda_version, "major", float("nan")):
-            raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
-        warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))
+        try:
+            # major/minor attributes are only available in setuptools>=49.4.0
+            if cuda_ver.major != torch_cuda_version.major:
+                raise RuntimeError(CUDA_MISMATCH_MESSAGE.format(cuda_str_version, torch.version.cuda))
+        except Exception:
+            raise ValueError("setuptools>=49.4.0 is required")
+        warnings.warn(CUDA_MISMATCH_WARN.format(cuda_str_version, torch.version.cuda))        
 
     if not (sys.platform.startswith('linux') and
             os.environ.get('TORCH_DONT_CHECK_COMPILER_ABI') not in ['ON', '1', 'YES', 'TRUE', 'Y'] and
