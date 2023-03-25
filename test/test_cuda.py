@@ -1709,21 +1709,17 @@ except RuntimeError as e:
 
     def test_bincount_ext(self):
         # ensure CUDA code coverage
-        input_size = (5000,)
+        input_size = (100000,)
         w = torch.randn(input_size, dtype=torch.double, device='cuda')
         w_cpu = w.cpu()
         # test shared memory impl
         t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
-        # test multi block memory impl
-        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
-        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
-        self.assertEqual(t.cpu().bincount(), t.bincount())
-        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
         # test global memory impl
-        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
-        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
+        #   see `CUDAHistogramMemoryType` in SummaryOps.cu
+        #   50000 * sizeof(int64_t) == 390 KiB, which should exceed smem of any known GPU
+        t = torch.randint(50000, input_size, dtype=torch.int64, device='cuda')
         self.assertEqual(t.cpu().bincount(), t.bincount())
         self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
@@ -4230,7 +4226,9 @@ exit(2)
 
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
-            params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
+            params = [
+                torch.randn((i + 5, i + 5), device="cuda") for i in range(2)
+            ] + [torch.randn((), device="cuda")]
             params_control = [p.clone().requires_grad_() for p in params]
             params_graphed = [p.clone().requires_grad_() for p in params]
 

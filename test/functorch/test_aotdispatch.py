@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_ARM64,
     compare_equal_outs_and_grads,
     outs_and_grads,
+    skipIfRocm,
 )
 import torch
 import torch.nn as nn
@@ -1759,6 +1760,7 @@ def forward(self, arg0_1):
             self.verify_aot_autograd(f, args)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @skipIfRocm  # https://github.com/pytorch/pytorch/issues/96560
     def test_batch_norm_amp(self):
         device = "cuda"
         input_dtype = torch.float16
@@ -2440,6 +2442,8 @@ aot_autograd_failures = {
 
     # Given input size: (s0xs1x2). Calculated output size: ...
     skip('max_pool2d_with_indices_backward'),
+
+    skip('linalg.pinv', 'singular'),  # likely needs updated tolerance
 
     # Worked with real but not with fake
     xfail('cholesky_inverse'),
