@@ -277,7 +277,7 @@ def run_and_get_cpp_code(fn, args):
     output_code_log.addHandler(ch)
     fn(*args)
     s = log_capture_string.getvalue()
-    otuput_code_log.removeHandler(ch)
+    output_code_log.removeHandler(ch)
     return s
 
 
