@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     subtest,
     TEST_WITH_UBSAN,
+    skipIfRocm,
 )
 from torch.testing._internal.common_device_type import \
     toleranceOverride, tol
@@ -3565,6 +3566,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
 
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+
         # RuntimeError: output with shape [4, 4] doesn't match the broadcast shape [1, 4, 4]
         xfail('addcdiv'),
         xfail('addcmul'),
@@ -3657,7 +3663,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.embedding_bag'),
         xfail('linalg.tensorsolve'),
         xfail('bernoulli', ''),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('native_dropout_backward'),
         xfail('nn.functional.kl_div', ''),
@@ -3719,7 +3724,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('nn.functional.dropout3d', ''),
         xfail('special.scaled_modified_bessel_k1'),
         xfail('special.modified_bessel_k0'),
-        xfail('linalg.ldl_factor', ''),
         xfail('special.modified_bessel_i1'),
         xfail('special.chebyshev_polynomial_t'),
         xfail('as_strided_scatter', ''),
@@ -3730,6 +3734,11 @@ class TestVmapOperatorsOpInfo(TestCase):
         # UBSAN: runtime error: shift exponent -1 is negative
         decorate('bitwise_left_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
         decorate('bitwise_right_shift', decorator=unittest.skipIf(TEST_WITH_UBSAN, "Fails with above error")),
+        # https://github.com/pytorch/pytorch/issues/96560
+        decorate('nn.functional.batch_norm', decorator=skipIfRocm),
+        decorate('nn.functional.instance_norm', decorator=skipIfRocm),
+        decorate('nn.functional.layer_norm', decorator=skipIfRocm),
+
         # One or more of the overload doesn't have a Batch rule.
         xfail('bincount'),
         # UBSAN: runtime error: 1.27043e+262 is outside the range of representable values of type 'float'

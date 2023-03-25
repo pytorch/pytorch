@@ -33,6 +33,7 @@ from torch.package import PackageExporter
 from torch.storage import TypedStorage
 from torch.types import (
     _bool,
+    _complex,
     _device,
     _dispatchkey,
     _dtype,
