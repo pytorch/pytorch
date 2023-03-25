@@ -62,7 +62,8 @@ struct CusparseLtLinear : torch::CustomClassHolder {
   void prune();
   void compress();
   at::Tensor masked_mm(const at::Tensor& input);
-  //void masked_mm(const at::Tensor& input);
+  int64_t get_alg_id();
+  void set_alg_id(int64_t alg);
 };
 
 
@@ -106,7 +107,6 @@ void CusparseLtLinear::init(const at::Tensor& weight,
   dA = weight.data_ptr<c10::Half>();
   dBias = bias.data_ptr<c10::Half>();
 
-  //--------------------------------------------------------------------------
   CHECK_CUDA(cudaMalloc((void**)&d_valid, sizeof(*d_valid)))
   
   // matrix descriptor initilization
@@ -249,7 +249,6 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
   CHECK_CUSPARSE( cusparseLtMatmulGetWorkspace(&handle, &plan, &workspace_size) )
   CHECK_CUDA( cudaMalloc((void**) &d_workspace, workspace_size) )
 
-  //CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(&handle, &alg_sel, CUSPARSELT_MATMUL_SEARCH_ITERATIONS, &n_search_iter, sizeof(int)))
 
   if (alg_id == 7777)
   {
@@ -264,10 +263,6 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
       //std::cout <<"alg id: " << alg_id << std::endl;
 
-      //CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
-                                                      //CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
-                                                      //&alg_id, sizeof(alg_id)) )
-      //std::cout <<"max alg id: " << alg_id << std::endl;
   }
 
 
@@ -288,13 +283,34 @@ at::Tensor CusparseLtLinear::masked_mm(const at::Tensor& input) {
 
 }
 
+int64_t CusparseLtLinear::get_alg_id() {
+  // don't need this for now
+  // int max_alg_id = 0;
+  // CHECK_CUSPARSE( cusparseLtMatmulAlgGetAttribute(&handle, &alg_sel,
+  //                                                 CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID,
+  //                                                 &max_alg_id, sizeof(max_alg_id)) )
+  // std::cout <<"max alg id: " << max_alg_id << std::endl;
+  return alg_id;
+}
+
+void CusparseLtLinear::set_alg_id(int64_t alg) {
+  alg_id = alg;
+  // CHECK_CUSPARSE( cusparseLtMatmulAlgSetAttribute(
+  //       &handle,
+  //       &alg_sel,
+  //       CUSPARSELT_MATMUL_ALG_CONFIG_ID ,
+  //       &alg_id,
+  //       sizeof(alg_id)))
+}
+
 TORCH_LIBRARY(cusparselt, m) {
   m.class_<CusparseLtLinear>("CusparseLtLinear")
     .def(torch::init())
     .def("init", &CusparseLtLinear::init)
     .def("prune", &CusparseLtLinear::prune)
     .def("compress", &CusparseLtLinear::compress)
-    //.def("search_matmul_algo", &CusparseLtLinear::search_matmul_algo)
     .def("masked_mm", &CusparseLtLinear::masked_mm)
+    .def("get_alg_id", &CusparseLtLinear::get_alg_id)
+    .def("set_alg_id", &CusparseLtLinear::set_alg_id)
   ;
 }
