@@ -96,7 +96,8 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, TEST_WITH_UBSAN, \
-    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, TestCase, \
+    suppress_warnings, BUILD_WITH_CAFFE2, IS_SANDCASTLE, GRAPH_EXECUTOR, \
+    DeterministicGuard, ProfilingMode, TestCase, \
     freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, IS_MACOS, skipIfTorchDynamo
@@ -2824,6 +2825,43 @@ graph(%Ra, %Rb):
 
         with self.assertRaisesRegex(Exception, "Mutable default parameters"):
             torch.jit.script(Test())
+
+    def _test_deterministic(self, device):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 24, kernel_size=3, stride=1, padding="same")
+                self.bn = torch.nn.BatchNorm2d(24)
+                self.bn.bias = torch.nn.Parameter(torch.randn([24]))
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        model = Model().eval().to(device)
+        x = torch.randn([1, 3, 32, 32], device=device)
+        traced_model = torch.jit.trace(model, x)
+
+        # After several non-deterministic runs
+        with DeterministicGuard(False):
+            for _ in range(5):
+                _ = traced_model(x)
+
+        with DeterministicGuard(True):
+            output = model(x)
+            for _ in range(5):
+                jit_output = traced_model(x)
+                self.assertTrue(torch.equal(output, jit_output))
+
+    def test_deterministic_cpu(self):
+        self._test_deterministic(device="cpu")
+
+    @unittest.skipIf(not RUN_CUDA, "Requires CUDA")
+    def test_deterministic_cuda(self):
+        self._test_deterministic(device="cuda")
 
     @skipIfTorchDynamo("TorchDynamo fails with unknown reason")
     def test_warnings(self):

@@ -41,6 +41,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   }
 
  private:
+  const ExecutionPlan& getFallbackPlan();
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
       c10::optional<size_t> remaining_bailout_depth);
