@@ -2627,6 +2627,8 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('nn_RNNCell'),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail('nn_GRUCell'), # Cannot call sizes() on tensor with symbolic sizes/strides
 }
 
 def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):

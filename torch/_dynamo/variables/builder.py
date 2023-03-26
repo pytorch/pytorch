@@ -809,9 +809,9 @@ class VariableBuilder:
                 shape_env = self.tx.output.shape_env
 
                 if value < 0 or torch._dynamo.config.specialize_int:
-                    dynamic_dim=DimDynamic.STATIC
+                    dynamic_dim = DimDynamic.STATIC
                 else:
-                    dynamic_dim=DimDynamic.DUCK
+                    dynamic_dim = DimDynamic.DUCK
 
                 wrapped_value = shape_env.create_symintnode(
                     shape_env.create_symbol(
