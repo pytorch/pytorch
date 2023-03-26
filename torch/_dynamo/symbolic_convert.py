@@ -16,8 +16,10 @@ import weakref
 from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
+import torch._logging
 
 import torch
+import torch._logging
 from torch._guards import Checkpointable, TracingContext
 
 from . import (
@@ -1993,7 +1995,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
-        if config.output_code:
+        # TODO: mlazos, add support for enabling multiple artifact logs
+        # with a single alias
+        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         log.debug(f"INLINING {code}{suffix}")
 

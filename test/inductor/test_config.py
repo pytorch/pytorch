@@ -1,11 +1,9 @@
 # Owner(s): ["module: inductor"]
-import logging
 import math
 import unittest
 
 import torch
 
-import torch._dynamo.config as dynamo_config
 from torch._dynamo.test_case import run_tests, TestCase
 
 from torch._inductor import config
@@ -87,14 +85,6 @@ class TestInductorConfig(TestCase):
             with config.patch("cpp.threads", 8999):
                 self.assertEqual(config.cpp.threads, 8999)
             self.assertEqual(config.cpp.threads, 9000)
-
-    def test_log_level_property(self):
-        old = dynamo_config.log_level
-        try:
-            dynamo_config.log_level = logging.CRITICAL
-            self.assertEqual(logging.getLogger("torch._dynamo").level, logging.CRITICAL)
-        finally:
-            dynamo_config.log_level = old
 
     @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
     def test_compile_api(self):
