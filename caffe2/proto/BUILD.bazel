@@ -40,4 +40,5 @@ proto_library(
         "prof_dag.proto",
         "torch.proto",
     ],
+    deps = [":caffe2_proto"],
 )
