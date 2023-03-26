@@ -1484,20 +1484,27 @@ class ShapeEnv:
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
-
-        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
-        sym_stride = []
-        for i, stride_expr in enumerate(stride):
-            # NB: Don't duck size the stride; instead use the expression
-            # we computed
-            assert stride_expr is not None
-            sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
-        sym_storage_offset = self.create_symintnode(self.create_symbol(
-            ex.storage_offset(),
-            TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
-            dynamic_dim=DimDynamic.DYNAMIC,
-            constraint_dim=None,
-        ), hint=ex.storage_offset())
+        
+        # symint allocation when every single number is an sympy int can cause meaningless
+        # data dependent access errors.
+        if all(isinstance(s, sympy.core.numbers.Integer) for s in size):
+            sym_sizes = size
+            sym_stride = ex.stride()
+            sym_storage_offset = ex.storage_offset()
+        else:
+            sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
+            sym_stride = []
+            for i, stride_expr in enumerate(stride):
+                # NB: Don't duck size the stride; instead use the expression
+                # we computed
+                assert stride_expr is not None
+                sym_stride.append(self.create_symintnode(stride_expr, hint=ex.stride(i)))
+            sym_storage_offset = self.create_symintnode(self.create_symbol(
+                ex.storage_offset(),
+                TensorPropertySource(source, TensorProperty.STORAGE_OFFSET),
+                dynamic_dim=DimDynamic.DYNAMIC,
+                constraint_dim=None,
+            ), hint=ex.storage_offset())
         return sym_sizes, sym_stride, sym_storage_offset
 
     # If you know what the current hint value of the SymInt to be created
