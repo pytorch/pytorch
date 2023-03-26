@@ -2060,7 +2060,18 @@ class ShapeEnv:
             rhs_vr = sympy_interp(ValueRangeAnalysis, self.var_to_range, expr.rhs)  # type: ignore
             lower_guard, upper_guard = self.var_to_guards.get(symbol, (None, None))
 
+            # Let's suppose that we have a preexisting range for x [0, 100].
+            # Now, we issue a guard x > y, where the range for y is [50, 150].
+            # Then, lower = 0, rhs_vr.lower = 50 and therefore refinement can happen,
+            # refining x to [51, 100], since x must be greater than y, but the lowest
+            # y could be is 50.
+            #
+            # sympy.Eq may update both lower and upper bounds.
+            # sympy.G{t,e} may update the lower bound, only.
+            # sympy.L{t,e} may update the upper bound, only.
             if lower < rhs_vr.lower and isinstance(expr, (sympy.Eq, sympy.Ge, sympy.Gt)):
+                # Strictly greater relations allow us to refine a bit more, since
+                # x < y implies that the lower bound for x is: y + 1.
                 lower = rhs_vr.lower + (1 * int(isinstance(expr, sympy.Gt)))
                 lower_guard = guard
             if upper < rhs_vr.upper and isinstance(expr, (sympy.Eq, sympy.Le, sympy.Lt)):
