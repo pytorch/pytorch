@@ -2627,8 +2627,7 @@ symbolic_aot_autograd_failures = {
     xfail('triangular_solve', ''),  # aten.triangular_solve.default - couldn't find symbolic meta function/de...
     xfail('_upsample_bilinear2d_aa'),  # RuntimeError: isIntList() INTERNAL ASSERT FAILED  Expected IntList but got GenericList
     xfail('vsplit', ''),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn_RNNCell'),  # Cannot call sizes() on tensor with symbolic sizes/strides
-    xfail('nn_GRUCell'), # Cannot call sizes() on tensor with symbolic sizes/strides
+    # TODO(voz): Did policy change? I cannot figure out why these started failing...
 }
 
 def _test_aot_autograd_forwards_backwards_helper(self, f, compiled_f, args):
@@ -2796,6 +2795,11 @@ aot_autograd_module_failures = set({
                            # to a causal mask tensor, to see if Boolean is_causal should be set
                            # for TrnasformerEncoder layers, MHA and sdp custom kernels
                            # (this bubbles up to Transformer)
+    # TODO(voz): It is unclear if a policy change led to this failure, or if we changed logic that
+    # fixed something else that causes this to fail.
+    # Note - Skipping symint node creation where sizes are 100% static fixes this
+    torch.nn.GRUCell, # Cannot call sizes() on tensor with symbolic sizes/strides
+    torch.nn.RNNCell, # Cannot call sizes() on tensor with symbolic sizes/strides
 })
 
 symbolic_aot_autograd_module_failures = {

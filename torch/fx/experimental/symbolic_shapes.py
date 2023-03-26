@@ -1484,8 +1484,8 @@ class ShapeEnv:
                     constraint_dim=None,
                 )
         assert all(x is not None for x in stride)
-        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
 
+        sym_sizes = [self.create_symintnode(i, hint=hint) for i, hint in zip(size, ex.size())]
         sym_stride = []
         for i, stride_expr in enumerate(stride):
             # NB: Don't duck size the stride; instead use the expression
