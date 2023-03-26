@@ -51,4 +51,5 @@ proto_library(
         "predictor_consts.proto",
         "prof_dag.proto",
     ],
+    deps = [":caffe2_proto"],
 )
