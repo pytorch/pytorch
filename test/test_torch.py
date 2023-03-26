@@ -6738,7 +6738,7 @@ class TestTorch(TestCase):
                 '^TypedStorage is deprecated',
                 str(warning)))
             # Check the line of code from the warning's stack
-            with open(w[0].filename) as f:
+            with open(w[0].filename, encoding="utf-8") as f:
                 code_line = f.readlines()[w[0].lineno - 1]
             self.assertTrue(re.search(re.escape('torch.FloatStorage()'), code_line))
 
