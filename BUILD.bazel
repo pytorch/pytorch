@@ -1040,7 +1040,6 @@ filegroup(
         "caffe2/utils/math/utils.cc",
         "caffe2/utils/math_cpu.cc",
         "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_convert.cc",
         "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/signal_handler.cc",
