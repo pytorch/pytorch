@@ -22,7 +22,13 @@ cc_proto_library(
 
 proto_library(
     name = "proto",
-    srcs = glob([
-        "*.proto",
-    ]),
+    srcs = [
+        "caffe2.proto",
+        "caffe2_legacy.proto",
+        "hsm.proto",
+        "metanet.proto",
+        "predictor_consts.proto",
+        "prof_dag.proto",
+        "torch.proto",
+    ],
 )
