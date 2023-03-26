@@ -1,6 +1,7 @@
 import contextlib
 import dataclasses
 import functools
+import itertools
 import logging
 import math
 import sys
@@ -13,6 +14,7 @@ import sympy
 
 import torch
 import torch.fx
+from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 
 from .. import codecache, config, ir, metrics
@@ -894,6 +896,19 @@ class CppKernel(Kernel):
         self.poststores = DeferredIndentedBuffer()
         self.num_threads = num_threads  # num_threads the kernel specialized for
 
+    # TODO(jgong5): make them as util function at the global scope
+    def stride_at(self, var: sympy.Symbol, index: sympy.Expr):
+        replacement = {var: var + 1}
+        new_index = sympy_subs(index, replacement)
+        return sympy.simplify(new_index - index)
+
+    def is_stride1_at(self, var: sympy.Symbol, index: sympy.Expr):
+        return self.stride_at(var, index) == 1
+
+    def is_invariant_under(self, var: sympy.Symbol, index: sympy.Expr):
+        expanded_index = sympy.expand(index)
+        return not expanded_index.has(var)
+
     def scale_index_with_offset(
         self, index: sympy.Expr, scale, itervar_idx=-1, offset=0
     ):
@@ -1104,34 +1119,25 @@ class CppKernel(Kernel):
 class CppVecKernel(CppKernel):
     overrides = CppVecOverrides
 
-    def __init__(self, args, num_threads, tiling_factor=0):
+    def __init__(self, args, num_threads, tiling_factor=0, tiling_idx=-1):
         super().__init__(args, num_threads)
         assert codecache.pick_vec_isa()
         if tiling_factor == 0:
             tiling_factor = codecache.pick_vec_isa().nelements()
         self.tiling_factor = tiling_factor
+        self.tiling_idx = tiling_idx
         self.reduction_omp_dec: Dict[str, str] = {}
         self.var_vec_buf_map: Dict[str, str] = {}
         metrics.generated_cpp_vec_kernel_count += 1
-
-    def stride_at(self, var: sympy.Symbol, index: sympy.Expr):
-        replacement = {var: var + 1}
-        new_index = sympy_subs(index, replacement)
-        return sympy.simplify(new_index - index)
-
-    def is_stride1_at(self, var: sympy.Symbol, index: sympy.Expr):
-        return self.stride_at(var, index) == 1
-
-    def is_invariant_under(self, var: sympy.Symbol, index: sympy.Expr):
-        expanded_index = sympy.expand(index)
-        return not expanded_index.has(var)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
         expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(index, self.tiling_factor)
+        new_index = self.scale_index_with_offset(
+            index, self.tiling_factor, itervar_idx=self.tiling_idx
+        )
 
         is_broadcast = expanded_index == new_index
 
@@ -1155,7 +1161,20 @@ class CppVecKernel(CppKernel):
         elif is_broadcast:
             line = f"at::vec::Vectorized<float>({var_expr})"
         else:
-            line = f"at::vec::Vectorized<float>::loadu({var_expr})"
+            tiling_var = self.itervars[self.tiling_idx]
+            if self.is_stride1_at(tiling_var, index):
+                line = f"at::vec::Vectorized<float>::loadu({var_expr})"
+            else:
+                inner = sympy.symbols(f"{tiling_var}_inner")
+                new_index = self.scale_index_with_offset(
+                    index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
+                )
+                line = (
+                    f"([&]() {{ __at_align__ float tmp_buf[{self.tiling_factor}]; "
+                    f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
+                    f"tmp_buf[{inner}] = {var}[{cexpr(new_index)}]; "
+                    "return at::vec::Vectorized<float>::loadu(tmp_buf); })()"
+                )
 
         return self.cse.generate(self.loads, line)
 
@@ -1166,12 +1185,26 @@ class CppVecKernel(CppKernel):
         assert mode is None
 
         expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(index, self.tiling_factor)
+        new_index = self.scale_index_with_offset(
+            index, self.tiling_factor, itervar_idx=self.tiling_idx
+        )
         assert new_index != expanded_index
         if V.graph.get_dtype(name) in [torch.bfloat16]:
             line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
         else:
-            line = f"{value}.store({var} + {cexpr(new_index)});"
+            tiling_var = self.itervars[self.tiling_idx]
+            if self.is_stride1_at(tiling_var, index):
+                line = f"{value}.store({var} + {cexpr(new_index)});"
+            else:
+                inner = sympy.symbols(f"{tiling_var}_inner")
+                new_index = self.scale_index_with_offset(
+                    index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
+                )
+                line = (
+                    f"{{ __at_align__ float tmp_buf[{self.tiling_factor}]; {value}.store(tmp_buf); "
+                    f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
+                    f"{var}[{cexpr(new_index)}] = tmp_buf[{inner}]; }}"
+                )
         self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -1257,7 +1290,7 @@ class CppTile2DKernel(CppVecKernel):
             }
             at::vec::transpose_mxn(out_ptr0 + ..., tmp1, ...) // into kernel.poststores
           for inner_most ... (tail)
-            // generated by CppTile2DTailKernel
+            // generated by CppVecKernel
             ...
       for i_outer ... (tail)
         for ...
@@ -1370,52 +1403,9 @@ class CppTile2DKernel(CppVecKernel):
         )
 
 
-class CppTile2DTailKernel(CppKernel):
-    """
-    A scalar kernel that handles the tail of inner-most loop split from a 2d tiling. The tile of the outer
-    loop axis is handled with a kernel inner loop (see method `codegen_inner_loops`).
-    """
-
-    def __init__(self, args, num_threads, tiling_factor, outer_tiling_idx):
-        super().__init__(args, num_threads)
-        self.outer_tiling_idx = outer_tiling_idx
-        self.tiling_factor = tiling_factor
-
-    def inner_itervar(self):
-        return sympy.symbols(f"{self.itervars[self.outer_tiling_idx]}_inner")
-
-    def transform_index(self, index):
-        index = self.rename_indexing(index)
-        expanded_index = sympy.expand(index)
-        new_index = self.scale_index_with_offset(
-            expanded_index,
-            self.tiling_factor,
-            itervar_idx=self.outer_tiling_idx,
-            offset=self.inner_itervar(),
-        )
-        return new_index
-
-    def load(self, name: str, index: sympy.Expr):
-        new_index = self.transform_index(index)
-        return super().load(name, new_index)
-
-    def store(self, name, index, value, mode=None):
-        assert "buf" in name
-        var = self.args.output(name)
-        assert mode is None
-        new_index = self.transform_index(index)
-        super().store(name, new_index, value, mode)
-
-    def codegen_inner_loops(self, code):
-        inner = self.inner_itervar()
-        code.writeline(
-            f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++)"
-        )
-
-
 class CppVecKernelChecker(CppVecKernel):
-    def __init__(self, args, num_threads, tiling_factor):
-        super().__init__(args, num_threads, tiling_factor)
+    def __init__(self, args, num_threads, tiling_factor, tiling_idx=-1):
+        super().__init__(args, num_threads, tiling_factor, tiling_idx)
 
         # Since this kernel is only for checker but does not generate any
         # code, so we need to decrease the kernel count.
@@ -1469,10 +1459,7 @@ class CppVecKernelChecker(CppVecKernel):
         if self.is_indirect_indexing(index):
             return False
 
-        most_inner_var = self.itervars[-1]
-        return self.is_invariant_under(most_inner_var, index) or self.is_stride1_at(
-            most_inner_var, index
-        )
+        return True
 
     def is_mask(self, name: str, users: Dict[torch.fx.Node, None]):
         load_type = V.graph.get_dtype(name)
@@ -1557,9 +1544,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             index = self.rename_indexing(index)
             if self.simd_vec and not self.could_vec(name, index):
-                self.disable_vec(
-                    f"load with indirect indexing or non-contigous: {index}"
-                )
+                self.disable_vec(f"load with indirect indexing or not a loop: {index}")
             return var
 
     def store(self, name, index, value, mode=None):
@@ -1593,9 +1578,7 @@ class CppVecKernelChecker(CppVecKernel):
                 return self.simd_vec
 
             if self.simd_vec and not self.could_vec(name, index):
-                self.disable_vec(
-                    f"store with indirect indexing or non-contigous: {index}"
-                )
+                self.disable_vec(f"store with indirect indexing or not a loop: {index}")
             return self.simd_vec
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
@@ -1854,17 +1837,13 @@ class CppVecKernelChecker(CppVecKernel):
                         opt_ctx.dtype = dtype
                         self.disable_vec(f"index_expr: {expr}, dtype {dtype}")
 
-                    # Pick the most inner loop variable since we always vectorize the
-                    # most inner loop
-                    most_inner_var = self.itervars[-1]
-                    most_inner_loop_irrevelant = self.is_invariant_under(
-                        most_inner_var, expr
-                    )
-                    if not most_inner_loop_irrevelant:
+                    tiling_var = self.itervars[self.tiling_idx]
+                    tiling_var_irrelevant = self.is_invariant_under(tiling_var, expr)
+                    if not tiling_var_irrelevant:
                         self.disable_vec(
-                            f"index_expr (most-inner var relevant): {expr}, dtype {dtype}"
+                            f"index_expr (tiling var relevant): {expr}, dtype {dtype}"
                         )
-                    opt_ctx.is_most_inner_loop_irrevelant = most_inner_loop_irrevelant
+                    opt_ctx.is_most_inner_loop_irrevelant = tiling_var_irrelevant
                     tmp_var = self.cse.newvar()
                     return tmp_var
 
@@ -1945,80 +1924,6 @@ class CppVecKernelChecker(CppVecKernel):
         self.exit_stack.enter_context(V.set_ops_handler(VecCheckerProxy()))
         self.exit_stack.enter_context(V.set_kernel_handler(self))
         return self
-
-
-class CppTile2DKernelChecker(CppVecKernelChecker):
-    """
-    Currently, we only address the situations with following constraints.
-    1. There exists one and only one fp32 load/store with outer loop var having contiguous buffer accesses.
-    2. When a load/store doesn't have contiguous access in an outer loop var, the access should be
-       vectorizable from the inner-most dim.
-    3. No reduction.
-    """
-
-    def __init__(self, args, num_threads, tiling_factor):
-        super().__init__(args, num_threads, tiling_factor)
-        self.can_tile2d = True
-        self.outer_tiling_idx = -1
-
-    def check_can_tile2d(self, name: str, index: sympy.Expr):
-        if not self.can_tile2d:
-            return
-        # make sure the transpose_mxn(src, ld_src, dst, ld_dst) ld_src doesn't depend on most inner var.
-        if len(self.itervars) > 0 and not self.is_invariant_under(
-            self.itervars[-1], self.stride_at(self.itervars[-1], index)
-        ):
-            self.can_tile2d = False
-            return
-
-        # check contiguity from any of the outer loops
-        has_stride1 = False
-        for loop_idx, itervar in enumerate(self.itervars[:-1]):
-            if self.is_stride1_at(itervar, index):
-                # only support 2d tile now
-                if V.graph.get_dtype(name) not in [torch.float, torch.float32] or (
-                    self.outer_tiling_idx >= 0 and self.outer_tiling_idx != loop_idx
-                ):
-                    self.can_tile2d = False
-                    return
-                else:
-                    self.outer_tiling_idx = loop_idx
-                has_stride1 = True
-
-        if not has_stride1 and not self.could_vec(name, index):
-            self.can_tile2d = False
-        return self.can_tile2d
-
-    def load(self, name: str, index: sympy.Expr):
-        if not V.graph.get_dtype(name) in [
-            torch.float,
-            torch.float32,
-            torch.bool,
-            torch.uint8,
-        ]:
-            self.can_tile2d = False
-            return self.can_tile2d
-        index = self.rename_indexing(index)
-        return self.check_can_tile2d(name, index)
-
-    def store(self, name, index, value, mode=None):
-        if not V.graph.get_dtype(name) in [
-            torch.float,
-            torch.float32,
-        ]:
-            self.can_tile2d = False
-            return self.can_tile2d
-        index = self.rename_indexing(index)
-        return self.check_can_tile2d(name, index)
-
-    def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
-        self.can_tile2d = False
-        return self.can_tile2d
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        super().__exit__(exc_type, exc_val, exc_tb)
-        if not self.simd_vec or self.outer_tiling_idx < 0:
-            self.can_tile2d = False
 
 
 class CppKernelProxy(CppKernel):
@@ -2195,35 +2100,84 @@ class CppKernelProxy(CppKernel):
 
         scalar_kernel = codegen_kernel(CppKernel)
         inner_most_idx = len(scalar_kernel.itervars) - 1
+        # TODO(jgong5): call self.set_ranges directly
         self.call_ranges = scalar_kernel.call_ranges
+        self.itervars = scalar_kernel.itervars
+        self.reduction_depth = scalar_kernel.reduction_depth
         self.loop_nest = LoopNestWithSplit.build(scalar_kernel)
 
         if not self.picked_vec_isa:
             return
 
-        # TODO(jgong5): support alternative tiling factors and data types
-        tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+        def select_tiling_indices():
+            all_index = []
+            for node in nodes:
+                rw = dependencies.extract_read_writes(node._body, *node._sizes)
+                all_index += [dep.index for dep in itertools.chain(rw.reads, rw.writes)]
+            contig_vars = set()
+            non_contig_stride_const = set()
+            non_contig_stride_other = set()
+            for index in all_index:
+                for var in index.free_symbols:
+                    if "tmp" in var.name:
+                        return []
+                    stride = self.stride_at(var, index)
+                    if stride == 1:
+                        contig_vars.add(int(var.name[1:]))
+                    elif stride.is_number:
+                        non_contig_stride_const.add(int(var.name[1:]))
+                    else:
+                        non_contig_stride_other.add(int(var.name[1:]))
+            candidates = contig_vars - non_contig_stride_other
+            contig_only = candidates - non_contig_stride_const
+            if not candidates or (len(candidates) == 1 and not contig_only):
+                return []
+            if contig_only:
+                return sorted(contig_only)[-1:]
+            assert len(candidates) > 1
+            return sorted(candidates)[-2:]
+
+        def select_tiling():
+            # TODO(jgong5): support alternative tiling factors and data types
+            tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+            tiling_indices = select_tiling_indices()
+            if tiling_indices:
+                with CppVecKernelChecker(
+                    deepcopy(self.kernel_group.args),
+                    parallel_num_threads(),
+                    tiling_factor,
+                    tiling_indices[-1],
+                ) as vec_checker:
+                    run(vec_checker)
+                if vec_checker.simd_vec:
+                    if (
+                        len(tiling_indices) == 1
+                        and tiling_indices[0] == len(self.itervars) - 1
+                    ):
+                        # TODO(jgong5): support vec on outer loop
+                        return [tiling_factor], tiling_indices
+                    if len(tiling_indices) == 2 and self.reduction_depth == len(
+                        self.itervars
+                    ):
+                        # TODO(jgong5): support tile2d with reduction
+                        assert tiling_indices[1] == len(self.itervars) - 1
+                        return [tiling_factor, tiling_factor], tiling_indices
+            return [], []
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            with CppVecKernelChecker(
-                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
-            ) as vec_checker:
-                run(vec_checker)
-
-            with CppTile2DKernelChecker(
-                deepcopy(self.kernel_group.args), parallel_num_threads(), tiling_factor
-            ) as tile2d_checker:
-                run(tile2d_checker)
-
-            if vec_checker.simd_vec:
+            tiling_factors, tiling_indices = select_tiling()
+            assert len(tiling_factors) == len(tiling_indices)
+            if len(tiling_indices) == 1:
                 main_loop, tail_loop = self.loop_nest.split_with_tiling(
-                    inner_most_idx, factor=tiling_factor
+                    inner_most_idx, factor=tiling_factors[0]
                 )
-                main_loop.set_kernel(codegen_kernel(CppVecKernel, tiling_factor))
+                main_loop.set_kernel(
+                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
+                )
                 tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
                 tail_loop.simd_omp = True
@@ -2232,22 +2186,26 @@ class CppKernelProxy(CppKernel):
                 # nelements. But for the tail loop, it still could be vectorized. For example,
                 # if the nelements is 8(256bits), then the tail loop still could be vectorized
                 # as 4(128bits).
-                tail_loop.simd_nelements = tiling_factor // 2
-            elif tile2d_checker.can_tile2d:
-                outer_tiling_idx = tile2d_checker.outer_tiling_idx
-                assert outer_tiling_idx < inner_most_idx
+                tail_loop.simd_nelements = tiling_factors[0] // 2
+            elif len(tiling_indices) == 2:
+                assert (
+                    tiling_indices[1] == inner_most_idx
+                    and tiling_factors[0] == tiling_factors[1]
+                )
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
-                    outer_tiling_idx, factor=tiling_factor
+                    tiling_indices[0], factor=tiling_factors[0]
                 )
                 outer_tail_loop.set_kernel(scalar_kernel)
                 inner_main_loop, inner_tail_loop = outer_main_loop.split_with_tiling(
-                    inner_most_idx - outer_tiling_idx, factor=tiling_factor
+                    inner_most_idx - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(
-                    codegen_kernel(CppTile2DKernel, tiling_factor, outer_tiling_idx)
+                    codegen_kernel(
+                        CppTile2DKernel, tiling_factors[0], tiling_indices[0]
+                    )
                 )
                 inner_tail_loop.set_kernel(
-                    codegen_kernel(CppTile2DTailKernel, tiling_factor, outer_tiling_idx)
+                    codegen_kernel(CppVecKernel, tiling_factors[0], tiling_indices[0])
                 )
 
     def codegen_loops(self, code, worksharing):
