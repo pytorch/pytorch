@@ -2137,7 +2137,7 @@ class CommonTemplate:
                 return mod(*ex, **kwargs)
 
             run = torch._dynamo.optimize(compile_fx_wrapper)(run)
-            code = run_and_get_cpp_code(run, (v,))
+            code = run_and_get_cpp_code(run, v)
             self.assertFalse("= as_strided(" in code)
             self.assertEqual(run(*v), mod(*v))
 
@@ -5687,7 +5687,7 @@ class CommonTemplate:
 
         inps = [torch.randn(1, 2, 8, 4), torch.randn(1, 2, 8, 4)]
         fn_opt = torch._dynamo.optimize("inductor")(fn)
-        code = run_and_get_cpp_code(fn_opt, inps)
+        code = run_and_get_cpp_code(fn_opt, *inps)
         self.assertTrue("in_out_ptr" in code)
         self.assertEqual(fn_opt(*inps), fn(*inps))
 
@@ -5738,7 +5738,7 @@ class CommonTemplate:
             assert hasattr(self, test_name), "undefined function"
             func = getattr(self, test_name)
             assert callable(func), "not a callable"
-            code = run_and_get_cpp_code(func, [])
+            code = run_and_get_cpp_code(func)
             self.assertEqual("load_inline" in code, supported)
 
     @unittest.skipIf(IS_X86 and not HAS_AVX2, "Requires AVX2")
