@@ -6282,7 +6282,7 @@ if HAS_CPU and not torch.backends.mps.is_available():
                     assert same(fn(x)[0], compiled([x])[0], equal_nan=True)
                     assert metrics.generated_cpp_vec_kernel_count == 1
 
-        @slow
+        @slow()
         @unittest.skipIf(
             not codecache.valid_vec_isa_list(), "Does not support vectorization"
         )
