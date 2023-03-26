@@ -16,9 +16,9 @@ import weakref
 from collections.abc import Sized
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Type
 from unittest.mock import patch
-import torch._logging
 
 import torch
+import torch._logging
 from torch._guards import Checkpointable, TracingContext
 
 from . import (

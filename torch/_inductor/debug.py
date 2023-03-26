@@ -2,13 +2,11 @@ import collections
 import contextlib
 import cProfile
 import functools
-import itertools
 import logging
 import os.path
 import pstats
 import shutil
 import subprocess
-import sys
 from typing import Any, List
 from unittest.mock import patch
 

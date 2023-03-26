@@ -1051,6 +1051,10 @@ orig_code_map = ExactWeakKeyDictionary()
 # keep a record of code_obj -> list of guard failure reasons for logging
 guard_failures = collections.defaultdict(list)
 
+# keep record of compiled code, if we are in "error if recompile"
+# to track code that dynamo has compiled previously
+seen_code_map = ExactWeakKeyDictionary()
+
 
 class CompileProfiler:
     """Utility for profiling how and what dynamo would compile.
