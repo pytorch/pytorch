@@ -476,7 +476,7 @@ class TORCH_API Reducer {
  private:
   // reset counting for buckets before backward starts
   void reset_bucket_counting();
-  // search unused parameters beore backward starts
+  // search unused parameters before backward starts
   void search_unused_parameters(
       const std::vector<torch::autograd::Variable>& outputs);
   void set_divide_factor();
