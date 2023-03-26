@@ -5894,7 +5894,7 @@ def copy_tests(my_cls, other_cls, suffix, test_failures=None):  # noqa: B902
                 )
 
 
-if HAS_CPU:
+if HAS_CPU and not torch.backends.mps.is_available():
 
     class SweepInputsCpuTest(SweepInputs2, TestCase):
         gen = InputGen(10, "cpu")
