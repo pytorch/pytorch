@@ -650,6 +650,9 @@ def _get_available_device_type():
         return "cuda"
     if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
         return "xpu"
+    if torch.utils.run_custom_mod_func("is_available"):
+        return torch._C._get_privateuse1_backend_name()
+
     # add more available device types here
     return None
 
@@ -660,6 +663,8 @@ def _get_device_attr(get_member):
         return get_member(torch.cuda)
     if device_type and device_type.lower() == "xpu":
         return get_member(torch.xpu)  # type: ignore[attr-defined]
+    if device_type == torch._C._get_privateuse1_backend_name():
+        return get_member(getattr(torch, device_type))
     # add more available device types here
     return None
 
@@ -687,6 +692,11 @@ def get_current_device_index() -> int:
     """
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
+    if (
+        torch.utils.get_custom_mod_func("is_available")()
+        and torch.utils.get_custom_mod_func("device_count")() > 0
+    ):
+        return torch.utils.get_custom_mod_func("current_device")()
     return -1
 
 
