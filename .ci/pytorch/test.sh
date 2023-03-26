@@ -198,13 +198,13 @@ test_python_shard() {
     exit 1
   fi
 
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-inductor-codegen-tests --shard "$1" "$NUM_TEST_SHARDS" --verbose
 
   assert_git_not_dirty
 }
 
 test_python() {
-  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --verbose
+  time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests --exclude-inductor-codegen-tests --verbose
   assert_git_not_dirty
 }
 
@@ -220,6 +220,7 @@ test_dynamo_shard() {
   time python test/run_test.py --dynamo \
     --exclude-jit-executor \
     --exclude-distributed-tests \
+    --exclude-inductor-codegen-tests \
     --exclude \
       test_autograd \
       test_proxy_tensor \

@@ -352,6 +352,9 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith("distributed")]
+
+INDUCTOR_CODEGEN_TESTS = ["inductor/test_torchinductor_codegen_dynamic_shapes"]
+
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
 
 TESTS_REQUIRING_LAPACK = [
@@ -1022,6 +1025,11 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
+        "--exclude-inductor-codegen-tests",
+        action="store_true",
+        help="exclude inductor codegen tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1169,6 +1177,9 @@ def get_selected_tests(options):
 
     if options.exclude_distributed_tests:
         options.exclude.extend(DISTRIBUTED_TESTS)
+
+    if options.exclude_inductor_codegen_tests:
+        options.exclude.extend(INDUCTOR_CODEGEN_TESTS)
 
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None and LooseVersion(torch.version.cuda) >= "11.6":

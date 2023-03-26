@@ -39,6 +39,7 @@ from inductor.test_torchinductor import (
 from inductor.test_torchinductor_dynamic_shapes import make_dynamic_cls
 
 
+# Checks for patterns in generated C++/Triton code to see if it's dynamic
 def check_codegen(
     self: TestCase,
     model,
