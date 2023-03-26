@@ -5190,6 +5190,16 @@ class MiscTests(torch._dynamo.test_case.TestCase):
         else:
             base_checker().check("No recompilation detected.").run(prof.report())
 
+    def test_error_on_recompile(self):
+        @torch._dynamo.optimize("eager")
+        def fn(a, b):
+            return a + b
+
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            with self.assertRaises(torch._dynamo.exc.RecompileError):
+                fn(torch.rand(2, 3), torch.rand(2, 3))
+                fn(torch.rand(2, 3), (1, 2, 3))
+
 
 class CustomFunc1(torch.autograd.Function):
     @staticmethod
