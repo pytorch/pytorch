@@ -1142,8 +1142,6 @@ def include_paths(cuda: bool = False) -> List[str]:
         paths.append(_join_rocm_home('include'))
         if MIOPEN_HOME is not None:
             paths.append(os.path.join(MIOPEN_HOME, 'include'))
-        if HIP_HOME is not None:
-            paths.append(os.path.join(HIP_HOME, 'include'))
     elif cuda:
         cuda_home_include = _join_cuda_home('include')
         # if we have the Debian/Ubuntu packages for cuda, we get /usr as cuda home.
@@ -1804,6 +1802,8 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
         for flag in cflags:
             if 'amdgpu-target' in flag:
                 return ['-fno-gpu-rdc']
+            if 'offload-arch' in flag:
+                return ['-fno-gpu-rdc']
     # Use same defaults as used for building PyTorch
     # Allow env var to override, just like during initial cmake build.
     _archs = os.environ.get('PYTORCH_ROCM_ARCH', None)
@@ -1815,7 +1815,7 @@ def _get_rocm_arch_flags(cflags: Optional[List[str]] = None) -> List[str]:
             archs = []
     else:
         archs = _archs.replace(' ', ';').split(';')
-    flags = ['--amdgpu-target=%s' % arch for arch in archs]
+    flags = ['--offload-arch=%s' % arch for arch in archs]
     flags += ['-fno-gpu-rdc']
     return flags
 
