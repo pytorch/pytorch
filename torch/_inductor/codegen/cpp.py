@@ -1146,6 +1146,7 @@ class CppVecKernel(CppKernel):
         )
 
         if V.graph.get_dtype(name) in [torch.bool, torch.uint8]:
+            # TODO(jgong5): handle non-contiguous case
             nelements = codecache.pick_vec_isa().nelements()
             if var not in self.var_vec_buf_map:
                 self.var_vec_buf_map[var] = f"g_tmp_buffer_{var}"
@@ -1156,14 +1157,15 @@ class CppVecKernel(CppKernel):
                 f"flag_to_float({var_expr}, {self.var_vec_buf_map[var]}, {nelements});"
             )
             line = f"at::vec::Vectorized<float>::loadu({self.var_vec_buf_map[var]})"
-        elif V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"load_bf16_as_float({var_expr})"
         elif is_broadcast:
-            line = f"at::vec::Vectorized<float>({var_expr})"
+            line = f"at::vec::Vectorized<float>(static_cast<float>({var_expr}))"
         else:
             tiling_var = self.itervars[self.tiling_idx]
             if self.is_stride1_at(tiling_var, index):
-                line = f"at::vec::Vectorized<float>::loadu({var_expr})"
+                if V.graph.get_dtype(name) in [torch.bfloat16]:
+                    line = f"load_bf16_as_float({var_expr})"
+                else:
+                    line = f"at::vec::Vectorized<float>::loadu({var_expr})"
             else:
                 inner = sympy.symbols(f"{tiling_var}_inner")
                 new_index = self.scale_index_with_offset(
@@ -1189,22 +1191,23 @@ class CppVecKernel(CppKernel):
             index, self.tiling_factor, itervar_idx=self.tiling_idx
         )
         assert new_index != expanded_index
-        if V.graph.get_dtype(name) in [torch.bfloat16]:
-            line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
-        else:
-            tiling_var = self.itervars[self.tiling_idx]
-            if self.is_stride1_at(tiling_var, index):
-                line = f"{value}.store({var} + {cexpr(new_index)});"
+
+        tiling_var = self.itervars[self.tiling_idx]
+        if self.is_stride1_at(tiling_var, index):
+            if V.graph.get_dtype(name) in [torch.bfloat16]:
+                line = f"store_float_as_bf16({var} + {cexpr(new_index)}, {value});"
             else:
-                inner = sympy.symbols(f"{tiling_var}_inner")
-                new_index = self.scale_index_with_offset(
-                    index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
-                )
-                line = (
-                    f"{{ __at_align__ float tmp_buf[{self.tiling_factor}]; {value}.store(tmp_buf); "
-                    f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
-                    f"{var}[{cexpr(new_index)}] = tmp_buf[{inner}]; }}"
-                )
+                line = f"{value}.store({var} + {cexpr(new_index)});"
+        else:
+            inner = sympy.symbols(f"{tiling_var}_inner")
+            new_index = self.scale_index_with_offset(
+                index, self.tiling_factor, itervar_idx=self.tiling_idx, offset=inner
+            )
+            line = (
+                f"{{ __at_align__ float tmp_buf[{self.tiling_factor}]; {value}.store(tmp_buf); "
+                f"for (long {inner} = 0; {inner} < {self.tiling_factor}; {inner}++) "
+                f"{var}[{cexpr(new_index)}] = tmp_buf[{inner}]; }}"
+            )
         self.stores.writeline(name, line)
 
     def reduction(self, name, dtype, src_dtype, reduction_type, index, value):
