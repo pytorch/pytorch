@@ -83,6 +83,7 @@ auto cow::StateMachine::maybe_bump(cow::ShadowStorage* maybe_shadow_storage)
         "reshape(). In the future, reshape() will never create a view but will "
         "instead return a lazily copied tensor. If you wish to preserve the "
         "aliasing properties, you should rewrite your reshape() as a view().");
+    TORCH_INTERNAL_ASSERT(false); // boom goes the dynamite
   }
 }
 

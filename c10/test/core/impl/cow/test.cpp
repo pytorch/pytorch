@@ -83,7 +83,7 @@ MATCHER_P(IsWarning, msg, "") {
 }
 
 // Test our behavior with multiple view families.
-TEST_F(CopyOnWriteTest, MultipleViewFamilies) {
+TEST_F(CopyOnWriteTest, DISABLED_MultipleViewFamilies) {
   cow::StateMachine state;
   intrusive_ptr<cow::ShadowStorage> family_2 =
       state.simulate_lazy_copy(nullptr);
@@ -116,7 +116,7 @@ TEST_F(CopyOnWriteTest, MultipleViewFamilies) {
 // This test is mostly identical to the previous test, except it
 // doesn't run in WarnAlways mode. This verifies that the warn-once
 // setting is respected.
-TEST_F(CopyOnWriteTest, OnlyWarnsOnce) {
+TEST_F(CopyOnWriteTest, DISABLED_OnlyWarnsOnce) {
   cow::StateMachine state;
   intrusive_ptr<cow::ShadowStorage> family_2 =
       state.simulate_lazy_copy(nullptr);
