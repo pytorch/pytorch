@@ -283,15 +283,13 @@ def get_kernel_metadata(node_schedule):
     for node in inductor_nodes:
         if "original_aten" in node.meta:
             original_aten_dict[str(node.meta["original_aten"]._overloadpacket)].append(
-                node
+                node.name
             )
     metadata = [
-        f"# Original ATen: {', '.join(original_aten_dict.keys())}\n",
+        f"# Original ATen: {', '.join(sorted(original_aten_dict.keys()))}\n",
     ]
-    for original_aten, nodes in original_aten_dict.items():
-        metadata.append(
-            f"# {original_aten} => {', '.join([node.name for node in nodes])}"
-        )
+    for original_aten, nodes in sorted(original_aten_dict.items()):
+        metadata.append(f"# {original_aten} => {', '.join(sorted(nodes))}")
     return "\n".join(metadata)
 
 
@@ -563,9 +561,9 @@ class DeferredLineBase:
 
 @functools.lru_cache(None)
 def is_big_gpu(index):
-    cores = torch.cuda.get_device_properties(index).multi_processor_count
-    if cores < 80:  # V100
-        log.warning("not enough cuda cores to use max_autotune_gemm mode")
+    sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if sms < 80:  # V100
+        log.warning("not enough SMs to use max_autotune_gemm mode")
         return False
     return True
 
@@ -640,13 +638,18 @@ def developer_warning(msg):
         log.info(msg)
 
 
-def get_num_bytes(*args):
+def get_num_bytes(*args, num_in_out_args=0):
     """
     Return the total number of bytes the arguments of tensor type takes.
+
+    For in/out args, tensor sizes are counted twice: once for reading and
+    once for writing.
+
+    The first num_in_out_args arguments are in out tensors.
     """
     return sum(
-        arg.numel() * arg.element_size()
-        for arg in args
+        arg.numel() * arg.element_size() * (1 + int(i < num_in_out_args))
+        for i, arg in enumerate(args)
         if isinstance(arg, torch.Tensor)
     )
 
@@ -737,7 +740,14 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
 
         kernel_category = get_kernel_category(kernel_mod)
         args = kernel_mod.get_args()
-        num_gb = get_num_bytes(*args) / 1e9
+        num_in_out_ptrs = len(
+            [
+                arg_name
+                for arg_name in kernel_mod.triton_.fn.arg_names
+                if arg_name.startswith("in_out_ptr")
+            ]
+        )
+        num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
 
         def get_info_str(ms, n_regs, n_spills, shared, prefix=""):
             if not any(x is None for x in [n_regs, n_spills, shared]):
@@ -785,3 +795,19 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
         print(
             "No kernel with benchmark functionality found. Make sure you run inductor with config.benchmark_kernel being True"
         )
+
+
+def is_ones(items):
+    return all(x == 1 for x in items)
+
+
+def is_zeros(items):
+    return all(x == 0 for x in items)
+
+
+def is_cpu_device(inputs):
+    return all(
+        item.device == torch.device("cpu")
+        for item in inputs
+        if isinstance(item, torch.Tensor)
+    )
